@@ -54,7 +54,7 @@ const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 500;
 
 const VERSION_PREFIX_REGEX = /^v/;
-const WINDOWS_DRIVE_PATTERN = /^[A-Za-z]:\\/;
+const WINDOWS_DRIVE_PATTERN = /^[A-Za-z]:[/\\]/;
 
 /** Commands that should skip auto-update to prevent loops */
 const SKIP_UPDATE_COMMANDS = new Set([

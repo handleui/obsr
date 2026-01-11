@@ -1,5 +1,11 @@
 # @detent/parser
 
+## 0.1.2
+
+### Patch Changes
+
+- 3944d8e: Sanitize JSDoc examples to use obviously fake credentials
+
 ## 0.1.1
 
 ### Patch Changes

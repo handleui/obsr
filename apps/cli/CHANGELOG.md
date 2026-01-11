@@ -1,5 +1,13 @@
 # @detent/cli
 
+## 0.2.2
+
+### Patch Changes
+
+- 3944d8e: Redact sensitive data (API keys, tokens) from error messages in config and init commands
+- Updated dependencies [3944d8e]
+  - @detent/parser@0.1.2
+
 ## 0.2.1
 
 ### Patch Changes

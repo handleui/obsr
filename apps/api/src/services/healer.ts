@@ -1,9 +1,7 @@
-import type { ExtractedError } from "@detent/parser";
-
-export type { ExtractedError } from "@detent/parser";
+import type { ApiExtractedError } from "./parser";
 
 interface HealOptions {
-  errors: ExtractedError[];
+  errors: ApiExtractedError[];
   repoUrl: string;
   branch: string;
   // Future: Add Claude API key from org context

@@ -1,10 +1,12 @@
+import { isAbsolute } from "node:path";
 import { unzipSync } from "fflate";
 import { Hono } from "hono";
 import { createDb } from "../db/client";
-import { runs } from "../db/schema";
+import { runErrors, runs } from "../db/schema";
 import { parseService } from "../services/parser";
+import type { Env } from "../types/env";
 
-const app = new Hono();
+const app = new Hono<{ Bindings: Env }>();
 
 // Maximum log size to prevent DoS (10MB)
 const MAX_LOG_SIZE = 10 * 1024 * 1024;
@@ -19,6 +21,8 @@ type LogSource = (typeof VALID_SOURCES)[number];
 
 const VALID_PROVIDERS = ["github", "gitlab"] as const;
 type Provider = (typeof VALID_PROVIDERS)[number];
+
+const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 const isValidFormat = (format: unknown): format is LogFormat => {
   return (
@@ -49,6 +53,7 @@ interface ParseRequestBody {
   repository?: string;
   provider?: string;
   projectId?: string;
+  workspacePath?: string;
 }
 
 const isZip = (data: Uint8Array): boolean =>
@@ -123,6 +128,9 @@ const validateOptionalString = (
   }
   return { value };
 };
+
+const isValidRepository = (repository: string): boolean =>
+  REPOSITORY_PATTERN.test(repository);
 
 const validateInlineLogs = (
   logs: unknown
@@ -249,10 +257,24 @@ app.post("/", async (c) => {
   if (repository.error) {
     return c.json({ error: repository.error }, 400);
   }
+  if (repository.value && !isValidRepository(repository.value)) {
+    return c.json({ error: "repository must be in owner/name format" }, 400);
+  }
 
   const projectId = validateOptionalString(body.projectId, 36);
   if (projectId.error) {
     return c.json({ error: projectId.error }, 400);
+  }
+
+  const workspacePath = validateOptionalString(body.workspacePath, 2048);
+  let resolvedWorkspacePath = workspacePath.value;
+  if (workspacePath.error) {
+    console.warn("[parse] ignoring invalid workspacePath", workspacePath.error);
+    resolvedWorkspacePath = undefined;
+  }
+  if (resolvedWorkspacePath && !isAbsolute(resolvedWorkspacePath)) {
+    console.warn("[parse] workspacePath must be absolute");
+    resolvedWorkspacePath = undefined;
   }
 
   const resolvedLogs = resolveLogs(body);
@@ -265,6 +287,7 @@ app.post("/", async (c) => {
     format,
     source,
     runId: runId.value,
+    workspacePath: resolvedWorkspacePath,
   });
 
   const resolvedSource = result.metadata.source;
@@ -273,18 +296,57 @@ app.post("/", async (c) => {
   try {
     const { db, client } = await createDb(c.env);
     try {
-      await db.insert(runs).values({
+      const runRecordId = crypto.randomUUID();
+      const errorRows = result.errors.map((error) => ({
         id: crypto.randomUUID(),
-        projectId: projectId.value,
-        provider:
-          provider ?? (resolvedSource === "unknown" ? null : resolvedSource),
-        source: resolvedSource,
-        format: resolvedFormat,
-        runId: runId.value,
-        repository: repository.value,
-        commitSha: commitSha.value,
-        logBytes: result.metadata.logBytes,
-        errorCount: result.metadata.errorCount,
+        runId: runRecordId,
+        filePath: error.filePath,
+        line: error.line,
+        column: error.column,
+        message: error.message,
+        category: error.category,
+        severity: error.severity,
+        ruleId: error.ruleId,
+        source: error.source,
+        stackTrace: error.stackTrace,
+        suggestions: error.suggestions ? [...error.suggestions] : undefined,
+        hint: error.hint,
+        workflowJob: error.workflowJob ?? error.workflowContext?.job,
+        workflowStep: error.workflowContext?.step,
+        workflowAction: error.workflowContext?.action,
+        unknownPattern: error.unknownPattern,
+        lineKnown: error.lineKnown,
+        columnKnown: error.columnKnown,
+        messageTruncated: error.messageTruncated,
+        stackTraceTruncated: error.stackTraceTruncated,
+        codeSnippet: error.codeSnippet
+          ? {
+              ...error.codeSnippet,
+              lines: [...error.codeSnippet.lines],
+            }
+          : undefined,
+        exitCode: error.exitCode,
+        isInfrastructure: error.isInfrastructure,
+      }));
+
+      await db.transaction(async (tx) => {
+        await tx.insert(runs).values({
+          id: runRecordId,
+          projectId: projectId.value,
+          provider:
+            provider ?? (resolvedSource === "unknown" ? null : resolvedSource),
+          source: resolvedSource,
+          format: resolvedFormat,
+          runId: runId.value,
+          repository: repository.value,
+          commitSha: commitSha.value,
+          logBytes: result.metadata.logBytes,
+          errorCount: result.metadata.errorCount,
+        });
+
+        if (errorRows.length > 0) {
+          await tx.insert(runErrors).values(errorRows);
+        }
       });
     } finally {
       await client.end();

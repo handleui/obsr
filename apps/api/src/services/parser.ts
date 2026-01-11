@@ -1,16 +1,42 @@
 import {
   AllCategories,
+  type CodeSnippet,
   type ErrorCategory,
+  type ErrorSeverity,
   type ErrorSource,
   ErrorSources,
-  type ExtractedError,
+  extractSnippetsForErrors,
+  type ExtractedError as ParserExtractedError,
   parse,
   parseActLogs,
   parseGitHubLogs,
   resetDefaultExtractor,
+  type WorkflowContext,
 } from "@detent/parser";
 
-export type { ExtractedError } from "@detent/parser";
+export interface ApiExtractedError {
+  readonly message: string;
+  readonly filePath?: string;
+  readonly line?: number;
+  readonly column?: number;
+  readonly severity?: ErrorSeverity;
+  readonly stackTrace?: string;
+  readonly ruleId?: string;
+  readonly category?: ErrorCategory;
+  readonly workflowContext?: WorkflowContext;
+  readonly workflowJob?: string;
+  readonly source?: ErrorSource;
+  readonly unknownPattern?: boolean;
+  readonly codeSnippet?: CodeSnippet;
+  readonly suggestions?: readonly string[];
+  readonly lineKnown?: boolean;
+  readonly columnKnown?: boolean;
+  readonly stackTraceTruncated?: boolean;
+  readonly messageTruncated?: boolean;
+  readonly hint?: string;
+  readonly exitCode?: number;
+  readonly isInfrastructure?: boolean;
+}
 
 type ParseFormat = "github-actions" | "act" | "gitlab" | "auto";
 type ParseSource = "github" | "gitlab" | "unknown";
@@ -20,6 +46,7 @@ interface ParseOptions {
   source?: ParseSource | "auto";
   logs: string;
   runId?: string;
+  workspacePath?: string;
 }
 
 interface ParseRunMetadata {
@@ -31,7 +58,7 @@ interface ParseRunMetadata {
 }
 
 interface ParseResult {
-  errors: ExtractedError[];
+  errors: ApiExtractedError[];
   summary: {
     total: number;
     byCategory: Record<ErrorCategory, number>;
@@ -111,7 +138,7 @@ const resolveFormat = (
 };
 
 const summarizeErrors = (
-  errors: ExtractedError[]
+  errors: ParserExtractedError[]
 ): {
   total: number;
   byCategory: Record<ErrorCategory, number>;
@@ -126,8 +153,8 @@ const summarizeErrors = (
   ) as Record<ErrorSource, number>;
 
   for (const error of errors) {
-    const category = error.category ?? "unknown";
-    const source = error.source ?? "generic";
+    const category: ErrorCategory = error.category ?? "unknown";
+    const source: ErrorSource = error.source ?? "generic";
     byCategory[category] = (byCategory[category] ?? 0) + 1;
     bySource[source] = (bySource[source] ?? 0) + 1;
   }
@@ -137,6 +164,44 @@ const summarizeErrors = (
     byCategory,
     bySource,
   };
+};
+
+const mapError = (error: ParserExtractedError): ApiExtractedError => ({
+  message: error.message,
+  filePath: error.file,
+  line: error.line,
+  column: error.column,
+  severity: error.severity,
+  stackTrace: error.stackTrace,
+  ruleId: error.ruleId,
+  category: error.category,
+  workflowContext: error.workflowContext,
+  workflowJob: error.workflowJob,
+  source: error.source,
+  unknownPattern: error.unknownPattern,
+  codeSnippet: error.codeSnippet,
+  suggestions: error.suggestions,
+  lineKnown: error.lineKnown,
+  columnKnown: error.columnKnown,
+  stackTraceTruncated: error.stackTraceTruncated,
+  messageTruncated: error.messageTruncated,
+  hint: error.hint,
+  exitCode: error.exitCode,
+  isInfrastructure: error.isInfrastructure,
+});
+
+const addSnippets = async (
+  errors: ParserExtractedError[],
+  workspacePath: string | undefined
+): Promise<ParserExtractedError[]> => {
+  if (!workspacePath) {
+    return errors;
+  }
+  const { errors: withSnippets } = await extractSnippetsForErrors(
+    errors,
+    workspacePath
+  );
+  return withSnippets;
 };
 
 const recordParseRun = async (_metadata: ParseRunMetadata): Promise<void> => {
@@ -153,7 +218,7 @@ export const parseService = {
       options.source
     );
 
-    let errors: ExtractedError[];
+    let errors: ParserExtractedError[];
     switch (resolved.format) {
       case "act":
         errors = parseActLogs(options.logs);
@@ -169,7 +234,8 @@ export const parseService = {
         break;
     }
 
-    const summary = summarizeErrors(errors);
+    const errorsWithSnippets = await addSnippets(errors, options.workspacePath);
+    const summary = summarizeErrors(errorsWithSnippets);
     const logBytes = new TextEncoder().encode(options.logs).length;
     const metadata: ParseRunMetadata = {
       runId: options.runId,
@@ -182,7 +248,7 @@ export const parseService = {
     await recordParseRun(metadata);
 
     return {
-      errors,
+      errors: errorsWithSnippets.map(mapError),
       summary,
       metadata,
     };

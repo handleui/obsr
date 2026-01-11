@@ -64,6 +64,13 @@
       "when": 1768106170697,
       "tag": "0008_magical_ultimo",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1768108571634,
+      "tag": "0009_crazy_multiple_man",
+      "breakpoints": true
     }
   ]
 }

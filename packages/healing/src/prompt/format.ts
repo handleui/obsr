@@ -9,7 +9,12 @@ export type ErrorCategory =
   | "test"
   | "runtime"
   | "lint"
+  | "infrastructure"
   | "metadata"
+  | "security"
+  | "dependency"
+  | "config"
+  | "docs"
   | "unknown";
 
 /**
@@ -21,12 +26,12 @@ export type ErrorSeverity = "error" | "warning";
  * Extracted error with full diagnostic context.
  */
 export interface ExtractedError {
-  filePath: string;
-  line: number;
+  filePath?: string;
+  line?: number;
   column?: number;
   message: string;
-  category: ErrorCategory;
-  severity: ErrorSeverity;
+  category?: ErrorCategory;
+  severity?: ErrorSeverity;
   ruleId?: string;
   source?: string;
   stackTrace?: string;
@@ -50,8 +55,13 @@ const CATEGORY_PRIORITY: Record<ErrorCategory, number> = {
   test: 3,
   runtime: 4,
   lint: 5,
-  metadata: 6,
-  unknown: 7,
+  infrastructure: 6,
+  metadata: 7,
+  security: 8,
+  dependency: 9,
+  config: 10,
+  docs: 11,
+  unknown: 12,
 };
 
 /**
@@ -106,7 +116,8 @@ export const formatStackTrace = (error: ExtractedError): string => {
     return "  Stack trace: (truncated - exceeds 50KB limit)";
   }
 
-  if (!CATEGORIES_NEEDING_STACK_TRACE.has(error.category)) {
+  const category = error.category ?? DEFAULT_CATEGORY;
+  if (!CATEGORIES_NEEDING_STACK_TRACE.has(category)) {
     return "";
   }
 
@@ -142,16 +153,21 @@ export const formatStackTrace = (error: ExtractedError): string => {
 export const formatError = (error: ExtractedError): string => {
   const parts: string[] = [];
 
-  const category = error.category || DEFAULT_CATEGORY;
-  const column = error.column ?? DEFAULT_COLUMN;
-
-  const file = escapePromptString(error.filePath);
+  const category = error.category ?? DEFAULT_CATEGORY;
+  const file = error.filePath ? escapePromptString(error.filePath) : "";
   const message = escapePromptString(error.message);
+
+  const lineValue = error.line ?? 0;
+  const columnValue =
+    error.column ?? (lineValue > 0 ? DEFAULT_COLUMN : undefined);
+  const lineLabel = lineValue > 0 ? String(lineValue) : MISSING_VALUE;
+  const columnLabel =
+    columnValue && columnValue > 0 ? String(columnValue) : MISSING_VALUE;
 
   const location =
     file !== ""
-      ? `${file}:${error.line}:${column}`
-      : `line ${error.line}:${column}`;
+      ? `${file}:${lineLabel}:${columnLabel}`
+      : `line ${lineLabel}:${columnLabel}`;
   parts.push(`[${category}] ${location}: ${message}`);
 
   if (error.ruleId || error.source) {
@@ -184,18 +200,22 @@ export const prioritizeErrors = (
 
   const sorted = [...errors];
   sorted.sort((a, b) => {
-    const priA = getCategoryPriority(a.category);
-    const priB = getCategoryPriority(b.category);
+    const priA = getCategoryPriority(a.category ?? DEFAULT_CATEGORY);
+    const priB = getCategoryPriority(b.category ?? DEFAULT_CATEGORY);
 
     if (priA !== priB) {
       return priA - priB;
     }
 
-    if (a.filePath !== b.filePath) {
-      return a.filePath.localeCompare(b.filePath);
+    const fileA = a.filePath ?? "";
+    const fileB = b.filePath ?? "";
+    if (fileA !== fileB) {
+      return fileA.localeCompare(fileB);
     }
 
-    return a.line - b.line;
+    const lineA = a.line ?? 0;
+    const lineB = b.line ?? 0;
+    return lineA - lineB;
   });
 
   return sorted;
@@ -255,7 +275,12 @@ export const countByCategory = (
     test: 0,
     runtime: 0,
     lint: 0,
+    infrastructure: 0,
     metadata: 0,
+    security: 0,
+    dependency: 0,
+    config: 0,
+    docs: 0,
     unknown: 0,
   };
 

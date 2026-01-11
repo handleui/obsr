@@ -1,5 +1,13 @@
 # @detent/cli
 
+## 0.2.1
+
+### Patch Changes
+
+- c18225b: Mask API keys in init TUI to prevent accidental exposure
+- Updated dependencies [c18225b]
+  - @detent/parser@0.1.1
+
 ## 0.2.0
 
 ### Minor Changes

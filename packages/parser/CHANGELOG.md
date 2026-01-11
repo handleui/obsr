@@ -1,5 +1,11 @@
 # @detent/parser
 
+## 0.1.1
+
+### Patch Changes
+
+- c18225b: Harden regex patterns against ReDoS attacks by using bounded character classes and preventing backtracking
+
 ## 0.1.0
 
 ### Minor Changes

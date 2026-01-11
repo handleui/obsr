@@ -251,6 +251,15 @@ export class HealLoop {
         };
       }
 
+      // Detect if we hit the step limit without natural completion
+      const hitStepLimit = result.iterations >= MAX_ITERATIONS;
+      if (hitStepLimit) {
+        result.finalMessage =
+          result.finalMessage ||
+          `Max iterations (${MAX_ITERATIONS}) reached without completion`;
+        return result;
+      }
+
       return { ...result, success: true };
     } catch (error) {
       result.duration = Date.now() - startTime;

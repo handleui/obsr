@@ -154,6 +154,10 @@ export const schemaToZod = (schema: Record<string, unknown>): ZodTypeAny => {
     let field: ZodTypeAny;
 
     if (definition.enum && definition.enum.length > 0) {
+      const allStrings = definition.enum.every((v) => typeof v === "string");
+      if (!allStrings) {
+        throw new Error(`Enum values for "${name}" must all be strings`);
+      }
       field = z.enum(definition.enum as [string, ...string[]]) as ZodTypeAny;
     } else {
       switch (definition.type) {

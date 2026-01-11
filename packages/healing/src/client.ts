@@ -25,15 +25,22 @@ const normalizeModelId = (model: string): string => {
 export class Client {
   private readonly byokAnthropicApiKey?: string;
 
+  /**
+   * Creates a new Client instance.
+   *
+   * Note: The AI Gateway reads AI_GATEWAY_API_KEY at module load time.
+   * Only one Client instance with a given API key should be used per process.
+   * Creating multiple instances with different keys will use the first key set.
+   */
   constructor(apiKey?: string, options?: { anthropicApiKey?: string }) {
     const resolvedKey = apiKey ?? process.env.AI_GATEWAY_API_KEY ?? "";
     if (!resolvedKey) {
       throw new Error("No API key provided");
     }
 
-    if (!process.env.AI_GATEWAY_API_KEY) {
-      process.env.AI_GATEWAY_API_KEY = resolvedKey;
-    }
+    // Always set the env var - the AI SDK reads it at provider creation time.
+    // Warning: Multiple Client instances with different keys are not supported.
+    process.env.AI_GATEWAY_API_KEY = resolvedKey;
 
     const byokKey = options?.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY;
     if (byokKey) {

@@ -20,7 +20,7 @@
     },
     "apps/api": {
       "name": "@detent/api",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@detent/healing": "*",
         "@detent/parser": "*",
@@ -46,7 +46,7 @@
     },
     "apps/cli": {
       "name": "@detent/cli",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "bin": {
         "dt": "./dist/index.js",
       },
@@ -85,7 +85,7 @@
     },
     "apps/docs": {
       "name": "@detent/docs",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "devDependencies": {
         "mintlify": "^4.0.0",
       },

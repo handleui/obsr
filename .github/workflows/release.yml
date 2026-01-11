@@ -43,6 +43,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # IMPORTANT: Manual trigger is required because GITHUB_TOKEN pushes don't
+      # trigger other workflows (GitHub security measure to prevent infinite loops).
+      # The tag push from changesets/action won't trigger build.yml automatically.
       - name: Trigger Build workflow
         run: |
           VERSION="v$(node -p "require('./apps/cli/package.json').version")"

@@ -1,4 +1,5 @@
 import { findGitRoot } from "@detent/git";
+import { redactSensitiveData } from "@detent/parser";
 import { defineCommand } from "citty";
 import {
   ensureRepoDetentDir,
@@ -106,7 +107,9 @@ export const configSetCommand = defineCommand({
       saveRepoConfig(updated, repoRoot);
       console.log("ok");
     } catch (error) {
-      console.error(error instanceof Error ? error.message : "unknown error");
+      // Redact sensitive data (API keys, tokens) before logging
+      const message = error instanceof Error ? error.message : "unknown error";
+      console.error(redactSensitiveData(message));
       process.exit(1);
     }
   },

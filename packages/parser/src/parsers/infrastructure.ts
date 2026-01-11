@@ -138,9 +138,10 @@ const engineIncompatiblePattern =
  * Next.js Node.js version mismatch error.
  * Format: You are using Node.js 18.20.8. For Next.js, Node.js version ">=20.9.0" is required.
  * Groups: 1=current version, 2=framework name, 3=required version
+ * Security: Uses literal space instead of \s+ to prevent ReDoS attacks
  */
 const nextjsNodeVersionPattern =
-  /^You\s+are\s+using\s+Node\.js\s+([\d.]+)\.\s+For\s+([^,]+),\s+Node\.js\s+version\s+"([^"]+)"\s+is\s+required/i;
+  /^You +are +using +Node\.js +([\d.]+)\. +For +([^,]+), +Node\.js +version +"([^"]+)" +is +required/i;
 
 // ============================================================================
 // Missing Scripts/Dependencies Patterns

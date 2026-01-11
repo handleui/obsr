@@ -1,5 +1,13 @@
 # @detent/cli
 
+## 0.3.0
+
+### Minor Changes
+
+- 92ef167: Add automatic updates at CLI startup with user preference control.
+  Includes CI environment detection (auto-disabled), 24-hour cache for non-blocking checks,
+  lock file to prevent concurrent updates, and `autoUpdate` preference via `detent config set/get`.
+
 ## 0.2.2
 
 ### Patch Changes

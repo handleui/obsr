@@ -24,7 +24,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { compare, valid } from "semver";
 
 // ============================================================================
@@ -33,6 +33,7 @@ import { compare, valid } from "semver";
 
 const MANIFEST_URL = "https://detent.sh/api/cli/manifest.json";
 const INSTALL_SCRIPT_URL = "https://detent.sh/install.sh";
+const INSTALL_SCRIPT_URL_WIN = "https://detent.sh/install.ps1";
 
 const CACHE_FILE = "update-cache.json";
 const LOCK_FILE = "update.lock";
@@ -54,6 +55,7 @@ const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 500;
 
 const VERSION_PREFIX_REGEX = /^v/;
+/** Matches Windows absolute paths (C:\ or C:/) */
 const WINDOWS_DRIVE_PATTERN = /^[A-Za-z]:[/\\]/;
 
 /** Commands that should skip auto-update to prevent loops */
@@ -126,17 +128,20 @@ export interface AutoUpdateResult {
 // Path Helpers
 // ============================================================================
 
+const isAbsolutePath = (p: string): boolean =>
+  p.startsWith("/") || WINDOWS_DRIVE_PATTERN.test(p);
+
 const getDetentDir = (): string => {
   const override = process.env.DETENT_HOME;
-  // Validate override path for security
-  if (
-    override &&
-    !override.includes("..") &&
-    (override.startsWith("/") || WINDOWS_DRIVE_PATTERN.test(override))
-  ) {
-    return override;
+  if (!(override && isAbsolutePath(override))) {
+    return join(homedir(), ".detent");
   }
-  return join(homedir(), ".detent");
+  // Normalize path and verify it remains absolute after resolution
+  const normalized = resolve(override);
+  if (!isAbsolutePath(normalized)) {
+    return join(homedir(), ".detent");
+  }
+  return normalized;
 };
 
 const getCachePath = (): string => join(getDetentDir(), CACHE_FILE);
@@ -165,9 +170,17 @@ const acquireLock = (): boolean => {
           readFileSync(lockPath, "utf-8")
         ) as UpdateLock;
         const lockAge = Date.now() - lockData.startedAt;
+        const isProcessAlive = (() => {
+          try {
+            process.kill(lockData.pid, 0);
+            return true;
+          } catch {
+            return false;
+          }
+        })();
 
-        // Stale lock detection - process likely crashed
-        if (lockAge > LOCK_STALE_MS) {
+        // Stale lock detection - process crashed or timed out
+        if (lockAge > LOCK_STALE_MS || !isProcessAlive) {
           unlinkSync(lockPath);
         } else {
           return false;
@@ -283,11 +296,19 @@ const fetchLatestVersion = async (): Promise<string | null> => {
       }
 
       const text = await response.text();
+      clearTimeout(timeoutId);
+
       if (text.length > MAX_RESPONSE_SIZE) {
         return null;
       }
 
-      const manifest = JSON.parse(text) as Manifest;
+      // Parse outside try-catch - malformed JSON shouldn't retry
+      let manifest: Manifest;
+      try {
+        manifest = JSON.parse(text) as Manifest;
+      } catch {
+        return null;
+      }
 
       if (!manifest.latest) {
         return null;
@@ -301,7 +322,7 @@ const fetchLatestVersion = async (): Promise<string | null> => {
       return manifest.latest;
     } catch {
       clearTimeout(timeoutId);
-      // Continue to retry
+      // Network error - continue to retry
     }
   }
 
@@ -393,14 +414,30 @@ const checkForUpdate = async (
 /**
  * Execute the update by running the install script.
  * Handles SIGINT/SIGTERM gracefully during update.
+ * Uses PowerShell on Windows, bash on Unix.
  */
 const runUpdate = (): Promise<boolean> =>
   new Promise((resolve) => {
-    const proc = spawn(
-      "bash",
-      ["-c", `set -o pipefail; curl -fsSL ${INSTALL_SCRIPT_URL} | bash`],
-      { stdio: "inherit" }
-    );
+    let hadError = false;
+
+    const isWindows = process.platform === "win32";
+    const proc = isWindows
+      ? spawn(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            `& { irm ${INSTALL_SCRIPT_URL_WIN} | iex }`,
+          ],
+          { stdio: "inherit" }
+        )
+      : spawn(
+          "bash",
+          ["-c", `set -o pipefail; curl -fsSL ${INSTALL_SCRIPT_URL} | bash`],
+          { stdio: "inherit" }
+        );
 
     // Forward signals to child process
     const signalHandler = (signal: NodeJS.Signals): void => {
@@ -410,16 +447,14 @@ const runUpdate = (): Promise<boolean> =>
     process.on("SIGINT", signalHandler);
     process.on("SIGTERM", signalHandler);
 
+    proc.on("error", () => {
+      hadError = true;
+    });
+
     proc.on("close", (code) => {
       process.off("SIGINT", signalHandler);
       process.off("SIGTERM", signalHandler);
-      resolve(code === 0);
-    });
-
-    proc.on("error", () => {
-      process.off("SIGINT", signalHandler);
-      process.off("SIGTERM", signalHandler);
-      resolve(false);
+      resolve(!hadError && code === 0);
     });
   });
 
@@ -430,21 +465,41 @@ const runUpdate = (): Promise<boolean> =>
 /**
  * Spawn a detached process to refresh the cache in background.
  * This allows the main CLI to continue without waiting for network.
+ *
+ * Security notes:
+ * - Uses env vars to pass paths (avoids injection via string interpolation)
+ * - Enforces MAX_RESPONSE_SIZE to prevent memory exhaustion
+ * - Explicitly finds node/bun runtime (process.execPath may be bundled binary)
  */
 const spawnBackgroundRefresh = (): void => {
   const cachePath = getCachePath();
+
+  // Find a JS runtime - process.execPath may point to bundled binary
+  const runtime = findJsRuntime();
+  if (!runtime) {
+    return; // No runtime available, skip background refresh
+  }
+
   const script = `
     const https = require('https');
     const fs = require('fs');
     const path = require('path');
 
-    const MANIFEST_URL = '${MANIFEST_URL}';
-    const CACHE_PATH = '${cachePath}';
+    const MANIFEST_URL = process.env._DETENT_MANIFEST_URL;
+    const CACHE_PATH = process.env._DETENT_CACHE_PATH;
+    const MAX_SIZE = 65536;
+
+    if (!MANIFEST_URL || !CACHE_PATH) process.exit(1);
 
     https.get(MANIFEST_URL, { timeout: 5000 }, (res) => {
       if (res.statusCode !== 200) return;
       let data = '';
-      res.on('data', (chunk) => { data += chunk; });
+      let size = 0;
+      res.on('data', (chunk) => {
+        size += chunk.length;
+        if (size > MAX_SIZE) { res.destroy(); return; }
+        data += chunk;
+      });
       res.on('end', () => {
         try {
           const manifest = JSON.parse(data);
@@ -462,14 +517,47 @@ const spawnBackgroundRefresh = (): void => {
   `;
 
   try {
-    const child = spawn(process.execPath, ["-e", script], {
+    const child = spawn(runtime, ["-e", script], {
       detached: true,
       stdio: "ignore",
+      env: {
+        _DETENT_MANIFEST_URL: MANIFEST_URL,
+        _DETENT_CACHE_PATH: cachePath,
+      },
     });
     child.unref();
   } catch {
     // Silent fail
   }
+};
+
+/**
+ * Find a JavaScript runtime (node or bun) in the system.
+ * Returns null if no runtime is found.
+ */
+const findJsRuntime = (): string | null => {
+  const { execSync } =
+    require("node:child_process") as typeof import("node:child_process");
+  const runtimes = ["bun", "node"];
+
+  for (const runtime of runtimes) {
+    try {
+      const cmd =
+        process.platform === "win32" ? `where ${runtime}` : `which ${runtime}`;
+      const result = execSync(cmd, {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "ignore"],
+      });
+      const path = result.trim().split("\n")[0];
+      if (path) {
+        return path;
+      }
+    } catch {
+      // Runtime not found, try next
+    }
+  }
+
+  return null;
 };
 
 // ============================================================================

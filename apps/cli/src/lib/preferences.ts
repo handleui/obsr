@@ -7,7 +7,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, normalize } from "node:path";
 
 // ============================================================================
 // Types
@@ -29,7 +29,6 @@ interface PreferencesFile {
 
 const PREFERENCES_FILE = "preferences.json";
 const SCHEMA_URL = "./preferences-schema.json";
-const WINDOWS_DRIVE_PATTERN = /^[A-Za-z]:[/\\]/;
 
 const DEFAULTS: Preferences = {
   autoUpdate: true,
@@ -39,14 +38,15 @@ const DEFAULTS: Preferences = {
 // Path Helpers
 // ============================================================================
 
+const isValidOverridePath = (path: string): boolean => {
+  const normalized = normalize(path);
+  return isAbsolute(normalized) && !normalized.includes("..");
+};
+
 const getPreferencesDir = (): string => {
   const override = process.env.DETENT_HOME;
-  if (
-    override &&
-    !override.includes("..") &&
-    (override.startsWith("/") || WINDOWS_DRIVE_PATTERN.test(override))
-  ) {
-    return override;
+  if (override && isValidOverridePath(override)) {
+    return normalize(override);
   }
   return join(homedir(), ".detent");
 };

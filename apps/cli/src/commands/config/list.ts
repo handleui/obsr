@@ -27,9 +27,10 @@ export const configListCommand = defineCommand({
 
     console.log(`Config file: ${configPath}`);
     console.log();
-    console.log(
-      `apiKey: ${maskApiKey(config.apiKey) || "(not set)"}${hasEnvApiKey ? " (from ANTHROPIC_API_KEY)" : ""}`
-    );
+    const maskedKey = maskApiKey(config.apiKey);
+    const apiKeyDisplay = maskedKey || "(not set)";
+    const apiKeySource = hasEnvApiKey ? " (from environment)" : "";
+    console.log(`apiKey: ${apiKeyDisplay}${apiKeySource}`);
     console.log(`model: ${config.model}`);
     console.log(`budgetPerRunUsd: ${formatBudget(config.budgetPerRunUsd)}`);
     console.log(`budgetMonthlyUsd: ${formatBudget(config.budgetMonthlyUsd)}`);

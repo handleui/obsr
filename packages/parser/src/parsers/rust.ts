@@ -41,8 +41,10 @@ const MAX_NOTE_BYTES = 1024;
  * - error: cannot find type `Foo` in this scope
  * - warning: unused variable `x`
  * Groups: [1] level, [2] error code (optional), [3] message
+ * Security: Uses non-overlapping character classes to prevent ReDoS
  */
-const rustErrorHeaderPattern = /^(error|warning)(?:\[([A-Z]\d{4})\])?:\s*(.+)$/;
+const rustErrorHeaderPattern =
+  /^(error|warning)(?:\[([A-Z]\d{4})\])?:\s*([^\s\r\n][^\r\n]*)$/;
 
 /**
  * Matches Rust error location arrows:

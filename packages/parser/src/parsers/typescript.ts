@@ -95,7 +95,7 @@ const TS_EXT_PATTERN = "(?:d\\.)?[cm]?tsx?";
  * Security: Uses bounded lengths to prevent ReDoS.
  */
 const tsParenErrorPattern = new RegExp(
-  `^([^\\s(]{1,1024}\\.${TS_EXT_PATTERN})\\((\\d{1,10}),(\\d{1,10})\\):\\s*(?:(error|warning)\\s+(TS\\d{1,5}):\\s*)?(.{1,2048})\\s*$`
+  `^([^\\s(]{1,1024}\\.${TS_EXT_PATTERN})\\((\\d{1,10}),(\\d{1,10})\\):\\s*(?:(error|warning)\\s+(TS\\d{1,5}):\\s*)?([^\\r\\n]{1,2048})$`
 );
 
 /**
@@ -114,7 +114,7 @@ const tsParenErrorPattern = new RegExp(
  * Security: Uses bounded lengths to prevent ReDoS.
  */
 const tsColonErrorPattern = new RegExp(
-  `^([^\\s:]{1,1024}\\.${TS_EXT_PATTERN}):(\\d{1,10}):(\\d{1,10})\\s+-\\s+(error|warning)\\s+(?:(TS\\d{1,5}):\\s*)?(.{1,2048})\\s*$`
+  `^([^\\s:]{1,1024}\\.${TS_EXT_PATTERN}):(\\d{1,10}):(\\d{1,10})\\s+-\\s+(error|warning)\\s+(?:(TS\\d{1,5}):\\s*)?([^\\r\\n]{1,2048})$`
 );
 
 /**
@@ -130,7 +130,7 @@ const tsColonErrorPattern = new RegExp(
  * Security: Requires error code to avoid false positives.
  */
 const tsGlobalErrorPattern =
-  /^(error|warning)\s+(TS\d{1,5}):\s*(.{1,2048})\s*$/;
+  /^(error|warning)\s+(TS\d{1,5}):\s*([^\r\n]{1,2048})$/;
 
 /**
  * Suggestion pattern: "Did you mean 'X'?"

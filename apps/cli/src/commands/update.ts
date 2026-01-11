@@ -1,7 +1,7 @@
 import { defineCommand } from "citty";
 import { printHeader } from "../tui/components/index.js";
 import { ANSI_RESET, colors, hexToAnsi } from "../tui/styles.js";
-import { checkForUpdate, runUpdate } from "../utils/update.js";
+import { forceCheckForUpdate, runUpdate } from "../utils/auto-update.js";
 import { getVersion } from "../utils/version.js";
 
 const brandAnsi = hexToAnsi(colors.brand);
@@ -17,10 +17,15 @@ export const updateCommand = defineCommand({
     printHeader("update");
 
     const currentVersion = getVersion();
-    const { hasUpdate, latestVersion } = await checkForUpdate(currentVersion);
+
+    // Force check (bypass cache) for manual update command
+    const { hasUpdate, latestVersion } =
+      await forceCheckForUpdate(currentVersion);
 
     if (!hasUpdate) {
-      console.log(`${brandAnsi}✓${ANSI_RESET} Already on latest version`);
+      console.log(
+        `${brandAnsi}✓${ANSI_RESET} Already on latest version (v${currentVersion})`
+      );
       console.log();
       return;
     }

@@ -2,6 +2,7 @@ import { relations } from "drizzle-orm";
 import {
   boolean,
   index,
+  integer,
   pgEnum,
   pgTable,
   timestamp,
@@ -259,6 +260,35 @@ export const projects = pgTable(
 );
 
 // ============================================================================
+// Runs (Log ingestion metadata)
+// ============================================================================
+
+export const runs = pgTable(
+  "runs",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    projectId: varchar("project_id", { length: 36 }).references(
+      () => projects.id,
+      { onDelete: "set null" }
+    ),
+    provider: providerEnum("provider"),
+    source: varchar("source", { length: 32 }),
+    format: varchar("format", { length: 32 }),
+    runId: varchar("run_id", { length: 255 }),
+    repository: varchar("repository", { length: 500 }),
+    commitSha: varchar("commit_sha", { length: 64 }),
+    logBytes: integer("log_bytes"),
+    errorCount: integer("error_count"),
+    receivedAt: timestamp("received_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("runs_project_id_idx").on(table.projectId),
+    index("runs_provider_run_id_idx").on(table.provider, table.runId),
+    index("runs_commit_sha_idx").on(table.commitSha),
+  ]
+);
+
+// ============================================================================
 // Relations (for Drizzle relational query API)
 // ============================================================================
 
@@ -303,6 +333,13 @@ export const projectsRelations = relations(projects, ({ one }) => ({
   }),
 }));
 
+export const runsRelations = relations(runs, ({ one }) => ({
+  project: one(projects, {
+    fields: [runs.projectId],
+    references: [projects.id],
+  }),
+}));
+
 // ============================================================================
 // Type Exports
 // ============================================================================
@@ -321,3 +358,6 @@ export type NewInvitation = typeof invitations.$inferInsert;
 
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
+
+export type Run = typeof runs.$inferSelect;
+export type NewRun = typeof runs.$inferInsert;

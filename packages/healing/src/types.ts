@@ -22,7 +22,7 @@ export interface HealResult {
   success: boolean;
   /** Number of message rounds completed */
   iterations: number;
-  /** Claude's final response */
+  /** Model's final response */
   finalMessage: string;
   /** Total number of tool calls made */
   toolCalls: number;

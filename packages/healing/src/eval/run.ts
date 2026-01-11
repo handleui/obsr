@@ -5,7 +5,8 @@
  *
  * Environment variables:
  * - BRAINTRUST_API_KEY: Required for logging to Braintrust
- * - ANTHROPIC_API_KEY: Required for running actual healing loops
+ * - AI_GATEWAY_API_KEY: Required for running actual healing loops
+ * - ANTHROPIC_API_KEY: Optional BYOK key for Anthropic via the AI Gateway
  * - EVAL_MODE: "mock" (default) or "live" - controls whether to use real API calls
  */
 

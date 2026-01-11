@@ -75,12 +75,24 @@ const DEFAULT_PRICING: ModelPricing = {
 };
 
 /**
+ * Normalizes model IDs by stripping provider prefixes like "anthropic/".
+ */
+const normalizeModelName = (model: string): string => {
+  const parts = model.split("/");
+  if (parts.length <= 1) {
+    return model;
+  }
+  return parts.at(-1) ?? model;
+};
+
+/**
  * Gets the pricing for a model using prefix matching
  * to handle versioned model names like "claude-sonnet-4-5-20250929".
  */
 const getPricing = (model: string): ModelPricing => {
+  const normalized = normalizeModelName(model);
   for (const { prefix, pricing } of MODEL_PREFIXES) {
-    if (model.startsWith(prefix)) {
+    if (normalized.startsWith(prefix)) {
       return pricing;
     }
   }

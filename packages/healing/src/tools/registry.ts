@@ -1,7 +1,11 @@
-import type { Tool as AnthropicTool } from "@anthropic-ai/sdk/resources/messages.js";
+import { type Tool as AiSdkTool, tool as aiTool } from "ai";
 import type { ToolContext } from "./context.js";
-import type { Tool, ToolResult } from "./types.js";
-import { errorResult } from "./types.js";
+import {
+  errorResult,
+  schemaToZod,
+  type Tool,
+  type ToolResult,
+} from "./types.js";
 
 /**
  * Registry for managing and dispatching tools.
@@ -9,7 +13,11 @@ import { errorResult } from "./types.js";
 export class ToolRegistry {
   private readonly tools: Map<string, Tool> = new Map();
   private readonly ctx: ToolContext;
-  private cachedAnthropicTools: AnthropicTool[] | null = null;
+  private cachedAiTools: Record<string, AiSdkTool<unknown, ToolOutput>> | null =
+    null;
+  private toolCallListener:
+    | ((name: string, input: Record<string, unknown>) => void)
+    | null = null;
 
   constructor(ctx: ToolContext) {
     this.ctx = ctx;
@@ -20,7 +28,7 @@ export class ToolRegistry {
    */
   register = (tool: Tool): void => {
     this.tools.set(tool.name, tool);
-    this.cachedAnthropicTools = null;
+    this.cachedAiTools = null;
   };
 
   /**
@@ -60,26 +68,43 @@ export class ToolRegistry {
   };
 
   /**
-   * Converts registered tools to Anthropic SDK format.
+   * Sets a listener for tool calls (used for verbose logging).
+   */
+  setToolCallListener = (
+    listener: ((name: string, input: Record<string, unknown>) => void) | null
+  ): void => {
+    this.toolCallListener = listener;
+  };
+
+  /**
+   * Converts registered tools to AI SDK format.
    * Results are cached until a new tool is registered.
    */
-  toAnthropicTools = (): AnthropicTool[] => {
-    if (this.cachedAnthropicTools) {
-      return this.cachedAnthropicTools;
+  toAiTools = (): Record<string, AiSdkTool<unknown, ToolOutput>> => {
+    if (this.cachedAiTools) {
+      return this.cachedAiTools;
     }
 
-    this.cachedAnthropicTools = Array.from(this.tools.values()).map(
-      (tool): AnthropicTool => ({
-        name: tool.name,
-        description: tool.description,
-        input_schema: {
-          type: "object",
-          ...tool.inputSchema,
-        },
-      })
-    );
+    const tools: Record<string, AiSdkTool<unknown, ToolOutput>> = {};
 
-    return this.cachedAnthropicTools;
+    for (const tool of this.tools.values()) {
+      tools[tool.name] = aiTool({
+        description: tool.description,
+        inputSchema: schemaToZod(tool.inputSchema),
+        execute: async (input: unknown) => {
+          const safeInput =
+            typeof input === "object" && input !== null
+              ? (input as Record<string, unknown>)
+              : {};
+          this.toolCallListener?.(tool.name, safeInput);
+          const result = await this.dispatch(tool.name, input);
+          return formatToolResult(result);
+        },
+      });
+    }
+
+    this.cachedAiTools = tools;
+    return this.cachedAiTools;
   };
 
   /**
@@ -102,3 +127,27 @@ export class ToolRegistry {
  */
 export const createToolRegistry = (ctx: ToolContext): ToolRegistry =>
   new ToolRegistry(ctx);
+
+const formatToolResult = (
+  result: ToolResult
+): Record<string, unknown> | string => {
+  if (!(result.isError || result.metadata)) {
+    return result.content;
+  }
+
+  const payload: Record<string, unknown> = {
+    content: result.content,
+  };
+
+  if (result.isError) {
+    payload.is_error = true;
+  }
+
+  if (result.metadata) {
+    payload.metadata = result.metadata;
+  }
+
+  return payload;
+};
+
+type ToolOutput = string | Record<string, unknown>;

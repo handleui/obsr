@@ -19,6 +19,14 @@ describe("calculateCost", () => {
     expect(cost).toBe(18.0);
   });
 
+  test("provider-prefixed model names are normalized", () => {
+    const cost = calculateCost(
+      "anthropic/claude-sonnet-4-5",
+      usage({ inputTokens: 1_000_000 })
+    );
+    expect(cost).toBe(3.0);
+  });
+
   test("cache read discount (0.1x)", () => {
     const cost = calculateCost(
       "claude-sonnet-4-5",

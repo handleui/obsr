@@ -1,0 +1,7 @@
+{
+  "scripts": {
+    "setup": "bun install && ln -s \"$CONDUCTOR_ROOT_PATH/apps/cli/.env\" apps/cli/.env && ln -s \"$CONDUCTOR_ROOT_PATH/apps/navigator/.env\" apps/navigator/.env && ln -s \"$CONDUCTOR_ROOT_PATH/packages/healing/.env\" packages/healing/.env",
+    "run": "bun run dev",
+    "archive": ""
+  }
+}

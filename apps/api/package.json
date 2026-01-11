@@ -1,6 +1,6 @@
 {
   "name": "@detent/api",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -24,6 +24,7 @@
     "@sentry/cloudflare": "^10.32.1",
     "@upstash/ratelimit": "^2.0.7",
     "@upstash/redis": "^1.36.0",
+    "fflate": "^0.8.2",
     "drizzle-orm": "^0.45.1",
     "hono": "^4.11.3",
     "jose": "^6.0.10",

@@ -2,8 +2,11 @@ import { relations } from "drizzle-orm";
 import {
   boolean,
   index,
+  integer,
+  jsonb,
   pgEnum,
   pgTable,
+  text,
   timestamp,
   uniqueIndex,
   varchar,
@@ -259,6 +262,83 @@ export const projects = pgTable(
 );
 
 // ============================================================================
+// Runs (Log ingestion metadata)
+// ============================================================================
+
+export const runs = pgTable(
+  "runs",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    projectId: varchar("project_id", { length: 36 }).references(
+      () => projects.id,
+      { onDelete: "set null" }
+    ),
+    provider: providerEnum("provider"),
+    source: varchar("source", { length: 32 }),
+    format: varchar("format", { length: 32 }),
+    runId: varchar("run_id", { length: 255 }),
+    repository: varchar("repository", { length: 500 }),
+    commitSha: varchar("commit_sha", { length: 64 }),
+    logBytes: integer("log_bytes"),
+    errorCount: integer("error_count"),
+    receivedAt: timestamp("received_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("runs_project_id_idx").on(table.projectId),
+    index("runs_provider_run_id_idx").on(table.provider, table.runId),
+    index("runs_commit_sha_idx").on(table.commitSha),
+  ]
+);
+
+// ============================================================================
+// Run Errors (Structured errors tied to runs)
+// ============================================================================
+
+export const runErrors = pgTable(
+  "run_errors",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    runId: varchar("run_id", { length: 36 })
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    filePath: varchar("file_path", { length: 2048 }),
+    line: integer("line"),
+    column: integer("column"),
+    message: text("message").notNull(),
+    category: varchar("category", { length: 32 }),
+    severity: varchar("severity", { length: 16 }),
+    ruleId: varchar("rule_id", { length: 255 }),
+    source: varchar("source", { length: 64 }),
+    stackTrace: text("stack_trace"),
+    suggestions: jsonb("suggestions").$type<string[]>(),
+    hint: text("hint"),
+    workflowJob: varchar("workflow_job", { length: 255 }),
+    workflowStep: varchar("workflow_step", { length: 255 }),
+    workflowAction: varchar("workflow_action", { length: 255 }),
+    unknownPattern: boolean("unknown_pattern"),
+    lineKnown: boolean("line_known"),
+    columnKnown: boolean("column_known"),
+    messageTruncated: boolean("message_truncated"),
+    stackTraceTruncated: boolean("stack_trace_truncated"),
+    codeSnippet: jsonb("code_snippet").$type<{
+      lines: string[];
+      startLine: number;
+      errorLine: number;
+      language: string;
+    }>(),
+    exitCode: integer("exit_code"),
+    isInfrastructure: boolean("is_infrastructure"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("run_errors_run_id_idx").on(table.runId),
+    index("run_errors_category_idx").on(table.category),
+    index("run_errors_source_idx").on(table.source),
+    index("run_errors_rule_id_idx").on(table.ruleId),
+  ]
+);
+
+// ============================================================================
 // Relations (for Drizzle relational query API)
 // ============================================================================
 
@@ -303,6 +383,21 @@ export const projectsRelations = relations(projects, ({ one }) => ({
   }),
 }));
 
+export const runsRelations = relations(runs, ({ one, many }) => ({
+  project: one(projects, {
+    fields: [runs.projectId],
+    references: [projects.id],
+  }),
+  errors: many(runErrors),
+}));
+
+export const runErrorsRelations = relations(runErrors, ({ one }) => ({
+  run: one(runs, {
+    fields: [runErrors.runId],
+    references: [runs.id],
+  }),
+}));
+
 // ============================================================================
 // Type Exports
 // ============================================================================
@@ -321,3 +416,9 @@ export type NewInvitation = typeof invitations.$inferInsert;
 
 export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
+
+export type Run = typeof runs.$inferSelect;
+export type NewRun = typeof runs.$inferInsert;
+
+export type RunError = typeof runErrors.$inferSelect;
+export type NewRunError = typeof runErrors.$inferInsert;

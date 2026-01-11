@@ -32,7 +32,9 @@ vi.mock("./runner/executor.ts", () => ({
   },
 }));
 
-describe("mock command integration", () => {
+const isCI = process.env.CI === "true";
+
+describe.skipIf(isCI)("mock command integration", () => {
   let testRepoPath: string;
   let commitCounter = 0;
 

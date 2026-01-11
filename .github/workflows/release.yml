@@ -11,11 +11,15 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
 
 jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.changesets.outputs.published }}
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Checkout
@@ -32,6 +36,7 @@ jobs:
         run: bun install
 
       - name: Create Release PR or Publish
+        id: changesets
         uses: changesets/action@v1
         with:
           version: bun changeset version
@@ -40,3 +45,24 @@ jobs:
           title: "chore: release"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version if published
+        id: version
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          VERSION=$(node -p "require('./apps/cli/package.json').version")
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: Failed to extract version from package.json"
+            exit 1
+          fi
+          echo "version=v$VERSION" >> $GITHUB_OUTPUT
+          echo "Published version: v$VERSION"
+
+  build:
+    name: Build & Distribute
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.release.outputs.version }}
+    secrets: inherit

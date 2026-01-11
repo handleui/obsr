@@ -11,6 +11,9 @@ const app = new Hono<{ Bindings: Env }>();
 // Maximum log size to prevent DoS (10MB)
 const MAX_LOG_SIZE = 10 * 1024 * 1024;
 const MAX_ZIP_SIZE = 30 * 1024 * 1024;
+// Maximum compression ratio for zip bomb detection
+// DEFLATE typically achieves 2-10x for text; 100x is very generous
+const MAX_COMPRESSION_RATIO = 100;
 
 // Valid log formats
 const VALID_FORMATS = ["github-actions", "act", "gitlab", "auto"] as const;
@@ -76,14 +79,53 @@ const decodeZip = (bytes: Uint8Array): string => {
   if (!isZip(bytes)) {
     throw new Error("Invalid zip payload");
   }
+
+  // Pre-scan: Validate ZIP entry sizes before decompression (zip bomb protection)
+  // The filter callback receives metadata from ZIP headers without decompressing
+  let declaredSize = 0;
+  let compressedSize = 0;
+  let entryCount = 0;
+
+  unzipSync(bytes, {
+    filter(file) {
+      if (!file.name.endsWith("/")) {
+        declaredSize += file.originalSize ?? 0;
+        compressedSize += file.size ?? 0;
+        entryCount += 1;
+      }
+      return false; // Don't decompress during scan phase
+    },
+  });
+
+  if (entryCount === 0) {
+    throw new Error("Zip archive contained no files");
+  }
+
+  // Guard: Reject if declared uncompressed size exceeds limit
+  if (declaredSize > MAX_LOG_SIZE) {
+    throw new Error(`logs exceeds maximum size of ${MAX_LOG_SIZE} bytes`);
+  }
+
+  // Guard: Reject archives with suspicious metadata (possible zip bomb)
+  // If declared size < compressed size, headers may be falsified since
+  // compression cannot make files larger than their original size
+  if (compressedSize > 0 && declaredSize < compressedSize) {
+    const worstCaseExpansion = compressedSize * MAX_COMPRESSION_RATIO;
+    if (worstCaseExpansion > MAX_LOG_SIZE) {
+      throw new Error(
+        `Zip archive may exceed maximum size of ${MAX_LOG_SIZE} bytes`
+      );
+    }
+  }
+
+  // Safe to decompress - headers have been validated
   const unzipped = unzipSync(bytes);
   const decoder = new TextDecoder();
   const entries = Object.entries(unzipped).filter(
     ([name]) => name && !name.endsWith("/")
   );
-  if (entries.length === 0) {
-    throw new Error("Zip archive contained no files");
-  }
+
+  // Post-decompression size check (defense in depth)
   const parts: string[] = [];
   let totalBytes = 0;
   for (const [, data] of entries) {

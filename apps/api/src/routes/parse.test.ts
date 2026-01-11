@@ -316,6 +316,22 @@ describe("parse routes", () => {
     });
   });
 
+  it("rejects empty zip archives", async () => {
+    // Create a zip with only a directory entry (no files)
+    const zipped = zipSync({ "empty-dir/": new Uint8Array(0) });
+    const logZipBase64 = Buffer.from(zipped).toString("base64");
+
+    const res = await makeRequest({
+      logZipBase64,
+      format: "auto",
+      source: "auto",
+    });
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json).toEqual({ error: "Zip archive contained no files" });
+  });
+
   it("persists parsed errors", async () => {
     const result = {
       errors: [

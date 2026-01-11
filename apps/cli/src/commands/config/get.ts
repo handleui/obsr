@@ -1,26 +1,50 @@
 import { findGitRoot } from "@detent/git";
 import { defineCommand } from "citty";
 import { loadConfig } from "../../lib/config.js";
+import {
+  formatPreferenceValue,
+  getPreference,
+  isPreferenceKey,
+  PREFERENCE_KEYS,
+} from "../../lib/preferences.js";
 import { CONFIG_KEYS, isConfigKey } from "./constants.js";
+
+// All valid keys (config + preferences)
+const ALL_KEYS = [...CONFIG_KEYS, ...PREFERENCE_KEYS] as const;
 
 export const configGetCommand = defineCommand({
   meta: {
     name: "get",
-    description: "Get a configuration value (for AI/scripting)",
+    description: "Get a configuration value",
   },
   args: {
     key: {
       type: "positional",
-      description: `Configuration key (${CONFIG_KEYS.join(", ")})`,
+      description: `Configuration key (${ALL_KEYS.join(", ")})`,
       required: true,
     },
   },
   run: async ({ args }) => {
     const key = args.key;
 
+    // Handle global preferences
+    if (isPreferenceKey(key)) {
+      try {
+        const value = getPreference(key);
+        console.log(formatPreferenceValue(key, value));
+      } catch (error) {
+        console.error(
+          `Error: ${error instanceof Error ? error.message : "unknown error"}`
+        );
+        process.exit(1);
+      }
+      return;
+    }
+
+    // Handle per-repo config
     if (!isConfigKey(key)) {
       console.error(`Unknown key: ${key}`);
-      console.error(`Valid keys: ${CONFIG_KEYS.join(", ")}`);
+      console.error(`Valid keys: ${ALL_KEYS.join(", ")}`);
       process.exit(1);
     }
 

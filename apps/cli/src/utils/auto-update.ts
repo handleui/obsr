@@ -1,3 +1,20 @@
+/**
+ * Automatic Update System for Detent CLI
+ *
+ * Industry-standard patterns implemented:
+ * - Background cache refresh (non-blocking startup)
+ * - 24-hour cache to minimize network calls
+ * - Lock file to prevent concurrent updates
+ * - CI environment detection (auto-disabled)
+ * - Graceful degradation (failures don't break CLI)
+ * - Signal handling during updates
+ * - Retry with exponential backoff
+ *
+ * Disable via:
+ * - DETENT_NO_AUTO_UPDATE=1 environment variable
+ * - `detent config set autoUpdate off`
+ */
+
 import { spawn } from "node:child_process";
 import {
   existsSync,
@@ -20,15 +37,51 @@ const INSTALL_SCRIPT_URL = "https://detent.sh/install.sh";
 const CACHE_FILE = "update-cache.json";
 const LOCK_FILE = "update.lock";
 
-const CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
-const LOCK_STALE_MS = 5 * 60 * 1000; // 5 minutes - consider lock stale after this
+/** Cache duration - 24 hours between version checks */
+const CACHE_DURATION_MS = 24 * 60 * 60 * 1000;
+
+/** Lock file stale threshold - 5 minutes (handles crashed processes) */
+const LOCK_STALE_MS = 5 * 60 * 1000;
+
+/** HTTP timeout for manifest fetch */
 const HTTP_TIMEOUT_MS = 5000;
+
+/** Maximum response size to prevent memory exhaustion */
 const MAX_RESPONSE_SIZE = 64 * 1024; // 64KB
 
-const VERSION_PREFIX_REGEX = /^v/;
+/** Retry configuration for network failures */
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 500;
 
-// Commands that should skip auto-update
-const SKIP_UPDATE_COMMANDS = new Set(["update", "version", "--version", "-v"]);
+const VERSION_PREFIX_REGEX = /^v/;
+const WINDOWS_DRIVE_PATTERN = /^[A-Za-z]:\\/;
+
+/** Commands that should skip auto-update to prevent loops */
+const SKIP_UPDATE_COMMANDS = new Set([
+  "update",
+  "version",
+  "--version",
+  "-v",
+  "--help",
+  "-h",
+  "help",
+]);
+
+/** CI environment variables to check */
+const CI_ENV_VARS = [
+  "CI",
+  "GITHUB_ACTIONS",
+  "GITLAB_CI",
+  "CIRCLECI",
+  "JENKINS_URL",
+  "BUILDKITE",
+  "TRAVIS",
+  "AZURE_PIPELINES",
+  "TEAMCITY_VERSION",
+  "BITBUCKET_BUILD_NUMBER",
+  "CODEBUILD_BUILD_ID",
+  "TF_BUILD",
+] as const;
 
 // ============================================================================
 // Types
@@ -36,7 +89,7 @@ const SKIP_UPDATE_COMMANDS = new Set(["update", "version", "--version", "-v"]);
 
 interface Manifest {
   latest: string;
-  versions: string[];
+  versions?: string[];
 }
 
 interface UpdateCache {
@@ -55,22 +108,48 @@ interface UpdateCheckResult {
   currentVersion: string;
 }
 
+export interface AutoUpdateOptions {
+  currentVersion: string;
+  args: string[];
+  silent?: boolean;
+}
+
+export interface AutoUpdateResult {
+  checked: boolean;
+  updated: boolean;
+  fromVersion?: string;
+  toVersion?: string;
+  error?: string;
+}
+
 // ============================================================================
 // Path Helpers
 // ============================================================================
 
 const getDetentDir = (): string => {
-  const home = process.env.DETENT_HOME || homedir();
-  return join(home, ".detent");
+  const override = process.env.DETENT_HOME;
+  // Validate override path for security
+  if (
+    override &&
+    !override.includes("..") &&
+    (override.startsWith("/") || WINDOWS_DRIVE_PATTERN.test(override))
+  ) {
+    return override;
+  }
+  return join(homedir(), ".detent");
 };
 
 const getCachePath = (): string => join(getDetentDir(), CACHE_FILE);
 const getLockPath = (): string => join(getDetentDir(), LOCK_FILE);
 
 // ============================================================================
-// Lock File Management (prevents concurrent updates)
+// Lock File Management
 // ============================================================================
 
+/**
+ * Acquire an exclusive lock to prevent concurrent updates.
+ * Uses a file-based lock with PID and timestamp for stale detection.
+ */
 const acquireLock = (): boolean => {
   const lockPath = getLockPath();
   const dir = dirname(lockPath);
@@ -80,23 +159,25 @@ const acquireLock = (): boolean => {
       mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
 
-    // Check for existing lock
     if (existsSync(lockPath)) {
-      const lockData = JSON.parse(
-        readFileSync(lockPath, "utf-8")
-      ) as UpdateLock;
-      const lockAge = Date.now() - lockData.startedAt;
+      try {
+        const lockData = JSON.parse(
+          readFileSync(lockPath, "utf-8")
+        ) as UpdateLock;
+        const lockAge = Date.now() - lockData.startedAt;
 
-      // If lock is stale (process likely crashed), remove it
-      if (lockAge > LOCK_STALE_MS) {
+        // Stale lock detection - process likely crashed
+        if (lockAge > LOCK_STALE_MS) {
+          unlinkSync(lockPath);
+        } else {
+          return false;
+        }
+      } catch {
+        // Corrupted lock file - remove it
         unlinkSync(lockPath);
-      } else {
-        // Another update is in progress
-        return false;
       }
     }
 
-    // Create lock
     const lock: UpdateLock = {
       pid: process.pid,
       startedAt: Date.now(),
@@ -115,7 +196,7 @@ const releaseLock = (): void => {
       unlinkSync(lockPath);
     }
   } catch {
-    // Silent fail
+    // Silent fail - lock will become stale
   }
 };
 
@@ -131,7 +212,17 @@ const loadCache = (): UpdateCache | null => {
 
   try {
     const data = readFileSync(cachePath, "utf-8");
-    return JSON.parse(data) as UpdateCache;
+    const parsed = JSON.parse(data) as UpdateCache;
+
+    // Validate cache structure
+    if (
+      typeof parsed.lastCheck !== "number" ||
+      typeof parsed.latestVersion !== "string"
+    ) {
+      return null;
+    }
+
+    return parsed;
   } catch {
     return null;
   }
@@ -147,56 +238,80 @@ const saveCache = (cache: UpdateCache): void => {
     }
     writeFileSync(cachePath, JSON.stringify(cache), { mode: 0o600 });
   } catch {
-    // Silent fail
+    // Silent fail - cache is not critical
   }
 };
 
 // ============================================================================
-// Version Fetching & Comparison
+// Network Operations
 // ============================================================================
 
+/**
+ * Sleep helper for retry backoff
+ */
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Fetch latest version from manifest with retry and exponential backoff.
+ */
 const fetchLatestVersion = async (): Promise<string | null> => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
-
-  try {
-    const response = await fetch(MANIFEST_URL, { signal: controller.signal });
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      return null;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      // Exponential backoff: 500ms, 1000ms, 2000ms
+      await sleep(INITIAL_RETRY_DELAY_MS * 2 ** (attempt - 1));
     }
 
-    const contentLength = response.headers.get("content-length");
-    if (
-      contentLength &&
-      Number.parseInt(contentLength, 10) > MAX_RESPONSE_SIZE
-    ) {
-      return null;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(MANIFEST_URL, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        continue;
+      }
+
+      // Size check before reading body
+      const contentLength = response.headers.get("content-length");
+      if (
+        contentLength &&
+        Number.parseInt(contentLength, 10) > MAX_RESPONSE_SIZE
+      ) {
+        return null; // Don't retry - server misconfiguration
+      }
+
+      const text = await response.text();
+      if (text.length > MAX_RESPONSE_SIZE) {
+        return null;
+      }
+
+      const manifest = JSON.parse(text) as Manifest;
+
+      if (!manifest.latest) {
+        return null;
+      }
+
+      const version = manifest.latest.replace(VERSION_PREFIX_REGEX, "");
+      if (!valid(version)) {
+        return null;
+      }
+
+      return manifest.latest;
+    } catch {
+      clearTimeout(timeoutId);
+      // Continue to retry
     }
-
-    const text = await response.text();
-    if (text.length > MAX_RESPONSE_SIZE) {
-      return null;
-    }
-
-    const manifest = JSON.parse(text) as Manifest;
-
-    if (!manifest.latest) {
-      return null;
-    }
-
-    const version = manifest.latest.replace(VERSION_PREFIX_REGEX, "");
-    if (!valid(version)) {
-      return null;
-    }
-
-    return manifest.latest;
-  } catch {
-    clearTimeout(timeoutId);
-    return null;
   }
+
+  // All retries exhausted
+  return null;
 };
+
+// ============================================================================
+// Version Comparison
+// ============================================================================
 
 const compareVersions = (
   current: string,
@@ -216,6 +331,10 @@ const compareVersions = (
   };
 };
 
+const isDevVersion = (version: string): boolean => {
+  return !version || version === "dev" || version === "0.0.0";
+};
+
 // ============================================================================
 // Update Check
 // ============================================================================
@@ -229,12 +348,7 @@ const checkForUpdate = async (
     currentVersion,
   };
 
-  // Skip dev versions
-  if (
-    !currentVersion ||
-    currentVersion === "dev" ||
-    currentVersion === "0.0.0"
-  ) {
+  if (isDevVersion(currentVersion)) {
     return result;
   }
 
@@ -250,7 +364,7 @@ const checkForUpdate = async (
     return { hasUpdate, latestVersion, currentVersion };
   }
 
-  // Fetch latest version
+  // Fetch latest version (with retries)
   const latest = await fetchLatestVersion();
 
   if (latest === null) {
@@ -276,6 +390,10 @@ const checkForUpdate = async (
 // Update Execution
 // ============================================================================
 
+/**
+ * Execute the update by running the install script.
+ * Handles SIGINT/SIGTERM gracefully during update.
+ */
 const runUpdate = (): Promise<boolean> =>
   new Promise((resolve) => {
     const proc = spawn(
@@ -284,11 +402,23 @@ const runUpdate = (): Promise<boolean> =>
       { stdio: "inherit" }
     );
 
+    // Forward signals to child process
+    const signalHandler = (signal: NodeJS.Signals): void => {
+      proc.kill(signal);
+    };
+
+    process.on("SIGINT", signalHandler);
+    process.on("SIGTERM", signalHandler);
+
     proc.on("close", (code) => {
+      process.off("SIGINT", signalHandler);
+      process.off("SIGTERM", signalHandler);
       resolve(code === 0);
     });
 
     proc.on("error", () => {
+      process.off("SIGINT", signalHandler);
+      process.off("SIGTERM", signalHandler);
       resolve(false);
     });
   });
@@ -297,14 +427,19 @@ const runUpdate = (): Promise<boolean> =>
 // Background Cache Refresh
 // ============================================================================
 
+/**
+ * Spawn a detached process to refresh the cache in background.
+ * This allows the main CLI to continue without waiting for network.
+ */
 const spawnBackgroundRefresh = (): void => {
+  const cachePath = getCachePath();
   const script = `
     const https = require('https');
     const fs = require('fs');
     const path = require('path');
 
     const MANIFEST_URL = '${MANIFEST_URL}';
-    const CACHE_PATH = '${getCachePath()}';
+    const CACHE_PATH = '${cachePath}';
 
     https.get(MANIFEST_URL, { timeout: 5000 }, (res) => {
       if (res.statusCode !== 200) return;
@@ -338,44 +473,64 @@ const spawnBackgroundRefresh = (): void => {
 };
 
 // ============================================================================
-// Configuration
+// Configuration Checks
 // ============================================================================
 
 /**
- * Check if auto-update is disabled via environment variable or config
+ * Detect if running in a CI environment.
+ */
+const isCI = (): boolean => {
+  for (const envVar of CI_ENV_VARS) {
+    const value = process.env[envVar];
+    if (value && value !== "false" && value !== "0") {
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Check if auto-update is disabled via environment, CI, or preferences.
+ *
+ * Priority:
+ * 1. DETENT_NO_AUTO_UPDATE env var (explicit override)
+ * 2. CI environment detection (always disabled)
+ * 3. User preference from ~/.detent/preferences.json
  */
 const isAutoUpdateDisabled = (): boolean => {
-  // Environment variable takes precedence (explicit opt-out)
+  // Explicit env var override
   const envDisabled = process.env.DETENT_NO_AUTO_UPDATE;
   if (envDisabled === "1" || envDisabled === "true") {
     return true;
   }
 
-  // Check CI environments - never auto-update in CI
-  if (
-    process.env.CI === "true" ||
-    process.env.GITHUB_ACTIONS === "true" ||
-    process.env.GITLAB_CI === "true" ||
-    process.env.CIRCLECI === "true" ||
-    process.env.JENKINS_URL ||
-    process.env.BUILDKITE === "true"
-  ) {
+  // Never auto-update in CI
+  if (isCI()) {
     return true;
+  }
+
+  // Check user preference (lazy import to keep module lightweight)
+  try {
+    const { getPreference } =
+      require("../lib/preferences.js") as typeof import("../lib/preferences.js");
+    if (!getPreference("autoUpdate")) {
+      return true;
+    }
+  } catch {
+    // If preferences can't be loaded, default to enabled
   }
 
   return false;
 };
 
 /**
- * Check if the current command should skip auto-update
+ * Check if the current command should skip auto-update.
  */
 const shouldSkipForCommand = (args: string[]): boolean => {
-  // Skip if no args (help screen)
   const command = args[0];
   if (!command) {
-    return true;
+    return true; // No command = help screen
   }
-
   return SKIP_UPDATE_COMMANDS.has(command);
 };
 
@@ -383,32 +538,11 @@ const shouldSkipForCommand = (args: string[]): boolean => {
 // Public API
 // ============================================================================
 
-export interface AutoUpdateOptions {
-  currentVersion: string;
-  args: string[];
-  silent?: boolean;
-}
-
-export interface AutoUpdateResult {
-  checked: boolean;
-  updated: boolean;
-  fromVersion?: string;
-  toVersion?: string;
-  error?: string;
-}
-
 /**
- * Performs automatic update check and update if available.
+ * Main entry point for automatic updates.
  *
- * Industry-standard behavior:
- * - Checks version against cached manifest (24h cache)
- * - Refreshes cache in background if stale
- * - Applies update automatically if available
- * - Skips in CI environments
- * - Respects DETENT_NO_AUTO_UPDATE env var
- * - Uses lock file to prevent concurrent updates
- *
- * @returns Result indicating what happened
+ * Called at CLI startup to check for and apply updates transparently.
+ * Designed to be fast (uses cache) and non-disruptive (graceful failures).
  */
 export const maybeAutoUpdate = async (
   options: AutoUpdateOptions
@@ -416,17 +550,13 @@ export const maybeAutoUpdate = async (
   const { currentVersion, args, silent = false } = options;
 
   // Skip for dev versions
-  if (
-    !currentVersion ||
-    currentVersion === "dev" ||
-    currentVersion === "0.0.0"
-  ) {
+  if (isDevVersion(currentVersion)) {
     return { checked: false, updated: false };
   }
 
-  // Skip if disabled
+  // Skip if disabled (env, CI, or preference)
   if (isAutoUpdateDisabled()) {
-    // Still refresh cache in background for when user runs `detent update`
+    // Still refresh cache in background for manual `detent update`
     const cache = loadCache();
     if (!cache || Date.now() - cache.lastCheck >= CACHE_DURATION_MS) {
       spawnBackgroundRefresh();
@@ -456,7 +586,6 @@ export const maybeAutoUpdate = async (
   }
 
   try {
-    // Show update message
     if (!silent) {
       console.log(`Updating detent: v${currentVersion} → ${latestVersion}`);
     }
@@ -467,7 +596,6 @@ export const maybeAutoUpdate = async (
       if (!silent) {
         console.log("Update complete. Restarting...\n");
       }
-
       return {
         checked: true,
         updated: true,
@@ -476,11 +604,9 @@ export const maybeAutoUpdate = async (
       };
     }
 
-    // Update failed - continue with current version
     if (!silent) {
       console.log("Update failed. Continuing with current version.\n");
     }
-
     return {
       checked: true,
       updated: false,
@@ -493,7 +619,7 @@ export const maybeAutoUpdate = async (
 
 /**
  * Force a version check, ignoring cache.
- * Used by the `update` command.
+ * Used by the `detent update` command.
  */
 export const forceCheckForUpdate = async (
   currentVersion: string
@@ -504,11 +630,7 @@ export const forceCheckForUpdate = async (
     currentVersion,
   };
 
-  if (
-    !currentVersion ||
-    currentVersion === "dev" ||
-    currentVersion === "0.0.0"
-  ) {
+  if (isDevVersion(currentVersion)) {
     return result;
   }
 

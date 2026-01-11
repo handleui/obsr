@@ -36,6 +36,10 @@ if (isProduction) {
     if (binaryPath) {
       const child = spawn(binaryPath, args, { stdio: "inherit" });
       child.on("close", (code: number | null) => process.exit(code ?? 0));
+      child.on("error", (err) => {
+        console.error(`Failed to restart with updated binary: ${err.message}`);
+        process.exit(1);
+      });
     } else {
       runMain(main);
     }

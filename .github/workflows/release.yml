@@ -11,6 +11,7 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
 
 jobs:
   release:
@@ -50,6 +51,10 @@ jobs:
         if: steps.changesets.outputs.published == 'true'
         run: |
           VERSION=$(node -p "require('./apps/cli/package.json').version")
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: Failed to extract version from package.json"
+            exit 1
+          fi
           echo "version=v$VERSION" >> $GITHUB_OUTPUT
           echo "Published version: v$VERSION"
 

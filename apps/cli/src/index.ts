@@ -16,21 +16,32 @@ if (typeof DETENT_PRODUCTION === "undefined") {
   config({ path: resolve(__dirname, "..", ".env") });
 }
 
-// Auto-update check (non-blocking for cached results, applies update if available)
+// Auto-update only runs in production builds (standalone binaries)
+// In production, process.argv[0] IS the binary path (e.g., ~/.local/bin/dt)
+// In development, process.argv[0] is the node/bun executable, so re-exec wouldn't work
+const isProduction = typeof DETENT_PRODUCTION !== "undefined";
 const args = process.argv.slice(2);
-const updateResult = await maybeAutoUpdate({
-  currentVersion: getVersion(),
-  args,
-});
 
-// If we successfully updated, re-exec with the new binary
-if (updateResult.updated) {
-  const { spawn } = await import("node:child_process");
-  const execPath = process.argv[0] ?? process.execPath;
-  const child = spawn(execPath, process.argv.slice(1), {
-    stdio: "inherit",
+if (isProduction) {
+  const updateResult = await maybeAutoUpdate({
+    currentVersion: getVersion(),
+    args,
   });
-  child.on("close", (code: number | null) => process.exit(code ?? 0));
+
+  // If we successfully updated, re-exec with the new binary
+  // process.argv[0] is the standalone binary path in production
+  if (updateResult.updated) {
+    const { spawn } = await import("node:child_process");
+    const binaryPath = process.argv[0];
+    if (binaryPath) {
+      const child = spawn(binaryPath, args, { stdio: "inherit" });
+      child.on("close", (code: number | null) => process.exit(code ?? 0));
+    } else {
+      runMain(main);
+    }
+  } else {
+    runMain(main);
+  }
 } else {
   runMain(main);
 }

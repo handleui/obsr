@@ -204,7 +204,7 @@ export const redactionPatterns: readonly RedactionPattern[] = [
 
   /**
    * AWS access key IDs (permanent)
-   * @example "AKIAIOSFODNN7EXAMPLE"
+   * @example "AKIAXXXXXXXXXXXXXXXX"
    */
   {
     name: "aws_access_key",
@@ -305,7 +305,7 @@ export const redactionPatterns: readonly RedactionPattern[] = [
 
   /**
    * Firebase API keys (same format as Google)
-   * @example "AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe"
+   * @example "AIzaSyXXXXXX_FAKE_EXAMPLE_KEY_XXXXX"
    */
   {
     name: "firebase_key",

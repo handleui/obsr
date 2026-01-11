@@ -8,6 +8,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { findGitRoot, validateGitRepository } from "@detent/git";
+import { redactSensitiveData } from "@detent/parser";
 import { defineCommand } from "citty";
 import { Box, render, Text, useApp, useInput } from "ink";
 import { useState } from "react";
@@ -76,7 +77,7 @@ const runVerboseInit = (
   if (finalKey) {
     const validation = validateApiKey(finalKey);
     if (!validation.valid) {
-      console.error(`Error: ${validation.error}`);
+      console.error(`Error: ${redactSensitiveData(validation.error ?? "")}`);
       process.exit(1);
     }
     console.log(

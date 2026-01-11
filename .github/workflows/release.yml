@@ -43,3 +43,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # IMPORTANT: Manual trigger is required because GITHUB_TOKEN pushes don't
+      # trigger other workflows (GitHub security measure to prevent infinite loops).
+      # The tag push from changesets/action won't trigger build.yml automatically.
+      - name: Trigger Build workflow
+        run: |
+          VERSION="v$(node -p "require('./apps/cli/package.json').version")"
+          # Check if release already exists for this version
+          if gh release view "$VERSION" &>/dev/null; then
+            echo "Release $VERSION already exists, skipping build trigger"
+          else
+            echo "Triggering build for $VERSION"
+            gh workflow run build.yml --ref "$VERSION"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

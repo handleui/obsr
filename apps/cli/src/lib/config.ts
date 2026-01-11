@@ -38,10 +38,9 @@ export interface Config {
   timeoutMins: number;
 }
 
-export interface ValidationResult {
-  valid: boolean;
-  error?: string;
-}
+export type ValidationResult =
+  | { valid: true }
+  | { valid: false; error: string };
 
 export interface ConfigLoadResult {
   config: GlobalConfig;

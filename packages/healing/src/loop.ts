@@ -1,7 +1,4 @@
-import type {
-  ContentBlock,
-  MessageParam,
-} from "@anthropic-ai/sdk/resources/messages.js";
+import { generateText, stepCountIs } from "ai";
 import type { Client } from "./client.js";
 import { calculateCost } from "./pricing.js";
 import type { ToolRegistry } from "./tools/registry.js";
@@ -81,7 +78,72 @@ const getUsageFromResult = (result: HealResult): TokenUsage => ({
 });
 
 /**
- * Checks if budget limits have been exceeded.
+ * Step usage from AI SDK response.
+ */
+interface StepUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  inputTokenDetails?: {
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+}
+
+/**
+ * Calculates cumulative cost from step usage data.
+ */
+const calculateStepsCost = (
+  steps: Array<{ usage?: StepUsage }>,
+  modelName: string
+): number => {
+  const totalUsage = steps.reduce(
+    (acc, step) => ({
+      inputTokens: acc.inputTokens + (step.usage?.inputTokens ?? 0),
+      outputTokens: acc.outputTokens + (step.usage?.outputTokens ?? 0),
+      cacheCreationInputTokens:
+        acc.cacheCreationInputTokens +
+        (step.usage?.inputTokenDetails?.cacheWriteTokens ?? 0),
+      cacheReadInputTokens:
+        acc.cacheReadInputTokens +
+        (step.usage?.inputTokenDetails?.cacheReadTokens ?? 0),
+    }),
+    {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+    }
+  );
+  return calculateCost(modelName, totalUsage);
+};
+
+/**
+ * Creates a stop condition that checks budget limits between steps.
+ */
+const createBudgetStopCondition = (
+  config: HealConfig,
+  modelName: string
+): (({ steps }: { steps: Array<{ usage?: StepUsage }> }) => boolean) => {
+  return ({ steps }) => {
+    const costUSD = calculateStepsCost(steps, modelName);
+
+    if (config.budgetPerRunUSD > 0 && costUSD > config.budgetPerRunUSD) {
+      return true;
+    }
+
+    if (
+      config.remainingMonthlyUSD >= 0 &&
+      costUSD > config.remainingMonthlyUSD
+    ) {
+      return true;
+    }
+
+    return false;
+  };
+};
+
+/**
+ * Checks if budget limits have been exceeded (post-run validation).
  */
 const checkBudgetLimits = (
   config: HealConfig,
@@ -142,72 +204,77 @@ export class HealLoop {
     userPrompt: string
   ): Promise<HealResult> => {
     const startTime = Date.now();
-    const messages: MessageParam[] = [{ role: "user", content: userPrompt }];
     const result = createInitialResult();
-    const api = this.client.api;
-    const modelName = this.config.model;
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(
-        () => reject(new Error("Healing loop timeout exceeded")),
-        this.config.timeout
-      );
-    });
+    const modelName = this.client.normalizeModel(this.config.model);
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(
+      () => abortController.abort(),
+      this.config.timeout
+    );
 
     try {
-      for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-        result.iterations = iteration + 1;
+      this.registry.setToolCallListener(
+        this.verboseWriter
+          ? (toolName: string, input: Record<string, unknown>) =>
+              this.logToolCall(toolName, input)
+          : null
+      );
 
-        const response = await Promise.race([
-          api.messages.create({
-            model: modelName,
-            max_tokens: MAX_TOKENS_PER_RESPONSE,
-            system: systemPrompt,
-            messages,
-            tools: this.registry.toAnthropicTools(),
-          }),
-          timeoutPromise,
-        ]);
+      const budgetStopCondition = createBudgetStopCondition(
+        this.config,
+        modelName
+      );
 
-        this.updateTokenUsage(result, response.usage, modelName);
+      const response = await generateText({
+        model: modelName,
+        system: systemPrompt,
+        prompt: userPrompt,
+        maxOutputTokens: MAX_TOKENS_PER_RESPONSE,
+        tools: this.registry.toAiTools(),
+        stopWhen: [stepCountIs(MAX_ITERATIONS), budgetStopCondition],
+        abortSignal: abortController.signal,
+        providerOptions: this.client.providerOptions(modelName) ?? undefined,
+      });
 
-        const budgetExceeded = checkBudgetLimits(
-          this.config,
-          result,
-          startTime
-        );
-        if (budgetExceeded) {
-          return budgetExceeded;
-        }
+      this.updateTokenUsage(result, response.usage ?? {}, modelName);
+      result.iterations = response.steps?.length ?? 1;
+      result.toolCalls =
+        response.steps?.flatMap((step) => step.toolCalls ?? []).length ?? 0;
+      result.finalMessage = response.text ?? "";
+      result.duration = Date.now() - startTime;
 
-        if (response.stop_reason === "end_turn") {
-          return this.createSuccessResult(result, response.content, startTime);
-        }
-
-        const { toolResults, hasToolUse } = await this.processToolCalls(
-          response.content,
-          result
-        );
-
-        if (!hasToolUse) {
-          return this.createSuccessResult(result, response.content, startTime);
-        }
-
-        messages.push(
-          { role: "assistant", content: response.content },
-          { role: "user", content: toolResults }
-        );
+      const budgetExceeded = checkBudgetLimits(this.config, result, startTime);
+      if (budgetExceeded) {
+        return {
+          ...budgetExceeded,
+          finalMessage: result.finalMessage,
+        };
       }
 
-      result.duration = Date.now() - startTime;
-      result.finalMessage = `Max iterations (${MAX_ITERATIONS}) exceeded`;
-      return result;
+      // Detect if we hit the step limit without natural completion
+      const hitStepLimit = result.iterations >= MAX_ITERATIONS;
+      if (hitStepLimit) {
+        result.finalMessage =
+          result.finalMessage ||
+          `Max iterations (${MAX_ITERATIONS}) reached without completion`;
+        return result;
+      }
+
+      return { ...result, success: true };
     } catch (error) {
       result.duration = Date.now() - startTime;
       result.costUSD = calculateCost(modelName, getUsageFromResult(result));
-      result.finalMessage =
-        error instanceof Error ? error.message : "Unknown error occurred";
+      if (abortController.signal.aborted) {
+        result.finalMessage = "Healing loop timeout exceeded";
+      } else if (error instanceof Error) {
+        result.finalMessage = error.message;
+      } else {
+        result.finalMessage = "Unknown error occurred";
+      }
       return result;
+    } finally {
+      clearTimeout(timeoutId);
+      this.registry.setToolCallListener(null);
     }
   };
 
@@ -217,88 +284,25 @@ export class HealLoop {
   private readonly updateTokenUsage = (
     result: HealResult,
     usage: {
-      input_tokens: number;
-      output_tokens: number;
-      cache_creation_input_tokens?: number | null;
-      cache_read_input_tokens?: number | null;
+      inputTokens?: number;
+      outputTokens?: number;
+      inputTokenDetails?: {
+        cacheReadTokens?: number;
+        cacheWriteTokens?: number;
+      };
     },
     modelName: string
   ): void => {
-    result.inputTokens += usage.input_tokens;
-    result.outputTokens += usage.output_tokens;
-    result.cacheCreationInputTokens += usage.cache_creation_input_tokens ?? 0;
-    result.cacheReadInputTokens += usage.cache_read_input_tokens ?? 0;
+    const inputTokens = usage.inputTokens ?? 0;
+    const outputTokens = usage.outputTokens ?? 0;
+    const cacheReadTokens = usage.inputTokenDetails?.cacheReadTokens ?? 0;
+    const cacheWriteTokens = usage.inputTokenDetails?.cacheWriteTokens ?? 0;
+
+    result.inputTokens = inputTokens;
+    result.outputTokens = outputTokens;
+    result.cacheCreationInputTokens = cacheWriteTokens;
+    result.cacheReadInputTokens = cacheReadTokens;
     result.costUSD = calculateCost(modelName, getUsageFromResult(result));
-  };
-
-  /**
-   * Creates a success result with final message.
-   */
-  private readonly createSuccessResult = (
-    result: HealResult,
-    content: ContentBlock[],
-    startTime: number
-  ): HealResult => ({
-    ...result,
-    finalMessage: this.extractTextContent(content),
-    success: true,
-    duration: Date.now() - startTime,
-  });
-
-  /**
-   * Processes tool calls from response content.
-   */
-  private readonly processToolCalls = async (
-    content: ContentBlock[],
-    result: HealResult
-  ): Promise<{
-    toolResults: Array<{
-      type: "tool_result";
-      tool_use_id: string;
-      content: string;
-      is_error?: boolean;
-    }>;
-    hasToolUse: boolean;
-  }> => {
-    const toolResults: Array<{
-      type: "tool_result";
-      tool_use_id: string;
-      content: string;
-      is_error?: boolean;
-    }> = [];
-    let hasToolUse = false;
-
-    for (const block of content) {
-      if (block.type === "tool_use") {
-        hasToolUse = true;
-        result.toolCalls++;
-
-        const input = block.input as Record<string, unknown>;
-        this.logToolCall(block.name, input);
-
-        const toolResult = await this.registry.dispatch(block.name, input);
-        toolResults.push({
-          type: "tool_result",
-          tool_use_id: block.id,
-          content: toolResult.content,
-          is_error: toolResult.isError || undefined,
-        });
-      }
-    }
-
-    return { toolResults, hasToolUse };
-  };
-
-  /**
-   * Extracts text content from a response.
-   */
-  private readonly extractTextContent = (content: ContentBlock[]): string => {
-    for (const block of content) {
-      if (block.type === "text") {
-        return block.text;
-      }
-    }
-    return "";
   };
 
   /**

@@ -29,7 +29,7 @@ interface PreferencesFile {
 
 const PREFERENCES_FILE = "preferences.json";
 const SCHEMA_URL = "./preferences-schema.json";
-const WINDOWS_DRIVE_PATTERN = /^[A-Za-z]:\\/;
+const WINDOWS_DRIVE_PATTERN = /^[A-Za-z]:[/\\]/;
 
 const DEFAULTS: Preferences = {
   autoUpdate: true,

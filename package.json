@@ -21,7 +21,7 @@
     "lint-staged": "^16.2.7",
     "turbo": "^2.7.2",
     "typescript": "5.9.2",
-    "ultracite": "7.0.8",
+    "ultracite": "7.0.11",
     "wrangler": "^4.54.0"
   },
   "engines": {
@@ -34,6 +34,7 @@
   ],
   "lint-staged": {
     "*.{js,jsx,ts,tsx,json,jsonc,css,scss,md,mdx}": [
+      "bun x ultracite fix",
       "bun x ultracite fix"
     ]
   },

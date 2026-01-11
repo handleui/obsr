@@ -13,7 +13,17 @@ import {
   validateModel,
   validateTimeout,
 } from "../../lib/config.js";
+import {
+  isPreferenceKey,
+  PREFERENCE_KEYS,
+  type PreferenceKey,
+  parsePreferenceValue,
+  setPreference,
+} from "../../lib/preferences.js";
 import { CONFIG_KEYS, type ConfigKey, isConfigKey } from "./constants.js";
+
+// All valid keys (config + preferences)
+const ALL_KEYS = [...CONFIG_KEYS, ...PREFERENCE_KEYS] as const;
 
 // Helper to parse and validate string values (apiKey, model)
 const parseStringValue = (
@@ -67,12 +77,12 @@ const parseAndValidate = (key: ConfigKey, value: string): unknown => {
 export const configSetCommand = defineCommand({
   meta: {
     name: "set",
-    description: "Set a configuration value (for AI/scripting)",
+    description: "Set a configuration value",
   },
   args: {
     key: {
       type: "positional",
-      description: `Configuration key (${CONFIG_KEYS.join(", ")})`,
+      description: `Configuration key (${ALL_KEYS.join(", ")})`,
       required: true,
     },
     value: {
@@ -85,8 +95,23 @@ export const configSetCommand = defineCommand({
     const key = args.key;
     const rawValue = args.value;
 
+    // Handle global preferences (autoUpdate, etc.)
+    if (isPreferenceKey(key)) {
+      try {
+        const parsed = parsePreferenceValue(key, rawValue);
+        setPreference(key as PreferenceKey, parsed);
+        console.log("ok");
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : "unknown error");
+        process.exit(1);
+      }
+      return;
+    }
+
+    // Handle per-repo config
     if (!isConfigKey(key)) {
       console.error(`Unknown key: ${key}`);
+      console.error(`Valid keys: ${ALL_KEYS.join(", ")}`);
       process.exit(1);
     }
 

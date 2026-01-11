@@ -80,10 +80,10 @@ const contextCanceledPattern = /^Error:\s*context\s*canceled\s*$/i;
  * Shell command not found.
  * Format: bash: X: command not found
  * Groups: 1=command name
- * Security: Uses [^:\s]+ to prevent ReDoS from overlapping quantifiers
+ * Security: Uses bounded quantifier {1,256} to prevent ReDoS
  */
 const shellNotFoundPattern =
-  /^(?:bash|sh|zsh):\s+([^:\s][^:]*):\s+command\s+not\s+found/i;
+  /^(?:bash|sh|zsh):\s+([^\s:]{1,256}):\s+command\s+not\s+found/i;
 
 /**
  * Permission denied error.

@@ -214,7 +214,7 @@ export const redactionPatterns: readonly RedactionPattern[] = [
 
   /**
    * AWS temporary access key IDs (STS)
-   * @example "ASIAIOSFODNN7EXAMPLE"
+   * @example "ASIAxxxxxxxxxxxxxxxx"
    */
   {
     name: "aws_temp_key",
@@ -295,7 +295,7 @@ export const redactionPatterns: readonly RedactionPattern[] = [
 
   /**
    * Google API keys
-   * @example "AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe"
+   * @example "AIzaXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
    */
   {
     name: "google_api_key",

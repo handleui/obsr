@@ -80,9 +80,10 @@ const contextCanceledPattern = /^Error:\s*context\s*canceled\s*$/i;
  * Shell command not found.
  * Format: bash: X: command not found
  * Groups: 1=command name
+ * Security: Uses [^:\s]+ to prevent ReDoS from overlapping quantifiers
  */
 const shellNotFoundPattern =
-  /^(?:bash|sh|zsh):\s*([^:]+):\s*command\s*not\s*found/i;
+  /^(?:bash|sh|zsh):\s+([^:\s][^:]*):\s+command\s+not\s+found/i;
 
 /**
  * Permission denied error.
@@ -128,9 +129,10 @@ const nodeVersionRequirementPattern =
 /**
  * Engine incompatibility error.
  * Format: The engine "node" is incompatible with this module
+ * Security: Uses bounded character classes to prevent ReDoS
  */
 const engineIncompatiblePattern =
-  /^(?:error\s+)?(?:@\S+:\s*)?The\s+engine\s+"node"\s+is\s+incompatible/i;
+  /^(?:error\s+)?(?:@[\w.@/-]+:\s+)?The\s+engine\s+"node"\s+is\s+incompatible/i;
 
 /**
  * Next.js Node.js version mismatch error.

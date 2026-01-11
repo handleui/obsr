@@ -17,6 +17,7 @@ import {
   getRepoDetentDir,
   isRepoInitialized,
   loadRepoConfig,
+  maskApiKey,
   saveRepoConfig,
   validateApiKey,
 } from "../lib/config.js";
@@ -283,7 +284,7 @@ const InitTUI = ({ repoRoot, force }: InitTUIProps): JSX.Element => {
           <Box>
             <Text>API Key: </Text>
             {apiKey ? (
-              <Text color={colors.brand}>{apiKey}</Text>
+              <Text color={colors.brand}>{maskApiKey(apiKey)}</Text>
             ) : (
               <Text color={colors.muted}>_</Text>
             )}

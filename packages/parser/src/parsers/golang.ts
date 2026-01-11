@@ -61,9 +61,9 @@ const goGoroutinePattern = /^goroutine \d+ \[/;
 
 /**
  * Stack frame function lines: main.foo(0x1234)
- * SECURITY: Anchored, bounded character classes, no nested quantifiers
+ * SECURITY: Uses [^\s(]+ to prevent backtracking between \S+ and \(
  */
-const goStackFunctionPattern = /^\S+\([^)]*\)$/;
+const goStackFunctionPattern = /^[^\s(]+\([^)]*\)$/;
 
 /**
  * Stack frame file lines: /path/to/file.go:123 +0x1a2

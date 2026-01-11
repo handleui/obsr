@@ -1,17 +1,14 @@
 name: Build
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       ref:
         description: "Tag or ref to build (e.g., v0.10.0). Defaults to latest tag."
         required: false
-        type: string
-  workflow_call:
-    inputs:
-      ref:
-        description: "Tag to build (e.g., v0.10.0)"
-        required: true
         type: string
 
 permissions:
@@ -29,6 +26,8 @@ jobs:
         run: |
           if [ -n "${{ inputs.ref }}" ]; then
             echo "ref=${{ inputs.ref }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "ref=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
             echo "ref=${{ github.ref }}" >> $GITHUB_OUTPUT
           fi

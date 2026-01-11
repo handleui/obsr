@@ -1,5 +1,14 @@
 # @detent/healing
 
+## 0.2.0
+
+### Minor Changes
+
+- 5de32e4: Migrate from Anthropic SDK to Vercel AI SDK with AI Gateway support.
+  Enables multi-provider model access while maintaining BYOK capability via providerOptions.
+  Simplifies agentic loop by leveraging built-in tool calling and step-based control flow.
+  Fixes cache token tracking in budget calculations.
+
 ## 0.1.0
 
 ### Minor Changes

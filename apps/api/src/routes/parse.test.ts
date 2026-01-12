@@ -27,7 +27,8 @@ const MOCK_ENV = {
   UPSTASH_REDIS_REST_URL: "https://example.com",
   UPSTASH_REDIS_REST_TOKEN: "test-token",
   RESEND_API_KEY: "test-resend-key",
-  APP_BASE_URL: "https://example.com",
+  RESEND_EMAIL_FROM: "Test <test@example.com>",
+  NAVIGATOR_BASE_URL: "https://example.com",
 };
 
 const makeRequest = async (body: unknown): Promise<Response> => {

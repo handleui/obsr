@@ -12,6 +12,7 @@ interface SendInvitationEmailParams {
 
 export const createEmailService = (env: Env) => {
   const resend = new Resend(env.RESEND_API_KEY);
+  const emailFrom = env.RESEND_EMAIL_FROM;
 
   return {
     sendInvitationEmail: async (params: SendInvitationEmailParams) => {
@@ -23,7 +24,7 @@ export const createEmailService = (env: Env) => {
       );
 
       const { data, error } = await resend.emails.send({
-        from: "Detent <noreply@detent.dev>",
+        from: emailFrom,
         to,
         subject: `You've been invited to join ${organizationName} on Detent`,
         html: `

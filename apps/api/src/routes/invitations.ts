@@ -103,7 +103,7 @@ orgInvitationsRoutes.post(
       });
 
       // Send invitation email
-      const acceptUrl = `${c.env.APP_BASE_URL}/invitations/${token}`;
+      const acceptUrl = `${c.env.NAVIGATOR_BASE_URL}/invitations/${token}`;
       const emailService = createEmailService(c.env);
 
       try {

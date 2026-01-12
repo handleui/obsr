@@ -16,3 +16,14 @@ WORKOS_API_KEY=your_workos_api_key
 # Local Postgres for development (run: docker compose up -d)
 # For production migrations, override: DATABASE_URL="postgresql://..." bun run db:push
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/detent
+
+# Upstash Redis for rate limiting
+UPSTASH_REDIS_REST_URL=your_upstash_url
+UPSTASH_REDIS_REST_TOKEN=your_upstash_token
+
+# Email (Resend) configuration
+RESEND_API_KEY=your_resend_api_key
+RESEND_EMAIL_FROM="Detent <noreply@detent.dev>"
+
+# Navigator (web app) base URL for invitation links
+NAVIGATOR_BASE_URL=http://localhost:3000

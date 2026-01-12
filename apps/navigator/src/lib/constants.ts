@@ -4,6 +4,13 @@
 
 export const VERIFICATION_CODE_LENGTH = 6;
 
+/**
+ * Detent API base URL
+ * Used for server-side API calls (e.g., invitation acceptance)
+ */
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "https://api.detent.sh";
+
 export const COOKIE_NAMES = {
   session: "session",
   /** WorkOS sealed session cookie - contains encrypted refresh token */

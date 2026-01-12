@@ -58,7 +58,8 @@ const createMockEnv = (): Env =>
     UPSTASH_REDIS_REST_URL: "test",
     UPSTASH_REDIS_REST_TOKEN: "test",
     RESEND_API_KEY: "test",
-    APP_BASE_URL: "https://test.com",
+    RESEND_EMAIL_FROM: "Test <test@test.com>",
+    NAVIGATOR_BASE_URL: "https://test.com",
   }) as unknown as Env;
 
 const createError = (

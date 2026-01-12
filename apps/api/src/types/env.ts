@@ -42,9 +42,12 @@ export interface Env {
 
   // Email (Resend) configuration
   RESEND_API_KEY: string;
+  // Sender address for emails, e.g., "Detent <noreply@detent.dev>"
+  RESEND_EMAIL_FROM: string;
 
-  // Application URL for invitation links
-  APP_BASE_URL: string;
+  // Navigator (web app) base URL for invitation links
+  // e.g., https://navigator.detent.sh
+  NAVIGATOR_BASE_URL: string;
 
   // Sentry error monitoring
   SENTRY_DSN?: string;

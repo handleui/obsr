@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { formatCheckSummary, formatResultsComment } from "./comment-formatter";
+import {
+  formatCheckRunOutput,
+  formatCheckSummary,
+  formatResultsComment,
+} from "./comment-formatter";
 
 // Factory for creating test options
 const createOptions = (
@@ -185,8 +189,8 @@ describe("formatCheckSummary", () => {
       1
     );
 
-    expect(result).toContain("**1** workflow failed");
-    expect(result).toContain("**1** error found");
+    expect(result).toContain("1 workflow failed");
+    expect(result).toContain("1 error");
     expect(result).not.toContain("workflows");
     expect(result).not.toContain("errors");
   });
@@ -200,8 +204,8 @@ describe("formatCheckSummary", () => {
       5
     );
 
-    expect(result).toContain("**2** workflows failed");
-    expect(result).toContain("**5** errors found");
+    expect(result).toContain("2 workflows failed");
+    expect(result).toContain("5 errors");
   });
 
   it("shows success message when all workflows pass", () => {
@@ -217,7 +221,7 @@ describe("formatCheckSummary", () => {
     expect(result).not.toContain("failed");
   });
 
-  it("uses plain text status without emojis", () => {
+  it("shows passed count when some workflows pass", () => {
     const result = formatCheckSummary(
       [
         { name: "build", id: 1, conclusion: "success", errorCount: 0 },
@@ -226,9 +230,175 @@ describe("formatCheckSummary", () => {
       1
     );
 
-    expect(result).toContain("Passed");
-    expect(result).toContain("Failed");
+    expect(result).toContain("1 passed");
+    expect(result).toContain("1 workflow failed");
     expect(result).not.toContain("\u2705"); // No check emoji
     expect(result).not.toContain("\u274C"); // No X emoji
+  });
+});
+
+describe("formatCheckRunOutput", () => {
+  const createCheckRunOptions = (
+    overrides: Partial<Parameters<typeof formatCheckRunOutput>[0]> = {}
+  ) => ({
+    owner: "test-owner",
+    repo: "test-repo",
+    headSha: "abc1234567890def1234567890def1234567890",
+    runs: [],
+    errors: [],
+    totalErrors: 0,
+    ...overrides,
+  });
+
+  describe("summary", () => {
+    it("includes workflow stats in summary", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          runs: [
+            { name: "Build", id: 123, conclusion: "failure", errorCount: 3 },
+            { name: "Test", id: 456, conclusion: "success", errorCount: 0 },
+          ],
+          totalErrors: 3,
+        })
+      );
+
+      expect(result.summary).toContain("1 workflow failed");
+      expect(result.summary).toContain("3 errors");
+      expect(result.summary).toContain("1 passed");
+    });
+
+    it("includes failed workflows table", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          runs: [
+            { name: "Build", id: 123, conclusion: "failure", errorCount: 5 },
+          ],
+          totalErrors: 5,
+        })
+      );
+
+      expect(result.summary).toContain("| Workflow | Status | Errors |");
+      expect(result.summary).toContain("| Build | Failed | 5 |");
+    });
+  });
+
+  describe("text (error details)", () => {
+    it("includes top errors table when errors exist", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors: [
+            { message: "Type error", filePath: "src/app.ts", line: 42 },
+            {
+              message: "Cannot find module",
+              filePath: "src/utils.ts",
+              line: 10,
+            },
+          ],
+          totalErrors: 2,
+        })
+      );
+
+      expect(result.text).toContain("### Top Errors");
+      expect(result.text).toContain("| File | Line | Message |");
+      expect(result.text).toContain("src/app.ts");
+      expect(result.text).toContain("42");
+    });
+
+    it("includes CLI command in text", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          headSha: "abc1234567890def1234567890def1234567890",
+          errors: [{ message: "Error" }],
+          totalErrors: 1,
+        })
+      );
+
+      expect(result.text).toContain("`detent errors --commit abc1234`");
+    });
+
+    it("returns undefined text when no errors", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          runs: [
+            { name: "Build", id: 123, conclusion: "success", errorCount: 0 },
+          ],
+          totalErrors: 0,
+        })
+      );
+
+      expect(result.text).toBeUndefined();
+    });
+  });
+
+  describe("annotations", () => {
+    it("generates annotations for errors with file paths", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors: [
+            {
+              message: "Type 'string' is not assignable",
+              filePath: "src/app.ts",
+              line: 42,
+              source: "typescript",
+            },
+          ],
+          totalErrors: 1,
+        })
+      );
+
+      expect(result.annotations).toHaveLength(1);
+      expect(result.annotations?.[0]).toEqual({
+        path: "src/app.ts",
+        start_line: 42,
+        end_line: 42,
+        annotation_level: "failure",
+        message: "Type 'string' is not assignable",
+        title: "typescript",
+      });
+    });
+
+    it("skips errors without file path or line", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors: [
+            { message: "Error with path", filePath: "src/app.ts", line: 10 },
+            { message: "Error without path" },
+            { message: "Error with path no line", filePath: "src/other.ts" },
+          ],
+          totalErrors: 3,
+        })
+      );
+
+      expect(result.annotations).toHaveLength(1);
+      expect(result.annotations?.[0]?.path).toBe("src/app.ts");
+    });
+
+    it("limits annotations to 50", () => {
+      const errors = Array.from({ length: 100 }, (_, i) => ({
+        message: `Error ${i}`,
+        filePath: `src/file${i}.ts`,
+        line: i + 1,
+      }));
+
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors,
+          totalErrors: 100,
+        })
+      );
+
+      expect(result.annotations).toHaveLength(50);
+    });
+
+    it("returns undefined annotations when no errors have paths", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors: [{ message: "Error without path" }],
+          totalErrors: 1,
+        })
+      );
+
+      expect(result.annotations).toBeUndefined();
+    });
   });
 });

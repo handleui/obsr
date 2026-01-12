@@ -14,7 +14,7 @@ import {
 } from "../db/schema";
 import { webhookSignatureMiddleware } from "../middleware/webhook-signature";
 import {
-  formatCheckSummary,
+  formatCheckRunOutput,
   formatResultsComment,
 } from "../services/comment-formatter";
 import {
@@ -1032,6 +1032,16 @@ const finalizeAndPostResults = async (
   const hasFailed = failedCount > 0;
   const totalErrors = allErrors.length;
 
+  // Format check run output with summary, error details, and inline annotations
+  const checkRunOutput = formatCheckRunOutput({
+    owner,
+    repo,
+    headSha,
+    runs: runResults,
+    errors: allErrors,
+    totalErrors,
+  });
+
   // Update check run to completed
   await github.updateCheckRun(token, {
     owner,
@@ -1043,7 +1053,9 @@ const finalizeAndPostResults = async (
       title: hasFailed
         ? `${totalErrors} error${totalErrors !== 1 ? "s" : ""} found`
         : "All checks passed",
-      summary: formatCheckSummary(runResults, totalErrors),
+      summary: checkRunOutput.summary,
+      text: checkRunOutput.text,
+      annotations: checkRunOutput.annotations,
     },
   });
 

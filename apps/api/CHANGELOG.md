@@ -1,5 +1,18 @@
 # @detent/api
 
+## 0.4.0
+
+### Minor Changes
+
+- f747d88: Add inline annotations to check run output with run ID based error tracking.
+  Includes PR comment management for upserts, smarter annotation filtering and truncation,
+  plus new database migrations for workflow run metadata and comment tracking.
+
+### Patch Changes
+
+- Updated dependencies [f747d88]
+  - @detent/parser@0.2.0
+
 ## 0.3.0
 
 ### Minor Changes

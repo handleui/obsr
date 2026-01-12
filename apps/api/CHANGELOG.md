@@ -1,5 +1,11 @@
 # @detent/api
 
+## 0.2.1
+
+### Patch Changes
+
+- b801b67: Refactor parse route into modular service architecture with dedicated modules for validation, decompression, and persistence
+
 ## 0.2.0
 
 ### Minor Changes

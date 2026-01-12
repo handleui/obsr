@@ -33,7 +33,7 @@ const createError = (
   ...overrides,
 });
 
-const loadParseService = async () => (await import("./parser")).parseService;
+const loadParseService = async () => (await import("./parse")).parseService;
 
 describe("parseService", () => {
   beforeEach(() => {

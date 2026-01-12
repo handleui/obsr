@@ -11,6 +11,12 @@
       "custom_domain": true
     }
   ],
+  "kv_namespaces": [
+    {
+      "binding": "detent-idempotency",
+      "id": "2d985751efe442fa84093f7e8ee656cf"
+    }
+  ],
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",

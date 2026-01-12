@@ -7,9 +7,24 @@ import {
   organizationMembers,
   organizations,
   projects,
+  runErrors,
+  runs,
 } from "../db/schema";
 import { webhookSignatureMiddleware } from "../middleware/webhook-signature";
+import {
+  formatCheckSummary,
+  formatResultsComment,
+} from "../services/comment-formatter";
+import {
+  type ParsedError,
+  parseWorkflowLogsWithFallback,
+} from "../services/error-parser";
 import { createGitHubService } from "../services/github";
+import {
+  acquireCommitLock,
+  markCommitProcessed,
+  releaseCommitLock,
+} from "../services/idempotency";
 import type { Env } from "../types/env";
 
 // Type definitions for GitHub webhook payloads
@@ -20,6 +35,7 @@ interface WorkflowRunPayload {
     name: string;
     conclusion: string | null;
     head_branch: string;
+    head_sha: string;
     pull_requests: Array<{ number: number }>;
   };
   repository: {
@@ -202,58 +218,473 @@ app.post("/github", webhookSignatureMiddleware, (c: WebhookContext) => {
   }
 });
 
+// ParsedError is imported from ../services/error-parser
+
+// Store run and errors in the database
+const storeRunAndErrors = async (
+  env: Env,
+  data: {
+    runId: number;
+    runName: string;
+    prNumber: number;
+    headSha: string;
+    errors: ParsedError[];
+    repository: string;
+    checkRunId?: number;
+  }
+): Promise<string> => {
+  const { db, client } = await createDb(env);
+
+  try {
+    const runRecordId = crypto.randomUUID();
+
+    await db.transaction(async (tx) => {
+      await tx.insert(runs).values({
+        id: runRecordId,
+        provider: "github",
+        source: "github",
+        format: "github-actions",
+        runId: String(data.runId),
+        repository: data.repository,
+        commitSha: data.headSha,
+        prNumber: data.prNumber,
+        checkRunId: data.checkRunId ? String(data.checkRunId) : null,
+        errorCount: data.errors.length,
+      });
+
+      if (data.errors.length > 0) {
+        const errorRows = data.errors.map((error) => ({
+          id: crypto.randomUUID(),
+          runId: runRecordId,
+          filePath: error.filePath ?? null,
+          line: error.line ?? null,
+          column: error.column ?? null,
+          message: error.message,
+          category: error.category ?? null,
+          severity: error.severity ?? null,
+          ruleId: error.ruleId ?? null,
+          source: error.source ?? null,
+          stackTrace: error.stackTrace ?? null,
+          hint: error.hint ?? null,
+          workflowJob: error.workflowJob ?? data.runName,
+          workflowStep: error.workflowStep ?? null,
+          workflowAction: error.workflowAction ?? null,
+        }));
+        await tx.insert(runErrors).values(errorRows);
+      }
+    });
+
+    console.log(
+      `[workflow_run] Stored run ${data.runId} with ${data.errors.length} errors`
+    );
+    return runRecordId;
+  } finally {
+    await client.end();
+  }
+};
+
+// ============================================================================
+// Helper: Check if commit already has stored runs in database
+// ============================================================================
+const checkExistingRunsInDb = async (
+  env: Env,
+  repository: string,
+  headSha: string
+): Promise<boolean> => {
+  const { db, client } = await createDb(env);
+  try {
+    const existingRuns = await db
+      .select({ id: runs.id })
+      .from(runs)
+      .where(and(eq(runs.repository, repository), eq(runs.commitSha, headSha)))
+      .limit(1);
+    return existingRuns.length > 0;
+  } finally {
+    await client.end();
+  }
+};
+
+// ============================================================================
+// Helper: Sanitize error messages for user-facing output
+// ============================================================================
+// Known safe error patterns that can be shown to users
+const SAFE_ERROR_PATTERNS: Array<{ pattern: RegExp; message: string }> = [
+  { pattern: /Invalid zip payload/i, message: "Invalid log archive format" },
+  { pattern: /Zip archive contained no files/i, message: "Empty log archive" },
+  {
+    pattern: /Logs exceed maximum size/i,
+    message: "Log files too large to process",
+  },
+  {
+    pattern: /Zip archive.*exceed.*maximum size/i,
+    message: "Log archive too large",
+  },
+  {
+    pattern: /suspicious compression ratio/i,
+    message: "Invalid log archive format",
+  },
+  {
+    pattern: /too many files/i,
+    message: "Log archive contains too many files",
+  },
+  {
+    pattern: /Rate limit exceeded/i,
+    message: "GitHub API rate limit exceeded",
+  },
+  { pattern: /Failed to fetch logs: 404/i, message: "Logs not available" },
+  { pattern: /Failed to fetch logs: 403/i, message: "Log access denied" },
+  {
+    pattern: /Failed to fetch logs: 5\d{2}/i,
+    message: "GitHub API unavailable",
+  },
+];
+
+const sanitizeErrorMessage = (error: unknown): string => {
+  if (!(error instanceof Error)) {
+    return "An unexpected error occurred";
+  }
+
+  const message = error.message;
+
+  // Check against known safe patterns
+  for (const { pattern, message: safeMessage } of SAFE_ERROR_PATTERNS) {
+    if (pattern.test(message)) {
+      return safeMessage;
+    }
+  }
+
+  // For unknown errors, return a generic message to avoid leaking internal details
+  // The full error is logged to console for debugging
+  return "An internal error occurred while processing logs";
+};
+
+// ============================================================================
+// Helper: Process and store failed runs with batched parallel execution
+// ============================================================================
+//
+// Performance notes (Cloudflare Workers - 128MB limit):
+// - Fetches logs in parallel batches (MAX_CONCURRENT_FETCHES) to reduce latency
+// - Parses logs immediately after fetch to free memory before next batch
+// - Stores runs in parallel batches to reduce database round-trips
+// - Each batch completes before next starts to bound memory usage
+const processFailedRuns = async (
+  env: Env,
+  github: ReturnType<typeof createGitHubService>,
+  token: string,
+  failedRuns: Array<{ id: number; name: string }>,
+  context: {
+    owner: string;
+    repo: string;
+    prNumber: number;
+    headSha: string;
+    repository: string;
+    checkRunId: number;
+  }
+): Promise<ParsedError[]> => {
+  // Limit concurrent fetches to avoid memory pressure from multiple ZIP files
+  // Each workflow log can be up to 30MB compressed, so we keep this conservative
+  const MAX_CONCURRENT_FETCHES = 3;
+  const MAX_CONCURRENT_STORES = 5;
+
+  const allErrors: ParsedError[] = [];
+  const runDataList: Array<{
+    runId: number;
+    runName: string;
+    errors: ParsedError[];
+  }> = [];
+
+  // Process a single run: fetch logs, parse, and return result
+  const processRun = async (run: {
+    id: number;
+    name: string;
+  }): Promise<{
+    runId: number;
+    runName: string;
+    errors: ParsedError[];
+  }> => {
+    try {
+      // Fetch logs from GitHub API
+      const logsResult = await github.fetchWorkflowLogs(
+        token,
+        context.owner,
+        context.repo,
+        run.id
+      );
+
+      // Parse logs and extract errors (with fallback if none found)
+      const parseResult = parseWorkflowLogsWithFallback(
+        logsResult.logs,
+        run.name,
+        {
+          totalBytes: logsResult.totalBytes,
+          jobCount: logsResult.jobCount,
+        }
+      );
+
+      // Attach workflow context to each error
+      const errorsWithContext = parseResult.errors.map((e) => ({
+        ...e,
+        workflowJob: e.workflowJob ?? run.name,
+      }));
+
+      console.log(
+        `[workflow_run] Parsed ${errorsWithContext.length} errors from run ${run.id} (${run.name})`
+      );
+
+      return {
+        runId: run.id,
+        runName: run.name,
+        errors: errorsWithContext,
+      };
+    } catch (error) {
+      // If log fetching/parsing fails, use a fallback error
+      // Log full error internally for debugging
+      console.error(
+        `[workflow_run] Failed to fetch/parse logs for run ${run.id}:`,
+        error
+      );
+
+      // Sanitize error message for user-facing output (avoid leaking internal details)
+      const sanitizedMessage = sanitizeErrorMessage(error);
+      const fallbackError: ParsedError = {
+        message: `Workflow "${run.name}" failed. Unable to fetch logs: ${sanitizedMessage}`,
+        category: "workflow",
+        severity: "error",
+        source: "github-actions",
+        workflowJob: run.name,
+      };
+
+      return {
+        runId: run.id,
+        runName: run.name,
+        errors: [fallbackError],
+      };
+    }
+  };
+
+  // Fetch and parse logs in parallel batches
+  // This reduces total latency while bounding memory usage
+  for (let i = 0; i < failedRuns.length; i += MAX_CONCURRENT_FETCHES) {
+    const batch = failedRuns.slice(i, i + MAX_CONCURRENT_FETCHES);
+    const results = await Promise.all(batch.map(processRun));
+
+    // Collect results from this batch
+    for (const result of results) {
+      allErrors.push(...result.errors);
+      runDataList.push(result);
+    }
+  }
+
+  // Store runs in batches to avoid memory pressure (Workers: 128MB limit)
+  for (let i = 0; i < runDataList.length; i += MAX_CONCURRENT_STORES) {
+    const batch = runDataList.slice(i, i + MAX_CONCURRENT_STORES);
+    await Promise.all(
+      batch.map((runData) =>
+        storeRunAndErrors(env, {
+          runId: runData.runId,
+          runName: runData.runName,
+          prNumber: context.prNumber,
+          headSha: context.headSha,
+          errors: runData.errors,
+          repository: context.repository,
+          checkRunId: context.checkRunId,
+        })
+      )
+    );
+  }
+
+  return allErrors;
+};
+
+// ============================================================================
+// Helper: Clean up check run on error (prevents stale "in progress" state)
+// ============================================================================
+const cleanupCheckRunOnError = async (
+  github: ReturnType<typeof createGitHubService>,
+  token: string,
+  owner: string,
+  repo: string,
+  checkRunId: number
+): Promise<void> => {
+  try {
+    await github.updateCheckRun(token, {
+      owner,
+      repo,
+      checkRunId,
+      status: "completed",
+      conclusion: "cancelled",
+      output: {
+        title: "Analysis failed",
+        summary:
+          "An error occurred while analyzing CI results. This webhook may be retried.",
+      },
+    });
+    console.log(
+      `[workflow_run] Cleaned up check run ${checkRunId} after error`
+    );
+  } catch (cleanupError) {
+    console.error(
+      `[workflow_run] Failed to clean up check run ${checkRunId}:`,
+      cleanupError
+    );
+  }
+};
+
+// ============================================================================
+// Helper: Finalize check run and post PR comment with results
+// ============================================================================
+interface WorkflowRun {
+  id: number;
+  name: string;
+  status: string;
+  conclusion: string | null;
+}
+
+const finalizeAndPostResults = async (
+  github: ReturnType<typeof createGitHubService>,
+  token: string,
+  context: {
+    owner: string;
+    repo: string;
+    headSha: string;
+    prNumber: number;
+    checkRunId: number;
+    workflowRuns: WorkflowRun[];
+    allErrors: ParsedError[];
+  }
+): Promise<{
+  runResults: Array<{
+    name: string;
+    id: number;
+    conclusion: string;
+    errorCount: number;
+  }>;
+  totalErrors: number;
+}> => {
+  const {
+    owner,
+    repo,
+    headSha,
+    prNumber,
+    checkRunId,
+    workflowRuns,
+    allErrors,
+  } = context;
+
+  // Prepare run results for formatting
+  const runResults = workflowRuns.map((r) => ({
+    name: r.name,
+    id: r.id,
+    conclusion: r.conclusion ?? "unknown",
+    errorCount: allErrors.filter((e) => e.workflowJob === r.name).length,
+  }));
+
+  const failedCount = workflowRuns.filter(
+    (r) => r.conclusion === "failure"
+  ).length;
+  const hasFailed = failedCount > 0;
+  const totalErrors = allErrors.length;
+
+  // Update check run to completed
+  await github.updateCheckRun(token, {
+    owner,
+    repo,
+    checkRunId,
+    status: "completed",
+    conclusion: hasFailed ? "failure" : "success",
+    output: {
+      title: hasFailed
+        ? `${totalErrors} error${totalErrors !== 1 ? "s" : ""} found`
+        : "All checks passed",
+      summary: formatCheckSummary(runResults, totalErrors),
+    },
+  });
+
+  // Post single PR comment with results
+  const commentBody = formatResultsComment({
+    owner,
+    repo,
+    headSha,
+    runs: runResults,
+    errors: allErrors,
+    totalErrors,
+  });
+
+  await github.postCommentWithId(token, owner, repo, prNumber, commentBody);
+
+  return { runResults, totalErrors };
+};
+
 // Handle workflow_run events (CI completed)
+// Waits for ALL workflow runs for a commit to complete before posting comment
+//
+// Robustness features:
+// - Idempotency: Uses KV-backed lock to prevent duplicate processing (survives Worker restarts)
+// - Race condition handling: Returns early if another webhook is processing
+// - Error recovery: Cleans up check run on failure
+// - Database-backed deduplication: Unique constraint on (repository, commitSha, runId)
 const handleWorkflowRunEvent = async (
   c: WebhookContext,
   payload: WorkflowRunPayload
 ) => {
   const { action, workflow_run, repository, installation } = payload;
+  const owner = repository.owner.login;
+  const repo = repository.name;
+  const headSha = workflow_run.head_sha;
+  const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
 
   // Only process completed runs
   if (action !== "completed") {
     return c.json({ message: "ignored", reason: "not completed" });
   }
 
-  // Only process failures
-  if (workflow_run.conclusion !== "failure") {
-    return c.json({ message: "ignored", reason: "not a failure" });
-  }
-
   console.log(
-    `[workflow_run] Failed: ${repository.full_name} / ${workflow_run.name} (run ${workflow_run.id})`
+    `[workflow_run] Completed: ${repository.full_name} / ${workflow_run.name} (${workflow_run.conclusion}) [delivery: ${deliveryId}]`
   );
 
-  // Get GitHub service
+  // Idempotency check: Prevent duplicate processing of same commit (KV-backed)
+  const lockResult = await acquireCommitLock(
+    c.env.IDEMPOTENCY,
+    repository.full_name,
+    headSha
+  );
+  if (!lockResult.acquired) {
+    const state = lockResult.state;
+    const status = state?.processing
+      ? "duplicate_in_progress"
+      : "duplicate_completed";
+    console.log(
+      `[workflow_run] Commit ${headSha.slice(0, 7)} ${state?.processing ? "already being processed" : "already processed"}, skipping [delivery: ${deliveryId}]`
+    );
+    return c.json({
+      message: state?.processing ? "already processing" : "already processed",
+      repository: repository.full_name,
+      headSha,
+      checkRunId: state?.checkRunId,
+      status,
+    });
+  }
+
   const github = createGitHubService(c.env);
+  let checkRunId: number | undefined;
+  let token: string | undefined;
 
   try {
-    // 1. Get installation token
-    const token = await github.getInstallationToken(installation.id);
+    token = await github.getInstallationToken(installation.id);
 
-    // 2. Check PR and fetch logs in parallel (both only need the token)
+    // Get PR number (skip if no PR associated)
     const prFromPayload = workflow_run.pull_requests[0]?.number;
-    const [prFromApi, logs] = await Promise.all([
-      // Only fetch PR from API if not in payload
-      prFromPayload
-        ? Promise.resolve(null)
-        : github.getPullRequestForRun(
-            token,
-            repository.owner.login,
-            repository.name,
-            workflow_run.id
-          ),
-      github.fetchWorkflowLogs(
-        token,
-        repository.owner.login,
-        repository.name,
-        workflow_run.id
-      ),
-    ]);
-
-    const prNumber = prFromPayload ?? prFromApi;
+    const prNumber =
+      prFromPayload ??
+      (await github.getPullRequestForRun(token, owner, repo, workflow_run.id));
 
     if (!prNumber) {
-      console.log("[workflow_run] No associated PR found, skipping comment");
+      console.log("[workflow_run] No associated PR found, skipping");
+      await markCommitProcessed(
+        c.env.IDEMPOTENCY,
+        repository.full_name,
+        headSha
+      );
       return c.json({
         message: "workflow_run processed",
         repository: repository.full_name,
@@ -262,35 +693,120 @@ const handleWorkflowRunEvent = async (
       });
     }
 
-    // Future: Parse errors with @detent/parser and include them in the comment
-    // const errors = parseWorkflowLogs(logs);
+    // Check if ALL workflow runs for this commit are done BEFORE creating check run
+    const { allCompleted, runs: workflowRuns } =
+      await github.listWorkflowRunsForCommit(token, owner, repo, headSha);
 
-    // 4. Post summary comment on PR
-    const commentBody = formatFailureComment(
-      repository.owner.login,
-      repository.name,
-      workflow_run.name,
-      workflow_run.id,
-      logs
+    if (!allCompleted) {
+      await releaseCommitLock(c.env.IDEMPOTENCY, repository.full_name, headSha);
+      const pendingCount = workflowRuns.filter(
+        (r) => r.status !== "completed"
+      ).length;
+      console.log(
+        `[workflow_run] Waiting for ${pendingCount} more runs to complete`
+      );
+      return c.json({
+        message: "waiting for other runs",
+        repository: repository.full_name,
+        completed: workflowRuns.filter((r) => r.status === "completed").length,
+        pending: pendingCount,
+      });
+    }
+
+    // Database-backed idempotency: verify we haven't already stored runs
+    const hasExistingRuns = await checkExistingRunsInDb(
+      c.env,
+      repository.full_name,
+      headSha
+    );
+    if (hasExistingRuns) {
+      console.log(
+        `[workflow_run] Commit ${headSha.slice(0, 7)} already has stored runs, skipping [delivery: ${deliveryId}]`
+      );
+      await markCommitProcessed(
+        c.env.IDEMPOTENCY,
+        repository.full_name,
+        headSha
+      );
+      return c.json({
+        message: "already processed (db check)",
+        repository: repository.full_name,
+        headSha,
+        status: "duplicate_db",
+      });
+    }
+
+    // All runs completed! Create check run
+    const checkRun = await github.createCheckRun(token, {
+      owner,
+      repo,
+      headSha,
+      name: "Detent CI Analysis",
+      status: "in_progress",
+      output: {
+        title: "Analyzing CI results...",
+        summary: "Processing workflow runs and extracting errors",
+      },
+    });
+    checkRunId = checkRun.id;
+
+    // Process failed runs
+    const failedRuns = workflowRuns.filter((r) => r.conclusion === "failure");
+    const allErrors = await processFailedRuns(
+      c.env,
+      github,
+      token,
+      failedRuns,
+      {
+        owner,
+        repo,
+        prNumber,
+        headSha,
+        repository: repository.full_name,
+        checkRunId,
+      }
     );
 
-    await github.postComment(
-      token,
-      repository.owner.login,
-      repository.name,
+    // Finalize: update check run and post PR comment
+    const { totalErrors } = await finalizeAndPostResults(github, token, {
+      owner,
+      repo,
+      headSha,
       prNumber,
-      commentBody
+      checkRunId,
+      workflowRuns,
+      allErrors,
+    });
+
+    await markCommitProcessed(
+      c.env.IDEMPOTENCY,
+      repository.full_name,
+      headSha,
+      checkRunId
     );
 
     return c.json({
       message: "workflow_run processed",
       repository: repository.full_name,
-      runId: workflow_run.id,
       prNumber,
-      status: "commented",
+      runsProcessed: workflowRuns.length,
+      failedRuns: failedRuns.length,
+      totalErrors,
+      checkRunId,
     });
   } catch (error) {
-    console.error("[workflow_run] Error processing:", error);
+    console.error(
+      `[workflow_run] Error processing [delivery: ${deliveryId}]:`,
+      error
+    );
+
+    // Error recovery: Clean up check run if we created one
+    if (checkRunId && token) {
+      await cleanupCheckRunOnError(github, token, owner, repo, checkRunId);
+    }
+
+    await releaseCommitLock(c.env.IDEMPOTENCY, repository.full_name, headSha);
+
     return c.json(
       {
         message: "workflow_run error",
@@ -1155,31 +1671,6 @@ const parseDetentCommand = (body: string): DetentCommand => {
   }
 
   return { type: "unknown" };
-};
-
-// Format failure comment for PR
-// Future: Use parsed errors from @detent/parser to provide detailed error analysis
-const formatFailureComment = (
-  owner: string,
-  repo: string,
-  workflowName: string,
-  runId: number,
-  _logs: string
-): string => {
-  return `## ❌ CI Failed: ${workflowName}
-
-[View workflow run](https://github.com/${owner}/${repo}/actions/runs/${runId})
-
-<details>
-<summary>🔍 Error Analysis</summary>
-
-_Error parsing not yet implemented. Log extraction pending._
-
-</details>
-
----
-💡 **Tip:** Comment \`@detent heal\` to attempt automatic fixes.
-`;
 };
 
 // Format help message

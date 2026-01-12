@@ -44,7 +44,7 @@ Before any AI prompting, run deterministic autofix tools. This eliminates trivia
 |----------|------|---------|-------|
 | Go | gofmt | `gofmt -w .` | Formatting |
 | Go | goimports | `goimports -w .` | Import sorting, unused imports |
-| TS/JS | Biome | `biome check --fix .` | Formatting, lint autofixes |
+| TS/JS | Biome | `ultracite check --fix .` | Formatting, lint autofixes |
 | TS/JS | ESLint | `eslint --fix .` | Lint autofixes |
 | Python | Ruff | `ruff check --fix .` | Lint autofixes |
 | Python | Black | `black .` | Formatting |

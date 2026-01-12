@@ -328,6 +328,31 @@ const toolPatterns: readonly ToolPattern[] = [
     parserID: "python",
     displayName: "poetry",
   },
+
+  // Vitest
+  { pattern: /(?:^|\s|\/)vitest\b/, parserID: "vitest", displayName: "vitest" },
+  {
+    pattern: /(?:^|\s)npx\s+vitest\b/,
+    parserID: "vitest",
+    displayName: "vitest",
+  },
+  {
+    pattern: /(?:^|\s)bunx?\s+vitest\b/,
+    parserID: "vitest",
+    displayName: "vitest",
+  },
+  {
+    // HACK: Use [^\n]* instead of .* to prevent ReDoS - limits backtracking
+    pattern: /(?:^|\s)pnpm\s+[^\n]*\bvitest\b/,
+    parserID: "vitest",
+    displayName: "vitest",
+  },
+  {
+    // HACK: Use [^\n]* instead of .* to prevent ReDoS - limits backtracking
+    pattern: /(?:^|\s)yarn\s+[^\n]*\bvitest\b/,
+    parserID: "vitest",
+    displayName: "vitest",
+  },
 ];
 
 // ============================================================================

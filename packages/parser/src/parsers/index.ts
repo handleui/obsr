@@ -20,3 +20,4 @@ export { createInfrastructureParser } from "./infrastructure.js";
 export { createPythonParser, PythonParser } from "./python.js";
 export { createRustParser } from "./rust.js";
 export { createTypeScriptParser, TypeScriptParser } from "./typescript.js";
+export { createVitestParser, VitestParser } from "./vitest.js";

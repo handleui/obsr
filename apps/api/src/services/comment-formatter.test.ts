@@ -327,23 +327,29 @@ describe("formatCheckRunOutput", () => {
   });
 
   describe("text (error details)", () => {
-    it("includes top errors table when errors exist", () => {
+    it("includes errors grouped by source when errors exist", () => {
       const result = formatCheckRunOutput(
         createCheckRunOptions({
           errors: [
-            { message: "Type error", filePath: "src/app.ts", line: 42 },
+            {
+              message: "Type error",
+              filePath: "src/app.ts",
+              line: 42,
+              source: "typescript",
+            },
             {
               message: "Cannot find module",
               filePath: "src/utils.ts",
               line: 10,
+              source: "typescript",
             },
           ],
           totalErrors: 2,
         })
       );
 
-      expect(result.text).toContain("### Top Errors");
-      expect(result.text).toContain("| File | Line | Message |");
+      expect(result.text).toContain("### TypeScript (2 errors)");
+      expect(result.text).toContain("| Line | Message |");
       expect(result.text).toContain("src/app.ts");
       expect(result.text).toContain("42");
     });
@@ -371,6 +377,125 @@ describe("formatCheckRunOutput", () => {
       );
 
       expect(result.text).toBeUndefined();
+    });
+
+    it("should group errors by source tool", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors: [
+            {
+              message: "Type error",
+              source: "typescript",
+              filePath: "a.ts",
+              line: 1,
+            },
+            {
+              message: "Lint error",
+              source: "biome",
+              filePath: "b.ts",
+              line: 2,
+            },
+            {
+              message: "Another type error",
+              source: "typescript",
+              filePath: "c.ts",
+              line: 3,
+            },
+          ],
+          totalErrors: 3,
+        })
+      );
+
+      expect(result.text).toContain("### TypeScript (2 errors)");
+      expect(result.text).toContain("### Biome (1 error)");
+    });
+
+    it("should group errors by file within source", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors: [
+            {
+              message: "Error 1",
+              source: "typescript",
+              filePath: "src/a.ts",
+              line: 10,
+            },
+            {
+              message: "Error 2",
+              source: "typescript",
+              filePath: "src/a.ts",
+              line: 20,
+            },
+            {
+              message: "Error 3",
+              source: "typescript",
+              filePath: "src/b.ts",
+              line: 5,
+            },
+          ],
+          totalErrors: 3,
+        })
+      );
+
+      expect(result.text).toContain("<summary>src/a.ts (2 errors)</summary>");
+      expect(result.text).toContain("<summary>src/b.ts (1 error)</summary>");
+    });
+
+    it("should use collapsible details tags", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors: [
+            { message: "Error", source: "biome", filePath: "test.ts", line: 1 },
+          ],
+          totalErrors: 1,
+        })
+      );
+
+      expect(result.text).toContain("<details>");
+      expect(result.text).toContain("</details>");
+    });
+
+    it("should show annotation note at top when errors have file and line", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors: [
+            { message: "Error", source: "biome", filePath: "test.ts", line: 1 },
+          ],
+          totalErrors: 1,
+        })
+      );
+
+      expect(result.text).toContain(
+        "*1 error annotated inline where possible*"
+      );
+    });
+
+    it("should handle errors without source", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors: [{ message: "Unknown error", filePath: "test.ts", line: 1 }],
+          totalErrors: 1,
+        })
+      );
+
+      // Unknown source should show as capitalized
+      expect(result.text).toContain("unknown");
+    });
+
+    it("should handle more than 10 errors", () => {
+      const errors = Array.from({ length: 25 }, (_, i) => ({
+        message: `Error ${i + 1}`,
+        source: "typescript",
+        filePath: "test.ts",
+        line: i + 1,
+      }));
+
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({ errors, totalErrors: 25 })
+      );
+
+      // Should show all 25 errors, not just 10
+      expect(result.text).toContain("| 25 |");
     });
   });
 

@@ -513,7 +513,7 @@ const groupErrorsByFile = (errors: ParsedError[]): ErrorsByFile[] => {
   const grouped = new Map<string, ParsedError[]>();
 
   for (const error of errors) {
-    const filePath = error.filePath ?? "_unknown_";
+    const filePath = error.filePath ?? "__no_path__";
     const existing = grouped.get(filePath) ?? [];
     existing.push(error);
     grouped.set(filePath, existing);
@@ -534,7 +534,9 @@ const formatTextSection = (errors: ParsedError[]): string[] => {
   const lines: string[] = [];
 
   // Annotation note at top
-  const annotatableCount = errors.filter((e) => e.filePath && e.line).length;
+  const annotatableCount = errors.filter(
+    (e) => e.filePath && e.line && !e.possiblyTestOutput
+  ).length;
   if (annotatableCount > 0) {
     lines.push(
       `*${annotatableCount} error${annotatableCount === 1 ? "" : "s"} annotated inline where possible*`

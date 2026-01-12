@@ -502,9 +502,10 @@ describe("webhooks - installation events", () => {
       const json = await res.json();
 
       expect(res.status).toBe(500);
+      // Error is sanitized to avoid leaking internal details (e.g., DB connection strings)
       expect(json).toEqual({
         message: "installation error",
-        error: "Database connection failed",
+        error: "An internal error occurred",
       });
     });
 

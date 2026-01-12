@@ -19,3 +19,6 @@ const fn: () => void = "not a function";
 
 // Trigger #4
 const tuple: [string, number] = [1, "wrong order"];
+
+// Trigger #5 - permissions accepted now
+const promise: Promise<string> = 42;

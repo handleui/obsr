@@ -37,6 +37,29 @@ export const providerShortCodes: Record<"github" | "gitlab", string> = {
   gitlab: "gl",
 };
 
+// ============================================================================
+// Organization Settings (JSONB for flexibility as settings grow)
+// ============================================================================
+
+export interface OrganizationSettings {
+  allowAutoJoin?: boolean; // default: true - whether GitHub org members can auto-join
+  enableInlineAnnotations?: boolean; // default: true - show inline annotations in check runs
+  enablePrComments?: boolean; // default: true - post PR comments on failures
+}
+
+export const DEFAULT_ORG_SETTINGS: Required<OrganizationSettings> = {
+  allowAutoJoin: true,
+  enableInlineAnnotations: true,
+  enablePrComments: true,
+};
+
+export const getOrgSettings = (
+  settings: OrganizationSettings | null | undefined
+): Required<OrganizationSettings> => ({
+  ...DEFAULT_ORG_SETTINGS,
+  ...settings,
+});
+
 // Helper to create provider-prefixed slug
 export const createProviderSlug = (
   provider: "github" | "gitlab",
@@ -118,9 +141,11 @@ export const organizations = pgTable(
     // Sync tracking - when we last verified state with the provider
     lastSyncedAt: timestamp("last_synced_at"),
 
-    // Settings
-    // Whether GitHub org members can auto-join or require invitation
-    allowAutoJoin: boolean("allow_auto_join").default(true).notNull(),
+    // Settings (JSONB for flexibility as settings grow)
+    settings: jsonb("settings")
+      .$type<OrganizationSettings>()
+      .default({})
+      .notNull(),
 
     // Timestamps
     createdAt: timestamp("created_at").defaultNow().notNull(),

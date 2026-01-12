@@ -278,7 +278,7 @@ describe("webhooks - installation events", () => {
         {
           id: "existing-organization-id",
           slug: "existing-organization",
-          allowAutoJoin: true,
+          settings: {},
         },
       ]);
 
@@ -1338,7 +1338,7 @@ describe("webhooks - installation_repositories (add/remove)", () => {
   it("creates new projects when repositories are added", async () => {
     // Mock finding the organization
     mockLimit.mockResolvedValueOnce([
-      { id: "org-uuid-123", slug: "gh/test-org", allowAutoJoin: true },
+      { id: "org-uuid-123", slug: "gh/test-org", settings: {} },
     ]);
 
     const payload = {
@@ -1400,7 +1400,7 @@ describe("webhooks - installation_repositories (add/remove)", () => {
 
   it("soft-deletes projects when repositories are removed (sets removedAt)", async () => {
     mockLimit.mockResolvedValueOnce([
-      { id: "org-uuid-456", slug: "gh/test-org", allowAutoJoin: true },
+      { id: "org-uuid-456", slug: "gh/test-org", settings: {} },
     ]);
 
     const payload = {
@@ -1446,7 +1446,7 @@ describe("webhooks - installation_repositories (add/remove)", () => {
 
   it("handles both added and removed in same event", async () => {
     mockLimit.mockResolvedValueOnce([
-      { id: "org-uuid-789", slug: "gh/test-org", allowAutoJoin: true },
+      { id: "org-uuid-789", slug: "gh/test-org", settings: {} },
     ]);
 
     const payload = {

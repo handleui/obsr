@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { createDb } from "../db/client";
 import {
   createProviderSlug,
+  getOrgSettings,
   organizationMembers,
   organizations,
   prComments,
@@ -1105,6 +1106,9 @@ const finalizeAndPostResults = async (
     checkRunId: number;
     workflowRuns: WorkflowRun[];
     allErrors: ParsedError[];
+    // Feature settings
+    enableInlineAnnotations: boolean;
+    enablePrComments: boolean;
   }
 ): Promise<{
   runResults: Array<{
@@ -1124,6 +1128,8 @@ const finalizeAndPostResults = async (
     checkRunId,
     workflowRuns,
     allErrors,
+    enableInlineAnnotations,
+    enablePrComments,
   } = context;
 
   // Prepare run results for formatting
@@ -1163,9 +1169,17 @@ const finalizeAndPostResults = async (
         : "All checks passed",
       summary: checkRunOutput.summary,
       text: checkRunOutput.text,
-      annotations: checkRunOutput.annotations,
+      // Only include annotations if enabled in org settings
+      annotations: enableInlineAnnotations
+        ? checkRunOutput.annotations
+        : undefined,
     },
   });
+
+  // Skip PR comments if disabled in org settings
+  if (!enablePrComments) {
+    return { runResults, totalErrors };
+  }
 
   // Create DB connection (needed for both passing and failing cases)
   const { db, client } = await createDb(env);
@@ -1396,6 +1410,24 @@ const handleWorkflowRunCompleted = async (
   try {
     token = await github.getInstallationToken(installation.id);
 
+    // Load organization settings
+    const { db: settingsDb, client: settingsClient } = await createDb(c.env);
+    let orgSettings = getOrgSettings(undefined); // defaults
+    try {
+      const org = await settingsDb.query.organizations.findFirst({
+        where: eq(
+          organizations.providerInstallationId,
+          String(installation.id)
+        ),
+        columns: { settings: true },
+      });
+      if (org) {
+        orgSettings = getOrgSettings(org.settings);
+      }
+    } finally {
+      await settingsClient.end();
+    }
+
     // Get PR number (skip if no PR associated)
     const prFromPayload = workflow_run.pull_requests[0]?.number;
     const prNumber =
@@ -1557,6 +1589,8 @@ const handleWorkflowRunCompleted = async (
         checkRunId: finalCheckRunId,
         workflowRuns,
         allErrors,
+        enableInlineAnnotations: orgSettings.enableInlineAnnotations,
+        enablePrComments: orgSettings.enablePrComments,
       }
     );
 

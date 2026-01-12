@@ -7,7 +7,12 @@
 import { and, count, eq, inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { createDb } from "../db/client";
-import { organizations, projects } from "../db/schema";
+import {
+  getOrgSettings,
+  type OrganizationSettings,
+  organizations,
+  projects,
+} from "../db/schema";
 import {
   githubOrgAccessMiddleware,
   type OrgAccessContext,
@@ -157,6 +162,7 @@ app.get("/:organizationId/status", githubOrgAccessMiddleware, async (c) => {
 
     const appInstalled = Boolean(organization.providerInstallationId);
     const projectCount = projectCountResult[0]?.count ?? 0;
+    const settings = getOrgSettings(fullOrg.settings);
 
     return c.json({
       organization_id: fullOrg.id,
@@ -171,7 +177,9 @@ app.get("/:organizationId/status", githubOrgAccessMiddleware, async (c) => {
       created_at: fullOrg.createdAt.toISOString(),
       last_synced_at: fullOrg.lastSyncedAt?.toISOString() ?? null,
       settings: {
-        allow_auto_join: fullOrg.allowAutoJoin,
+        allow_auto_join: settings.allowAutoJoin,
+        enable_inline_annotations: settings.enableInlineAnnotations,
+        enable_pr_comments: settings.enablePrComments,
       },
     });
   } finally {
@@ -340,43 +348,109 @@ app.post(
 
 /**
  * PATCH /:organizationId/settings
- * Update organization settings (owner only)
+ * Update organization settings
+ * - allow_auto_join: owner only
+ * - enable_inline_annotations, enable_pr_comments: owner or admin
  */
 app.patch(
   "/:organizationId/settings",
   githubOrgAccessMiddleware,
-  requireRole("owner"),
+  requireRole("owner", "admin"),
   async (c) => {
     const orgAccess = c.get("orgAccess") as OrgAccessContext;
-    const { organization } = orgAccess;
+    const { organization, role } = orgAccess;
 
-    const body = await c.req.json<{ allow_auto_join?: boolean }>();
+    const body = await c.req.json<{
+      allow_auto_join?: boolean;
+      enable_inline_annotations?: boolean;
+      enable_pr_comments?: boolean;
+    }>();
 
-    // Validate request body
-    if (typeof body.allow_auto_join !== "boolean") {
+    // Validate: all provided values must be booleans
+    const validKeys = [
+      "allow_auto_join",
+      "enable_inline_annotations",
+      "enable_pr_comments",
+    ] as const;
+    const providedSettings: Partial<
+      Record<(typeof validKeys)[number], boolean>
+    > = {};
+
+    for (const key of validKeys) {
+      if (key in body) {
+        const value = body[key as keyof typeof body];
+        if (typeof value !== "boolean") {
+          return c.json(
+            {
+              error: "Invalid request body",
+              message: `${key} must be a boolean`,
+            },
+            400
+          );
+        }
+        providedSettings[key] = value;
+      }
+    }
+
+    if (Object.keys(providedSettings).length === 0) {
       return c.json(
         {
           error: "Invalid request body",
-          message: "allow_auto_join must be a boolean",
+          message: "At least one valid setting must be provided",
         },
         400
       );
     }
 
+    // Restrict allow_auto_join to owner only
+    if ("allow_auto_join" in providedSettings && role !== "owner") {
+      return c.json(
+        {
+          error: "Forbidden",
+          message: "Only owners can change allow_auto_join",
+        },
+        403
+      );
+    }
+
     const { db, client } = await createDb(c.env);
     try {
+      // Fetch current settings
+      const current = await db.query.organizations.findFirst({
+        where: eq(organizations.id, organization.id),
+        columns: { settings: true },
+      });
+
+      // Merge with new settings (snake_case to camelCase)
+      const newSettings: OrganizationSettings = {
+        ...current?.settings,
+        ...(providedSettings.allow_auto_join !== undefined && {
+          allowAutoJoin: providedSettings.allow_auto_join,
+        }),
+        ...(providedSettings.enable_inline_annotations !== undefined && {
+          enableInlineAnnotations: providedSettings.enable_inline_annotations,
+        }),
+        ...(providedSettings.enable_pr_comments !== undefined && {
+          enablePrComments: providedSettings.enable_pr_comments,
+        }),
+      };
+
       await db
         .update(organizations)
         .set({
-          allowAutoJoin: body.allow_auto_join,
+          settings: newSettings,
           updatedAt: new Date(),
         })
         .where(eq(organizations.id, organization.id));
 
+      const finalSettings = getOrgSettings(newSettings);
+
       return c.json({
         success: true,
         settings: {
-          allow_auto_join: body.allow_auto_join,
+          allow_auto_join: finalSettings.allowAutoJoin,
+          enable_inline_annotations: finalSettings.enableInlineAnnotations,
+          enable_pr_comments: finalSettings.enablePrComments,
         },
       });
     } finally {

@@ -4,7 +4,9 @@ import type { Context, Next } from "hono";
 import { createDb } from "../db/client";
 import type * as schema from "../db/schema";
 import {
+  getOrgSettings,
   type Organization,
+  type OrganizationSettings,
   organizationMembers,
   organizations,
 } from "../db/schema";
@@ -32,7 +34,7 @@ export interface OrgAccessContext {
     providerAccountType: "organization" | "user";
     providerInstallationId: string | null;
     installerGithubId: string | null;
-    allowAutoJoin: boolean;
+    settings: OrganizationSettings;
   };
   githubIdentity: GitHubIdentity;
   role: OrgAccessRole;
@@ -113,7 +115,8 @@ const resolveGitHubOrgRole = async (
   }
 
   // New member: check if auto-join is allowed
-  if (!org.allowAutoJoin) {
+  const settings = getOrgSettings(org.settings);
+  if (!settings.allowAutoJoin) {
     return {
       error: "Organization requires invitation to join",
       status: 403,
@@ -253,7 +256,7 @@ export const githubOrgAccessMiddleware = async (
         providerAccountType: org.providerAccountType,
         providerInstallationId: org.providerInstallationId,
         installerGithubId: org.installerGithubId,
-        allowAutoJoin: org.allowAutoJoin,
+        settings: org.settings ?? {},
       },
       githubIdentity,
       role,

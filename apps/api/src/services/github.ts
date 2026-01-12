@@ -824,6 +824,25 @@ const createGitHubServiceInternal = (env: Env) => {
     return { id: data.id, htmlUrl: data.html_url };
   };
 
+  // GitHub Check Run Annotation
+  // See: https://docs.github.com/en/rest/checks/runs#update-a-check-run
+  interface CheckRunAnnotation {
+    path: string;
+    start_line: number;
+    end_line: number;
+    annotation_level: "notice" | "warning" | "failure";
+    message: string;
+    title?: string;
+  }
+
+  // Check run output with optional detailed text and annotations
+  interface CheckRunOutput {
+    title: string;
+    summary: string;
+    text?: string;
+    annotations?: CheckRunAnnotation[];
+  }
+
   // PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}
   const updateCheckRun = async (
     token: string,
@@ -834,14 +853,14 @@ const createGitHubServiceInternal = (env: Env) => {
           checkRunId: number;
           status: "completed";
           conclusion: "success" | "failure" | "neutral" | "cancelled";
-          output?: { title: string; summary: string };
+          output?: CheckRunOutput;
         }
       | {
           owner: string;
           repo: string;
           checkRunId: number;
           status: "in_progress";
-          output?: { title: string; summary: string };
+          output?: CheckRunOutput;
         }
   ): Promise<void> => {
     const { owner, repo, checkRunId, status, output } = options;

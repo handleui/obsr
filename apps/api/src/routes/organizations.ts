@@ -13,6 +13,7 @@ import {
   organizations,
   projects,
 } from "../db/schema";
+import { cacheKey, deleteFromCache } from "../lib/cache";
 import {
   githubOrgAccessMiddleware,
   type OrgAccessContext,
@@ -360,25 +361,48 @@ app.patch(
     const orgAccess = c.get("orgAccess") as OrgAccessContext;
     const { organization, role } = orgAccess;
 
-    const body = await c.req.json<{
-      allow_auto_join?: boolean;
-      enable_inline_annotations?: boolean;
-      enable_pr_comments?: boolean;
-    }>();
+    // Parse body as unknown to enforce runtime validation
+    const body: unknown = await c.req.json();
 
-    // Validate: all provided values must be booleans
+    // Validate body is a plain object
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      return c.json(
+        {
+          error: "Invalid request body",
+          message: "Request body must be a JSON object",
+        },
+        400
+      );
+    }
+
     const validKeys = [
       "allow_auto_join",
       "enable_inline_annotations",
       "enable_pr_comments",
     ] as const;
-    const providedSettings: Partial<
-      Record<(typeof validKeys)[number], boolean>
-    > = {};
+    type ValidKey = (typeof validKeys)[number];
+    const validKeySet = new Set<string>(validKeys);
+
+    // Reject unknown keys to prevent injection attempts
+    const bodyKeys = Object.keys(body);
+    const unknownKeys = bodyKeys.filter((key) => !validKeySet.has(key));
+    if (unknownKeys.length > 0) {
+      return c.json(
+        {
+          error: "Invalid request body",
+          message: `Unknown settings: ${unknownKeys.join(", ")}. Valid settings are: ${validKeys.join(", ")}`,
+        },
+        400
+      );
+    }
+
+    // Validate: all provided values must be booleans
+    const providedSettings: Partial<Record<ValidKey, boolean>> = {};
+    const bodyRecord = body as Record<string, unknown>;
 
     for (const key of validKeys) {
-      if (key in body) {
-        const value = body[key as keyof typeof body];
+      if (key in bodyRecord) {
+        const value = bodyRecord[key];
         if (typeof value !== "boolean") {
           return c.json(
             {
@@ -442,6 +466,13 @@ app.patch(
           updatedAt: new Date(),
         })
         .where(eq(organizations.id, organization.id));
+
+      // Invalidate org settings cache so webhooks pick up changes immediately
+      if (organization.providerInstallationId) {
+        deleteFromCache(
+          cacheKey.orgSettings(organization.providerInstallationId)
+        );
+      }
 
       const finalSettings = getOrgSettings(newSettings);
 

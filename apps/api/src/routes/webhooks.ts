@@ -6,6 +6,7 @@ import { createDb } from "../db/client";
 import {
   createProviderSlug,
   getOrgSettings,
+  type OrganizationSettings,
   organizationMembers,
   organizations,
   prComments,
@@ -13,6 +14,7 @@ import {
   runErrors,
   runs,
 } from "../db/schema";
+import { CACHE_TTL, cacheKey, getFromCache, setInCache } from "../lib/cache";
 import { webhookSignatureMiddleware } from "../middleware/webhook-signature";
 import {
   formatCheckRunOutput,
@@ -486,53 +488,101 @@ const bulkStoreRunsAndErrors = async (
 };
 
 // ============================================================================
-// Helper: Check which specific run attempts already exist in database
+// Helper: Check run attempts AND load org settings in single DB connection
 // ============================================================================
 // Run-aware idempotency: Check specific (runId, runAttempt) tuples, not just
 // "any runs for commit". This enables proper re-run handling where the same
 // runId with a different runAttempt should be processed as a new run.
+//
+// Performance optimization: Combines run checks with org settings loading in
+// one DB connection, reducing connection overhead during webhook processing.
+// Also uses in-memory cache for org settings (2 min TTL).
 
 interface RunIdentifier {
   runId: number;
   runAttempt: number;
 }
 
-const checkExistingRunAttempts = async (
+const checkRunsAndLoadOrgSettings = async (
   env: Env,
   repository: string,
-  runIdentifiers: RunIdentifier[]
+  runIdentifiers: RunIdentifier[],
+  installationId: number
 ): Promise<{
   allExist: boolean;
-  existingRuns: Set<string>; // "runId:runAttempt" format
+  existingRuns: Set<string>;
+  orgSettings: Required<OrganizationSettings>;
 }> => {
-  if (runIdentifiers.length === 0) {
-    return { allExist: true, existingRuns: new Set() };
+  // Check cache first for org settings
+  const settingsCacheKey = cacheKey.orgSettings(installationId);
+  const cachedSettings = getFromCache<OrganizationSettings>(settingsCacheKey);
+
+  // If we have cached settings and no runs to check, skip DB entirely
+  if (cachedSettings && runIdentifiers.length === 0) {
+    return {
+      allExist: true,
+      existingRuns: new Set(),
+      orgSettings: getOrgSettings(cachedSettings),
+    };
   }
 
   const { db, client } = await createDb(env);
   try {
-    const runIdStrings = runIdentifiers.map((r) => String(r.runId));
+    // Execute both queries in parallel for better performance
+    const [existingRunsResult, orgResult] = await Promise.all([
+      // Query 1: Check existing run attempts
+      runIdentifiers.length > 0
+        ? db
+            .select({
+              runId: runs.runId,
+              runAttempt: runs.runAttempt,
+            })
+            .from(runs)
+            .where(
+              and(
+                eq(runs.repository, repository),
+                inArray(
+                  runs.runId,
+                  runIdentifiers.map((r) => String(r.runId))
+                )
+              )
+            )
+        : Promise.resolve([]),
 
-    const existingRuns = await db
-      .select({
-        runId: runs.runId,
-        runAttempt: runs.runAttempt,
-      })
-      .from(runs)
-      .where(
-        and(eq(runs.repository, repository), inArray(runs.runId, runIdStrings))
+      // Query 2: Load org settings (skip if cached)
+      cachedSettings
+        ? Promise.resolve(null)
+        : db.query.organizations.findFirst({
+            where: eq(
+              organizations.providerInstallationId,
+              String(installationId)
+            ),
+            columns: { settings: true },
+          }),
+    ]);
+
+    // Process run results
+    const existingSet = new Set(
+      existingRunsResult.map((r) => `${r.runId}:${r.runAttempt ?? 1}`)
+    );
+    const allExist =
+      runIdentifiers.length === 0 ||
+      runIdentifiers.every((r) =>
+        existingSet.has(`${r.runId}:${r.runAttempt}`)
       );
 
-    // Handle NULL runAttempt (backwards compatibility with legacy data)
-    const existingSet = new Set(
-      existingRuns.map((r) => `${r.runId}:${r.runAttempt ?? 1}`)
-    );
+    // Get org settings (from cache or DB result)
+    let orgSettings: Required<OrganizationSettings>;
+    if (cachedSettings) {
+      orgSettings = getOrgSettings(cachedSettings);
+    } else {
+      const settings = orgResult?.settings ?? null;
+      orgSettings = getOrgSettings(settings);
+      // Cache the raw settings for future requests
+      setInCache(settingsCacheKey, settings, CACHE_TTL.ORG_SETTINGS);
+    }
 
-    const allExist = runIdentifiers.every((r) =>
-      existingSet.has(`${r.runId}:${r.runAttempt}`)
-    );
-
-    return { allExist, existingRuns: existingSet };
+    return { allExist, existingRuns: existingSet, orgSettings };
   } finally {
     await client.end();
   }
@@ -1170,9 +1220,9 @@ const finalizeAndPostResults = async (
       summary: checkRunOutput.summary,
       text: checkRunOutput.text,
       // Only include annotations if enabled in org settings
-      annotations: enableInlineAnnotations
-        ? checkRunOutput.annotations
-        : undefined,
+      ...(enableInlineAnnotations && {
+        annotations: checkRunOutput.annotations,
+      }),
     },
   });
 
@@ -1410,24 +1460,6 @@ const handleWorkflowRunCompleted = async (
   try {
     token = await github.getInstallationToken(installation.id);
 
-    // Load organization settings
-    const { db: settingsDb, client: settingsClient } = await createDb(c.env);
-    let orgSettings = getOrgSettings(undefined); // defaults
-    try {
-      const org = await settingsDb.query.organizations.findFirst({
-        where: eq(
-          organizations.providerInstallationId,
-          String(installation.id)
-        ),
-        columns: { settings: true },
-      });
-      if (org) {
-        orgSettings = getOrgSettings(org.settings);
-      }
-    } finally {
-      await settingsClient.end();
-    }
-
     // Get PR number (skip if no PR associated)
     const prFromPayload = workflow_run.pull_requests[0]?.number;
     const prNumber =
@@ -1475,16 +1507,19 @@ const handleWorkflowRunCompleted = async (
 
     // Run-aware idempotency: check which specific (runId, runAttempt) tuples exist
     // This enables proper re-run handling - same runId with different runAttempt is a new run
+    // Performance: Also loads org settings in same DB connection (with caching)
     const runIdentifiers = workflowRuns.map((r) => ({
       runId: r.id,
       runAttempt: r.runAttempt,
     }));
 
-    const { allExist, existingRuns } = await checkExistingRunAttempts(
-      c.env,
-      repository.full_name,
-      runIdentifiers
-    );
+    const { allExist, existingRuns, orgSettings } =
+      await checkRunsAndLoadOrgSettings(
+        c.env,
+        repository.full_name,
+        runIdentifiers,
+        installation.id
+      );
 
     if (allExist) {
       // All these specific run attempts already stored - true duplicate

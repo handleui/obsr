@@ -701,6 +701,18 @@ const handleWorkflowRunInProgress = async (
   const headSha = workflow_run.head_sha;
   const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
 
+  // Skip if no PR associated (e.g., push to main branch)
+  if (workflow_run.pull_requests.length === 0) {
+    console.log(
+      `[workflow_run] No PR associated with ${workflow_run.name}, skipping [delivery: ${deliveryId}]`
+    );
+    return c.json({
+      message: "skipped",
+      reason: "no_pr",
+      branch: workflow_run.head_branch,
+    });
+  }
+
   console.log(
     `[workflow_run] In progress: ${repository.full_name} / ${workflow_run.name} [delivery: ${deliveryId}]`
   );

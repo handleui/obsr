@@ -18,18 +18,31 @@ import type { HealResult } from "../types.js";
 /**
  * Patterns that may indicate sensitive data in logs.
  * These are redacted before sending to Braintrust.
+ *
+ * Note: Patterns are designed to avoid false positives on known-safe values:
+ * - Git SHAs (40-char lowercase hex)
+ * - UUIDs (36-char with dashes)
+ * - Content hashes commonly used in build tools
  */
 const SENSITIVE_PATTERNS = [
-  // API keys and tokens (common formats)
+  // API keys and tokens (common formats with explicit key/token indicators)
   /(?:api[_-]?key|token|secret|password|auth|credential)s?\s*[:=]\s*['"]?[\w\-./+=]{20,}['"]?/gi,
   // Bearer tokens
   /Bearer\s+[\w\-./+=]+/gi,
-  // AWS-style keys
+  // AWS-style keys (specific prefix pattern)
   /(?:AKIA|ABIA|ACCA|ASIA)[A-Z0-9]{16}/g,
-  // GitHub tokens
+  // GitHub tokens (specific prefix pattern)
   /gh[pousr]_[A-Za-z0-9_]{36,}/g,
-  // Generic long hex/base64 strings that look like secrets
-  /(?:^|[^a-zA-Z0-9])([a-f0-9]{32,}|[A-Za-z0-9+/]{40,}={0,2})(?:[^a-zA-Z0-9]|$)/g,
+  // Anthropic API keys
+  /sk-ant-[A-Za-z0-9\-_]{40,}/g,
+  // OpenAI API keys
+  /sk-[A-Za-z0-9]{48,}/g,
+  // Slack tokens
+  /xox[baprs]-[A-Za-z0-9-]+/g,
+  // Private keys (PEM format markers)
+  /-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----/g,
+  // Base64 strings that are explicitly marked as secrets
+  /(?:secret|private|credential)[_-]?(?:key)?[:\s=]+[A-Za-z0-9+/]{40,}={0,2}/gi,
 ];
 
 /**

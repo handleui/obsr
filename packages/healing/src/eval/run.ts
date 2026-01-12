@@ -85,34 +85,48 @@ const mockTask = (input: HealingTestCase): HealingEvalResult => {
  * Uses real API calls to Claude for authentic evaluation.
  */
 const liveTask = async (input: HealingTestCase): Promise<HealingEvalResult> => {
-  // Create an isolated context for each test case
-  const ctx = createToolContext(
-    process.cwd(),
-    process.cwd(),
-    `eval-${input.id}-${Date.now()}`
-  );
+  const startTime = Date.now();
 
-  const registry = createToolRegistry(ctx);
-  for (const tool of getAllTools()) {
-    registry.register(tool);
+  try {
+    // Create an isolated context for each test case
+    const ctx = createToolContext(
+      process.cwd(),
+      process.cwd(),
+      `eval-${input.id}-${Date.now()}`
+    );
+
+    const registry = createToolRegistry(ctx);
+    for (const tool of getAllTools()) {
+      registry.register(tool);
+    }
+
+    const client = new Client();
+    const loop = new HealLoop(client, registry, {
+      verbose: true,
+      budgetPerRunUSD: input.expected.maxCostUSD ?? 1.0,
+    });
+
+    const result = await loop.run(SYSTEM_PROMPT, input.errorPrompt);
+
+    return {
+      success: result.success,
+      iterations: result.iterations,
+      toolCalls: result.toolCalls,
+      costUSD: result.costUSD,
+      duration: result.duration,
+      finalMessage: result.finalMessage,
+    };
+  } catch (error) {
+    // Return a failed result with error details for eval tracking
+    return {
+      success: false,
+      iterations: 0,
+      toolCalls: 0,
+      costUSD: 0,
+      duration: Date.now() - startTime,
+      finalMessage: `Error during healing: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
-
-  const client = new Client();
-  const loop = new HealLoop(client, registry, {
-    verbose: true,
-    budgetPerRunUSD: input.expected.maxCostUSD ?? 1.0,
-  });
-
-  const result = await loop.run(SYSTEM_PROMPT, input.errorPrompt);
-
-  return {
-    success: result.success,
-    iterations: result.iterations,
-    toolCalls: result.toolCalls,
-    costUSD: result.costUSD,
-    duration: result.duration,
-    finalMessage: result.finalMessage,
-  };
 };
 
 const task = isLiveMode ? liveTask : mockTask;
@@ -222,7 +236,9 @@ const combinedLlmScorer = async ({
     fixCorrectnessScorer({
       input: input.errorPrompt,
       output: output.finalMessage,
-      expected: String(expected.shouldSucceed),
+      expected: expected.shouldSucceed
+        ? "The fix should successfully resolve the error"
+        : "This error may not be fully fixable or requires manual intervention",
     })
   );
 

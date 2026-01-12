@@ -10,7 +10,8 @@
     "./tools": "./src/tools/index.ts",
     "./prompt": "./src/prompt/index.ts",
     "./prompt/system": "./src/prompt/system.ts",
-    "./prompt/format": "./src/prompt/format.ts"
+    "./prompt/format": "./src/prompt/format.ts",
+    "./eval": "./src/eval/index.ts"
   },
   "scripts": {
     "build": "tsc",

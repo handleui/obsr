@@ -30,6 +30,7 @@ import {
   createToolRegistry,
   getAllTools,
 } from "../tools/index.js";
+import { createCostTracker } from "./cost-tracker.js";
 import { HEALING_DATASET } from "./dataset.js";
 import {
   codeQualityScorer,
@@ -46,6 +47,14 @@ import {
 import type { HealingEvalResult, HealingTestCase } from "./types.js";
 
 const isLiveMode = process.env.EVAL_MODE === "live";
+
+// Create a cost tracker for this eval run
+const evalCostTracker = createCostTracker();
+
+// Print cost summary when eval completes
+process.on("beforeExit", () => {
+  evalCostTracker.printSummary();
+});
 
 // Validate environment for live mode
 if (isLiveMode && !process.env.AI_GATEWAY_API_KEY) {
@@ -88,11 +97,11 @@ const liveTask = async (input: HealingTestCase): Promise<HealingEvalResult> => {
   const startTime = Date.now();
 
   try {
-    // Create an isolated context for each test case
+    // Create an isolated context for each test case with a robust unique ID
     const ctx = createToolContext(
       process.cwd(),
       process.cwd(),
-      `eval-${input.id}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+      `eval-${input.id}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
     );
 
     const registry = createToolRegistry(ctx);
@@ -107,6 +116,9 @@ const liveTask = async (input: HealingTestCase): Promise<HealingEvalResult> => {
     });
 
     const result = await loop.run(SYSTEM_PROMPT, input.errorPrompt);
+
+    // Track task cost for eval summary
+    evalCostTracker.trackTaskCost(result.costUSD);
 
     return {
       success: result.success,
@@ -245,6 +257,8 @@ const combinedLlmScorer = async ({
   // Skip expensive quality scorers for failed cases - saves LLM costs
   if (!output.success) {
     const fixResult = await fixCorrectnessPromise;
+    // Track 1 judge call for failed cases
+    evalCostTracker.trackJudgeCost();
     return [
       fixResult,
       {
@@ -276,6 +290,11 @@ const combinedLlmScorer = async ({
       })
     ),
   ]);
+
+  // Track 3 judge calls for successful cases
+  evalCostTracker.trackJudgeCost();
+  evalCostTracker.trackJudgeCost();
+  evalCostTracker.trackJudgeCost();
 
   return [fixResult, codeResult, reasoningResult];
 };

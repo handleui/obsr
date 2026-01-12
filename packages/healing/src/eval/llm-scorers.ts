@@ -11,13 +11,19 @@ import { LLMClassifierFromTemplate } from "autoevals";
 
 /**
  * Sanitizes user input to prevent prompt injection.
- * Wraps content in XML-style delimiters and escapes any existing delimiters.
+ * Wraps content in XML-style delimiters and escapes delimiter injection attempts.
+ *
+ * Only escapes our specific delimiter tags (user_content) to prevent injection
+ * while preserving legitimate JSX/TSX/HTML code for proper evaluation.
  */
 const sanitizeInput = (input: string, maxLength = 5000): string => {
   const truncated =
     input.length > maxLength ? `${input.slice(0, maxLength)}...` : input;
-  // Escape all XML-like tags to prevent any delimiter injection
-  return truncated.replace(/<\/?[^>]+>/g, (match) => `[ESCAPED: ${match}]`);
+  // Only escape our specific delimiter tags to prevent injection while preserving code
+  return truncated.replace(
+    /<\/?user_content>/gi,
+    (match) => `[ESCAPED_TAG:${match}]`
+  );
 };
 
 /**

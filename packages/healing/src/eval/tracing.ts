@@ -30,8 +30,13 @@ import type { HealResult } from "../types.js";
  */
 const SENSITIVE_PATTERN_FACTORIES: Array<() => RegExp> = [
   // API keys and tokens (common formats with explicit key/token indicators)
+  // Matches: API_KEY=value, token: value, secret=value (including unquoted shell assignments)
+  // The [:=\s] character class matches =, :, or whitespace, so API_KEY=unquoted works
   () =>
-    /(?:api[_-]?key|token|secret|password|auth|credential)s?\s*[:=]\s*['"]?[\w\-./+=]{20,}['"]?/gi,
+    /(?:api[_-]?key|token|secret|password|auth|credential)s?\s*[:=]\s*['"]?[\w\-./+=]{8,}['"]?/gi,
+  // Shell-style export assignments (handles: export VAR=value, declare VAR=value)
+  () =>
+    /(?:export|declare)\s+\w*(?:key|token|secret|password|auth)\w*\s*=\s*['"]?[\w\-./+=]+['"]?/gi,
   // Bearer tokens
   () => /Bearer\s+[\w\-./+=]+/gi,
   // AWS-style keys (specific prefix pattern)

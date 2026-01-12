@@ -28,3 +28,6 @@ const map: Map<string, number> = "not a map";
 
 // Trigger #7 - debug logging test
 const set: Set<string> = "not a set";
+
+// Trigger #8 - test vitest noise filter
+const weakMap: WeakMap<object, string> = "not a weakmap";

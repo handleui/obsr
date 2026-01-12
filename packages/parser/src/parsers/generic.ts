@@ -138,6 +138,13 @@ const noisePatterns: readonly RegExp[] = [
   /(?:^(it|describe|test)\s*\()/i, // Jest/Mocha/Vitest
   /(?:^(PASSED|FAILED)\s*\()/i, // pytest
   /(?:^\d+\s+(passing|pending|failing)\s*$)/i, // Mocha summary
+  // Vitest/Jest console output capture (captured stdout/stderr from tests)
+  /(?:stdout\s*\|)/i, // Vitest stdout capture prefix
+  /(?:stderr\s*\|)/i, // Vitest stderr capture prefix
+  // Test file references in output (not actual errors)
+  /\|\s*\S+\.(test|spec)\.(ts|js|tsx|jsx)/i, // Vitest test file in output line
+  // Short generic errors without file:line (likely console output from tests)
+  /^error:\s*[^:]{1,50}$/i, // Short "Error: message" without path (likely test mock)
 
   // === COVERAGE/ANALYSIS TOOLS ===
   /(?:^coverage:)/i,
@@ -265,6 +272,13 @@ const fastContains: readonly string[] = [
   "already downloaded",
   "successfully installed",
   "successfully downloaded",
+  // Test framework console capture (vitest/jest)
+  "stdout |",
+  "stderr |",
+  ".test.ts",
+  ".test.js",
+  ".spec.ts",
+  ".spec.js",
 ];
 
 /**

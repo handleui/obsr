@@ -205,6 +205,12 @@ export const organizationMembers = pgTable(
     ),
     index("organization_members_user_id_idx").on(table.userId),
     index("organization_members_provider_user_id_idx").on(table.providerUserId),
+    // Composite index for role-based queries (owner count checks, elevated role counts)
+    // Enables efficient COUNT(*) WHERE org_id = ? AND role IN ('owner', 'admin')
+    index("organization_members_org_role_idx").on(
+      table.organizationId,
+      table.role
+    ),
   ]
 );
 

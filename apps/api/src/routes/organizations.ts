@@ -350,7 +350,9 @@ app.post(
 /**
  * PATCH /:organizationId/settings
  * Update organization settings
- * - allow_auto_join: owner only
+ *
+ * SECURITY: Setting-specific authorization:
+ * - allow_auto_join: owner only (controls who can access the org)
  * - enable_inline_annotations, enable_pr_comments: owner or admin
  */
 app.patch(
@@ -426,12 +428,17 @@ app.patch(
       );
     }
 
-    // Restrict allow_auto_join to owner only
-    if ("allow_auto_join" in providedSettings && role !== "owner") {
+    // SECURITY: Restrict allow_auto_join to owner/admin only
+    // This setting controls who can join the org, so elevated roles should modify it
+    if (
+      "allow_auto_join" in providedSettings &&
+      role !== "owner" &&
+      role !== "admin"
+    ) {
       return c.json(
         {
           error: "Forbidden",
-          message: "Only owners can change allow_auto_join",
+          message: "Only owners and admins can change allow_auto_join",
         },
         403
       );

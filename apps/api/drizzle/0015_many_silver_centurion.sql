@@ -1,0 +1,1 @@
+CREATE INDEX "organization_members_org_role_idx" ON "organization_members" USING btree ("organization_id","role");

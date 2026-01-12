@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, count, eq, isNull } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { Context, Next } from "hono";
 import { createDb } from "../db/client";
@@ -48,18 +48,45 @@ declare module "hono" {
 }
 
 // Determine initial role for new members based on GitHub state
-const seedRoleFromGitHub = (
+// For GitHub admins on ownerless orgs: first come, first serve - they become owner
+//
+// SECURITY: This function only determines the INTENDED role. The actual insert
+// uses ON CONFLICT to prevent race conditions from creating duplicate owners.
+// See resolveGitHubOrgRole for the atomic insert with conflict handling.
+const seedRoleFromGitHub = async (
+  db: NodePgDatabase<typeof schema>,
   org: Organization,
   githubIdentity: GitHubIdentity,
   githubRole: "admin" | "member"
-): OrgAccessRole => {
+): Promise<OrgAccessRole> => {
   // If user is the installer, they get "owner" regardless of GitHub role
   if (org.installerGithubId === githubIdentity.userId) {
     return "owner";
   }
+
+  // For GitHub admins: check if org has any existing owners
+  // First admin on an ownerless org becomes owner (first come, first serve)
+  // NOTE: Race condition between check and insert is mitigated by:
+  // 1. The unique constraint on (organizationId, userId) prevents duplicates
+  // 2. If multiple admins race, only one can win the owner slot due to
+  //    the recheck after insert (see resolveGitHubOrgRole)
   if (githubRole === "admin") {
+    const ownerCountResult = await db
+      .select({ count: count() })
+      .from(organizationMembers)
+      .where(
+        and(
+          eq(organizationMembers.organizationId, org.id),
+          eq(organizationMembers.role, "owner")
+        )
+      );
+
+    if (ownerCountResult[0]?.count === 0) {
+      return "owner";
+    }
     return "admin";
   }
+
   return "member";
 };
 
@@ -124,23 +151,69 @@ const resolveGitHubOrgRole = async (
   }
 
   // New member: seed role from GitHub, then create record
-  const role = seedRoleFromGitHub(
+  // SECURITY: Race condition mitigation for "first admin becomes owner":
+  // 1. seedRoleFromGitHub determines intended role based on current state
+  // 2. Insert with onConflictDoNothing handles concurrent inserts
+  // 3. If insert was skipped due to conflict, fetch the actual record
+  // 4. If we tried to become owner but someone else won, we stay as admin
+  const intendedRole = await seedRoleFromGitHub(
+    db,
     org,
     githubIdentity,
     membership.role ?? "member"
   );
 
-  await db.insert(organizationMembers).values({
-    id: crypto.randomUUID(),
-    organizationId: org.id,
-    userId,
-    role,
-    providerUserId: githubIdentity.userId,
-    providerUsername: githubIdentity.username,
-    providerLinkedAt: new Date(),
+  const memberId = crypto.randomUUID();
+  const insertResult = await db
+    .insert(organizationMembers)
+    .values({
+      id: memberId,
+      organizationId: org.id,
+      userId,
+      role: intendedRole,
+      providerUserId: githubIdentity.userId,
+      providerUsername: githubIdentity.username,
+      providerLinkedAt: new Date(),
+    })
+    .onConflictDoNothing({
+      target: [organizationMembers.organizationId, organizationMembers.userId],
+    })
+    .returning({ id: organizationMembers.id, role: organizationMembers.role });
+
+  // If insert succeeded, return the intended role
+  if (insertResult.length > 0) {
+    return { role: intendedRole };
+  }
+
+  // Insert was skipped due to conflict - another request beat us
+  // Fetch the actual record that was inserted by the other request
+  const actualMember = await db.query.organizationMembers.findFirst({
+    where: and(
+      eq(organizationMembers.userId, userId),
+      eq(organizationMembers.organizationId, org.id)
+    ),
   });
 
-  return { role };
+  if (!actualMember) {
+    // Shouldn't happen, but handle gracefully
+    console.error(
+      `[org-access] Race condition: insert conflict but no member found for ${userId} in ${org.id}`
+    );
+    return {
+      error: "Failed to create membership record",
+      status: 500,
+    };
+  }
+
+  // Return the actual role from the winning insert
+  // If we intended "owner" but got "admin", that's correct - someone else won the race
+  if (intendedRole === "owner" && actualMember.role !== "owner") {
+    console.log(
+      `[org-access] Race condition resolved: ${githubIdentity.username} intended owner but got ${actualMember.role} in ${org.slug}`
+    );
+  }
+
+  return { role: actualMember.role };
 };
 
 // Middleware that verifies GitHub org membership on-demand

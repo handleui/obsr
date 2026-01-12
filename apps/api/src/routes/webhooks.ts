@@ -167,6 +167,22 @@ interface OrganizationPayload {
   installation?: { id: number };
 }
 
+interface CheckSuitePayload {
+  action: "requested" | "rerequested" | "completed";
+  check_suite: {
+    id: number;
+    head_sha: string;
+    head_branch: string;
+    pull_requests: Array<{ number: number; head: { sha: string } }>;
+  };
+  repository: {
+    full_name: string;
+    owner: { login: string };
+    name: string;
+  };
+  installation: { id: number };
+}
+
 interface DetentCommand {
   type: "status" | "help" | "unknown";
 }
@@ -180,7 +196,8 @@ interface WebhookVariables {
     | InstallationPayload
     | InstallationRepositoriesPayload
     | RepositoryPayload
-    | OrganizationPayload;
+    | OrganizationPayload
+    | CheckSuitePayload;
 }
 
 type WebhookContext = Context<{ Bindings: Env; Variables: WebhookVariables }>;
@@ -235,6 +252,9 @@ app.post("/github", webhookSignatureMiddleware, (c: WebhookContext) => {
 
     case "organization":
       return handleOrganizationEvent(c, payload as OrganizationPayload);
+
+    case "check_suite":
+      return handleCheckSuiteRequested(c, payload as CheckSuitePayload);
 
     default:
       console.log(`[webhook] Ignoring unhandled event: ${event}`);
@@ -1041,10 +1061,11 @@ const handleNoPrEarlyReturn = async (
 // ============================================================================
 // Helper: Handle early return when waiting for other runs to complete
 // ============================================================================
-// Cleans up any orphaned check run and releases the commit lock before returning.
+// Releases the commit lock but preserves the check run in "queued" state.
+// The check run will be finalized when all workflows complete.
 const handleWaitingForRunsEarlyReturn = async (
-  github: ReturnType<typeof createGitHubService>,
-  token: string,
+  _github: ReturnType<typeof createGitHubService>,
+  _token: string,
   kv: KVNamespace,
   context: {
     installationId: number;
@@ -1063,34 +1084,15 @@ const handleWaitingForRunsEarlyReturn = async (
   completed: number;
   pending: number;
 }> => {
-  const {
-    installationId,
-    owner,
-    repo,
-    repository,
-    headSha,
-    deliveryId,
-    storedCheckRunId,
-    completedCount,
-    pendingCount,
-  } = context;
+  const { repository, headSha, completedCount, pendingCount } = context;
 
   console.log(
     `[workflow_run] Waiting for ${pendingCount} more runs to complete`
   );
 
-  // Clean up any existing check run since we're returning early
-  if (storedCheckRunId) {
-    await attemptCheckRunCleanup(
-      github,
-      token,
-      installationId,
-      owner,
-      repo,
-      storedCheckRunId,
-      deliveryId
-    );
-  }
+  // NOTE: Do NOT clean up the check run here. It should remain in "queued" state
+  // and will be properly finalized when all workflows complete. Cleaning it up
+  // here would mark it as "cancelled" prematurely.
 
   await releaseCommitLock(kv, repository, headSha);
 
@@ -1105,10 +1107,11 @@ const handleWaitingForRunsEarlyReturn = async (
 // ============================================================================
 // Helper: Handle early return when all runs already processed (duplicate)
 // ============================================================================
-// Cleans up any orphaned check run and releases the commit lock before returning.
+// Releases the commit lock. The check run was already finalized by the original
+// processing, so we don't touch it.
 const handleAllRunsProcessedEarlyReturn = async (
-  github: ReturnType<typeof createGitHubService>,
-  token: string,
+  _github: ReturnType<typeof createGitHubService>,
+  _token: string,
   kv: KVNamespace,
   context: {
     installationId: number;
@@ -1126,33 +1129,16 @@ const handleAllRunsProcessedEarlyReturn = async (
   headSha: string;
   status: string;
 }> => {
-  const {
-    installationId,
-    owner,
-    repo,
-    repository,
-    headSha,
-    deliveryId,
-    storedCheckRunId,
-    runCount,
-  } = context;
+  const { repository, headSha, deliveryId, runCount } = context;
 
   console.log(
     `[workflow_run] All ${runCount} run attempts already stored, skipping [delivery: ${deliveryId}]`
   );
 
-  // Clean up any existing check run since we're returning early
-  if (storedCheckRunId) {
-    await attemptCheckRunCleanup(
-      github,
-      token,
-      installationId,
-      owner,
-      repo,
-      storedCheckRunId,
-      deliveryId
-    );
-  }
+  // NOTE: Do NOT clean up the check run here. All runs were already processed,
+  // which means the check run was already finalized (completed with success or
+  // failure) by the original webhook. Cleaning it up would wrongly overwrite
+  // that result with "cancelled".
 
   await releaseCommitLock(kv, repository, headSha);
 
@@ -2650,6 +2636,204 @@ const handleOrganizationEvent = async (
     );
   } finally {
     await client.end();
+  }
+};
+
+// Check if org has an owner and post claim comment if not (fire-and-forget)
+const checkOrgOwnerAndPostComment = async (
+  env: Env,
+  installationId: number,
+  repository: string,
+  prNumber: number,
+  token: string
+): Promise<void> => {
+  const kv = env["detent-idempotency"];
+
+  // Check if we already posted this comment (once per repo, not per PR)
+  // Use cacheTtl for edge caching - reduces latency from ~50ms to ~5ms for hot keys
+  const claimCommentKey = `detent:claim-comment:${repository}`;
+  const alreadyPosted = await kv.get(claimCommentKey, { cacheTtl: 60 });
+  if (alreadyPosted) {
+    return;
+  }
+
+  const { db, client } = await createDb(env);
+
+  try {
+    // Single query with LEFT JOIN to check org existence and owner status
+    // This reduces from 2 DB round trips to 1
+    const result = await db
+      .select({
+        orgId: organizations.id,
+        ownerId: organizationMembers.id,
+      })
+      .from(organizations)
+      .leftJoin(
+        organizationMembers,
+        and(
+          eq(organizationMembers.organizationId, organizations.id),
+          eq(organizationMembers.role, "owner")
+        )
+      )
+      .where(eq(organizations.providerInstallationId, String(installationId)))
+      .limit(1);
+
+    const row = result[0];
+    if (!row) {
+      return; // Org not found - shouldn't happen but be safe
+    }
+
+    if (row.ownerId) {
+      return; // Has owner, nothing to do
+    }
+
+    // No owner - post claim comment
+    const github = createGitHubService(env);
+    const parts = repository.split("/");
+    const owner = parts[0];
+    const repo = parts[1];
+
+    if (!(owner && repo)) {
+      console.error(`[check_suite] Invalid repository format: ${repository}`);
+      return;
+    }
+
+    await github.postCommentWithId(
+      token,
+      owner,
+      repo,
+      prNumber,
+      "**Detent** is watching this repository! To unlock the full dashboard and team features, " +
+        "[sign in to claim your team](https://detent.dev)."
+    );
+
+    // Mark as posted (TTL: 30 days - re-notify if they still haven't claimed)
+    await kv.put(claimCommentKey, "true", { expirationTtl: 60 * 60 * 24 * 30 });
+
+    console.log(
+      `[check_suite] Posted claim comment on ${repository}#${prNumber}`
+    );
+  } catch (error) {
+    // Non-fatal - just log and continue
+    console.error("[check_suite] Error posting claim comment:", error);
+  } finally {
+    await client.end();
+  }
+};
+
+// Handle check_suite.requested - create a "queued" check run immediately
+const handleCheckSuiteRequested = async (
+  c: WebhookContext,
+  payload: CheckSuitePayload
+) => {
+  const { action, check_suite, repository, installation } = payload;
+  const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
+
+  // Only handle "requested" action
+  if (action !== "requested") {
+    return c.json({ message: "ignored", action });
+  }
+
+  // Skip if no PR associated (e.g., push to main branch)
+  if (check_suite.pull_requests.length === 0) {
+    console.log(
+      `[check_suite] No PR associated with ${check_suite.head_sha.slice(0, 7)}, skipping [delivery: ${deliveryId}]`
+    );
+    return c.json({
+      message: "skipped",
+      reason: "no_pr",
+      branch: check_suite.head_branch,
+    });
+  }
+
+  const headSha = check_suite.head_sha;
+  const firstPr = check_suite.pull_requests[0];
+  if (!firstPr) {
+    // Should never happen after length check, but satisfy TypeScript
+    return c.json({ message: "skipped", reason: "no_pr" });
+  }
+  const prNumber = firstPr.number;
+  const kv = c.env["detent-idempotency"];
+
+  console.log(
+    `[check_suite] Requested: ${repository.full_name} @ ${headSha.slice(0, 7)} (PR #${prNumber}) [delivery: ${deliveryId}]`
+  );
+
+  // Check if check run already exists (idempotency)
+  const existingCheckRunId = await getStoredCheckRunId(
+    kv,
+    repository.full_name,
+    headSha
+  );
+
+  if (existingCheckRunId) {
+    console.log(
+      `[check_suite] Check run ${existingCheckRunId} already exists for ${headSha.slice(0, 7)}`
+    );
+    return c.json({
+      message: "check run already exists",
+      checkRunId: existingCheckRunId,
+    });
+  }
+
+  const github = createGitHubService(c.env);
+
+  try {
+    const token = await github.getInstallationToken(installation.id);
+
+    // Create a "queued" check run so users know we're watching
+    const checkRun = await github.createCheckRun(token, {
+      owner: repository.owner.login,
+      repo: repository.name,
+      headSha,
+      name: "Detent Parser",
+      status: "queued",
+      output: {
+        title: "Waiting for CI to complete...",
+        summary: "Detent will analyze CI results once all workflows finish.",
+      },
+    });
+
+    console.log(
+      `[check_suite] Created queued check run ${checkRun.id} for ${headSha.slice(0, 7)}`
+    );
+
+    // Fire-and-forget background tasks (non-blocking for faster response)
+    c.executionCtx.waitUntil(
+      Promise.all([
+        // Store check run ID for later retrieval
+        storeCheckRunId(kv, repository.full_name, headSha, checkRun.id),
+        // Check org owner status and post claim comment if needed
+        checkOrgOwnerAndPostComment(
+          c.env,
+          installation.id,
+          repository.full_name,
+          prNumber,
+          token
+        ),
+      ])
+    );
+
+    return c.json({
+      message: "check run created",
+      checkRunId: checkRun.id,
+      status: "queued",
+    });
+  } catch (error) {
+    console.error(
+      `[check_suite] Error creating queued check run [delivery: ${deliveryId}]:`,
+      error
+    );
+
+    // Return 500 to be consistent with other error handlers in this file
+    // The check run will be created when workflow_run.in_progress fires as fallback
+    return c.json(
+      {
+        message: "failed to create check run",
+        error: sanitizeApiError(error),
+      },
+      500
+    );
   }
 };
 

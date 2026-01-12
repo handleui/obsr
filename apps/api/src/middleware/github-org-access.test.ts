@@ -9,6 +9,11 @@ const mockInsert = vi.fn();
 const mockSet = vi.fn();
 const mockWhere = vi.fn();
 const mockValues = vi.fn();
+const mockSelect = vi.fn();
+const mockFrom = vi.fn();
+const mockSelectWhere = vi.fn();
+const mockOnConflictDoNothing = vi.fn();
+const mockReturning = vi.fn();
 
 const mockDb = {
   query: {
@@ -17,6 +22,7 @@ const mockDb = {
   },
   update: mockUpdate,
   insert: mockInsert,
+  select: mockSelect,
 };
 
 const mockClient = { end: vi.fn() };
@@ -93,8 +99,19 @@ describe("github-org-access middleware", () => {
     mockUpdate.mockReturnValue({ set: mockSet });
     mockSet.mockReturnValue({ where: mockWhere });
     mockWhere.mockResolvedValue([]);
+    // Set up insert chain: db.insert().values().onConflictDoNothing().returning()
     mockInsert.mockReturnValue({ values: mockValues });
-    mockValues.mockResolvedValue([]);
+    mockValues.mockReturnValue({
+      onConflictDoNothing: mockOnConflictDoNothing,
+    });
+    mockOnConflictDoNothing.mockReturnValue({ returning: mockReturning });
+    // Default: insert succeeds (returns inserted row)
+    mockReturning.mockResolvedValue([{ id: "new-member-id", role: "member" }]);
+    // Set up select chain: db.select().from().where()
+    mockSelect.mockReturnValue({ from: mockFrom });
+    mockFrom.mockReturnValue({ where: mockSelectWhere });
+    // Default: org has owners (count: 1)
+    mockSelectWhere.mockResolvedValue([{ count: 1 }]);
   });
 
   describe("seedRoleFromGitHub - role seeding for new members", () => {
@@ -181,6 +198,48 @@ describe("github-org-access middleware", () => {
 
       const insertCall = mockValues.mock.calls[0]?.[0] as { role: string };
       expect(insertCall.role).toBe("admin");
+    });
+
+    it("first GitHub admin on ownerless org becomes owner", async () => {
+      const org = createOrg({ installerGithubId: "someone-else" });
+
+      mockOrgFindFirst.mockResolvedValue(org);
+      mockMemberFindFirst.mockResolvedValue(undefined);
+      // Org has no owners
+      mockSelectWhere.mockResolvedValue([{ count: 0 }]);
+
+      mockGetVerifiedGitHubIdentity.mockResolvedValue({
+        userId: "first-admin-id",
+        username: "first-admin",
+      });
+
+      mockVerifyGitHubMembership.mockResolvedValue({
+        isMember: true,
+        role: "admin",
+      });
+
+      const { githubOrgAccessMiddleware } = await import("./github-org-access");
+      const { Hono } = await import("hono");
+      const app = new Hono();
+
+      app.use("*", async (c, next) => {
+        c.set("auth" as never, { userId: "user-abc" } as never);
+        await next();
+      });
+      app.use("/orgs/:orgId/*", githubOrgAccessMiddleware);
+      app.get("/orgs/:orgId/test", (c) => {
+        const orgAccess = c.get("orgAccess");
+        return c.json({ role: orgAccess.role });
+      });
+
+      const res = await app.request("/orgs/org-123/test", {}, MOCK_ENV);
+      const json = (await res.json()) as { role: string };
+
+      expect(res.status).toBe(200);
+      expect(json.role).toBe("owner"); // First admin becomes owner
+
+      const insertCall = mockValues.mock.calls[0]?.[0] as { role: string };
+      expect(insertCall.role).toBe("owner");
     });
 
     it("GitHub member gets member role", async () => {

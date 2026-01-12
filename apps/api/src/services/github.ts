@@ -816,16 +816,24 @@ const createGitHubServiceInternal = (env: Env) => {
   // PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}
   const updateCheckRun = async (
     token: string,
-    options: {
-      owner: string;
-      repo: string;
-      checkRunId: number;
-      status: "completed";
-      conclusion: "success" | "failure" | "neutral" | "cancelled";
-      output?: { title: string; summary: string };
-    }
+    options:
+      | {
+          owner: string;
+          repo: string;
+          checkRunId: number;
+          status: "completed";
+          conclusion: "success" | "failure" | "neutral" | "cancelled";
+          output?: { title: string; summary: string };
+        }
+      | {
+          owner: string;
+          repo: string;
+          checkRunId: number;
+          status: "in_progress";
+          output?: { title: string; summary: string };
+        }
   ): Promise<void> => {
-    const { owner, repo, checkRunId, status, conclusion, output } = options;
+    const { owner, repo, checkRunId, status, output } = options;
     const context = `updateCheckRun(${owner}/${repo}, checkRunId=${checkRunId})`;
 
     // Validate inputs
@@ -834,12 +842,20 @@ const createGitHubServiceInternal = (env: Env) => {
       throw new Error(`${context}: Invalid check run ID`);
     }
 
-    const body = {
+    const body: Record<string, unknown> = {
       status,
-      conclusion,
-      completed_at: new Date().toISOString(),
       ...(output && { output }),
     };
+
+    // Only add conclusion and completed_at for completed status
+    if (status === "completed") {
+      body.conclusion = (
+        options as {
+          conclusion: "success" | "failure" | "neutral" | "cancelled";
+        }
+      ).conclusion;
+      body.completed_at = new Date().toISOString();
+    }
 
     const response = await fetch(
       `${GITHUB_API}/repos/${owner}/${repo}/check-runs/${checkRunId}`,
@@ -866,7 +882,11 @@ const createGitHubServiceInternal = (env: Env) => {
       });
     }
 
-    console.log(`[github] ${context}: Updated to ${conclusion}`);
+    const logStatus =
+      status === "completed"
+        ? (options as { conclusion: string }).conclusion
+        : status;
+    console.log(`[github] ${context}: Updated to ${logStatus}`);
   };
 
   // POST /repos/{owner}/{repo}/issues/{issue_number}/comments - returns comment ID
@@ -932,6 +952,58 @@ const createGitHubServiceInternal = (env: Env) => {
     return { id: data.id, htmlUrl: data.html_url };
   };
 
+  // PATCH /repos/{owner}/{repo}/issues/comments/{comment_id} - update existing comment
+  const updateComment = async (
+    token: string,
+    owner: string,
+    repo: string,
+    commentId: number,
+    body: string
+  ): Promise<void> => {
+    const context = `updateComment(${owner}/${repo}, commentId=${commentId})`;
+
+    // Validate inputs
+    validateOwnerRepo(owner, repo, context);
+    if (!Number.isInteger(commentId) || commentId <= 0) {
+      throw new Error(`${context}: Invalid comment ID`);
+    }
+    if (!body || body.trim().length === 0) {
+      throw new Error(`${context}: Comment body cannot be empty`);
+    }
+    if (body.length > 65_536) {
+      throw new Error(
+        `${context}: Comment body too long (${body.length} chars, max 65536)`
+      );
+    }
+
+    const response = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/issues/comments/${commentId}`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "Detent-App",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ body }),
+      }
+    );
+
+    const rateLimitInfo = parseRateLimitHeaders(response);
+    logRateLimitWarning(rateLimitInfo, context);
+
+    if (!response.ok) {
+      await handleApiError(response, rateLimitInfo, context, {
+        404: "Comment not found (may have been deleted)",
+        422: "Validation failed - comment body may be invalid.",
+      });
+    }
+
+    console.log(`[github] ${context}: Updated comment`);
+  };
+
   return {
     getInstallationToken,
     getInstallationInfo,
@@ -944,6 +1016,7 @@ const createGitHubServiceInternal = (env: Env) => {
     createCheckRun,
     updateCheckRun,
     postCommentWithId,
+    updateComment,
   };
 };
 

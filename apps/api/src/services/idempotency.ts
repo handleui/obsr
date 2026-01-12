@@ -365,8 +365,9 @@ export const getStoredCheckRunId = async (
       );
       return checkRunId;
     }
-    console.log(
-      `[idempotency] getStoredCheckRunId: no check run found for ${repository}@${headSha.slice(0, 7)} (KV miss or not created)`
+    // Expected for first-time lookups before check run creation
+    console.debug(
+      `[idempotency] getStoredCheckRunId: no check run found for ${repository}@${headSha.slice(0, 7)}`
     );
     return null;
   } catch (error) {

@@ -1604,8 +1604,7 @@ const handleWorkflowRunCompleted = async (
     );
 
     // All runs completed! Get or create check run
-    // Use the check run ID we retrieved early (for error recovery)
-    // This avoids a redundant KV call and ensures consistency
+    // Use the check run ID we retrieved early for error recovery
     if (storedCheckRunIdForRecovery) {
       // Update existing check run to in_progress
       checkRunId = storedCheckRunIdForRecovery;

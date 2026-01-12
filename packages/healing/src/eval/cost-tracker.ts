@@ -72,16 +72,17 @@ export interface CostTracker {
   /** Track cost from a HealLoop task run */
   trackTaskCost: (costUSD: number) => void;
   /**
-   * Track cost from an LLM judge/scorer call.
+   * Track cost from LLM judge/scorer call(s).
    *
-   * @param costUSD - Actual cost if available from LLM response metadata,
+   * @param count - Number of judge calls to track (default: 1)
+   * @param costPerCallUSD - Cost per call if available from LLM response metadata,
    *   otherwise uses default estimate. When autoevals provides cost/token
    *   metadata in the future, pass the actual cost here.
    *
    * Default estimate based on typical Claude Haiku pricing:
    * ~2000 input tokens ($0.0016) + ~500 output tokens ($0.002) ≈ $0.004/call
    */
-  trackJudgeCost: (costUSD?: number) => void;
+  trackJudgeCost: (count?: number, costPerCallUSD?: number) => void;
   /** Get the current cost summary */
   getSummary: () => EvalCostSummary;
   /** Reset the tracker */
@@ -124,11 +125,12 @@ export const createCostTracker = (
         state.testCaseCount > 0 ? state.totalCostUSD / state.testCaseCount : 0;
     },
 
-    trackJudgeCost: (estimatedCostUSD = 0.004): void => {
-      checkBudget(estimatedCostUSD);
-      state.judgeCallCostsUSD += estimatedCostUSD;
-      state.totalCostUSD += estimatedCostUSD;
-      state.judgeCallCount++;
+    trackJudgeCost: (count = 1, costPerCallUSD = 0.004): void => {
+      const totalCost = count * costPerCallUSD;
+      checkBudget(totalCost);
+      state.judgeCallCostsUSD += totalCost;
+      state.totalCostUSD += totalCost;
+      state.judgeCallCount += count;
       if (state.testCaseCount > 0) {
         state.avgCostPerCaseUSD = state.totalCostUSD / state.testCaseCount;
       }

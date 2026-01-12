@@ -293,9 +293,7 @@ const combinedLlmScorer = async ({
   ]);
 
   // Track 3 judge calls for successful cases
-  evalCostTracker.trackJudgeCost();
-  evalCostTracker.trackJudgeCost();
-  evalCostTracker.trackJudgeCost();
+  evalCostTracker.trackJudgeCost(3);
 
   return [fixResult, codeResult, reasoningResult];
 };

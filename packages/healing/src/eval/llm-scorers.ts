@@ -17,13 +17,14 @@ import { LLMClassifierFromTemplate } from "autoevals";
  * while preserving legitimate JSX/TSX/HTML code for proper evaluation.
  */
 const sanitizeInput = (input: string, maxLength = 5000): string => {
-  const truncated =
-    input.length > maxLength ? `${input.slice(0, maxLength)}...` : input;
-  // Only escape our specific delimiter tags to prevent injection while preserving code
-  return truncated.replace(
+  // Escape first to prevent injection, then truncate (order matters for security)
+  const escaped = input.replace(
     /<\/?user_content>/gi,
     (match) => `[ESCAPED_TAG:${match}]`
   );
+  return escaped.length > maxLength
+    ? `${escaped.slice(0, maxLength)}...`
+    : escaped;
 };
 
 /**

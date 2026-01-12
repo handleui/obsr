@@ -18,7 +18,7 @@ permissions:
 jobs:
   build:
     name: CLI Binaries
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
 
     steps:
       - name: Determine ref to build

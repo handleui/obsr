@@ -12,6 +12,8 @@ export interface LineContext {
   readonly job: string;
   /** Step name (if parseable) */
   readonly step: string;
+  /** Action name for GitHub Actions steps (e.g., "actions/checkout@v4") */
+  readonly action?: string;
   /** True if line should be skipped (debug output) */
   readonly isNoise: boolean;
 }
@@ -33,6 +35,11 @@ export interface ParseLineResult {
  * Different CI systems (act, GitHub Actions, GitLab) implement this interface
  * to parse their specific output formats and extract job/step context.
  *
+ * IMPORTANT: Parsers may be STATEFUL (e.g., GitHub Actions step tracking).
+ * - Call reset() between parsing unrelated log outputs to clear state
+ * - Do NOT share parser instances between concurrent parsing operations
+ * - For concurrent parsing, use factory functions (createGitHubContextParser, etc.)
+ *
  * @example
  * ```typescript
  * // Act format: [Job Name/Step Name] actual log content
@@ -51,4 +58,11 @@ export interface ContextParser {
    * If skip is true, the line should be ignored (debug noise, metadata).
    */
   parseLine(line: string): ParseLineResult;
+
+  /**
+   * Reset parser state to initial values.
+   * Call between parsing unrelated log outputs to clear accumulated context.
+   * Stateless parsers implement this as a no-op.
+   */
+  reset(): void;
 }

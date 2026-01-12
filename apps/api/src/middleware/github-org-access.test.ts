@@ -58,7 +58,7 @@ const createOrg = (overrides: Partial<Organization> = {}): Organization => ({
   suspendedAt: null,
   deletedAt: null,
   lastSyncedAt: null,
-  allowAutoJoin: true,
+  settings: {},
   createdAt: new Date(),
   updatedAt: new Date(),
   ...overrides,

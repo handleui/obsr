@@ -31,9 +31,26 @@ export const setInCache = <T>(key: string, value: T, ttlMs: number): void => {
   });
 };
 
+export const deleteFromCache = (key: string): void => {
+  cache.delete(key);
+};
+
 // Cache TTLs
 export const CACHE_TTL = {
   GITHUB_IDENTITY: 5 * 60 * 1000, // 5 minutes - identity rarely changes
   GITHUB_MEMBERSHIP: 2 * 60 * 1000, // 2 minutes - membership can change
   INSTALLATION_TOKEN: 50 * 60 * 1000, // 50 minutes - tokens last 60min
+  ORG_SETTINGS: 2 * 60 * 1000, // 2 minutes - settings change rarely via admin UI
+};
+
+/**
+ * Cache key builders for consistent key generation across the application.
+ */
+export const cacheKey = {
+  /**
+   * Generates a cache key for organization settings.
+   * @param installationId - The GitHub App installation ID (number from webhook payloads)
+   */
+  orgSettings: (installationId: number | string) =>
+    `org-settings:${installationId}`,
 };

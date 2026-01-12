@@ -92,6 +92,13 @@
       "when": 1768239156169,
       "tag": "0012_public_tinkerer",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1768241713259,
+      "tag": "0013_legal_hellcat",
+      "breakpoints": true
     }
   ]
 }

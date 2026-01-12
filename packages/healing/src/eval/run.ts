@@ -102,7 +102,7 @@ const liveTask = async (input: HealingTestCase): Promise<HealingEvalResult> => {
     const ctx = createToolContext(
       process.cwd(),
       process.cwd(),
-      `eval-${input.id}-${Date.now()}-${randomUUID().slice(0, 8)}`
+      `eval-${input.id}-${randomUUID()}`
     );
 
     const registry = createToolRegistry(ctx);

@@ -56,8 +56,12 @@ export const DEFAULT_ORG_SETTINGS: Required<OrganizationSettings> = {
 export const getOrgSettings = (
   settings: OrganizationSettings | null | undefined
 ): Required<OrganizationSettings> => ({
-  ...DEFAULT_ORG_SETTINGS,
-  ...settings,
+  allowAutoJoin: settings?.allowAutoJoin ?? DEFAULT_ORG_SETTINGS.allowAutoJoin,
+  enableInlineAnnotations:
+    settings?.enableInlineAnnotations ??
+    DEFAULT_ORG_SETTINGS.enableInlineAnnotations,
+  enablePrComments:
+    settings?.enablePrComments ?? DEFAULT_ORG_SETTINGS.enablePrComments,
 });
 
 // Helper to create provider-prefixed slug

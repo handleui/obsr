@@ -1228,6 +1228,7 @@ const finalizeAndPostResults = async (
 
   // Skip PR comments if disabled in org settings
   if (!enablePrComments) {
+    console.log(`[webhook] PR comments disabled for ${repository}`);
     return { runResults, totalErrors };
   }
 

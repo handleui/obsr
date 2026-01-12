@@ -43,8 +43,14 @@ export const CACHE_TTL = {
   ORG_SETTINGS: 2 * 60 * 1000, // 2 minutes - settings change rarely via admin UI
 };
 
-// Cache key builders
+/**
+ * Cache key builders for consistent key generation across the application.
+ */
 export const cacheKey = {
+  /**
+   * Generates a cache key for organization settings.
+   * @param installationId - The GitHub App installation ID (number from webhook payloads)
+   */
   orgSettings: (installationId: number | string) =>
     `org-settings:${installationId}`,
 };

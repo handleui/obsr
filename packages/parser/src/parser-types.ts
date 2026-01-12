@@ -193,6 +193,17 @@ export interface ToolParser {
    * Called between parsing runs or when switching context.
    */
   reset(): void;
+
+  /**
+   * Optional: Observe a line for context tracking without parsing.
+   * Called on ALL lines (including noise) before noise filtering.
+   * Use this for stateful context tracking that needs to see all lines.
+   *
+   * Unlike canParse/parse, this is called even for lines that will be
+   * filtered as noise, allowing parsers to maintain context state
+   * (e.g., tracking whether we're in test output context).
+   */
+  observeLine?(line: string): void;
 }
 
 // ============================================================================

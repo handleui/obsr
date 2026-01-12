@@ -31,3 +31,6 @@ const set: Set<string> = "not a set";
 
 // Trigger #8 - test vitest noise filter
 const weakMap: WeakMap<object, string> = "not a weakmap";
+
+// Trigger #9 - test possiblyTestOutput feature
+const weakSet: WeakSet<object> = "not a weakset";

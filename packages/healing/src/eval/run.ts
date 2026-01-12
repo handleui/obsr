@@ -92,7 +92,7 @@ const liveTask = async (input: HealingTestCase): Promise<HealingEvalResult> => {
     const ctx = createToolContext(
       process.cwd(),
       process.cwd(),
-      `eval-${input.id}-${Date.now()}`
+      `eval-${input.id}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
     );
 
     const registry = createToolRegistry(ctx);
@@ -302,10 +302,7 @@ Eval("Detent", {
       },
     })),
 
-  task: async (input) => {
-    const result = await task(input);
-    return result;
-  },
+  task,
 
   // Limit concurrency to avoid rate limits on LLM APIs
   maxConcurrency: 10,

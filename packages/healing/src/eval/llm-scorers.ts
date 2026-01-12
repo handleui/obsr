@@ -14,11 +14,10 @@ import { LLMClassifierFromTemplate } from "autoevals";
  * Wraps content in XML-style delimiters and escapes any existing delimiters.
  */
 const sanitizeInput = (input: string, maxLength = 5000): string => {
-  // Truncate to prevent excessive token usage
   const truncated =
     input.length > maxLength ? `${input.slice(0, maxLength)}...` : input;
-  // Escape any existing delimiter patterns that could break out
-  return truncated.replace(/<\/?user_content>/gi, "[ESCAPED]");
+  // Escape all XML-like tags to prevent any delimiter injection
+  return truncated.replace(/<\/?[^>]+>/g, (match) => `[ESCAPED: ${match}]`);
 };
 
 /**

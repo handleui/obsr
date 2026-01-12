@@ -16,33 +16,39 @@ import { initLogger, traced } from "braintrust";
 import type { HealResult } from "../types.js";
 
 /**
- * Patterns that may indicate sensitive data in logs.
+ * Factory functions that create fresh regex instances for sensitive patterns.
  * These are redacted before sending to Braintrust.
  *
- * Note: Patterns are designed to avoid false positives on known-safe values:
- * - Git SHAs (40-char lowercase hex)
- * - UUIDs (36-char with dashes)
- * - Content hashes commonly used in build tools
+ * IMPORTANT: We use factory functions instead of regex literals because the
+ * global flag (`g`) makes regexes stateful via `lastIndex`. While `String.replace`
+ * doesn't persist this state, using factories prevents subtle bugs if patterns
+ * are ever used with `test()` or `exec()`, and makes the code more maintainable.
+ *
+ * Note: Patterns are designed to avoid false positives on known-safe values
+ * like git SHAs (40-char lowercase hex), UUIDs (36-char with dashes), and
+ * content hashes commonly used in build tools.
  */
-const SENSITIVE_PATTERNS = [
+const SENSITIVE_PATTERN_FACTORIES: Array<() => RegExp> = [
   // API keys and tokens (common formats with explicit key/token indicators)
-  /(?:api[_-]?key|token|secret|password|auth|credential)s?\s*[:=]\s*['"]?[\w\-./+=]{20,}['"]?/gi,
+  () =>
+    /(?:api[_-]?key|token|secret|password|auth|credential)s?\s*[:=]\s*['"]?[\w\-./+=]{20,}['"]?/gi,
   // Bearer tokens
-  /Bearer\s+[\w\-./+=]+/gi,
+  () => /Bearer\s+[\w\-./+=]+/gi,
   // AWS-style keys (specific prefix pattern)
-  /(?:AKIA|ABIA|ACCA|ASIA)[A-Z0-9]{16}/g,
+  () => /(?:AKIA|ABIA|ACCA|ASIA)[A-Z0-9]{16}/g,
   // GitHub tokens (specific prefix pattern)
-  /gh[pousr]_[A-Za-z0-9_]{36,}/g,
+  () => /gh[pousr]_[A-Za-z0-9_]{36,}/g,
   // Anthropic API keys
-  /sk-ant-[A-Za-z0-9\-_]{40,}/g,
+  () => /sk-ant-[A-Za-z0-9\-_]{40,}/g,
   // OpenAI API keys
-  /sk-[A-Za-z0-9]{48,}/g,
+  () => /sk-[A-Za-z0-9]{48,}/g,
   // Slack tokens
-  /xox[baprs]-[A-Za-z0-9-]+/g,
+  () => /xox[baprs]-[A-Za-z0-9-]+/g,
   // Private keys (PEM format markers)
-  /-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----/g,
+  () => /-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----/g,
   // Base64 strings that are explicitly marked as secrets
-  /(?:secret|private|credential)[_-]?(?:key)?[:\s=]+[A-Za-z0-9+/]{40,}={0,2}/gi,
+  () =>
+    /(?:secret|private|credential)[_-]?(?:key)?[:\s=]+[A-Za-z0-9+/]{40,}={0,2}/gi,
 ];
 
 /**
@@ -50,8 +56,8 @@ const SENSITIVE_PATTERNS = [
  */
 const redactSensitive = (text: string): string => {
   let result = text;
-  for (const pattern of SENSITIVE_PATTERNS) {
-    result = result.replace(pattern, "[REDACTED]");
+  for (const createPattern of SENSITIVE_PATTERN_FACTORIES) {
+    result = result.replace(createPattern(), "[REDACTED]");
   }
   return result;
 };

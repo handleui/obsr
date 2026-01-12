@@ -1,5 +1,13 @@
 # @detent/cli
 
+## 0.4.0
+
+### Minor Changes
+
+- 5188d02: Add `detent errors` command to view CI errors for a commit.
+  Supports short SHA prefixes, auto-detects repository from git remote,
+  and outputs in human-readable or JSON format.
+
 ## 0.3.0
 
 ### Minor Changes

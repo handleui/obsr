@@ -1,5 +1,12 @@
 # @detent/api
 
+## 0.6.0
+
+### Minor Changes
+
+- 5188d02: Add errors API endpoint for fetching CI errors by commit.
+  Extracts org-access verification to shared utility for reuse across routes.
+
 ## 0.5.0
 
 ### Minor Changes

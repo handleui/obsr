@@ -1039,6 +1039,70 @@ const handleNoPrEarlyReturn = async (
 };
 
 // ============================================================================
+// Helper: Handle early return when waiting for other runs to complete
+// ============================================================================
+// Cleans up any orphaned check run and releases the commit lock before returning.
+const handleWaitingForRunsEarlyReturn = async (
+  github: ReturnType<typeof createGitHubService>,
+  token: string,
+  kv: KVNamespace,
+  context: {
+    installationId: number;
+    owner: string;
+    repo: string;
+    repository: string;
+    headSha: string;
+    deliveryId: string;
+    storedCheckRunId: number | null;
+    completedCount: number;
+    pendingCount: number;
+  }
+): Promise<{
+  message: string;
+  repository: string;
+  completed: number;
+  pending: number;
+}> => {
+  const {
+    installationId,
+    owner,
+    repo,
+    repository,
+    headSha,
+    deliveryId,
+    storedCheckRunId,
+    completedCount,
+    pendingCount,
+  } = context;
+
+  console.log(
+    `[workflow_run] Waiting for ${pendingCount} more runs to complete`
+  );
+
+  // Clean up any existing check run since we're returning early
+  if (storedCheckRunId) {
+    await attemptCheckRunCleanup(
+      github,
+      token,
+      installationId,
+      owner,
+      repo,
+      storedCheckRunId,
+      deliveryId
+    );
+  }
+
+  await releaseCommitLock(kv, repository, headSha);
+
+  return {
+    message: "waiting for other runs",
+    repository,
+    completed: completedCount,
+    pending: pendingCount,
+  };
+};
+
+// ============================================================================
 // Helper: Handle early return when all runs already processed (duplicate)
 // ============================================================================
 // Cleans up any orphaned check run and releases the commit lock before returning.
@@ -1667,23 +1731,28 @@ const handleWorkflowRunCompleted = async (
       await github.listWorkflowRunsForCommit(token, owner, repo, headSha);
 
     if (!allCompleted) {
-      await releaseCommitLock(
-        c.env["detent-idempotency"],
-        repository.full_name,
-        headSha
-      );
       const pendingCount = workflowRuns.filter(
         (r) => r.status !== "completed"
       ).length;
-      console.log(
-        `[workflow_run] Waiting for ${pendingCount} more runs to complete`
+      return c.json(
+        await handleWaitingForRunsEarlyReturn(
+          github,
+          token,
+          c.env["detent-idempotency"],
+          {
+            installationId: installation.id,
+            owner,
+            repo,
+            repository: repository.full_name,
+            headSha,
+            deliveryId,
+            storedCheckRunId: storedCheckRunIdForRecovery,
+            completedCount: workflowRuns.filter((r) => r.status === "completed")
+              .length,
+            pendingCount,
+          }
+        )
       );
-      return c.json({
-        message: "waiting for other runs",
-        repository: repository.full_name,
-        completed: workflowRuns.filter((r) => r.status === "completed").length,
-        pending: pendingCount,
-      });
     }
 
     // Run-aware idempotency: check which specific (runId, runAttempt) tuples exist

@@ -23,5 +23,11 @@
       "id": "d097d07d81dd449483d792aa860ec167",
       "localConnectionString": "postgresql://postgres:postgres@localhost:5432/detent"
     }
-  ]
+  ],
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  }
 }

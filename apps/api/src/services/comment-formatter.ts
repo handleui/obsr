@@ -90,7 +90,7 @@ const formatWorkflowRow = (
   return `| [${safeName}](https://github.com/${owner}/${repo}/actions/runs/${run.id}) | ${statusIcon} ${status} | ${run.errorCount} |`;
 };
 
-// Helper: format a single error row
+// Helper: format a single error row (with Source column)
 const formatErrorRow = (
   error: ParsedError,
   owner: string,
@@ -107,10 +107,33 @@ const formatErrorRow = (
   return `| ${file} | ${line} | ${message} | ${source} |`;
 };
 
+// Helper: format error row for uncertain errors (without Source column)
+const formatUncertainErrorRow = (
+  error: ParsedError,
+  owner: string,
+  repo: string,
+  headSha: string
+): string => {
+  const file = error.filePath
+    ? buildFileLink(error.filePath, error.line, owner, repo, headSha)
+    : "_unknown_";
+  const line = error.line ?? "-";
+  const message = truncateMessage(error.message, 60);
+  return `| ${file} | ${line} | ${message} |`;
+};
+
+// Helper: check if an error is uncertain (possibly test output or unknown pattern)
+const isUncertainError = (error: ParsedError): boolean =>
+  error.possiblyTestOutput === true || error.unknownPattern === true;
+
 // Format the main PR comment with error summary
 export const formatResultsComment = (options: FormatCommentOptions): string => {
-  const { owner, repo, headSha, runs, errors, totalErrors } = options;
+  const { owner, repo, headSha, runs, errors } = options;
   const lines: string[] = [];
+
+  // Separate errors into certain and uncertain
+  const certainErrors = errors.filter((e) => !isUncertainError(e));
+  const uncertainErrors = errors.filter(isUncertainError);
 
   // Header
   lines.push("## Detent CI Analysis");
@@ -126,20 +149,42 @@ export const formatResultsComment = (options: FormatCommentOptions): string => {
     lines.push("");
   }
 
-  // Error list (top 10)
-  if (errors.length > 0) {
-    const displayCount = Math.min(errors.length, 10);
-    lines.push(`### Top Errors (${displayCount} of ${totalErrors})`);
+  // Certain errors section (top 10)
+  if (certainErrors.length > 0) {
+    const displayCount = Math.min(certainErrors.length, 10);
+    const totalCertain = certainErrors.length;
+    lines.push(`### Top Errors (${displayCount} of ${totalCertain})`);
     lines.push("");
     lines.push("| File | Line | Message | Source |");
     lines.push("|------|------|---------|--------|");
 
-    for (const error of errors.slice(0, 10)) {
+    for (const error of certainErrors.slice(0, 10)) {
       lines.push(formatErrorRow(error, owner, repo, headSha));
     }
     lines.push("");
-  } else {
+  } else if (uncertainErrors.length === 0) {
     lines.push("### No errors found");
+    lines.push("");
+  }
+
+  // Uncertain errors section (possibly test output or unknown pattern)
+  if (uncertainErrors.length > 0) {
+    lines.push("### Possibly Test Console Output");
+    lines.push(
+      "_The following may be captured from test mocks, not actual errors:_"
+    );
+    lines.push("");
+    lines.push("| File | Line | Message |");
+    lines.push("|------|------|---------|");
+
+    for (const error of uncertainErrors.slice(0, 10)) {
+      lines.push(formatUncertainErrorRow(error, owner, repo, headSha));
+    }
+    if (uncertainErrors.length > 10) {
+      lines.push(
+        `| ... | ... | _${uncertainErrors.length - 10} more uncertain errors_ |`
+      );
+    }
     lines.push("");
   }
 

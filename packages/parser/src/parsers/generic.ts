@@ -138,6 +138,11 @@ const noisePatterns: readonly RegExp[] = [
   /(?:^(it|describe|test)\s*\()/i, // Jest/Mocha/Vitest
   /(?:^(PASSED|FAILED)\s*\()/i, // pytest
   /(?:^\d+\s+(passing|pending|failing)\s*$)/i, // Mocha summary
+  // Vitest/Jest console output capture (captured stdout/stderr from tests)
+  /(?:stdout\s*\|)/i, // Vitest stdout capture prefix
+  /(?:stderr\s*\|)/i, // Vitest stderr capture prefix
+  // Test file references in output (not actual errors)
+  /\|\s*\S+\.(test|spec)\.(ts|js|tsx|jsx)/i, // Vitest test file in output line
 
   // === COVERAGE/ANALYSIS TOOLS ===
   /(?:^coverage:)/i,
@@ -189,7 +194,7 @@ const noisePatterns: readonly RegExp[] = [
   // === URLs AND PATHS (often contain "error" in path names) ===
   /(?:https?:\/\/\S+error)/i,
   /(?:\/errors?\/)/i, // Path containing /error/ or /errors/
-  /(?:error\.(js|ts|go|py))/i, // Error module files
+  /(?:^|[/\\])error\.(js|ts|go|py)/i, // Error module files (e.g. /path/error.ts)
 ];
 
 /**
@@ -265,6 +270,13 @@ const fastContains: readonly string[] = [
   "already downloaded",
   "successfully installed",
   "successfully downloaded",
+  // Test framework console capture (vitest/jest)
+  "stdout |",
+  "stderr |",
+  ".test.ts",
+  ".test.js",
+  ".spec.ts",
+  ".spec.js",
 ];
 
 /**
@@ -332,6 +344,13 @@ const mightBeError = (lowerTrimmed: string): boolean => {
 };
 
 /**
+ * Pattern to detect vitest/jest test output markers.
+ * Matches lines like "stdout | path/to/file.test.ts" or "stderr | file.spec.js"
+ */
+const testOutputMarkerPattern =
+  /(?:stdout|stderr)\s*\|\s*\S+\.(test|spec)\.(ts|js|tsx|jsx)/i;
+
+/**
  * GenericParser implements a fallback parser for unrecognized error formats.
  * It matches lines containing common error indicators and flags them for Sentry reporting.
  *
@@ -343,6 +362,13 @@ const mightBeError = (lowerTrimmed: string): boolean => {
 class GenericParser extends BaseParser implements NoisePatternProvider {
   readonly id = PARSER_ID;
   readonly priority = PARSER_PRIORITY;
+
+  /**
+   * Tracks whether we're currently in a test output context.
+   * Set to true when we see a vitest/jest stdout/stderr marker with a test file pattern.
+   * Reset when we see a new marker without a test file, or a completely different context.
+   */
+  private inTestOutputContext = false;
 
   /**
    * Returns a confidence score for parsing the given line.
@@ -357,6 +383,18 @@ class GenericParser extends BaseParser implements NoisePatternProvider {
     // Strip ANSI codes for consistent matching
     const stripped = stripAnsi(line);
     const trimmed = stripped.trim();
+
+    // Update test output context tracking
+    // Check if this line is a vitest/jest output marker with a test file
+    if (testOutputMarkerPattern.test(trimmed)) {
+      this.inTestOutputContext = true;
+    } else if (
+      trimmed.toLowerCase().includes("stdout |") ||
+      trimmed.toLowerCase().includes("stderr |")
+    ) {
+      // A stdout/stderr marker WITHOUT a test file pattern - reset context
+      this.inTestOutputContext = false;
+    }
 
     // FAST PATH 1: Skip empty or very short lines
     if (trimmed.length < MIN_LINE_LENGTH) {
@@ -417,6 +455,11 @@ class GenericParser extends BaseParser implements NoisePatternProvider {
       unknownPattern: true, // Flag for Sentry reporting
     };
 
+    // Mark as possibly test output if we're in a test output context
+    if (this.inTestOutputContext) {
+      err.possiblyTestOutput = true;
+    }
+
     applyWorkflowContext(err, ctx);
 
     return err;
@@ -439,6 +482,13 @@ class GenericParser extends BaseParser implements NoisePatternProvider {
     fastContains,
     regex: noisePatterns,
   });
+
+  /**
+   * Reset parser state between parsing runs.
+   */
+  reset = (): void => {
+    this.inTestOutputContext = false;
+  };
 }
 
 /**

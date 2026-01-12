@@ -245,3 +245,130 @@ export const releaseCommitLock = async (
     console.error("[idempotency] releaseCommitLock failed:", error);
   }
 };
+
+// ============================================================================
+// Check Run Tracking
+// ============================================================================
+// Separate key prefix for storing check run IDs created during "waiting" state
+// This allows the check run to be created early (on workflow_run.in_progress)
+// and updated later (on workflow_run.completed)
+
+const CHECK_RUN_KEY_PREFIX = "detent:checkrun";
+
+const buildCheckRunKey = (repository: string, headSha: string): string =>
+  `${CHECK_RUN_KEY_PREFIX}:${repository}:${headSha}`;
+
+/**
+ * Stores the check run ID for a commit. Used when creating the check run early
+ * (on workflow_run.in_progress) so it can be retrieved and updated later.
+ */
+export const storeCheckRunId = async (
+  kv: KVNamespace,
+  repository: string,
+  headSha: string,
+  checkRunId: number
+): Promise<void> => {
+  const validated = validateInputs(repository, headSha);
+  if (!validated) {
+    return;
+  }
+
+  const key = buildCheckRunKey(validated.repository, validated.headSha);
+
+  try {
+    await kv.put(key, String(checkRunId), {
+      expirationTtl: IDEMPOTENCY_TTL_SECONDS,
+    });
+  } catch (error) {
+    console.error("[idempotency] storeCheckRunId failed:", error);
+  }
+};
+
+/**
+ * Retrieves a previously stored check run ID for a commit.
+ * Returns null if not found or on error.
+ */
+export const getStoredCheckRunId = async (
+  kv: KVNamespace,
+  repository: string,
+  headSha: string
+): Promise<number | null> => {
+  const validated = validateInputs(repository, headSha);
+  if (!validated) {
+    return null;
+  }
+
+  const key = buildCheckRunKey(validated.repository, validated.headSha);
+
+  try {
+    const value = await kv.get(key, {
+      cacheTtl: KV_CACHE_TTL_SECONDS,
+    });
+    return value ? Number.parseInt(value, 10) : null;
+  } catch (error) {
+    console.error("[idempotency] getStoredCheckRunId failed:", error);
+    return null;
+  }
+};
+
+// ============================================================================
+// Comment ID Tracking
+// ============================================================================
+// Store comment IDs to allow editing/updating existing comments instead of
+// creating new ones (prevents comment spam on PRs)
+
+const COMMENT_KEY_PREFIX = "detent:comment";
+
+const buildCommentKey = (repository: string, prNumber: number): string =>
+  `${COMMENT_KEY_PREFIX}:${repository}:${prNumber}`;
+
+/**
+ * Stores the comment ID for a PR. Used to update existing comments instead of
+ * creating new ones on subsequent webhook calls.
+ */
+export const storeCommentId = async (
+  kv: KVNamespace,
+  repository: string,
+  prNumber: number,
+  commentId: number
+): Promise<void> => {
+  if (repository.length > 200 || prNumber <= 0) {
+    return;
+  }
+
+  const key = buildCommentKey(repository.toLowerCase(), prNumber);
+
+  try {
+    await kv.put(key, String(commentId), {
+      expirationTtl: IDEMPOTENCY_TTL_SECONDS,
+    });
+  } catch (error) {
+    console.error("[idempotency] storeCommentId failed:", error);
+  }
+};
+
+/**
+ * Retrieves a previously stored comment ID for a PR.
+ * Returns null if not found or on error.
+ */
+export const getStoredCommentId = async (
+  kv: KVNamespace,
+  repository: string,
+  prNumber: number
+): Promise<number | null> => {
+  if (repository.length > 200 || prNumber <= 0) {
+    return null;
+  }
+
+  const key = buildCommentKey(repository.toLowerCase(), prNumber);
+
+  try {
+    const value = await kv.get(key, {
+      cacheTtl: KV_CACHE_TTL_SECONDS,
+    });
+    return value ? Number.parseInt(value, 10) : null;
+  } catch (error) {
+    console.error("[idempotency] getStoredCommentId failed:", error);
+    return null;
+  }
+};

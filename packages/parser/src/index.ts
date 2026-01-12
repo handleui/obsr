@@ -189,6 +189,7 @@ export {
 // ============================================================================
 
 import {
+  createBiomeParser,
   createESLintParser,
   createGenericParser,
   createGolangParser,
@@ -205,7 +206,7 @@ import { createRegistry, type ParserRegistry } from "./registry.js";
  *
  * Priority order (highest to lowest):
  * - Language-specific (80): Go, Python, Rust, TypeScript
- * - ESLint (75): JavaScript/TypeScript linting
+ * - Linter (75): Biome, ESLint
  * - Infrastructure (70): CI/CD infrastructure failures
  * - Generic (10): Fallback for unknown formats
  */
@@ -218,7 +219,8 @@ export const createDefaultRegistry = (): ParserRegistry => {
   registry.register(createRustParser());
   registry.register(createTypeScriptParser());
 
-  // ESLint parser (priority 75)
+  // Linter parsers (priority 75)
+  registry.register(createBiomeParser());
   registry.register(createESLintParser());
 
   // Infrastructure parser (priority 70) - CI/CD failures

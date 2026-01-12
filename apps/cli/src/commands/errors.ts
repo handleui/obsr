@@ -15,6 +15,9 @@ import { getAccessToken } from "../lib/auth.js";
 const SSH_REMOTE_PATTERN = /^git@[^:]+:([^/]+\/[^/]+?)(?:\.git)?$/;
 const HTTPS_REMOTE_PATTERN = /^https?:\/\/[^/]+\/([^/]+\/[^/]+?)(?:\.git)?$/;
 
+// Display constants
+const MAX_MESSAGE_LENGTH = 80;
+
 /**
  * Parse a git remote URL to extract owner/repo
  * Supports both HTTPS and SSH formats:
@@ -91,8 +94,8 @@ const formatFileErrors = (
       const lineNum = error.line ? `:${error.line}` : "";
       // Truncate message if too long
       const message =
-        error.message.length > 80
-          ? `${error.message.slice(0, 77)}...`
+        error.message.length > MAX_MESSAGE_LENGTH
+          ? `${error.message.slice(0, MAX_MESSAGE_LENGTH - 3)}...`
           : error.message;
       lines.push(`    ${lineNum}  ${message}`);
     }
@@ -231,9 +234,11 @@ export const errorsCommand = defineCommand({
       const message = error instanceof Error ? error.message : String(error);
 
       if (message.includes("No CI runs found")) {
+        // Not an error, just no data yet - exit successfully
         const shortSha = commitSha.slice(0, 7);
         console.log(`No CI runs found for commit ${shortSha}`);
         console.log("This commit may not have been processed by Detent yet.");
+        process.exit(0);
       } else if (
         message.includes("not found") ||
         message.includes("not linked")
@@ -242,10 +247,11 @@ export const errorsCommand = defineCommand({
         console.error(
           "Make sure the Detent GitHub App is installed on this repository."
         );
+        process.exit(1);
       } else {
         console.error("Failed to fetch errors:", message);
+        process.exit(1);
       }
-      process.exit(1);
     }
   },
 });

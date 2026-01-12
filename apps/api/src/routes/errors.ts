@@ -113,6 +113,17 @@ app.get("/", async (c) => {
       return c.json({ error: "No CI runs found for this commit" }, 404);
     }
 
+    // Detect ambiguous short SHA matches (multiple distinct commits)
+    const distinctCommits = new Set(commitRuns.map((r) => r.commitSha));
+    if (distinctCommits.size > 1) {
+      return c.json(
+        {
+          error: `Ambiguous commit SHA: '${normalizedCommit}' matches ${distinctCommits.size} different commits. Please use a longer SHA prefix.`,
+        },
+        400
+      );
+    }
+
     // Get the full commit SHA from the first run
     const fullCommitSha = firstRun.commitSha;
 

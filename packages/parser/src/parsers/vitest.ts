@@ -69,6 +69,11 @@ const testFileSummaryPattern =
  * Failed test name: "x test name" or "X test name" (Unicode or ASCII)
  * SECURITY: Uses {1,500} instead of + to bound the capture group length.
  * Combined with MAX_LINE_LENGTH check, prevents ReDoS on long test names.
+ *
+ * LIMITATION: ASCII 'x' and 'X' markers may cause false positives for lines
+ * that happen to start with x/X followed by spaces (e.g., "X coordinate value"
+ * in debug output). The lower confidence score (0.85) helps mitigate this by
+ * allowing higher-confidence parsers to take precedence.
  */
 const failedTestNamePattern = /^\s*[×✕xX]\s+(.{1,500})$/;
 
@@ -113,6 +118,18 @@ const testFileHeaderPattern =
 /** Code context line pattern (indented) */
 const codeContextPattern = /^\s{2,}\S/;
 
+/**
+ * Pattern to identify lines that likely contain error context.
+ * Matches lines with:
+ * - Object/array notation: { } [ ]
+ * - Assignment/comparison operators: = === !==
+ * - Common error keywords: expected, received, actual, undefined, null
+ * - Numeric values or quoted strings
+ * - Line numbers or column indicators
+ */
+const errorContextHeuristicPattern =
+  /[{}[\]=]|expected|received|actual|undefined|null|true|false|".*"|'.*'|:\s*\d+/i;
+
 // ============================================================================
 // Noise Patterns
 // ============================================================================
@@ -153,6 +170,10 @@ const noisePatterns: readonly RegExp[] = [
   /^No test files found/i, // No tests message
   /^Typechecking/i, // Type checking indicator
   /^Restarting due to/i, // Restart message
+  // TAP format noise patterns: Vitest supports --reporter=tap output.
+  // These are included here for noise filtering only (not error parsing).
+  // If TAP reporter becomes more commonly used with distinct error formats,
+  // consider extracting to a dedicated TAP parser.
   /^ok\s+\d+\s+-/i, // TAP format passing test
   /^\d+\.\.\d+$/i, // TAP format test plan (e.g., "1..5")
   /^TAP version \d+$/i, // TAP version header
@@ -674,9 +695,16 @@ export class VitestParser
       return true;
     }
 
-    // Any other unrecognized line may signal end
-    // But be lenient for a few lines
-    if (this.errorState.raw.length < 20) {
+    // For unrecognized lines, use heuristics to determine if they're error context
+    // Lines with error-like content (objects, values, keywords) are more likely relevant
+    if (errorContextHeuristicPattern.test(stripped)) {
+      this.pushErrorLine(line);
+      return true;
+    }
+
+    // Be lenient for a few initial lines even without heuristic match,
+    // as error blocks often have varied formatting
+    if (this.errorState.raw.length < 10) {
       this.pushErrorLine(line);
       return true;
     }
@@ -690,13 +718,12 @@ export class VitestParser
         ? this.errorState.stackTrace.join("\n")
         : undefined;
 
-    let message = this.errorState.message;
-    if (
-      this.errorState.errorType &&
-      !message.startsWith(this.errorState.errorType)
-    ) {
-      message = `${this.errorState.errorType}: ${message}`;
-    }
+    // Prepend error type to message for complete error context.
+    // The message field only contains text after "ErrorType: " from the regex,
+    // so we reconstruct the full error format here.
+    let message = this.errorState.errorType
+      ? `${this.errorState.errorType}: ${this.errorState.message}`
+      : this.errorState.message;
 
     const messageTruncated = message.length > MAX_MESSAGE_LENGTH;
     message = truncateMessage(message);

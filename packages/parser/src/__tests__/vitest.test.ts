@@ -356,6 +356,32 @@ describe("VitestParser", () => {
       expect(parser.continueMultiLine(veryLongLine, ctx)).toBe(false);
     });
 
+    it("parses test names at the 500 character boundary", () => {
+      // Test name exactly 499 characters (should match - under limit)
+      const testName499 = "a".repeat(499);
+      const line499 = `× ${testName499}`;
+      const result499 = parser.parse(line499, ctx);
+      expect(result499).not.toBeNull();
+      expect(result499?.message).toBe(`Test failed: ${testName499}`);
+
+      parser.reset();
+
+      // Test name exactly 500 characters (should match - at limit)
+      const testName500 = "a".repeat(500);
+      const line500 = `× ${testName500}`;
+      const result500 = parser.parse(line500, ctx);
+      expect(result500).not.toBeNull();
+      expect(result500?.message).toBe(`Test failed: ${testName500}`);
+
+      parser.reset();
+
+      // Test name 501 characters (should NOT match - over limit)
+      const testName501 = "a".repeat(501);
+      const line501 = `× ${testName501}`;
+      const result501 = parser.parse(line501, ctx);
+      expect(result501).toBeNull();
+    });
+
     it("enforces resource limits on multi-line accumulation", () => {
       parser.parse("AssertionError: some error", ctx);
 

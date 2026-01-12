@@ -1041,10 +1041,11 @@ const handleNoPrEarlyReturn = async (
 // ============================================================================
 // Helper: Handle early return when waiting for other runs to complete
 // ============================================================================
-// Cleans up any orphaned check run and releases the commit lock before returning.
+// Releases the commit lock but preserves the check run in "queued" state.
+// The check run will be finalized when all workflows complete.
 const handleWaitingForRunsEarlyReturn = async (
-  github: ReturnType<typeof createGitHubService>,
-  token: string,
+  _github: ReturnType<typeof createGitHubService>,
+  _token: string,
   kv: KVNamespace,
   context: {
     installationId: number;
@@ -1063,34 +1064,15 @@ const handleWaitingForRunsEarlyReturn = async (
   completed: number;
   pending: number;
 }> => {
-  const {
-    installationId,
-    owner,
-    repo,
-    repository,
-    headSha,
-    deliveryId,
-    storedCheckRunId,
-    completedCount,
-    pendingCount,
-  } = context;
+  const { repository, headSha, completedCount, pendingCount } = context;
 
   console.log(
     `[workflow_run] Waiting for ${pendingCount} more runs to complete`
   );
 
-  // Clean up any existing check run since we're returning early
-  if (storedCheckRunId) {
-    await attemptCheckRunCleanup(
-      github,
-      token,
-      installationId,
-      owner,
-      repo,
-      storedCheckRunId,
-      deliveryId
-    );
-  }
+  // NOTE: Do NOT clean up the check run here. It should remain in "queued" state
+  // and will be properly finalized when all workflows complete. Cleaning it up
+  // here would mark it as "cancelled" prematurely.
 
   await releaseCommitLock(kv, repository, headSha);
 
@@ -1105,10 +1087,11 @@ const handleWaitingForRunsEarlyReturn = async (
 // ============================================================================
 // Helper: Handle early return when all runs already processed (duplicate)
 // ============================================================================
-// Cleans up any orphaned check run and releases the commit lock before returning.
+// Releases the commit lock. The check run was already finalized by the original
+// processing, so we don't touch it.
 const handleAllRunsProcessedEarlyReturn = async (
-  github: ReturnType<typeof createGitHubService>,
-  token: string,
+  _github: ReturnType<typeof createGitHubService>,
+  _token: string,
   kv: KVNamespace,
   context: {
     installationId: number;
@@ -1126,33 +1109,16 @@ const handleAllRunsProcessedEarlyReturn = async (
   headSha: string;
   status: string;
 }> => {
-  const {
-    installationId,
-    owner,
-    repo,
-    repository,
-    headSha,
-    deliveryId,
-    storedCheckRunId,
-    runCount,
-  } = context;
+  const { repository, headSha, deliveryId, runCount } = context;
 
   console.log(
     `[workflow_run] All ${runCount} run attempts already stored, skipping [delivery: ${deliveryId}]`
   );
 
-  // Clean up any existing check run since we're returning early
-  if (storedCheckRunId) {
-    await attemptCheckRunCleanup(
-      github,
-      token,
-      installationId,
-      owner,
-      repo,
-      storedCheckRunId,
-      deliveryId
-    );
-  }
+  // NOTE: Do NOT clean up the check run here. All runs were already processed,
+  // which means the check run was already finalized (completed with success or
+  // failure) by the original webhook. Cleaning it up would wrongly overwrite
+  // that result with "cancelled".
 
   await releaseCommitLock(kv, repository, headSha);
 

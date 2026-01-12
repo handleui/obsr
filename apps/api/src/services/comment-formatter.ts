@@ -22,6 +22,10 @@ export interface FormatCommentOptions {
 // Top-level regex for performance (avoid creating in loops)
 const PIPE_PATTERN = /\|/g;
 const BACKTICK_PATTERN = /`/g;
+const NEWLINE_PATTERN = /[\r\n]+/g;
+const HTML_TAG_PATTERN = /[<>&"']/g;
+const BRACKET_OPEN_PATTERN = /\[/g;
+const BRACKET_CLOSE_PATTERN = /\]/g;
 
 // GitHub Check Run API limits
 // See: https://docs.github.com/en/rest/checks/runs
@@ -32,14 +36,43 @@ const ANNOTATION_LIMITS = {
   RAW_DETAILS_MAX_BYTES: 65_536, // 64 KB
 } as const;
 
+// Check run output field limits (per GitHub API docs)
+// API maximum is 65535 chars; we use slightly lower to avoid edge cases
+const OUTPUT_LIMITS = {
+  SUMMARY_MAX_CHARS: 65_000,
+  TEXT_MAX_CHARS: 65_000,
+} as const;
+
 // Practical limit for annotation messages (readability in UI)
 // API allows 64 KB but that's excessive for error messages
 const ANNOTATION_MESSAGE_PRACTICAL_LIMIT = 4096;
 
+// HTML entity map for escaping (hoisted for performance)
+// Note: & must be listed first conceptually (though replace() handles this correctly)
+const HTML_ENTITIES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+// Helper: escape HTML entities for safe insertion into HTML contexts
+// Prevents XSS via user-controlled content in <details>, <summary>, etc.
+const escapeHtml = (text: string): string => {
+  return text.replace(HTML_TAG_PATTERN, (char) => HTML_ENTITIES[char] ?? char);
+};
+
 // Helper: escape text for markdown table cells
 // Pipe chars break table structure, backticks can interfere with inline code
+// Newlines break table rows, brackets can create links
 const escapeTableCell = (text: string): string => {
-  return text.replace(PIPE_PATTERN, "\\|").replace(BACKTICK_PATTERN, "\\`");
+  return text
+    .replace(NEWLINE_PATTERN, " ") // Newlines break table rows
+    .replace(PIPE_PATTERN, "\\|")
+    .replace(BACKTICK_PATTERN, "\\`")
+    .replace(BRACKET_OPEN_PATTERN, "\\[") // Prevent markdown link injection
+    .replace(BRACKET_CLOSE_PATTERN, "\\]");
 };
 
 // Format UTC timestamp in ISO-like format (internationally unambiguous)
@@ -208,7 +241,7 @@ export interface FormatCheckRunOptions {
 const WHITESPACE_PATTERN = /\s+/g;
 
 // Helper: truncate and sanitize message for display
-const truncateMessage = (message: string, maxLen = 80): string => {
+const truncateMessage = (message: string, maxLen = 500): string => {
   const clean = message.replace(WHITESPACE_PATTERN, " ").trim();
   const escaped = escapeTableCell(clean);
   if (escaped.length <= maxLen) {
@@ -217,7 +250,8 @@ const truncateMessage = (message: string, maxLen = 80): string => {
   return `${escaped.slice(0, maxLen - 3)}...`;
 };
 
-// Helper: truncate file path for display
+// Helper: truncate file path for display (returns unescaped path)
+// Caller must apply appropriate escaping (escapeHtml or escapeTableCell)
 const truncatePath = (path: string, maxLen = 50): string => {
   if (path.length <= maxLen) {
     return path;
@@ -327,8 +361,11 @@ const calculateErrorPriority = (error: ParsedError): number => {
 };
 
 // Create a unique key for error deduplication (file:line)
+// Uses sentinel values that won't collide with real paths/lines:
+// - "__no_path__" instead of "unknown" (real files could be named "unknown")
+// - "__no_line__" instead of 0 (real errors can occur at line 0)
 const createErrorKey = (error: ParsedError): string => {
-  return `${error.filePath ?? "unknown"}:${error.line ?? 0}`;
+  return `${error.filePath ?? "__no_path__"}:${error.line ?? "__no_line__"}`;
 };
 
 // Deduplicated error with combined messages from same location
@@ -355,9 +392,11 @@ const mergeIntoExisting = (
   }
 
   // Keep higher severity (failure > warning > notice)
+  // Numeric mapping: failure=2, warning=1, notice=0
+  const severityRank = { failure: 2, warning: 1, notice: 0 } as const;
   const newLevel = mapSeverityToAnnotationLevel(error.severity);
   const existingLevel = mapSeverityToAnnotationLevel(existing.severity);
-  if (newLevel === "failure" && existingLevel !== "failure") {
+  if (severityRank[newLevel] > severityRank[existingLevel]) {
     existing.severity = error.severity;
   }
 
@@ -422,6 +461,140 @@ const capitalizeSource = (source: string): string => {
     nodejs: "Node.js",
   };
   return knownSources[source.toLowerCase()] ?? source;
+};
+
+// === GROUPING HELPERS ===
+
+interface ErrorsBySource {
+  source: string;
+  displayName: string;
+  errors: ParsedError[];
+}
+
+interface ErrorsByFile {
+  filePath: string;
+  errors: ParsedError[];
+}
+
+// Group errors by their source tool (typescript, biome, eslint, etc.)
+const groupErrorsBySource = (errors: ParsedError[]): ErrorsBySource[] => {
+  const grouped = new Map<string, ParsedError[]>();
+
+  for (const error of errors) {
+    const source = error.source ?? "unknown";
+    const existing = grouped.get(source) ?? [];
+    existing.push(error);
+    grouped.set(source, existing);
+  }
+
+  // Sort sources alphabetically, but put "unknown" last
+  return Array.from(grouped.entries())
+    .sort(([a], [b]) => {
+      if (a === "unknown") {
+        return 1;
+      }
+      if (b === "unknown") {
+        return -1;
+      }
+      return a.localeCompare(b);
+    })
+    .map(([source, errs]) => ({
+      source,
+      displayName: capitalizeSource(source),
+      errors: errs.sort((a, b) => {
+        // Sort by file, then line
+        const fileCompare = (a.filePath ?? "").localeCompare(b.filePath ?? "");
+        if (fileCompare !== 0) {
+          return fileCompare;
+        }
+        return (a.line ?? 0) - (b.line ?? 0);
+      }),
+    }));
+};
+
+// Group errors by file path within a source
+// Note: Assumes errors are already sorted by file then line (from groupErrorsBySource)
+// so we only need to sort file paths, not errors within each file
+const groupErrorsByFile = (errors: ParsedError[]): ErrorsByFile[] => {
+  const grouped = new Map<string, ParsedError[]>();
+
+  for (const error of errors) {
+    const filePath = error.filePath ?? "__no_path__";
+    const existing = grouped.get(filePath) ?? [];
+    existing.push(error);
+    grouped.set(filePath, existing);
+  }
+
+  // Sort file paths alphabetically
+  // Errors within each file are already sorted by line from groupErrorsBySource
+  return Array.from(grouped.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([filePath, errs]) => ({
+      filePath,
+      errors: errs,
+    }));
+};
+
+// Format the text section with errors grouped by source and file
+const formatTextSection = (errors: ParsedError[]): string[] => {
+  const lines: string[] = [];
+
+  // Annotation note at top
+  const annotatableCount = errors.filter(
+    (e) => e.filePath && e.line && !e.possiblyTestOutput
+  ).length;
+  if (annotatableCount > 0) {
+    lines.push(
+      `*${annotatableCount} error${annotatableCount === 1 ? "" : "s"} annotated inline where possible*`
+    );
+    lines.push("");
+    lines.push("---");
+    lines.push("");
+  }
+
+  // Group by source, then by file
+  const bySource = groupErrorsBySource(errors);
+
+  for (const sourceGroup of bySource) {
+    const errorCount = sourceGroup.errors.length;
+    // Escape source name to prevent markdown injection via error.source
+    const safeName = escapeTableCell(sourceGroup.displayName);
+    lines.push(
+      `### ${safeName} (${errorCount} error${errorCount === 1 ? "" : "s"})`
+    );
+    lines.push("");
+
+    const byFile = groupErrorsByFile(sourceGroup.errors);
+
+    for (const fileGroup of byFile) {
+      const fileErrorCount = fileGroup.errors.length;
+      // Escape HTML in file path to prevent XSS via malicious file names
+      const displayPath = escapeHtml(truncatePath(fileGroup.filePath, 80));
+
+      lines.push("<details>");
+      lines.push(
+        `<summary>${displayPath} (${fileErrorCount} error${fileErrorCount === 1 ? "" : "s"})</summary>`
+      );
+      lines.push("");
+      lines.push("| Line | Message |");
+      lines.push("|------|---------|");
+
+      for (const error of fileGroup.errors) {
+        const line = error.line ?? "-";
+        const message = truncateMessage(error.message);
+        lines.push(`| ${line} | ${message} |`);
+      }
+
+      lines.push("");
+      lines.push("</details>");
+      lines.push("");
+    }
+
+    lines.push("---");
+    lines.push("");
+  }
+
+  return lines;
 };
 
 // Generate annotation title: concise, scannable header
@@ -625,39 +798,35 @@ export const formatCheckRunOutput = (
   }
 
   // === TEXT: Error details (shown below summary) ===
-  const textLines: string[] = [];
+  // Cap at 200 errors for reasonable output size
+  const maxDisplayErrors = 200;
+  const displayErrors = errors.slice(0, maxDisplayErrors);
+  const textLines = formatTextSection(displayErrors);
 
-  // Sort errors by priority (most actionable first) for display
-  const sortedErrors = [...errors].sort(
-    (a, b) => calculateErrorPriority(b) - calculateErrorPriority(a)
-  );
-
-  // Top errors table (max 10)
-  const displayErrors = sortedErrors.slice(0, 10);
-  textLines.push("### Top Errors");
-  textLines.push("");
-  textLines.push("| File | Line | Message |");
-  textLines.push("|------|------|---------|");
-
-  for (const error of displayErrors) {
-    const file = error.filePath ? truncatePath(error.filePath) : "_unknown_";
-    const line = error.line ?? "-";
-    const message = truncateMessage(error.message);
-    textLines.push(`| ${file} | ${line} | ${message} |`);
-  }
-
-  if (totalErrors > 10) {
+  // Show truncation note if errors were capped
+  if (errors.length > maxDisplayErrors) {
     textLines.push("");
-    textLines.push(`_Showing 10 of ${totalErrors} errors_`);
+    textLines.push(`_Showing ${maxDisplayErrors} of ${errors.length} errors_`);
   }
 
   // Footer with CLI command
-  textLines.push("");
   textLines.push(
     `\`detent errors --commit ${headSha.slice(0, 7)}\` for full list`
   );
 
+  let text = textLines.join("\n");
+
+  // Ensure we don't exceed GitHub's text field limit (65535 chars)
+  if (text.length > OUTPUT_LIMITS.TEXT_MAX_CHARS) {
+    text = `${text.slice(0, OUTPUT_LIMITS.TEXT_MAX_CHARS - 500)}\n\n_Output truncated due to size limits_`;
+  }
+
   // === ANNOTATIONS: Inline file annotations ===
+  // Sort errors by priority (most actionable first) for annotations
+  const sortedErrors = [...errors].sort(
+    (a, b) => calculateErrorPriority(b) - calculateErrorPriority(a)
+  );
+
   // Filter to errors with file path and line number (required for annotations)
   // Also filter out test output noise (vitest/jest progress, etc.)
   const errorsWithPath = sortedErrors.filter(
@@ -665,22 +834,27 @@ export const formatCheckRunOutput = (
   );
 
   // Deduplicate errors at same file:line to reduce annotation noise
+  // Note: Order is preserved because:
+  // 1. Input is already sorted by priority (highest first)
+  // 2. Map preserves insertion order
+  // 3. First error at each file:line has highest priority for that location
   const deduplicatedErrors = deduplicateErrors(errorsWithPath);
-
-  // Re-sort deduplicated errors by priority
-  const sortedDeduped = deduplicatedErrors.sort(
-    (a, b) => calculateErrorPriority(b) - calculateErrorPriority(a)
-  );
 
   // Create annotations using helper (max 50 per request)
   // Helper handles: severity-based levels, rich titles, raw_details, column info
-  const annotations = sortedDeduped
+  const annotations = deduplicatedErrors
     .slice(0, ANNOTATION_LIMITS.MAX_PER_REQUEST)
     .map(createAnnotation);
 
+  // Build summary and ensure it doesn't exceed GitHub's limit
+  let summary = summaryLines.join("\n");
+  if (summary.length > OUTPUT_LIMITS.SUMMARY_MAX_CHARS) {
+    summary = `${summary.slice(0, OUTPUT_LIMITS.SUMMARY_MAX_CHARS - 100)}\n\n_Summary truncated_`;
+  }
+
   return {
-    summary: summaryLines.join("\n"),
-    text: textLines.join("\n"),
+    summary,
+    text,
     annotations: annotations.length > 0 ? annotations : undefined,
   };
 };

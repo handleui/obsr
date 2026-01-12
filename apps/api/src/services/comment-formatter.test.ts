@@ -327,23 +327,29 @@ describe("formatCheckRunOutput", () => {
   });
 
   describe("text (error details)", () => {
-    it("includes top errors table when errors exist", () => {
+    it("includes errors grouped by source when errors exist", () => {
       const result = formatCheckRunOutput(
         createCheckRunOptions({
           errors: [
-            { message: "Type error", filePath: "src/app.ts", line: 42 },
+            {
+              message: "Type error",
+              filePath: "src/app.ts",
+              line: 42,
+              source: "typescript",
+            },
             {
               message: "Cannot find module",
               filePath: "src/utils.ts",
               line: 10,
+              source: "typescript",
             },
           ],
           totalErrors: 2,
         })
       );
 
-      expect(result.text).toContain("### Top Errors");
-      expect(result.text).toContain("| File | Line | Message |");
+      expect(result.text).toContain("### TypeScript (2 errors)");
+      expect(result.text).toContain("| Line | Message |");
       expect(result.text).toContain("src/app.ts");
       expect(result.text).toContain("42");
     });
@@ -371,6 +377,125 @@ describe("formatCheckRunOutput", () => {
       );
 
       expect(result.text).toBeUndefined();
+    });
+
+    it("should group errors by source tool", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors: [
+            {
+              message: "Type error",
+              source: "typescript",
+              filePath: "a.ts",
+              line: 1,
+            },
+            {
+              message: "Lint error",
+              source: "biome",
+              filePath: "b.ts",
+              line: 2,
+            },
+            {
+              message: "Another type error",
+              source: "typescript",
+              filePath: "c.ts",
+              line: 3,
+            },
+          ],
+          totalErrors: 3,
+        })
+      );
+
+      expect(result.text).toContain("### TypeScript (2 errors)");
+      expect(result.text).toContain("### Biome (1 error)");
+    });
+
+    it("should group errors by file within source", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors: [
+            {
+              message: "Error 1",
+              source: "typescript",
+              filePath: "src/a.ts",
+              line: 10,
+            },
+            {
+              message: "Error 2",
+              source: "typescript",
+              filePath: "src/a.ts",
+              line: 20,
+            },
+            {
+              message: "Error 3",
+              source: "typescript",
+              filePath: "src/b.ts",
+              line: 5,
+            },
+          ],
+          totalErrors: 3,
+        })
+      );
+
+      expect(result.text).toContain("<summary>src/a.ts (2 errors)</summary>");
+      expect(result.text).toContain("<summary>src/b.ts (1 error)</summary>");
+    });
+
+    it("should use collapsible details tags", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors: [
+            { message: "Error", source: "biome", filePath: "test.ts", line: 1 },
+          ],
+          totalErrors: 1,
+        })
+      );
+
+      expect(result.text).toContain("<details>");
+      expect(result.text).toContain("</details>");
+    });
+
+    it("should show annotation note at top when errors have file and line", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors: [
+            { message: "Error", source: "biome", filePath: "test.ts", line: 1 },
+          ],
+          totalErrors: 1,
+        })
+      );
+
+      expect(result.text).toContain(
+        "*1 error annotated inline where possible*"
+      );
+    });
+
+    it("should handle errors without source", () => {
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors: [{ message: "Unknown error", filePath: "test.ts", line: 1 }],
+          totalErrors: 1,
+        })
+      );
+
+      // Unknown source should show as capitalized
+      expect(result.text).toContain("unknown");
+    });
+
+    it("should handle more than 10 errors", () => {
+      const errors = Array.from({ length: 25 }, (_, i) => ({
+        message: `Error ${i + 1}`,
+        source: "typescript",
+        filePath: "test.ts",
+        line: i + 1,
+      }));
+
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({ errors, totalErrors: 25 })
+      );
+
+      // Should show all 25 errors, not just 10
+      expect(result.text).toContain("| 25 |");
     });
   });
 
@@ -542,5 +667,280 @@ describe("formatPassingComment", () => {
 
     expect(result).toContain("✓ All checks passed");
     expect(result).not.toContain("passed ·"); // No "0 passed" shown
+  });
+});
+
+describe("XSS prevention", () => {
+  const createCheckRunOptions = (
+    overrides: Partial<Parameters<typeof formatCheckRunOutput>[0]> = {}
+  ) => ({
+    owner: "test-owner",
+    repo: "test-repo",
+    headSha: "abc1234567890def1234567890def1234567890",
+    runs: [],
+    errors: [],
+    totalErrors: 0,
+    ...overrides,
+  });
+
+  it("escapes HTML in file paths to prevent XSS", () => {
+    const result = formatCheckRunOutput(
+      createCheckRunOptions({
+        errors: [
+          {
+            message: "Error",
+            filePath: '<script>alert("xss")</script>',
+            line: 1,
+            source: "typescript",
+          },
+        ],
+        totalErrors: 1,
+      })
+    );
+
+    // File path should be HTML escaped in the text output
+    expect(result.text).not.toContain("<script>");
+    expect(result.text).toContain("&lt;script&gt;");
+  });
+
+  it("escapes markdown injection in workflow names", () => {
+    const result = formatResultsComment(
+      createOptions({
+        runs: [
+          {
+            name: "[malicious](http://evil.com)",
+            id: 123,
+            conclusion: "failure",
+            errorCount: 1,
+          },
+        ],
+      })
+    );
+
+    // Brackets should be escaped to prevent markdown link injection
+    expect(result).not.toContain("[malicious]");
+    expect(result).toContain("\\[malicious\\]");
+  });
+
+  it("escapes ampersands correctly without double-escaping", () => {
+    const result = formatCheckRunOutput(
+      createCheckRunOptions({
+        errors: [
+          {
+            message: "Error",
+            filePath: "foo&bar<baz",
+            line: 1,
+            source: "typescript",
+          },
+        ],
+        totalErrors: 1,
+      })
+    );
+
+    // & should become &amp; and < should become &lt;
+    // But &amp; should NOT become &amp;amp;
+    expect(result.text).toContain("&amp;");
+    expect(result.text).toContain("&lt;");
+    expect(result.text).not.toContain("&amp;amp;");
+    expect(result.text).not.toContain("&amp;lt;");
+  });
+});
+
+describe("severity upgrade logic", () => {
+  const createCheckRunOptions = (
+    overrides: Partial<Parameters<typeof formatCheckRunOutput>[0]> = {}
+  ) => ({
+    owner: "test-owner",
+    repo: "test-repo",
+    headSha: "abc1234567890def1234567890def1234567890",
+    runs: [],
+    errors: [],
+    totalErrors: 0,
+    ...overrides,
+  });
+
+  it("upgrades notice to warning when merging errors at same location", () => {
+    const result = formatCheckRunOutput(
+      createCheckRunOptions({
+        errors: [
+          {
+            message: "Info message",
+            filePath: "src/app.ts",
+            line: 10,
+            severity: "info", // maps to notice
+            source: "typescript",
+          },
+          {
+            message: "Warning message",
+            filePath: "src/app.ts",
+            line: 10,
+            severity: "warning", // maps to warning
+            source: "typescript",
+          },
+        ],
+        totalErrors: 2,
+      })
+    );
+
+    // Should have one annotation (deduplicated) with warning level
+    expect(result.annotations).toHaveLength(1);
+    expect(result.annotations?.[0]?.annotation_level).toBe("warning");
+  });
+
+  it("upgrades warning to failure when merging errors at same location", () => {
+    const result = formatCheckRunOutput(
+      createCheckRunOptions({
+        errors: [
+          {
+            message: "Warning message",
+            filePath: "src/app.ts",
+            line: 10,
+            severity: "warning",
+            source: "typescript",
+          },
+          {
+            message: "Error message",
+            filePath: "src/app.ts",
+            line: 10,
+            severity: "error", // maps to failure
+            source: "typescript",
+          },
+        ],
+        totalErrors: 2,
+      })
+    );
+
+    expect(result.annotations).toHaveLength(1);
+    expect(result.annotations?.[0]?.annotation_level).toBe("failure");
+  });
+
+  it("upgrades notice to failure when merging errors at same location", () => {
+    const result = formatCheckRunOutput(
+      createCheckRunOptions({
+        errors: [
+          {
+            message: "Info message",
+            filePath: "src/app.ts",
+            line: 10,
+            severity: "info",
+            source: "typescript",
+          },
+          {
+            message: "Error message",
+            filePath: "src/app.ts",
+            line: 10,
+            severity: "error",
+            source: "typescript",
+          },
+        ],
+        totalErrors: 2,
+      })
+    );
+
+    expect(result.annotations).toHaveLength(1);
+    expect(result.annotations?.[0]?.annotation_level).toBe("failure");
+  });
+
+  it("does not downgrade severity when merging", () => {
+    const result = formatCheckRunOutput(
+      createCheckRunOptions({
+        errors: [
+          {
+            message: "Error message",
+            filePath: "src/app.ts",
+            line: 10,
+            severity: "error",
+            source: "typescript",
+          },
+          {
+            message: "Info message",
+            filePath: "src/app.ts",
+            line: 10,
+            severity: "info",
+            source: "typescript",
+          },
+        ],
+        totalErrors: 2,
+      })
+    );
+
+    expect(result.annotations).toHaveLength(1);
+    expect(result.annotations?.[0]?.annotation_level).toBe("failure");
+  });
+});
+
+describe("GitHub API limits", () => {
+  const createCheckRunOptions = (
+    overrides: Partial<Parameters<typeof formatCheckRunOutput>[0]> = {}
+  ) => ({
+    owner: "test-owner",
+    repo: "test-repo",
+    headSha: "abc1234567890def1234567890def1234567890",
+    runs: [],
+    errors: [],
+    totalErrors: 0,
+    ...overrides,
+  });
+
+  it("truncates text output when exceeding 65000 chars", () => {
+    // Create many errors with long messages to exceed the 65000 char limit
+    // Message length is capped at 500 chars by truncateMessage, so we need many errors
+    // Each error + markdown structure adds ~300-400 chars
+    // 200 errors * ~350 chars = ~70000 chars
+    const longMessage = "A".repeat(400);
+    const errors = Array.from({ length: 200 }, (_, i) => ({
+      message: `${longMessage} error ${i + 1}`,
+      filePath: `src/very/long/deeply/nested/directory/structure/path/file${i}.ts`,
+      line: i + 1,
+      source: `source${i % 20}`, // 20 different sources = more section headers
+    }));
+
+    const result = formatCheckRunOutput(
+      createCheckRunOptions({
+        errors,
+        totalErrors: 200,
+      })
+    );
+
+    // Text should be truncated and include truncation notice
+    expect(result.text?.length).toBeLessThanOrEqual(65_000);
+    expect(result.text).toContain("truncated");
+  });
+
+  it("caps displayed errors at 200 to limit output size", () => {
+    const errors = Array.from({ length: 250 }, (_, i) => ({
+      message: `Error ${i + 1}`,
+      filePath: `src/file${i}.ts`,
+      line: i + 1,
+      source: "typescript",
+    }));
+
+    const result = formatCheckRunOutput(
+      createCheckRunOptions({
+        errors,
+        totalErrors: 250,
+      })
+    );
+
+    // Should show truncation message
+    expect(result.text).toContain("Showing 200 of 250 errors");
+  });
+
+  it("limits annotations to 50 per request", () => {
+    const errors = Array.from({ length: 100 }, (_, i) => ({
+      message: `Error ${i}`,
+      filePath: `src/file${i}.ts`,
+      line: i + 1,
+      source: "typescript",
+    }));
+
+    const result = formatCheckRunOutput(
+      createCheckRunOptions({
+        errors,
+        totalErrors: 100,
+      })
+    );
+
+    expect(result.annotations).toHaveLength(50);
   });
 });

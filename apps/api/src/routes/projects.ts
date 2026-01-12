@@ -9,83 +9,9 @@ import { and, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { createDb } from "../db/client";
 import { organizations, projects } from "../db/schema";
-import { getVerifiedGitHubIdentity } from "../lib/github-identity";
-import { verifyGitHubMembership } from "../lib/github-membership";
+import { verifyOrgAccess } from "../lib/org-access";
 import { validateHandle, validateSlug, validateUUID } from "../lib/validation";
 import type { Env } from "../types/env";
-
-interface OrgForVerification {
-  id: string;
-  provider: string;
-  providerAccountLogin: string;
-  providerInstallationId: string | null;
-  providerAccountType: string;
-  providerAccountId: string;
-  installerGithubId: string | null;
-}
-
-interface OrgAccessResult {
-  allowed: boolean;
-  role?: "owner" | "admin" | "member";
-  error?: string;
-}
-
-/**
- * Verify user has access to an organization via on-demand GitHub membership check.
- * This replaces stale database lookups with real-time verification.
- */
-const verifyOrgAccess = async (
-  userId: string,
-  org: OrgForVerification,
-  env: Env
-): Promise<OrgAccessResult> => {
-  // Only GitHub orgs supported
-  if (org.provider !== "github" || !org.providerInstallationId) {
-    return { allowed: false, error: "GitHub App not installed" };
-  }
-
-  // Get verified GitHub identity
-  const githubIdentity = await getVerifiedGitHubIdentity(
-    userId,
-    env.WORKOS_API_KEY
-  );
-  if (!githubIdentity) {
-    return { allowed: false, error: "GitHub account not linked" };
-  }
-
-  // For personal accounts, check if user is the owner
-  if (org.providerAccountType === "user") {
-    if (githubIdentity.userId === org.providerAccountId) {
-      return { allowed: true, role: "owner" };
-    }
-    return { allowed: false, error: "Not the owner of this account" };
-  }
-
-  // Verify GitHub org membership
-  const membership = await verifyGitHubMembership(
-    githubIdentity.username,
-    org.providerAccountLogin,
-    org.providerInstallationId,
-    env
-  );
-
-  if (!membership.isMember) {
-    return {
-      allowed: false,
-      error: "Not a member of this GitHub organization",
-    };
-  }
-
-  // Determine role
-  let role: "owner" | "admin" | "member" = "member";
-  if (org.installerGithubId === githubIdentity.userId) {
-    role = "owner";
-  } else if (membership.role === "admin") {
-    role = "admin";
-  }
-
-  return { allowed: true, role };
-};
 
 const app = new Hono<{ Bindings: Env }>();
 

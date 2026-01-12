@@ -342,6 +342,7 @@ export const runs = pgTable(
     index("runs_project_id_idx").on(table.projectId),
     index("runs_provider_run_id_idx").on(table.provider, table.runId),
     index("runs_commit_sha_idx").on(table.commitSha),
+    index("runs_repository_commit_idx").on(table.repository, table.commitSha),
     index("runs_pr_number_idx").on(table.prNumber),
     // Primary deduplication: unique per repository + run ID + attempt
     // GitHub re-runs have same runId but increment runAttempt (starts at 1)

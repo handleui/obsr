@@ -99,6 +99,13 @@
       "when": 1768241713259,
       "tag": "0013_legal_hellcat",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1768248725756,
+      "tag": "0014_stormy_sunspot",
+      "breakpoints": true
     }
   ]
 }

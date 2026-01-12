@@ -121,8 +121,7 @@ export const createCostTracker = (
       state.taskCostsUSD += costUSD;
       state.totalCostUSD += costUSD;
       state.testCaseCount++;
-      state.avgCostPerCaseUSD =
-        state.testCaseCount > 0 ? state.totalCostUSD / state.testCaseCount : 0;
+      state.avgCostPerCaseUSD = state.totalCostUSD / state.testCaseCount;
     },
 
     trackJudgeCost: (count = 1, costPerCallUSD = 0.004): void => {

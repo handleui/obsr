@@ -71,6 +71,20 @@
       "when": 1768108571634,
       "tag": "0009_crazy_multiple_man",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1768177080616,
+      "tag": "0010_many_alex_wilder",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1768178780182,
+      "tag": "0011_same_celestials",
+      "breakpoints": true
     }
   ]
 }

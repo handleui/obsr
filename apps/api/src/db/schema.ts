@@ -279,6 +279,8 @@ export const runs = pgTable(
     runId: varchar("run_id", { length: 255 }),
     repository: varchar("repository", { length: 500 }),
     commitSha: varchar("commit_sha", { length: 64 }),
+    prNumber: integer("pr_number"),
+    checkRunId: varchar("check_run_id", { length: 64 }),
     logBytes: integer("log_bytes"),
     errorCount: integer("error_count"),
     receivedAt: timestamp("received_at").defaultNow().notNull(),
@@ -287,6 +289,12 @@ export const runs = pgTable(
     index("runs_project_id_idx").on(table.projectId),
     index("runs_provider_run_id_idx").on(table.provider, table.runId),
     index("runs_commit_sha_idx").on(table.commitSha),
+    index("runs_pr_number_idx").on(table.prNumber),
+    uniqueIndex("runs_repository_commit_run_unique_idx").on(
+      table.repository,
+      table.commitSha,
+      table.runId
+    ),
   ]
 );
 

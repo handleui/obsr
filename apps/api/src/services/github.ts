@@ -1,4 +1,9 @@
 import type { Env } from "../types/env";
+import {
+  blobToArrayBuffer,
+  extractLogsFromZip,
+  type LogExtractionResult,
+} from "./log-extractor";
 
 // GitHub App API service
 // Handles: JWT generation, installation tokens, API calls
@@ -18,6 +23,8 @@ const BASE64_TRAILING_EQUALS = /=+$/;
 const GITHUB_NAME_PATTERN = /^[a-zA-Z0-9][-a-zA-Z0-9._]*$/;
 // Branch names: more permissive but no path traversal
 const GITHUB_BRANCH_PATTERN = /^[a-zA-Z0-9][-a-zA-Z0-9._/]*$/;
+// Git SHA: 40-character hexadecimal (full SHA) or 7+ character short SHA
+const GIT_SHA_PATTERN = /^[a-fA-F0-9]{7,40}$/;
 
 const isValidGitHubName = (name: string): boolean => {
   return (
@@ -36,6 +43,125 @@ const isValidBranchName = (branch: string): boolean => {
     !branch.includes("..") &&
     !branch.startsWith("/") &&
     !branch.endsWith("/")
+  );
+};
+
+const isValidGitSha = (sha: string): boolean => {
+  return GIT_SHA_PATTERN.test(sha);
+};
+
+// Rate limit information extracted from GitHub API response headers
+interface RateLimitInfo {
+  limit: number;
+  remaining: number;
+  reset: Date;
+  isExceeded: boolean;
+}
+
+// Parse rate limit headers from GitHub API response
+const parseRateLimitHeaders = (response: Response): RateLimitInfo | null => {
+  const limit = response.headers.get("x-ratelimit-limit");
+  const remaining = response.headers.get("x-ratelimit-remaining");
+  const reset = response.headers.get("x-ratelimit-reset");
+
+  if (!(limit && remaining && reset)) {
+    return null;
+  }
+
+  const resetTimestamp = Number.parseInt(reset, 10) * 1000; // Convert to milliseconds
+  return {
+    limit: Number.parseInt(limit, 10),
+    remaining: Number.parseInt(remaining, 10),
+    reset: new Date(resetTimestamp),
+    isExceeded: Number.parseInt(remaining, 10) === 0,
+  };
+};
+
+// Log rate limit warning if remaining requests are low
+const logRateLimitWarning = (
+  rateLimitInfo: RateLimitInfo | null,
+  context: string
+): void => {
+  if (!rateLimitInfo) {
+    return;
+  }
+
+  const { remaining, limit, reset } = rateLimitInfo;
+  const percentRemaining = (remaining / limit) * 100;
+
+  // Warn if less than 10% of rate limit remaining
+  if (percentRemaining < 10) {
+    console.warn(
+      `[github] Rate limit warning for ${context}: ${remaining}/${limit} remaining (resets at ${reset.toISOString()})`
+    );
+  }
+};
+
+// Create enhanced error with rate limit context
+const createRateLimitError = (
+  response: Response,
+  rateLimitInfo: RateLimitInfo | null,
+  context: string
+): Error => {
+  if (rateLimitInfo?.isExceeded) {
+    const retryAfter = response.headers.get("retry-after");
+    const resetTime = rateLimitInfo.reset.toISOString();
+    return new Error(
+      `Rate limit exceeded for ${context}. ` +
+        `Resets at ${resetTime}` +
+        (retryAfter ? `. Retry after ${retryAfter}s` : "")
+    );
+  }
+  return new Error(`GitHub API error for ${context}: ${response.status}`);
+};
+
+// Common validation for owner/repo
+const validateOwnerRepo = (
+  owner: string,
+  repo: string,
+  context: string
+): void => {
+  if (!(isValidGitHubName(owner) && isValidGitHubName(repo))) {
+    throw new Error(`${context}: Invalid owner or repo name`);
+  }
+};
+
+// Common validation for git SHA
+const validateGitSha = (sha: string, context: string): void => {
+  if (!isValidGitSha(sha)) {
+    throw new Error(
+      `${context}: Invalid SHA format. Expected 7-40 character hex string`
+    );
+  }
+};
+
+// Handle common GitHub API error responses and throw appropriate errors
+const handleApiError = async (
+  response: Response,
+  rateLimitInfo: RateLimitInfo | null,
+  context: string,
+  errorMessages: { 404?: string; 422?: string }
+): Promise<never> => {
+  // Check for rate limit errors
+  if (
+    (response.status === 403 || response.status === 429) &&
+    rateLimitInfo?.isExceeded
+  ) {
+    throw createRateLimitError(response, rateLimitInfo, context);
+  }
+
+  const error = await response.text();
+
+  // Provide more specific error messages for common failures
+  if (response.status === 404 && errorMessages[404]) {
+    throw new Error(`${context}: ${errorMessages[404]}`);
+  }
+  if (response.status === 422 && errorMessages[422]) {
+    throw new Error(`${context}: ${errorMessages[422]} ${error}`);
+  }
+
+  throw new Error(
+    `${context}: API request failed - ${response.status} ${error}`
   );
 };
 
@@ -170,6 +296,25 @@ interface InstallationReposResponse {
   }>;
 }
 
+interface WorkflowRunsResponse {
+  workflow_runs: Array<{
+    id: number;
+    name: string;
+    status: string;
+    conclusion: string | null;
+  }>;
+}
+
+interface CheckRunResponse {
+  id: number;
+  html_url: string;
+}
+
+interface CommentResponse {
+  id: number;
+  html_url: string;
+}
+
 // Module-level cache for installation tokens (survives across function calls within isolate)
 const tokenCache = new Map<number, { token: string; expiresAt: number }>();
 
@@ -239,11 +384,11 @@ const createGitHubServiceInternal = (env: Env) => {
     owner: string,
     repo: string,
     runId: number
-  ): Promise<string> => {
+  ): Promise<LogExtractionResult> => {
+    const context = `fetchWorkflowLogs(${owner}/${repo}, runId=${runId})`;
+
     // Validate inputs to prevent URL manipulation
-    if (!(isValidGitHubName(owner) && isValidGitHubName(repo))) {
-      throw new Error("Invalid owner or repo name");
-    }
+    validateOwnerRepo(owner, repo, context);
 
     // GitHub returns a redirect to a zip file containing logs
     const response = await fetch(
@@ -259,21 +404,25 @@ const createGitHubServiceInternal = (env: Env) => {
       }
     );
 
+    const rateLimitInfo = parseRateLimitHeaders(response);
+    logRateLimitWarning(rateLimitInfo, context);
+
     if (!response.ok) {
-      throw new Error(`Failed to fetch logs: ${response.status}`);
+      await handleApiError(response, rateLimitInfo, context, {
+        404: "Workflow run not found or logs expired",
+      });
     }
 
-    // Response is a zip file - we need to extract it
-    // For now, return the raw response to be processed by the caller
-    // In production, we'd use a zip library to extract specific job logs
+    // Extract logs from zip archive
     const blob = await response.blob();
+    const arrayBuffer = await blobToArrayBuffer(blob);
+    const result = extractLogsFromZip(arrayBuffer);
+
     console.log(
-      `[github] Fetched logs for ${owner}/${repo} run ${runId} (${blob.size} bytes)`
+      `[github] ${context}: Fetched ${result.totalBytes} bytes, ${result.jobCount} jobs`
     );
 
-    // Future: Unzip and extract relevant job logs
-    // Log extraction will require a zip library (e.g., pako or fflate)
-    return `[Log archive: ${blob.size} bytes - extraction not yet implemented]`;
+    return result;
   };
 
   const postComment = async (
@@ -526,6 +675,263 @@ const createGitHubServiceInternal = (env: Env) => {
     return allRepos;
   };
 
+  // GET /repos/{owner}/{repo}/actions/runs?head_sha={sha}
+  // Returns all workflow runs for a commit and whether they're all completed
+  const listWorkflowRunsForCommit = async (
+    token: string,
+    owner: string,
+    repo: string,
+    headSha: string
+  ): Promise<{
+    allCompleted: boolean;
+    runs: Array<{
+      id: number;
+      name: string;
+      status: string;
+      conclusion: string | null;
+    }>;
+  }> => {
+    const context = `listWorkflowRunsForCommit(${owner}/${repo}@${headSha.slice(0, 7)})`;
+
+    // Validate inputs
+    validateOwnerRepo(owner, repo, context);
+    validateGitSha(headSha, context);
+
+    const response = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/actions/runs?head_sha=${headSha}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "Detent-App",
+        },
+      }
+    );
+
+    const rateLimitInfo = parseRateLimitHeaders(response);
+    logRateLimitWarning(rateLimitInfo, context);
+
+    if (!response.ok) {
+      await handleApiError(response, rateLimitInfo, context, {});
+    }
+
+    const data = (await response.json()) as WorkflowRunsResponse;
+
+    // Handle empty or missing workflow_runs array
+    const workflowRuns = data.workflow_runs ?? [];
+    const runs = workflowRuns.map((run) => ({
+      id: run.id,
+      name: run.name ?? "Unknown",
+      status: run.status ?? "unknown",
+      conclusion: run.conclusion,
+    }));
+
+    // Empty runs array means no workflows configured or SHA not found
+    // Consider this as "all completed" since there's nothing to wait for
+    const allCompleted =
+      runs.length === 0 || runs.every((run) => run.status === "completed");
+
+    console.log(
+      `[github] ${context}: Found ${runs.length} workflow runs, allCompleted=${allCompleted}`
+    );
+
+    return { allCompleted, runs };
+  };
+
+  // POST /repos/{owner}/{repo}/check-runs
+  const createCheckRun = async (
+    token: string,
+    options: {
+      owner: string;
+      repo: string;
+      headSha: string;
+      name: string;
+      status: "queued" | "in_progress";
+      output?: { title: string; summary: string };
+    }
+  ): Promise<{ id: number; htmlUrl: string }> => {
+    const { owner, repo, headSha, name, status, output } = options;
+    const context = `createCheckRun(${owner}/${repo}@${headSha.slice(0, 7)}, "${name}")`;
+
+    // Validate inputs
+    validateOwnerRepo(owner, repo, context);
+    validateGitSha(headSha, context);
+    if (!name || name.trim().length === 0) {
+      throw new Error(`${context}: Check run name cannot be empty`);
+    }
+    // GitHub recommends unique check names to appear correctly in UI
+    if (name.length > 200) {
+      throw new Error(`${context}: Check run name too long (max 200 chars)`);
+    }
+
+    const body = {
+      name: name.trim(),
+      head_sha: headSha,
+      status,
+      ...(output && { output }),
+    };
+
+    const response = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/check-runs`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "Detent-App",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      }
+    );
+
+    const rateLimitInfo = parseRateLimitHeaders(response);
+    logRateLimitWarning(rateLimitInfo, context);
+
+    if (!response.ok) {
+      await handleApiError(response, rateLimitInfo, context, {
+        404: "Repository not found or app lacks permission to create check runs",
+        422: "Validation failed - check that SHA exists and name is valid.",
+      });
+    }
+
+    const data = (await response.json()) as CheckRunResponse;
+
+    // Validate response has expected fields
+    if (typeof data.id !== "number" || !data.html_url) {
+      throw new Error(
+        `${context}: Unexpected response format - missing id or html_url`
+      );
+    }
+
+    console.log(
+      `[github] ${context}: Created check run ${data.id} at ${data.html_url}`
+    );
+
+    return { id: data.id, htmlUrl: data.html_url };
+  };
+
+  // PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}
+  const updateCheckRun = async (
+    token: string,
+    options: {
+      owner: string;
+      repo: string;
+      checkRunId: number;
+      status: "completed";
+      conclusion: "success" | "failure" | "neutral" | "cancelled";
+      output?: { title: string; summary: string };
+    }
+  ): Promise<void> => {
+    const { owner, repo, checkRunId, status, conclusion, output } = options;
+    const context = `updateCheckRun(${owner}/${repo}, checkRunId=${checkRunId})`;
+
+    // Validate inputs
+    validateOwnerRepo(owner, repo, context);
+    if (!Number.isInteger(checkRunId) || checkRunId <= 0) {
+      throw new Error(`${context}: Invalid check run ID`);
+    }
+
+    const body = {
+      status,
+      conclusion,
+      completed_at: new Date().toISOString(),
+      ...(output && { output }),
+    };
+
+    const response = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/check-runs/${checkRunId}`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "Detent-App",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      }
+    );
+
+    const rateLimitInfo = parseRateLimitHeaders(response);
+    logRateLimitWarning(rateLimitInfo, context);
+
+    if (!response.ok) {
+      await handleApiError(response, rateLimitInfo, context, {
+        404: "Check run not found or app lacks permission to update it",
+        422: "Validation failed - check run may already be completed or conclusion invalid.",
+      });
+    }
+
+    console.log(`[github] ${context}: Updated to ${conclusion}`);
+  };
+
+  // POST /repos/{owner}/{repo}/issues/{issue_number}/comments - returns comment ID
+  const postCommentWithId = async (
+    token: string,
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    body: string
+  ): Promise<{ id: number; htmlUrl: string }> => {
+    const context = `postCommentWithId(${owner}/${repo}#${issueNumber})`;
+
+    // Validate inputs
+    validateOwnerRepo(owner, repo, context);
+    if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+      throw new Error(`${context}: Invalid issue number`);
+    }
+    if (!body || body.trim().length === 0) {
+      throw new Error(`${context}: Comment body cannot be empty`);
+    }
+    // GitHub API has a limit of ~65536 characters for comment body
+    if (body.length > 65_536) {
+      throw new Error(
+        `${context}: Comment body too long (${body.length} chars, max 65536)`
+      );
+    }
+
+    const response = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "Detent-App",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ body }),
+      }
+    );
+
+    const rateLimitInfo = parseRateLimitHeaders(response);
+    logRateLimitWarning(rateLimitInfo, context);
+
+    if (!response.ok) {
+      await handleApiError(response, rateLimitInfo, context, {
+        404: "Issue/PR not found or app lacks permission to comment",
+        422: "Validation failed - comment body may be invalid.",
+      });
+    }
+
+    const data = (await response.json()) as CommentResponse;
+
+    // Validate response has expected fields
+    if (typeof data.id !== "number" || !data.html_url) {
+      throw new Error(
+        `${context}: Unexpected response format - missing id or html_url`
+      );
+    }
+
+    console.log(`[github] ${context}: Posted comment ${data.id}`);
+    return { id: data.id, htmlUrl: data.html_url };
+  };
+
   return {
     getInstallationToken,
     getInstallationInfo,
@@ -534,6 +940,10 @@ const createGitHubServiceInternal = (env: Env) => {
     postComment,
     pushCommit,
     getPullRequestForRun,
+    listWorkflowRunsForCommit,
+    createCheckRun,
+    updateCheckRun,
+    postCommentWithId,
   };
 };
 

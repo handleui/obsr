@@ -1,4 +1,4 @@
-import type { Hyperdrive } from "@cloudflare/workers-types";
+import type { Hyperdrive, KVNamespace } from "@cloudflare/workers-types";
 
 // Cloudflare Worker environment bindings
 // Set these via: npx wrangler secret put <NAME>
@@ -32,6 +32,9 @@ export interface Env {
   // Upstash Redis for rate limiting
   UPSTASH_REDIS_REST_URL: string;
   UPSTASH_REDIS_REST_TOKEN: string;
+
+  // KV for webhook idempotency
+  "detent-idempotency": KVNamespace;
 
   // OpenStatus monitoring (optional)
   // Your OpenStatus status page slug for public status checks

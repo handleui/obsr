@@ -233,6 +233,40 @@ const toolPatterns: readonly ToolPattern[] = [
     displayName: "eslint",
   },
 
+  // Biome
+  {
+    pattern: /(?:^|\s|\/)biome\s+(check|lint|format|ci)\b/,
+    parserID: "biome",
+    displayName: "biome",
+  },
+  {
+    pattern: /(?:^|\s)npx\s+@biomejs\/biome\b/,
+    parserID: "biome",
+    displayName: "biome",
+  },
+  {
+    pattern: /(?:^|\s)npx\s+biome\b/,
+    parserID: "biome",
+    displayName: "biome",
+  },
+  {
+    pattern: /(?:^|\s)bunx?\s+biome\b/,
+    parserID: "biome",
+    displayName: "biome",
+  },
+  {
+    // HACK: Use [^\n]* to prevent ReDoS
+    pattern: /(?:^|\s)pnpm\s+[^\n]*\bbiome\b/,
+    parserID: "biome",
+    displayName: "biome",
+  },
+  {
+    // HACK: Use [^\n]* to prevent ReDoS
+    pattern: /(?:^|\s)yarn\s+[^\n]*\bbiome\b/,
+    parserID: "biome",
+    displayName: "biome",
+  },
+
   // Rust tools
   {
     pattern: /(?:^|\s)cargo\s+(test|build|check|clippy|run|fmt)\b/,

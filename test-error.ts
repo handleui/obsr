@@ -25,3 +25,6 @@ const promise: Promise<string> = 42;
 
 // Trigger #6 - testing queued check run
 const map: Map<string, number> = "not a map";
+
+// Trigger #7 - debug logging test
+const set: Set<string> = "not a set";

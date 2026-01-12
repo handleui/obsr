@@ -528,15 +528,6 @@ const processFailedRuns = async (
         run.id
       );
 
-      // DEBUG: Log first 2000 chars of raw log content
-      console.log(
-        `[DEBUG] Run ${run.id} raw logs (first 2000 chars):\n`,
-        logsResult.logs.slice(0, 2000)
-      );
-      console.log(
-        `[DEBUG] Run ${run.id} log stats: ${logsResult.totalBytes} bytes, ${logsResult.jobCount} jobs`
-      );
-
       // Parse logs and extract errors (with fallback if none found)
       const parseResult = parseWorkflowLogsWithFallback(
         logsResult.logs,
@@ -545,12 +536,6 @@ const processFailedRuns = async (
           totalBytes: logsResult.totalBytes,
           jobCount: logsResult.jobCount,
         }
-      );
-
-      // DEBUG: Log parsed errors
-      console.log(
-        `[DEBUG] Run ${run.id} parsed ${parseResult.errors.length} errors:`,
-        JSON.stringify(parseResult.errors.slice(0, 5), null, 2)
       );
 
       // Attach workflow context to each error
@@ -728,6 +713,11 @@ const updateExistingComment = async (
       errorMessage.includes("404") || errorMessage.includes("not found");
 
     if (isNotFound) {
+      // Comment was deleted externally - create a new one.
+      // This is safe because the PR comment lock is held by finalizeAndPostResults.
+      // Note: KV locks are eventually consistent, so very rare duplicate comments
+      // are possible if two webhooks win the lock race. The DB stores the latest
+      // comment ID, so subsequent updates will consolidate to one comment.
       console.log(
         `[workflow_run] Comment ${commentId} was deleted, creating new comment for PR #${prNumber}`
       );
@@ -848,18 +838,23 @@ const finalizeAndPostResults = async (
     return { runResults, totalErrors };
   }
 
-  // Acquire PR comment lock to prevent race conditions
-  const prLock = await acquirePrCommentLock(kv, repository, prNumber);
-  if (!prLock.acquired) {
-    console.log(
-      `[workflow_run] PR comment lock not acquired for ${repository}#${prNumber}, skipping comment`
-    );
-    return { runResults, totalErrors };
-  }
-
+  // Create DB connection before acquiring lock (reduces lock hold time)
   const { db, client } = await createDb(env);
+  let lockAcquired = false;
 
   try {
+    // Acquire PR comment lock to prevent race conditions
+    // Note: KV locks are eventually consistent, so rare race conditions are possible.
+    // The DB unique constraint on prComments table is the ultimate safety net.
+    const prLock = await acquirePrCommentLock(kv, repository, prNumber);
+    if (!prLock.acquired) {
+      console.log(
+        `[workflow_run] PR comment lock not acquired for ${repository}#${prNumber}, skipping comment`
+      );
+      return { runResults, totalErrors };
+    }
+    lockAcquired = true;
+
     const commentBody = formatResultsComment({
       owner,
       repo,
@@ -882,7 +877,9 @@ const finalizeAndPostResults = async (
     });
   } finally {
     await client.end();
-    await releasePrCommentLock(kv, repository, prNumber);
+    if (lockAcquired) {
+      await releasePrCommentLock(kv, repository, prNumber);
+    }
   }
 
   return { runResults, totalErrors };

@@ -110,6 +110,34 @@ When a workflow fails, Detent:
 2. Posts a summary comment on the associated PR
 3. Offers healing via `@detent heal` command
 
+#### `check_suite`
+
+Triggered when a check suite is requested (immediately when code is pushed to a PR).
+
+| Action | Description |
+|--------|-------------|
+| `requested` | Creates a "queued" check run immediately |
+
+This provides better UX by showing the Detent Parser check right away, before workflows start running.
+
+```json
+{
+  "action": "requested",
+  "check_suite": {
+    "id": 12345678,
+    "head_sha": "abc123def456",
+    "head_branch": "feat/new-feature",
+    "pull_requests": [{ "number": 42 }]
+  },
+  "repository": {
+    "full_name": "handleui/detent",
+    "owner": { "login": "handleui" },
+    "name": "detent"
+  },
+  "installation": { "id": 12345678 }
+}
+```
+
 #### `issue_comment`
 
 Triggered when a comment is posted on an issue or PR.

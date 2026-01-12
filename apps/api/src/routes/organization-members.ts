@@ -10,7 +10,7 @@
  * 2. Having their GitHub identity linked via WorkOS OAuth
  */
 
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { createDb } from "../db/client";
 import { organizationMembers } from "../db/schema";
@@ -64,23 +64,23 @@ app.post("/leave", async (c) => {
       });
     }
 
-    // If user is a Detent owner, check if they're the only one
-    if (member.role === "owner") {
-      const ownerCountResult = await db
+    // If user is a Detent owner or admin, check if they're the only elevated member
+    if (member.role === "owner" || member.role === "admin") {
+      const elevatedCountResult = await db
         .select({ count: count() })
         .from(organizationMembers)
         .where(
           and(
             eq(organizationMembers.organizationId, organizationId),
-            eq(organizationMembers.role, "owner")
+            inArray(organizationMembers.role, ["owner", "admin"])
           )
         );
 
-      if (ownerCountResult[0]?.count === 1) {
+      if (elevatedCountResult[0]?.count === 1) {
         return c.json(
           {
             error:
-              "Cannot leave as the only Detent owner. Transfer ownership first.",
+              "Cannot leave as the only owner/admin. Transfer ownership first.",
           },
           400
         );
@@ -212,15 +212,19 @@ app.get("/:orgId/me", githubOrgAccessMiddleware, async (c) => {
 /**
  * PUT /:orgId/members/:userId/role
  * Update a member's role in the organization
- * Authorization: Owner only
+ *
+ * SECURITY: Role-based permission hierarchy:
+ * - Owners can: promote anyone to any role, demote anyone except last owner
+ * - Admins can: promote members to admin, demote admins to member
+ * - Admins CANNOT: promote anyone to owner, demote owners
  */
 app.put(
   "/:orgId/members/:userId/role",
   githubOrgAccessMiddleware,
-  requireRole("owner"),
+  requireRole("owner", "admin"),
   async (c) => {
     const orgAccess = c.get("orgAccess") as OrgAccessContext;
-    const { organization } = orgAccess;
+    const { organization, role: actorRole } = orgAccess;
     const auth = c.get("auth");
     const targetUserId = c.req.param("userId");
 
@@ -286,7 +290,33 @@ app.put(
         });
       }
 
-      // If demoting an owner, check if they're the last owner
+      // SECURITY: Enforce role hierarchy for admins
+      // Admins cannot: promote to owner, demote owners, or modify other owners
+      if (actorRole === "admin") {
+        // Admins cannot promote anyone to owner
+        if (newRole === "owner") {
+          return c.json(
+            {
+              error: "Insufficient permissions",
+              message: "Only owners can promote members to owner",
+            },
+            403
+          );
+        }
+        // Admins cannot modify owners at all
+        if (oldRole === "owner") {
+          return c.json(
+            {
+              error: "Insufficient permissions",
+              message: "Only owners can modify other owners",
+            },
+            403
+          );
+        }
+      }
+
+      // If demoting from owner, check if they're the last owner
+      // (different from last owner/admin - we specifically protect last owner)
       if (oldRole === "owner" && newRole !== "owner") {
         const ownerCountResult = await db
           .select({ count: count() })
@@ -302,6 +332,32 @@ app.put(
           return c.json(
             {
               error: "Cannot demote the last owner",
+              message:
+                "Transfer ownership to another member before demoting yourself",
+            },
+            400
+          );
+        }
+      }
+
+      // If demoting from admin to member, check if they're the last elevated member
+      // (ensures org always has at least one owner or admin)
+      if (oldRole === "admin" && newRole === "member") {
+        const elevatedCountResult = await db
+          .select({ count: count() })
+          .from(organizationMembers)
+          .where(
+            and(
+              eq(organizationMembers.organizationId, organization.id),
+              inArray(organizationMembers.role, ["owner", "admin"])
+            )
+          );
+
+        if (elevatedCountResult[0]?.count === 1) {
+          return c.json(
+            {
+              error: "Cannot demote the last admin",
+              message: "Promote another member to admin first",
             },
             400
           );
@@ -318,7 +374,7 @@ app.put(
         .where(eq(organizationMembers.id, targetMember.id));
 
       console.log(
-        `[role-update] ${auth.userId} changed ${targetUserId} role from ${oldRole} to ${newRole} in ${organization.slug}`
+        `[role-update] ${auth.userId} (${actorRole}) changed ${targetUserId} role from ${oldRole} to ${newRole} in ${organization.slug}`
       );
 
       return c.json({

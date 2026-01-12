@@ -348,6 +348,32 @@ export const runErrors = pgTable(
 );
 
 // ============================================================================
+// PR Comments (Tracking GitHub comment IDs for deduplication)
+// ============================================================================
+// Persistent storage for PR comment IDs to prevent duplicate comments.
+// KV serves as a fast cache; this table is the ultimate source of truth.
+
+export const prComments = pgTable(
+  "pr_comments",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    repository: varchar("repository", { length: 500 }).notNull(),
+    prNumber: integer("pr_number").notNull(),
+    commentId: varchar("comment_id", { length: 64 }).notNull(), // GitHub comment ID
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    // Unique constraint: one Detent comment per PR
+    uniqueIndex("pr_comments_repo_pr_unique_idx").on(
+      table.repository,
+      table.prNumber
+    ),
+    index("pr_comments_repository_idx").on(table.repository),
+  ]
+);
+
+// ============================================================================
 // Relations (for Drizzle relational query API)
 // ============================================================================
 
@@ -431,3 +457,6 @@ export type NewRun = typeof runs.$inferInsert;
 
 export type RunError = typeof runErrors.$inferSelect;
 export type NewRunError = typeof runErrors.$inferInsert;
+
+export type PrComment = typeof prComments.$inferSelect;
+export type NewPrComment = typeof prComments.$inferInsert;

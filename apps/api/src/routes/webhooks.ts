@@ -7,6 +7,7 @@ import {
   createProviderSlug,
   organizationMembers,
   organizations,
+  prComments,
   projects,
   runErrors,
   runs,
@@ -23,10 +24,12 @@ import {
 import { createGitHubService } from "../services/github";
 import {
   acquireCommitLock,
+  acquirePrCommentLock,
   getStoredCheckRunId,
   getStoredCommentId,
   markCommitProcessed,
   releaseCommitLock,
+  releasePrCommentLock,
   storeCheckRunId,
   storeCommentId,
 } from "../services/idempotency";
@@ -323,6 +326,102 @@ const checkExistingRunsInDb = async (
 };
 
 // ============================================================================
+// Helper: PR Comment ID Database Operations
+// ============================================================================
+// Database is the ultimate source of truth for comment IDs.
+// KV serves as a fast cache; these functions handle the persistent layer.
+
+type DbClient = Awaited<ReturnType<typeof createDb>>["db"];
+
+/**
+ * Retrieves a comment ID from the database for a PR.
+ * Returns null if not found.
+ */
+const getCommentIdFromDb = async (
+  db: DbClient,
+  repository: string,
+  prNumber: number
+): Promise<string | null> => {
+  try {
+    const result = await db
+      .select({ commentId: prComments.commentId })
+      .from(prComments)
+      .where(
+        and(
+          eq(prComments.repository, repository.toLowerCase()),
+          eq(prComments.prNumber, prNumber)
+        )
+      )
+      .limit(1);
+    return result[0]?.commentId ?? null;
+  } catch (error) {
+    console.error(
+      `[pr-comments] getCommentIdFromDb failed for ${repository}#${prNumber}:`,
+      error
+    );
+    return null;
+  }
+};
+
+/**
+ * Upserts a comment ID in the database for a PR.
+ * Creates new record or updates existing one.
+ */
+const upsertCommentIdInDb = async (
+  db: DbClient,
+  repository: string,
+  prNumber: number,
+  commentId: string
+): Promise<void> => {
+  const normalizedRepo = repository.toLowerCase();
+
+  try {
+    // Check if record exists
+    const existing = await db
+      .select({ id: prComments.id })
+      .from(prComments)
+      .where(
+        and(
+          eq(prComments.repository, normalizedRepo),
+          eq(prComments.prNumber, prNumber)
+        )
+      )
+      .limit(1);
+
+    if (existing[0]) {
+      // Update existing record
+      await db
+        .update(prComments)
+        .set({
+          commentId,
+          updatedAt: new Date(),
+        })
+        .where(eq(prComments.id, existing[0].id));
+      console.log(
+        `[pr-comments] Updated comment ID in DB for ${repository}#${prNumber}: ${commentId}`
+      );
+    } else {
+      // Insert new record
+      await db.insert(prComments).values({
+        id: crypto.randomUUID(),
+        repository: normalizedRepo,
+        prNumber,
+        commentId,
+      });
+      console.log(
+        `[pr-comments] Stored new comment ID in DB for ${repository}#${prNumber}: ${commentId}`
+      );
+    }
+  } catch (error) {
+    // Non-critical: KV is also storing this, and we have the unique constraint as safety
+    console.error(
+      `[pr-comments] upsertCommentIdInDb failed for ${repository}#${prNumber}:`,
+      error
+    );
+  }
+};
+
+// ============================================================================
 // Helper: Sanitize error messages for user-facing output
 // ============================================================================
 // Known safe error patterns that can be shown to users
@@ -564,6 +663,110 @@ const cleanupCheckRunOnError = async (
 };
 
 // ============================================================================
+// Helper: Post or update PR comment with deduplication
+// ============================================================================
+// Handles the comment lifecycle: check KV → check DB → update or create → persist
+// Includes 404 recovery if comment was deleted by user
+
+interface PostCommentContext {
+  github: ReturnType<typeof createGitHubService>;
+  token: string;
+  kv: KVNamespace;
+  db: DbClient;
+  owner: string;
+  repo: string;
+  repository: string;
+  prNumber: number;
+  commentBody: string;
+}
+
+const postOrUpdateComment = async (ctx: PostCommentContext): Promise<void> => {
+  const { kv, db, repository, prNumber } = ctx;
+
+  // Check KV first (fast path), then DB (persistent fallback)
+  let existingCommentId = await getStoredCommentId(kv, repository, prNumber);
+  let commentSource = "kv";
+
+  if (!existingCommentId) {
+    const dbCommentId = await getCommentIdFromDb(db, repository, prNumber);
+    if (dbCommentId) {
+      existingCommentId = Number.parseInt(dbCommentId, 10);
+      commentSource = "db";
+      console.log(
+        `[workflow_run] Found comment ID ${existingCommentId} in DB (KV miss) for PR #${prNumber}`
+      );
+    }
+  }
+
+  if (existingCommentId) {
+    await updateExistingComment(ctx, existingCommentId, commentSource);
+  } else {
+    await createNewComment(ctx);
+  }
+};
+
+const updateExistingComment = async (
+  ctx: PostCommentContext,
+  commentId: number,
+  source: string
+): Promise<void> => {
+  const { github, token, kv, owner, repo, repository, prNumber, commentBody } =
+    ctx;
+
+  try {
+    await github.updateComment(token, owner, repo, commentId, commentBody);
+    console.log(
+      `[workflow_run] Updated existing comment ${commentId} on PR #${prNumber} (source: ${source})`
+    );
+    // Refresh KV cache if found in DB
+    if (source === "db") {
+      await storeCommentId(kv, repository, prNumber, commentId);
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isNotFound =
+      errorMessage.includes("404") || errorMessage.includes("not found");
+
+    if (isNotFound) {
+      console.log(
+        `[workflow_run] Comment ${commentId} was deleted, creating new comment for PR #${prNumber}`
+      );
+      await createNewComment(ctx);
+    } else {
+      throw error;
+    }
+  }
+};
+
+const createNewComment = async (ctx: PostCommentContext): Promise<void> => {
+  const {
+    github,
+    token,
+    kv,
+    db,
+    owner,
+    repo,
+    repository,
+    prNumber,
+    commentBody,
+  } = ctx;
+
+  const { id: newCommentId } = await github.postCommentWithId(
+    token,
+    owner,
+    repo,
+    prNumber,
+    commentBody
+  );
+  // Store in both KV (cache) and DB (persistence)
+  await storeCommentId(kv, repository, prNumber, newCommentId);
+  await upsertCommentIdInDb(db, repository, prNumber, String(newCommentId));
+  console.log(
+    `[workflow_run] Posted new comment ${newCommentId} on PR #${prNumber}`
+  );
+};
+
+// ============================================================================
 // Helper: Finalize check run and post PR comment with results
 // ============================================================================
 interface WorkflowRun {
@@ -574,6 +777,7 @@ interface WorkflowRun {
 }
 
 const finalizeAndPostResults = async (
+  env: Env,
   github: ReturnType<typeof createGitHubService>,
   token: string,
   kv: KVNamespace,
@@ -637,8 +841,25 @@ const finalizeAndPostResults = async (
   });
 
   // Only post/update comment if there are failures
-  // If all checks pass, just update the check run (no comment spam)
-  if (hasFailed) {
+  if (!hasFailed) {
+    console.log(
+      `[workflow_run] All checks passed - no comment posted on PR #${prNumber}`
+    );
+    return { runResults, totalErrors };
+  }
+
+  // Acquire PR comment lock to prevent race conditions
+  const prLock = await acquirePrCommentLock(kv, repository, prNumber);
+  if (!prLock.acquired) {
+    console.log(
+      `[workflow_run] PR comment lock not acquired for ${repository}#${prNumber}, skipping comment`
+    );
+    return { runResults, totalErrors };
+  }
+
+  const { db, client } = await createDb(env);
+
+  try {
     const commentBody = formatResultsComment({
       owner,
       repo,
@@ -648,43 +869,20 @@ const finalizeAndPostResults = async (
       totalErrors,
     });
 
-    // Check if we already have a comment for this PR - update instead of create new
-    const existingCommentId = await getStoredCommentId(
+    await postOrUpdateComment({
+      github,
+      token,
       kv,
+      db,
+      owner,
+      repo,
       repository,
-      prNumber
-    );
-
-    if (existingCommentId) {
-      // Update existing comment (prevents spam)
-      await github.updateComment(
-        token,
-        owner,
-        repo,
-        existingCommentId,
-        commentBody
-      );
-      console.log(
-        `[workflow_run] Updated existing comment ${existingCommentId} on PR #${prNumber}`
-      );
-    } else {
-      // Create new comment and store ID for future updates
-      const { id: commentId } = await github.postCommentWithId(
-        token,
-        owner,
-        repo,
-        prNumber,
-        commentBody
-      );
-      await storeCommentId(kv, repository, prNumber, commentId);
-      console.log(
-        `[workflow_run] Posted new comment ${commentId} on PR #${prNumber}`
-      );
-    }
-  } else {
-    console.log(
-      `[workflow_run] All checks passed - no comment posted on PR #${prNumber}`
-    );
+      prNumber,
+      commentBody,
+    });
+  } finally {
+    await client.end();
+    await releasePrCommentLock(kv, repository, prNumber);
   }
 
   return { runResults, totalErrors };
@@ -965,6 +1163,7 @@ const handleWorkflowRunCompleted = async (
 
     // Finalize: update check run and post PR comment (if failures)
     const { totalErrors } = await finalizeAndPostResults(
+      c.env,
       github,
       token,
       c.env["detent-idempotency"],
@@ -1022,9 +1221,6 @@ const handleWorkflowRunCompleted = async (
     );
   }
 };
-
-// Generate a unique slug for an organization
-type DbClient = Awaited<ReturnType<typeof createDb>>["db"];
 
 // Auto-link installer to organization if they have an existing Detent account
 const autoLinkInstaller = async (

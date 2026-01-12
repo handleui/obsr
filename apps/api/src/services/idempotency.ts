@@ -319,6 +319,11 @@ export const getStoredCheckRunId = async (
 
 const COMMENT_KEY_PREFIX = "detent:comment";
 
+// Comment IDs need longer TTL than commit locks since PRs can have failures
+// across many commits over hours/days. 24 hours ensures we update existing
+// comments rather than creating duplicates on long-running PRs.
+const COMMENT_TTL_SECONDS = 24 * 60 * 60; // 24 hours
+
 const buildCommentKey = (repository: string, prNumber: number): string =>
   `${COMMENT_KEY_PREFIX}:${repository}:${prNumber}`;
 
@@ -340,7 +345,7 @@ export const storeCommentId = async (
 
   try {
     await kv.put(key, String(commentId), {
-      expirationTtl: IDEMPOTENCY_TTL_SECONDS,
+      expirationTtl: COMMENT_TTL_SECONDS,
     });
   } catch (error) {
     console.error("[idempotency] storeCommentId failed:", error);
@@ -370,5 +375,137 @@ export const getStoredCommentId = async (
   } catch (error) {
     console.error("[idempotency] getStoredCommentId failed:", error);
     return null;
+  }
+};
+
+// ============================================================================
+// PR Comment Lock
+// ============================================================================
+// Prevents race conditions when multiple commits on the same PR try to
+// create/update comments simultaneously. This is separate from the commit
+// lock because different commits can race to post comments on the same PR.
+
+const PR_COMMENT_LOCK_PREFIX = "detent:pr-comment-lock";
+
+// Short TTL since comment operations should complete quickly (< 30 seconds)
+const PR_COMMENT_LOCK_TTL_SECONDS = 60;
+
+// Stale threshold for PR comment locks (30 seconds)
+const PR_COMMENT_LOCK_STALE_MS = 30 * 1000;
+
+interface PrCommentLockState {
+  lockId: string;
+  timestamp: number;
+}
+
+const buildPrCommentLockKey = (repository: string, prNumber: number): string =>
+  `${PR_COMMENT_LOCK_PREFIX}:${repository}:${prNumber}`;
+
+/**
+ * Attempts to acquire a lock for comment operations on a specific PR.
+ * This prevents race conditions when multiple commits on the same PR
+ * try to create/update comments simultaneously.
+ *
+ * Uses write-then-verify pattern to mitigate KV eventual consistency issues.
+ */
+export const acquirePrCommentLock = async (
+  kv: KVNamespace,
+  repository: string,
+  prNumber: number
+): Promise<{
+  acquired: boolean;
+  lockId?: string;
+  kvError?: boolean;
+}> => {
+  if (repository.length > MAX_REPOSITORY_LENGTH || prNumber <= 0) {
+    // Invalid input - fail open to avoid blocking legitimate requests
+    return { acquired: true };
+  }
+
+  const key = buildPrCommentLockKey(repository.toLowerCase(), prNumber);
+  const lockId = crypto.randomUUID();
+
+  try {
+    // Check for existing lock
+    const existing = await kv.get<PrCommentLockState>(key, {
+      type: "json",
+      cacheTtl: KV_CACHE_TTL_SECONDS,
+    });
+
+    if (existing) {
+      const ageMs = Date.now() - existing.timestamp;
+
+      if (ageMs > PR_COMMENT_LOCK_STALE_MS) {
+        // Stale lock - take over
+        console.warn(
+          `[pr-comment-lock] Stale lock for ${repository}#${prNumber} (age: ${Math.round(ageMs / 1000)}s), taking over`
+        );
+      } else {
+        // Lock is held by another worker
+        console.log(
+          `[pr-comment-lock] Lock held for ${repository}#${prNumber}, skipping comment`
+        );
+        return { acquired: false };
+      }
+    }
+
+    // Attempt to acquire lock
+    const state: PrCommentLockState = {
+      lockId,
+      timestamp: Date.now(),
+    };
+    await kv.put(key, JSON.stringify(state), {
+      expirationTtl: PR_COMMENT_LOCK_TTL_SECONDS,
+    });
+
+    // Write-then-verify pattern
+    const verification = await kv.get<PrCommentLockState>(key, "json");
+
+    if (verification && verification.lockId !== lockId) {
+      console.log(
+        `[pr-comment-lock] Lost lock race for ${repository}#${prNumber}`
+      );
+      return { acquired: false };
+    }
+
+    console.log(
+      `[pr-comment-lock] Acquired lock for ${repository}#${prNumber}`
+    );
+    return { acquired: true, lockId };
+  } catch (error) {
+    // Fail-open: DB unique constraint on pr_comments is safety net
+    console.error(
+      `[pr-comment-lock] acquirePrCommentLock failed for ${repository}#${prNumber}, proceeding with fail-open:`,
+      error
+    );
+    return { acquired: true, kvError: true };
+  }
+};
+
+/**
+ * Releases the PR comment lock after comment operations complete.
+ */
+export const releasePrCommentLock = async (
+  kv: KVNamespace,
+  repository: string,
+  prNumber: number
+): Promise<void> => {
+  if (repository.length > MAX_REPOSITORY_LENGTH || prNumber <= 0) {
+    return;
+  }
+
+  const key = buildPrCommentLockKey(repository.toLowerCase(), prNumber);
+
+  try {
+    await kv.delete(key);
+    console.log(
+      `[pr-comment-lock] Released lock for ${repository}#${prNumber}`
+    );
+  } catch (error) {
+    // Non-critical: TTL will clean up
+    console.error(
+      `[pr-comment-lock] releasePrCommentLock failed for ${repository}#${prNumber}:`,
+      error
+    );
   }
 };

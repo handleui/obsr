@@ -12,3 +12,7 @@ export const broken = () => {
 // More type errors
 const z: boolean = "also wrong";
 const arr: number[] = "not an array";
+
+// Even more errors to trigger CI
+const obj: { name: string } = { name: 123 };
+const fn: () => void = "not a function";

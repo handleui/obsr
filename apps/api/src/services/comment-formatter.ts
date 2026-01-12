@@ -48,10 +48,11 @@ const OUTPUT_LIMITS = {
 const ANNOTATION_MESSAGE_PRACTICAL_LIMIT = 4096;
 
 // HTML entity map for escaping (hoisted for performance)
+// Note: & must be listed first conceptually (though replace() handles this correctly)
 const HTML_ENTITIES: Record<string, string> = {
+  "&": "&amp;",
   "<": "&lt;",
   ">": "&gt;",
-  "&": "&amp;",
   '"': "&quot;",
   "'": "&#39;",
 };
@@ -360,8 +361,11 @@ const calculateErrorPriority = (error: ParsedError): number => {
 };
 
 // Create a unique key for error deduplication (file:line)
+// Uses sentinel values that won't collide with real paths/lines:
+// - "__no_path__" instead of "unknown" (real files could be named "unknown")
+// - "__no_line__" instead of 0 (real errors can occur at line 0)
 const createErrorKey = (error: ParsedError): string => {
-  return `${error.filePath ?? "unknown"}:${error.line ?? 0}`;
+  return `${error.filePath ?? "__no_path__"}:${error.line ?? "__no_line__"}`;
 };
 
 // Deduplicated error with combined messages from same location
@@ -388,9 +392,11 @@ const mergeIntoExisting = (
   }
 
   // Keep higher severity (failure > warning > notice)
+  // Numeric mapping: failure=2, warning=1, notice=0
+  const severityRank = { failure: 2, warning: 1, notice: 0 } as const;
   const newLevel = mapSeverityToAnnotationLevel(error.severity);
   const existingLevel = mapSeverityToAnnotationLevel(existing.severity);
-  if (newLevel === "failure" && existingLevel !== "failure") {
+  if (severityRank[newLevel] > severityRank[existingLevel]) {
     existing.severity = error.severity;
   }
 

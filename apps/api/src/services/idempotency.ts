@@ -1,5 +1,9 @@
 import type { KVNamespace } from "@cloudflare/workers-types";
 
+// ============================================================================
+// Types
+// ============================================================================
+
 export interface ProcessingState {
   timestamp: number;
   processing: boolean;
@@ -7,6 +11,36 @@ export interface ProcessingState {
   /** Unique ID for the worker instance that acquired the lock */
   lockId?: string;
 }
+
+/** Internal type for commit lock state with required lockId (used in write-then-verify) */
+interface CommitLockState {
+  timestamp: number;
+  processing: boolean;
+  lockId: string;
+}
+
+interface LockAcquireResult {
+  acquired: boolean;
+  state?: ProcessingState;
+  kvError?: boolean;
+  validationError?: boolean;
+}
+
+interface PrCommentLockResult {
+  acquired: boolean;
+  lockId?: string;
+  kvError?: boolean;
+  validationError?: boolean;
+}
+
+interface PrCommentLockState {
+  lockId: string;
+  timestamp: number;
+}
+
+// ============================================================================
+// Constants
+// ============================================================================
 
 // HACK: KV TTL minimum is 60 seconds per Cloudflare docs. Using 5 minutes for safety margin.
 const IDEMPOTENCY_TTL_SECONDS = 5 * 60; // 5 minutes
@@ -16,6 +50,9 @@ const IDEMPOTENCY_TTL_SECONDS = 5 * 60; // 5 minutes
 // Set lower than IDEMPOTENCY_TTL to ensure we see updates reasonably quickly
 // while still benefiting from edge caching for rapid duplicate webhooks
 const KV_CACHE_TTL_SECONDS = 30;
+
+// Stale lock threshold - locks older than this are considered abandoned
+const STALE_LOCK_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
 
 // Namespace prefix for all idempotency keys (allows sharing KV namespace if needed)
 const KEY_PREFIX = "detent:idem:commit";
@@ -75,6 +112,87 @@ const validateInputs = (
 const buildKey = (repository: string, headSha: string): string =>
   `${KEY_PREFIX}:${repository}:${headSha}`;
 
+// ============================================================================
+// Core Lock Operations (Write-then-Verify Pattern)
+// ============================================================================
+// KV is eventually consistent and does NOT support atomic check-and-set.
+// We use write-then-verify to mitigate race conditions:
+// 1. Write our lock state with a unique lockId
+// 2. Read back to verify we own the lock
+// 3. If another worker's lockId appears, we lost the race
+//
+// This doesn't eliminate races (eventual consistency means reads may be stale)
+// but significantly reduces the window. The database unique constraint is the
+// ultimate safety net for deduplication.
+
+/**
+ * Default blocking predicate: block if lock is not stale (age-based only).
+ */
+const defaultShouldBlock = <T extends { lockId: string; timestamp: number }>(
+  _existing: T,
+  ageMs: number,
+  staleThresholdMs: number
+): boolean => ageMs <= staleThresholdMs;
+
+/**
+ * Generic lock acquisition with write-then-verify pattern.
+ * Handles stale lock recovery and race detection.
+ *
+ * @param shouldBlock - Optional predicate to determine if existing lock should block.
+ *                      Default blocks if lock is not stale (age <= staleThresholdMs).
+ *                      Return true to block acquisition, false to allow takeover.
+ */
+const tryAcquireLock = async <T extends { lockId: string; timestamp: number }>(
+  kv: KVNamespace,
+  key: string,
+  ttlSeconds: number,
+  staleThresholdMs: number,
+  buildState: (lockId: string) => T,
+  logPrefix: string,
+  shouldBlock: (
+    existing: T,
+    ageMs: number,
+    staleThresholdMs: number
+  ) => boolean = defaultShouldBlock
+): Promise<{ acquired: boolean; state?: T; lockId?: string }> => {
+  const lockId = crypto.randomUUID();
+
+  // Check for existing lock with edge caching for hot keys
+  const existing = await kv.get<T>(key, {
+    type: "json",
+    cacheTtl: KV_CACHE_TTL_SECONDS,
+  });
+
+  if (existing) {
+    const ageMs = Date.now() - existing.timestamp;
+
+    // Use predicate to determine if we should block
+    if (shouldBlock(existing, ageMs, staleThresholdMs)) {
+      return { acquired: false, state: existing };
+    }
+
+    // Lock can be taken over - log and proceed
+    console.log(
+      `[${logPrefix}] Taking over lock for ${key} (age: ${Math.round(ageMs / 1000)}s)`
+    );
+  }
+
+  // Write our lock state
+  const state = buildState(lockId);
+  await kv.put(key, JSON.stringify(state), { expirationTtl: ttlSeconds });
+
+  // Write-then-verify: read back without cache to check ownership
+  const verification = await kv.get<T>(key, "json");
+
+  if (verification && verification.lockId !== lockId) {
+    // Another worker won the race
+    console.log(`[${logPrefix}] Lost lock race for ${key}`);
+    return { acquired: false, state: verification };
+  }
+
+  return { acquired: true, state, lockId };
+};
+
 /**
  * Attempts to acquire a distributed lock for processing a commit.
  *
@@ -93,16 +211,23 @@ const buildKey = (repository: string, headSha: string): string =>
  * deduplication where occasional duplicate processing is acceptable but should
  * be minimized.
  */
+/**
+ * Blocking predicate for commit locks: block only if actively processing AND not stale.
+ * This allows re-acquisition for:
+ * 1. Completed processing (processing=false) - enables re-run handling
+ * 2. Stale locks (processing=true but > threshold) - crashed worker recovery
+ */
+const commitLockShouldBlock = (
+  existing: CommitLockState,
+  ageMs: number,
+  staleThresholdMs: number
+): boolean => existing.processing && ageMs <= staleThresholdMs;
+
 export const acquireCommitLock = async (
   kv: KVNamespace,
   repository: string,
   headSha: string
-): Promise<{
-  acquired: boolean;
-  state?: ProcessingState;
-  kvError?: boolean;
-  validationError?: boolean;
-}> => {
+): Promise<LockAcquireResult> => {
   // Validate inputs before using in KV key (defense-in-depth)
   const validated = validateInputs(repository, headSha);
   if (!validated) {
@@ -112,64 +237,26 @@ export const acquireCommitLock = async (
   }
 
   const key = buildKey(validated.repository, validated.headSha);
-  const lockId = crypto.randomUUID();
 
   try {
-    // Use cacheTtl for faster edge-cached reads on hot keys
-    // Per Cloudflare docs: reduces latency from cold cache to 500μs-10ms for hot keys
-    const existing = await kv.get<ProcessingState>(key, {
-      type: "json",
-      cacheTtl: KV_CACHE_TTL_SECONDS,
-    });
+    const result = await tryAcquireLock<CommitLockState>(
+      kv,
+      key,
+      IDEMPOTENCY_TTL_SECONDS,
+      STALE_LOCK_THRESHOLD_MS,
+      (lockId) => ({
+        timestamp: Date.now(),
+        processing: true,
+        lockId,
+      }),
+      "idempotency",
+      commitLockShouldBlock
+    );
 
-    if (existing) {
-      // Lock exists - check if it's stale (processing for too long)
-      const ageMs = Date.now() - existing.timestamp;
-      const staleThresholdMs = 2 * 60 * 1000; // 2 minutes
-
-      if (existing.processing && ageMs > staleThresholdMs) {
-        // Stale lock - previous worker likely crashed. Take over the lock.
-        console.warn(
-          `[idempotency] Stale lock detected for ${key} (age: ${Math.round(ageMs / 1000)}s), taking over`
-        );
-        const state: ProcessingState = {
-          timestamp: Date.now(),
-          processing: true,
-          lockId,
-        };
-        await kv.put(key, JSON.stringify(state), {
-          expirationTtl: IDEMPOTENCY_TTL_SECONDS,
-        });
-        return { acquired: true, state };
-      }
-
-      return { acquired: false, state: existing };
-    }
-
-    // No existing lock - attempt to acquire it
-    const state: ProcessingState = {
-      timestamp: Date.now(),
-      processing: true,
-      lockId,
+    return {
+      acquired: result.acquired,
+      state: result.state,
     };
-    await kv.put(key, JSON.stringify(state), {
-      expirationTtl: IDEMPOTENCY_TTL_SECONDS,
-    });
-
-    // Write-then-verify pattern: Check if we actually own the lock
-    // This mitigates (but doesn't eliminate) race conditions in eventually consistent KV
-    // Skip cacheTtl here to get the freshest possible read after our write
-    const verification = await kv.get<ProcessingState>(key, "json");
-
-    if (verification && verification.lockId !== lockId) {
-      // Another worker won the race - they wrote after us or our write wasn't first
-      console.log(
-        `[idempotency] Lost lock race for ${key}, another worker acquired it`
-      );
-      return { acquired: false, state: verification };
-    }
-
-    return { acquired: true, state };
   } catch (error) {
     // Fail-open: if KV fails, allow processing (DB constraint is safety net)
     console.error(
@@ -181,44 +268,8 @@ export const acquireCommitLock = async (
 };
 
 /**
- * Marks a commit as successfully processed. Updates the lock state to indicate
- * processing is complete and stores the checkRunId for reference.
- *
- * The TTL ensures old entries are eventually cleaned up, but completed entries
- * remain long enough to prevent duplicate processing from delayed webhooks.
- */
-export const markCommitProcessed = async (
-  kv: KVNamespace,
-  repository: string,
-  headSha: string,
-  checkRunId?: number
-): Promise<void> => {
-  // Validate inputs (defense-in-depth)
-  const validated = validateInputs(repository, headSha);
-  if (!validated) {
-    // Skip KV write for invalid inputs - this is non-critical
-    return;
-  }
-
-  const key = buildKey(validated.repository, validated.headSha);
-  const state: ProcessingState = {
-    timestamp: Date.now(),
-    processing: false,
-    checkRunId,
-  };
-
-  try {
-    await kv.put(key, JSON.stringify(state), {
-      expirationTtl: IDEMPOTENCY_TTL_SECONDS,
-    });
-  } catch (error) {
-    // Non-critical: DB is the ultimate source of truth for deduplication
-    console.error("[idempotency] markCommitProcessed failed:", error);
-  }
-};
-
-/**
- * Releases a lock when processing cannot complete (e.g., waiting for other runs).
+ * Releases a lock after processing completes or when processing cannot complete
+ * (e.g., waiting for other runs).
  * This allows a future webhook to retry processing.
  *
  * Note: Due to eventual consistency, there may be a brief window where the lock
@@ -243,5 +294,289 @@ export const releaseCommitLock = async (
   } catch (error) {
     // Non-critical: TTL will clean up eventually
     console.error("[idempotency] releaseCommitLock failed:", error);
+  }
+};
+
+// ============================================================================
+// Check Run Tracking
+// ============================================================================
+// Separate key prefix for storing check run IDs created during "waiting" state
+// This allows the check run to be created early (on workflow_run.in_progress)
+// and updated later (on workflow_run.completed)
+
+const CHECK_RUN_KEY_PREFIX = "detent:checkrun";
+
+const buildCheckRunKey = (repository: string, headSha: string): string =>
+  `${CHECK_RUN_KEY_PREFIX}:${repository}:${headSha}`;
+
+/**
+ * Stores the check run ID for a commit. Used when creating the check run early
+ * (on workflow_run.in_progress) so it can be retrieved and updated later.
+ */
+export const storeCheckRunId = async (
+  kv: KVNamespace,
+  repository: string,
+  headSha: string,
+  checkRunId: number
+): Promise<void> => {
+  const validated = validateInputs(repository, headSha);
+  if (!validated) {
+    return;
+  }
+
+  const key = buildCheckRunKey(validated.repository, validated.headSha);
+
+  try {
+    await kv.put(key, String(checkRunId), {
+      expirationTtl: IDEMPOTENCY_TTL_SECONDS,
+    });
+  } catch (error) {
+    console.error("[idempotency] storeCheckRunId failed:", error);
+  }
+};
+
+/**
+ * Retrieves a previously stored check run ID for a commit.
+ * Returns null if not found or on error.
+ */
+export const getStoredCheckRunId = async (
+  kv: KVNamespace,
+  repository: string,
+  headSha: string
+): Promise<number | null> => {
+  const validated = validateInputs(repository, headSha);
+  if (!validated) {
+    return null;
+  }
+
+  const key = buildCheckRunKey(validated.repository, validated.headSha);
+
+  try {
+    const value = await kv.get(key, {
+      cacheTtl: KV_CACHE_TTL_SECONDS,
+    });
+    return value ? Number.parseInt(value, 10) : null;
+  } catch (error) {
+    console.error("[idempotency] getStoredCheckRunId failed:", error);
+    return null;
+  }
+};
+
+// ============================================================================
+// Comment ID Tracking
+// ============================================================================
+// Store comment IDs to allow editing/updating existing comments instead of
+// creating new ones (prevents comment spam on PRs)
+
+const COMMENT_KEY_PREFIX = "detent:comment";
+
+// Comment IDs need longer TTL than commit locks since PRs can have failures
+// across many commits over hours/days. 24 hours ensures we update existing
+// comments rather than creating duplicates on long-running PRs.
+const COMMENT_TTL_SECONDS = 24 * 60 * 60; // 24 hours
+
+const buildCommentKey = (repository: string, prNumber: number): string =>
+  `${COMMENT_KEY_PREFIX}:${repository}:${prNumber}`;
+
+/**
+ * Validates repository and PR number for comment/lock operations.
+ * Returns normalized repository (lowercase) if valid, null otherwise.
+ */
+const validatePrInputs = (
+  repository: string,
+  prNumber: number
+): string | null => {
+  // PR numbers must be positive integers within reasonable bounds
+  // GitHub uses 32-bit integers, max is ~2.1 billion
+  if (
+    !Number.isInteger(prNumber) ||
+    prNumber <= 0 ||
+    prNumber > 2_147_483_647
+  ) {
+    console.warn(`[idempotency] Invalid PR number rejected: ${prNumber}`);
+    return null;
+  }
+
+  // Validate repository format (same as commit lock validation)
+  if (
+    repository.length > MAX_REPOSITORY_LENGTH ||
+    !REPOSITORY_REGEX.test(repository)
+  ) {
+    console.warn(
+      `[idempotency] Invalid repository format for PR operation: ${repository.substring(0, 50)}...`
+    );
+    return null;
+  }
+
+  return repository.toLowerCase();
+};
+
+/**
+ * Stores the comment ID for a PR. Used to update existing comments instead of
+ * creating new ones on subsequent webhook calls.
+ */
+export const storeCommentId = async (
+  kv: KVNamespace,
+  repository: string,
+  prNumber: number,
+  commentId: number
+): Promise<void> => {
+  const normalizedRepo = validatePrInputs(repository, prNumber);
+  if (!normalizedRepo) {
+    return;
+  }
+
+  // Validate commentId is a positive integer
+  if (!Number.isInteger(commentId) || commentId <= 0) {
+    console.warn(`[idempotency] Invalid comment ID rejected: ${commentId}`);
+    return;
+  }
+
+  const key = buildCommentKey(normalizedRepo, prNumber);
+
+  try {
+    await kv.put(key, String(commentId), {
+      expirationTtl: COMMENT_TTL_SECONDS,
+    });
+  } catch (error) {
+    console.error("[idempotency] storeCommentId failed:", error);
+  }
+};
+
+/**
+ * Retrieves a previously stored comment ID for a PR.
+ * Returns null if not found or on error.
+ */
+export const getStoredCommentId = async (
+  kv: KVNamespace,
+  repository: string,
+  prNumber: number
+): Promise<number | null> => {
+  const normalizedRepo = validatePrInputs(repository, prNumber);
+  if (!normalizedRepo) {
+    return null;
+  }
+
+  const key = buildCommentKey(normalizedRepo, prNumber);
+
+  try {
+    const value = await kv.get(key, {
+      cacheTtl: KV_CACHE_TTL_SECONDS,
+    });
+    if (!value) {
+      return null;
+    }
+    // Validate parsed value is a positive integer
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      console.warn(`[idempotency] Invalid stored comment ID: ${value}`);
+      return null;
+    }
+    return parsed;
+  } catch (error) {
+    console.error("[idempotency] getStoredCommentId failed:", error);
+    return null;
+  }
+};
+
+// ============================================================================
+// PR Comment Lock
+// ============================================================================
+// Prevents race conditions when multiple commits on the same PR try to
+// create/update comments simultaneously. This is separate from the commit
+// lock because different commits can race to post comments on the same PR.
+
+const PR_COMMENT_LOCK_PREFIX = "detent:pr-comment-lock";
+
+// Short TTL since comment operations should complete quickly (< 30 seconds)
+const PR_COMMENT_LOCK_TTL_SECONDS = 60;
+
+// Stale threshold for PR comment locks (30 seconds)
+const PR_COMMENT_LOCK_STALE_MS = 30 * 1000;
+
+const buildPrCommentLockKey = (repository: string, prNumber: number): string =>
+  `${PR_COMMENT_LOCK_PREFIX}:${repository}:${prNumber}`;
+
+/**
+ * Attempts to acquire a lock for comment operations on a specific PR.
+ * This prevents race conditions when multiple commits on the same PR
+ * try to create/update comments simultaneously.
+ *
+ * Uses write-then-verify pattern to mitigate KV eventual consistency issues.
+ */
+export const acquirePrCommentLock = async (
+  kv: KVNamespace,
+  repository: string,
+  prNumber: number
+): Promise<PrCommentLockResult> => {
+  const normalizedRepo = validatePrInputs(repository, prNumber);
+  if (!normalizedRepo) {
+    // Invalid input - fail open but flag validation error for monitoring
+    return { acquired: true, validationError: true };
+  }
+
+  const key = buildPrCommentLockKey(normalizedRepo, prNumber);
+
+  try {
+    const result = await tryAcquireLock<PrCommentLockState>(
+      kv,
+      key,
+      PR_COMMENT_LOCK_TTL_SECONDS,
+      PR_COMMENT_LOCK_STALE_MS,
+      (lockId) => ({ lockId, timestamp: Date.now() }),
+      "pr-comment-lock"
+    );
+
+    if (result.acquired) {
+      console.log(
+        `[pr-comment-lock] Acquired lock for ${repository}#${prNumber}`
+      );
+    } else {
+      console.log(
+        `[pr-comment-lock] Lock held for ${repository}#${prNumber}, skipping comment`
+      );
+    }
+
+    return {
+      acquired: result.acquired,
+      lockId: result.lockId,
+    };
+  } catch (error) {
+    // Fail-open: DB unique constraint on pr_comments is safety net
+    console.error(
+      `[pr-comment-lock] acquirePrCommentLock failed for ${repository}#${prNumber}, proceeding with fail-open:`,
+      error
+    );
+    return { acquired: true, kvError: true };
+  }
+};
+
+/**
+ * Releases the PR comment lock after comment operations complete.
+ */
+export const releasePrCommentLock = async (
+  kv: KVNamespace,
+  repository: string,
+  prNumber: number
+): Promise<void> => {
+  const normalizedRepo = validatePrInputs(repository, prNumber);
+  if (!normalizedRepo) {
+    // Skip release for invalid inputs - TTL will clean up anyway
+    return;
+  }
+
+  const key = buildPrCommentLockKey(normalizedRepo, prNumber);
+
+  try {
+    await kv.delete(key);
+    console.log(
+      `[pr-comment-lock] Released lock for ${repository}#${prNumber}`
+    );
+  } catch (error) {
+    // Non-critical: TTL will clean up
+    console.error(
+      `[pr-comment-lock] releasePrCommentLock failed for ${repository}#${prNumber}:`,
+      error
+    );
   }
 };

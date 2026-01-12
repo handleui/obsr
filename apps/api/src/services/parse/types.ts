@@ -73,6 +73,7 @@ export interface ApiExtractedError {
   readonly hint?: string;
   readonly exitCode?: number;
   readonly isInfrastructure?: boolean;
+  readonly possiblyTestOutput?: boolean;
 }
 
 // Metadata about the parse run

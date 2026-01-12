@@ -1,3 +1,4 @@
+import type { KVNamespace } from "@cloudflare/workers-types";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -6,14 +7,17 @@ import {
   createProviderSlug,
   organizationMembers,
   organizations,
+  prComments,
   projects,
   runErrors,
   runs,
 } from "../db/schema";
 import { webhookSignatureMiddleware } from "../middleware/webhook-signature";
 import {
-  formatCheckSummary,
+  formatCheckRunOutput,
+  formatPassingComment,
   formatResultsComment,
+  type WorkflowRunResult,
 } from "../services/comment-formatter";
 import {
   type ParsedError,
@@ -22,8 +26,13 @@ import {
 import { createGitHubService } from "../services/github";
 import {
   acquireCommitLock,
-  markCommitProcessed,
+  acquirePrCommentLock,
+  getStoredCheckRunId,
+  getStoredCommentId,
   releaseCommitLock,
+  releasePrCommentLock,
+  storeCheckRunId,
+  storeCommentId,
 } from "../services/idempotency";
 import type { Env } from "../types/env";
 
@@ -187,8 +196,21 @@ app.post("/github", webhookSignatureMiddleware, (c: WebhookContext) => {
 
   // Route by event type
   switch (event) {
-    case "workflow_run":
-      return handleWorkflowRunEvent(c, payload as WorkflowRunPayload);
+    case "workflow_run": {
+      const workflowPayload = payload as WorkflowRunPayload;
+      // Route based on action type
+      if (workflowPayload.action === "in_progress") {
+        return handleWorkflowRunInProgress(c, workflowPayload);
+      }
+      if (workflowPayload.action === "completed") {
+        return handleWorkflowRunCompleted(c, workflowPayload);
+      }
+      // Ignore other actions (requested, etc.)
+      return c.json({
+        message: "ignored",
+        reason: `action ${workflowPayload.action} not handled`,
+      });
+    }
 
     case "issue_comment":
       return handleIssueCommentEvent(c, payload as IssueCommentPayload);
@@ -220,28 +242,156 @@ app.post("/github", webhookSignatureMiddleware, (c: WebhookContext) => {
 
 // ParsedError is imported from ../services/error-parser
 
-// Store run and errors in the database
-const storeRunAndErrors = async (
-  env: Env,
-  data: {
-    runId: number;
-    runName: string;
-    prNumber: number;
-    headSha: string;
-    errors: ParsedError[];
-    repository: string;
-    checkRunId?: number;
+// ============================================================================
+// Input Validation Helpers for GitHub Data
+// ============================================================================
+// Defense-in-depth: Validate GitHub API response data before database storage.
+// While webhooks are signed, we validate data shapes and bounds to prevent
+// issues from malformed responses or unexpected GitHub API changes.
+
+// Maximum lengths for text fields to prevent database bloat
+const MAX_WORKFLOW_NAME_LENGTH = 255;
+const MAX_BRANCH_NAME_LENGTH = 255;
+const MAX_CONCLUSION_LENGTH = 50;
+const MAX_REPOSITORY_LENGTH = 200;
+const MAX_ERROR_MESSAGE_LENGTH = 10_000;
+const MAX_FILE_PATH_LENGTH = 1000;
+const MAX_STACK_TRACE_LENGTH = 50_000;
+
+// Validation ranges for numeric fields
+const MAX_RUN_ID = Number.MAX_SAFE_INTEGER;
+const MAX_PR_NUMBER = 1_000_000_000; // GitHub PR numbers are 32-bit integers
+
+// SHA validation regex (40 hex characters)
+const SHA_REGEX = /^[a-fA-F0-9]{40}$/;
+const MAX_RUN_ATTEMPT = 10_000; // GitHub allows re-runs but has practical limits
+const MAX_LINE_NUMBER = 10_000_000;
+const MAX_COLUMN_NUMBER = 100_000;
+
+/**
+ * Validates and clamps a numeric value to safe bounds.
+ * Returns null if the value is not a valid positive integer.
+ */
+const validatePositiveInt = (value: unknown, max: number): number | null => {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    return null;
   }
-): Promise<string> => {
+  return Math.min(value, max);
+};
+
+/**
+ * Truncates a string to maximum length, returning null for non-strings.
+ */
+const truncateString = (value: unknown, maxLength: number): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  return value.length > maxLength ? value.slice(0, maxLength) : value;
+};
+
+// Data structure for prepared run data (after validation)
+interface PreparedRunData {
+  runRecordId: string;
+  runId: number;
+  runName: string;
+  prNumber: number;
+  headSha: string;
+  errors: ParsedError[];
+  repository: string;
+  checkRunId: number | null;
+  conclusion: string | null;
+  headBranch: string;
+  runAttempt: number;
+  runStartedAt: Date | null;
+}
+
+/**
+ * Validates run data and prepares it for database insertion.
+ * Returns null if validation fails for critical fields.
+ */
+const prepareRunData = (data: {
+  runId: number;
+  runName: string;
+  prNumber: number;
+  headSha: string;
+  errors: ParsedError[];
+  repository: string;
+  checkRunId?: number;
+  conclusion: string | null;
+  headBranch: string;
+  runAttempt: number;
+  runStartedAt: Date | null;
+}): PreparedRunData | null => {
+  // Validate critical numeric fields
+  const validatedRunId = validatePositiveInt(data.runId, MAX_RUN_ID);
+  const validatedPrNumber = validatePositiveInt(data.prNumber, MAX_PR_NUMBER);
+  const validatedRunAttempt =
+    validatePositiveInt(data.runAttempt, MAX_RUN_ATTEMPT) ?? 1;
+  const validatedCheckRunId = data.checkRunId
+    ? validatePositiveInt(data.checkRunId, MAX_RUN_ID)
+    : null;
+
+  if (validatedRunId === null || validatedPrNumber === null) {
+    console.error(
+      `[workflow_run] Invalid run ID (${data.runId}) or PR number (${data.prNumber})`
+    );
+    return null;
+  }
+
+  // Validate headSha format (40 hex characters)
+  if (!SHA_REGEX.test(data.headSha)) {
+    console.error(
+      `[workflow_run] Invalid SHA format: ${data.headSha.slice(0, 20)}...`
+    );
+    return null;
+  }
+
+  return {
+    runRecordId: crypto.randomUUID(),
+    runId: validatedRunId,
+    runName:
+      truncateString(data.runName, MAX_WORKFLOW_NAME_LENGTH) ?? "Unknown",
+    prNumber: validatedPrNumber,
+    headSha: data.headSha.toLowerCase(),
+    errors: data.errors,
+    repository: truncateString(data.repository, MAX_REPOSITORY_LENGTH) ?? "",
+    checkRunId: validatedCheckRunId,
+    conclusion: data.conclusion
+      ? truncateString(data.conclusion, MAX_CONCLUSION_LENGTH)
+      : null,
+    headBranch:
+      truncateString(data.headBranch, MAX_BRANCH_NAME_LENGTH) ?? "unknown",
+    runAttempt: validatedRunAttempt,
+    runStartedAt: data.runStartedAt,
+  };
+};
+
+/**
+ * Bulk store multiple runs and their errors in a single transaction.
+ *
+ * Performance optimizations (critical for Cloudflare Workers 128MB limit):
+ * - Single database connection for all runs (vs N connections)
+ * - Single transaction with bulk inserts (vs N transactions)
+ * - Reduces DB round-trips from 2N to 2 (one for runs, one for errors)
+ * - Respects Cloudflare Workers' 6 concurrent TCP connection limit
+ */
+const bulkStoreRunsAndErrors = async (
+  env: Env,
+  preparedRuns: PreparedRunData[]
+): Promise<void> => {
+  if (preparedRuns.length === 0) {
+    return;
+  }
+
   const { db, client } = await createDb(env);
+  const completedAt = new Date();
 
   try {
-    const runRecordId = crypto.randomUUID();
-
     await db.transaction(async (tx) => {
-      await tx.insert(runs).values({
-        id: runRecordId,
-        provider: "github",
+      // Bulk insert all runs in a single query
+      const runRows = preparedRuns.map((data) => ({
+        id: data.runRecordId,
+        provider: "github" as const,
         source: "github",
         format: "github-actions",
         runId: String(data.runId),
@@ -250,57 +400,225 @@ const storeRunAndErrors = async (
         prNumber: data.prNumber,
         checkRunId: data.checkRunId ? String(data.checkRunId) : null,
         errorCount: data.errors.length,
-      });
+        workflowName: data.runName,
+        conclusion: data.conclusion,
+        headBranch: data.headBranch,
+        runAttempt: data.runAttempt,
+        runStartedAt: data.runStartedAt,
+        runCompletedAt: completedAt,
+      }));
 
-      if (data.errors.length > 0) {
-        const errorRows = data.errors.map((error) => ({
-          id: crypto.randomUUID(),
-          runId: runRecordId,
-          filePath: error.filePath ?? null,
-          line: error.line ?? null,
-          column: error.column ?? null,
-          message: error.message,
-          category: error.category ?? null,
-          severity: error.severity ?? null,
-          ruleId: error.ruleId ?? null,
-          source: error.source ?? null,
-          stackTrace: error.stackTrace ?? null,
-          hint: error.hint ?? null,
-          workflowJob: error.workflowJob ?? data.runName,
-          workflowStep: error.workflowStep ?? null,
-          workflowAction: error.workflowAction ?? null,
-        }));
-        await tx.insert(runErrors).values(errorRows);
+      // Safety net: ON CONFLICT DO NOTHING handles rare race conditions
+      // where two webhooks both pass KV/DB checks due to eventual consistency
+      await tx.insert(runs).values(runRows).onConflictDoNothing();
+
+      // Collect all errors from all runs into a single array for bulk insert
+      const allErrorRows: Array<{
+        id: string;
+        runId: string;
+        filePath: string | null;
+        line: number | null;
+        column: number | null;
+        message: string;
+        category: string | null;
+        severity: string | null;
+        ruleId: string | null;
+        source: string | null;
+        stackTrace: string | null;
+        hint: string | null;
+        workflowJob: string | null;
+        workflowStep: string | null;
+        workflowAction: string | null;
+      }> = [];
+
+      for (const data of preparedRuns) {
+        for (const error of data.errors) {
+          allErrorRows.push({
+            id: crypto.randomUUID(),
+            runId: data.runRecordId,
+            filePath: truncateString(error.filePath, MAX_FILE_PATH_LENGTH),
+            line: validatePositiveInt(error.line, MAX_LINE_NUMBER),
+            column: validatePositiveInt(error.column, MAX_COLUMN_NUMBER),
+            message:
+              truncateString(error.message, MAX_ERROR_MESSAGE_LENGTH) ??
+              "Unknown error",
+            category: truncateString(error.category, 100),
+            severity: truncateString(error.severity, 50),
+            ruleId: truncateString(error.ruleId, 200),
+            source: truncateString(error.source, 100),
+            stackTrace: truncateString(
+              error.stackTrace,
+              MAX_STACK_TRACE_LENGTH
+            ),
+            hint: truncateString(error.hint, MAX_ERROR_MESSAGE_LENGTH),
+            workflowJob:
+              truncateString(error.workflowJob, MAX_WORKFLOW_NAME_LENGTH) ??
+              data.runName,
+            workflowStep: truncateString(
+              error.workflowStep,
+              MAX_WORKFLOW_NAME_LENGTH
+            ),
+            workflowAction: truncateString(
+              error.workflowAction,
+              MAX_WORKFLOW_NAME_LENGTH
+            ),
+          });
+        }
+      }
+
+      // Bulk insert all errors in a single query
+      if (allErrorRows.length > 0) {
+        await tx.insert(runErrors).values(allErrorRows);
       }
     });
 
-    console.log(
-      `[workflow_run] Stored run ${data.runId} with ${data.errors.length} errors`
+    const totalErrors = preparedRuns.reduce(
+      (sum, r) => sum + r.errors.length,
+      0
     );
-    return runRecordId;
+    console.log(
+      `[workflow_run] Bulk stored ${preparedRuns.length} runs with ${totalErrors} total errors in single transaction`
+    );
   } finally {
     await client.end();
   }
 };
 
 // ============================================================================
-// Helper: Check if commit already has stored runs in database
+// Helper: Check which specific run attempts already exist in database
 // ============================================================================
-const checkExistingRunsInDb = async (
+// Run-aware idempotency: Check specific (runId, runAttempt) tuples, not just
+// "any runs for commit". This enables proper re-run handling where the same
+// runId with a different runAttempt should be processed as a new run.
+
+interface RunIdentifier {
+  runId: number;
+  runAttempt: number;
+}
+
+const checkExistingRunAttempts = async (
   env: Env,
   repository: string,
-  headSha: string
-): Promise<boolean> => {
+  runIdentifiers: RunIdentifier[]
+): Promise<{
+  allExist: boolean;
+  existingRuns: Set<string>; // "runId:runAttempt" format
+}> => {
+  if (runIdentifiers.length === 0) {
+    return { allExist: true, existingRuns: new Set() };
+  }
+
   const { db, client } = await createDb(env);
   try {
+    const runIdStrings = runIdentifiers.map((r) => String(r.runId));
+
     const existingRuns = await db
-      .select({ id: runs.id })
+      .select({
+        runId: runs.runId,
+        runAttempt: runs.runAttempt,
+      })
       .from(runs)
-      .where(and(eq(runs.repository, repository), eq(runs.commitSha, headSha)))
-      .limit(1);
-    return existingRuns.length > 0;
+      .where(
+        and(eq(runs.repository, repository), inArray(runs.runId, runIdStrings))
+      );
+
+    // Handle NULL runAttempt (backwards compatibility with legacy data)
+    const existingSet = new Set(
+      existingRuns.map((r) => `${r.runId}:${r.runAttempt ?? 1}`)
+    );
+
+    const allExist = runIdentifiers.every((r) =>
+      existingSet.has(`${r.runId}:${r.runAttempt}`)
+    );
+
+    return { allExist, existingRuns: existingSet };
   } finally {
     await client.end();
+  }
+};
+
+// ============================================================================
+// Helper: PR Comment ID Database Operations
+// ============================================================================
+// Database is the ultimate source of truth for comment IDs.
+// KV serves as a fast cache; these functions handle the persistent layer.
+
+type DbClient = Awaited<ReturnType<typeof createDb>>["db"];
+
+/**
+ * Retrieves a comment ID from the database for a PR.
+ * Returns null if not found.
+ */
+const getCommentIdFromDb = async (
+  db: DbClient,
+  repository: string,
+  prNumber: number
+): Promise<string | null> => {
+  try {
+    const result = await db
+      .select({ commentId: prComments.commentId })
+      .from(prComments)
+      .where(
+        and(
+          eq(prComments.repository, repository.toLowerCase()),
+          eq(prComments.prNumber, prNumber)
+        )
+      )
+      .limit(1);
+    return result[0]?.commentId ?? null;
+  } catch (error) {
+    console.error(
+      `[pr-comments] getCommentIdFromDb failed for ${repository}#${prNumber}:`,
+      error
+    );
+    return null;
+  }
+};
+
+/**
+ * Upserts a comment ID in the database for a PR.
+ * Creates new record or updates existing one.
+ *
+ * Performance: Uses single INSERT...ON CONFLICT DO UPDATE query instead of
+ * SELECT+INSERT/UPDATE pattern to reduce DB round-trips from 2 to 1.
+ * Leverages the unique index on (repository, prNumber) for conflict detection.
+ */
+const upsertCommentIdInDb = async (
+  db: DbClient,
+  repository: string,
+  prNumber: number,
+  commentId: string
+): Promise<void> => {
+  const normalizedRepo = repository.toLowerCase();
+
+  try {
+    // Single upsert query using ON CONFLICT DO UPDATE
+    // Uses the unique index on (repository, prNumber) for conflict detection
+    await db
+      .insert(prComments)
+      .values({
+        id: crypto.randomUUID(),
+        repository: normalizedRepo,
+        prNumber,
+        commentId,
+      })
+      .onConflictDoUpdate({
+        target: [prComments.repository, prComments.prNumber],
+        set: {
+          commentId,
+          updatedAt: new Date(),
+        },
+      });
+
+    console.log(
+      `[pr-comments] Upserted comment ID in DB for ${repository}#${prNumber}: ${commentId}`
+    );
+  } catch (error) {
+    // Non-critical: KV is also storing this, and we have the unique constraint as safety
+    console.error(
+      `[pr-comments] upsertCommentIdInDb failed for ${repository}#${prNumber}:`,
+      error
+    );
   }
 };
 
@@ -359,19 +677,76 @@ const sanitizeErrorMessage = (error: unknown): string => {
 };
 
 // ============================================================================
-// Helper: Process and store failed runs with batched parallel execution
+// Helper: Sanitize error messages for JSON API responses
+// ============================================================================
+// Prevents leaking internal implementation details (e.g., database connection
+// strings, file paths, stack traces) in error responses.
+//
+// Safe patterns: Errors that describe high-level issues without exposing internals
+const SAFE_API_ERROR_PATTERNS = [
+  /^Failed to get installation token/i,
+  /^Rate limit exceeded/i,
+  /^Failed to fetch logs/i,
+  /^Repository not found/i,
+  /^Check run not found/i,
+  /^Comment not found/i,
+  /^Workflow run not found/i,
+  /^Invalid (owner|repo|SHA)/i,
+  /^PR not found/i,
+  // Validation errors from prepareRunData - safe to expose as they describe input issues
+  /^\[workflow_run\] Invalid/i,
+];
+
+const sanitizeApiError = (error: unknown): string => {
+  if (!(error instanceof Error)) {
+    return "An unexpected error occurred";
+  }
+
+  const message = error.message;
+
+  // Check if the error message matches a safe pattern
+  for (const pattern of SAFE_API_ERROR_PATTERNS) {
+    if (pattern.test(message)) {
+      // Return a truncated version to prevent overly long messages
+      return message.slice(0, 200);
+    }
+  }
+
+  // For unknown errors, return generic message to avoid leaking internals
+  // Full error is logged server-side for debugging
+  return "An internal error occurred";
+};
+
+// ============================================================================
+// Helper: Process and store ALL runs with bulk database operations
 // ============================================================================
 //
-// Performance notes (Cloudflare Workers - 128MB limit):
+// Stores ALL workflow runs (not just failures) for comprehensive tracking.
+// - Failed runs: fetch logs, parse errors, store with errors
+// - Other runs: store with metadata only (no errors)
+//
+// Performance optimizations (Cloudflare Workers - 128MB memory, 6 TCP connections):
 // - Fetches logs in parallel batches (MAX_CONCURRENT_FETCHES) to reduce latency
 // - Parses logs immediately after fetch to free memory before next batch
-// - Stores runs in parallel batches to reduce database round-trips
-// - Each batch completes before next starts to bound memory usage
-const processFailedRuns = async (
+// - BULK INSERTS: All runs stored in single transaction (1 connection, not N)
+// - Reduces DB round-trips from 2N to 2 (one INSERT for runs, one for errors)
+
+// Run metadata from GitHub API
+interface WorkflowRunMeta {
+  id: number;
+  name: string;
+  status: string;
+  conclusion: string | null;
+  headBranch: string;
+  runAttempt: number;
+  runStartedAt: Date | null;
+}
+
+const processAndStoreAllRuns = async (
   env: Env,
   github: ReturnType<typeof createGitHubService>,
   token: string,
-  failedRuns: Array<{ id: number; name: string }>,
+  allRuns: WorkflowRunMeta[],
   context: {
     owner: string;
     repo: string;
@@ -384,24 +759,15 @@ const processFailedRuns = async (
   // Limit concurrent fetches to avoid memory pressure from multiple ZIP files
   // Each workflow log can be up to 30MB compressed, so we keep this conservative
   const MAX_CONCURRENT_FETCHES = 3;
-  const MAX_CONCURRENT_STORES = 5;
 
   const allErrors: ParsedError[] = [];
-  const runDataList: Array<{
-    runId: number;
-    runName: string;
-    errors: ParsedError[];
-  }> = [];
+  const failedRuns = allRuns.filter((r) => r.conclusion === "failure");
 
-  // Process a single run: fetch logs, parse, and return result
-  const processRun = async (run: {
-    id: number;
-    name: string;
-  }): Promise<{
-    runId: number;
-    runName: string;
-    errors: ParsedError[];
-  }> => {
+  // Map to store errors by run ID
+  const errorsByRunId = new Map<number, ParsedError[]>();
+
+  // Process a single failed run: fetch logs, parse, and return errors
+  const processFailedRun = async (run: WorkflowRunMeta): Promise<void> => {
     try {
       // Fetch logs from GitHub API
       const logsResult = await github.fetchWorkflowLogs(
@@ -431,14 +797,10 @@ const processFailedRuns = async (
         `[workflow_run] Parsed ${errorsWithContext.length} errors from run ${run.id} (${run.name})`
       );
 
-      return {
-        runId: run.id,
-        runName: run.name,
-        errors: errorsWithContext,
-      };
+      errorsByRunId.set(run.id, errorsWithContext);
+      allErrors.push(...errorsWithContext);
     } catch (error) {
       // If log fetching/parsing fails, use a fallback error
-      // Log full error internally for debugging
       console.error(
         `[workflow_run] Failed to fetch/parse logs for run ${run.id}:`,
         error
@@ -454,44 +816,40 @@ const processFailedRuns = async (
         workflowJob: run.name,
       };
 
-      return {
-        runId: run.id,
-        runName: run.name,
-        errors: [fallbackError],
-      };
+      errorsByRunId.set(run.id, [fallbackError]);
+      allErrors.push(fallbackError);
     }
   };
 
-  // Fetch and parse logs in parallel batches
-  // This reduces total latency while bounding memory usage
+  // Fetch and parse logs for failed runs in parallel batches
   for (let i = 0; i < failedRuns.length; i += MAX_CONCURRENT_FETCHES) {
     const batch = failedRuns.slice(i, i + MAX_CONCURRENT_FETCHES);
-    const results = await Promise.all(batch.map(processRun));
+    await Promise.all(batch.map(processFailedRun));
+  }
 
-    // Collect results from this batch
-    for (const result of results) {
-      allErrors.push(...result.errors);
-      runDataList.push(result);
+  // Prepare all runs for bulk storage (validates and sanitizes data)
+  const preparedRuns: PreparedRunData[] = [];
+  for (const run of allRuns) {
+    const prepared = prepareRunData({
+      runId: run.id,
+      runName: run.name,
+      prNumber: context.prNumber,
+      headSha: context.headSha,
+      errors: errorsByRunId.get(run.id) ?? [],
+      repository: context.repository,
+      checkRunId: context.checkRunId,
+      conclusion: run.conclusion,
+      headBranch: run.headBranch,
+      runAttempt: run.runAttempt,
+      runStartedAt: run.runStartedAt,
+    });
+    if (prepared) {
+      preparedRuns.push(prepared);
     }
   }
 
-  // Store runs in batches to avoid memory pressure (Workers: 128MB limit)
-  for (let i = 0; i < runDataList.length; i += MAX_CONCURRENT_STORES) {
-    const batch = runDataList.slice(i, i + MAX_CONCURRENT_STORES);
-    await Promise.all(
-      batch.map((runData) =>
-        storeRunAndErrors(env, {
-          runId: runData.runId,
-          runName: runData.runName,
-          prNumber: context.prNumber,
-          headSha: context.headSha,
-          errors: runData.errors,
-          repository: context.repository,
-          checkRunId: context.checkRunId,
-        })
-      )
-    );
-  }
+  // Bulk store all runs in a single transaction for efficiency
+  await bulkStoreRunsAndErrors(env, preparedRuns);
 
   return allErrors;
 };
@@ -531,6 +889,199 @@ const cleanupCheckRunOnError = async (
 };
 
 // ============================================================================
+// Helper: Post or update PR comment with deduplication
+// ============================================================================
+// Handles the comment lifecycle: check KV → check DB → update or create → persist
+// Includes 404 recovery if comment was deleted by user
+
+interface PostCommentContext {
+  github: ReturnType<typeof createGitHubService>;
+  token: string;
+  kv: KVNamespace;
+  db: DbClient;
+  owner: string;
+  repo: string;
+  repository: string;
+  prNumber: number;
+  commentBody: string;
+}
+
+const postOrUpdateComment = async (ctx: PostCommentContext): Promise<void> => {
+  const { kv, db, repository, prNumber } = ctx;
+
+  // Check KV first (fast path), then DB (persistent fallback)
+  let existingCommentId = await getStoredCommentId(kv, repository, prNumber);
+  let commentSource = "kv";
+
+  if (!existingCommentId) {
+    const dbCommentId = await getCommentIdFromDb(db, repository, prNumber);
+    if (dbCommentId) {
+      existingCommentId = Number.parseInt(dbCommentId, 10);
+      commentSource = "db";
+      console.log(
+        `[workflow_run] Found comment ID ${existingCommentId} in DB (KV miss) for PR #${prNumber}`
+      );
+    }
+  }
+
+  if (existingCommentId) {
+    await updateExistingComment(ctx, existingCommentId, commentSource);
+  } else {
+    await createNewComment(ctx);
+  }
+};
+
+const updateExistingComment = async (
+  ctx: PostCommentContext,
+  commentId: number,
+  source: string
+): Promise<void> => {
+  const { github, token, kv, owner, repo, repository, prNumber, commentBody } =
+    ctx;
+
+  try {
+    await github.updateComment(token, owner, repo, commentId, commentBody);
+    console.log(
+      `[workflow_run] Updated existing comment ${commentId} on PR #${prNumber} (source: ${source})`
+    );
+    // Refresh KV cache if found in DB
+    if (source === "db") {
+      await storeCommentId(kv, repository, prNumber, commentId);
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isNotFound =
+      errorMessage.includes("404") || errorMessage.includes("not found");
+
+    if (isNotFound) {
+      // Comment was deleted externally - create a new one.
+      // This is safe because the PR comment lock is held by finalizeAndPostResults.
+      // Note: KV locks are eventually consistent, so very rare duplicate comments
+      // are possible if two webhooks win the lock race. The DB stores the latest
+      // comment ID, so subsequent updates will consolidate to one comment.
+      console.log(
+        `[workflow_run] Comment ${commentId} was deleted, creating new comment for PR #${prNumber}`
+      );
+      await createNewComment(ctx);
+    } else {
+      throw error;
+    }
+  }
+};
+
+const createNewComment = async (ctx: PostCommentContext): Promise<void> => {
+  const {
+    github,
+    token,
+    kv,
+    db,
+    owner,
+    repo,
+    repository,
+    prNumber,
+    commentBody,
+  } = ctx;
+
+  const { id: newCommentId } = await github.postCommentWithId(
+    token,
+    owner,
+    repo,
+    prNumber,
+    commentBody
+  );
+  // Store in both KV (cache) and DB (persistence)
+  await storeCommentId(kv, repository, prNumber, newCommentId);
+  await upsertCommentIdInDb(db, repository, prNumber, String(newCommentId));
+  console.log(
+    `[workflow_run] Posted new comment ${newCommentId} on PR #${prNumber}`
+  );
+};
+
+// ============================================================================
+// Helper: Update existing comment to passing state
+// ============================================================================
+// When all checks pass, update any existing failure comment to show success
+// Only updates if a comment already exists (no new comment created for passing)
+
+interface UpdatePassingCommentContext {
+  github: ReturnType<typeof createGitHubService>;
+  token: string;
+  kv: KVNamespace;
+  db: DbClient;
+  owner: string;
+  repo: string;
+  repository: string;
+  prNumber: number;
+  headSha: string;
+  runs: WorkflowRunResult[];
+}
+
+const updateCommentToPassingState = async (
+  ctx: UpdatePassingCommentContext
+): Promise<boolean> => {
+  const {
+    github,
+    token,
+    kv,
+    db,
+    owner,
+    repo,
+    repository,
+    prNumber,
+    headSha,
+    runs,
+  } = ctx;
+
+  // Check KV first (fast path)
+  let existingCommentId = await getStoredCommentId(kv, repository, prNumber);
+
+  // Fall back to DB if not in KV
+  if (!existingCommentId) {
+    const dbCommentId = await getCommentIdFromDb(db, repository, prNumber);
+    if (dbCommentId) {
+      existingCommentId = Number.parseInt(dbCommentId, 10);
+    }
+  }
+
+  // No existing comment = PR never had failures, nothing to update
+  if (!existingCommentId) {
+    console.log(
+      `[workflow_run] All checks passed - no existing comment to update for PR #${prNumber}`
+    );
+    return false;
+  }
+
+  // Format and update the comment to passing state
+  const passingBody = formatPassingComment({ runs, headSha });
+
+  try {
+    await github.updateComment(
+      token,
+      owner,
+      repo,
+      existingCommentId,
+      passingBody
+    );
+    console.log(
+      `[workflow_run] Updated comment ${existingCommentId} to passing state for PR #${prNumber}`
+    );
+    return true;
+  } catch (error) {
+    // Comment may have been deleted - that's fine, no need to recreate for passing state
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isNotFound =
+      errorMessage.includes("404") || errorMessage.includes("not found");
+    if (isNotFound) {
+      console.log(
+        `[workflow_run] Comment ${existingCommentId} was deleted, skipping passing comment for PR #${prNumber}`
+      );
+      return false;
+    }
+    throw error;
+  }
+};
+
+// ============================================================================
 // Helper: Finalize check run and post PR comment with results
 // ============================================================================
 interface WorkflowRun {
@@ -541,11 +1092,14 @@ interface WorkflowRun {
 }
 
 const finalizeAndPostResults = async (
+  env: Env,
   github: ReturnType<typeof createGitHubService>,
   token: string,
+  kv: KVNamespace,
   context: {
     owner: string;
     repo: string;
+    repository: string;
     headSha: string;
     prNumber: number;
     checkRunId: number;
@@ -564,6 +1118,7 @@ const finalizeAndPostResults = async (
   const {
     owner,
     repo,
+    repository,
     headSha,
     prNumber,
     checkRunId,
@@ -585,23 +1140,8 @@ const finalizeAndPostResults = async (
   const hasFailed = failedCount > 0;
   const totalErrors = allErrors.length;
 
-  // Update check run to completed
-  await github.updateCheckRun(token, {
-    owner,
-    repo,
-    checkRunId,
-    status: "completed",
-    conclusion: hasFailed ? "failure" : "success",
-    output: {
-      title: hasFailed
-        ? `${totalErrors} error${totalErrors !== 1 ? "s" : ""} found`
-        : "All checks passed",
-      summary: formatCheckSummary(runResults, totalErrors),
-    },
-  });
-
-  // Post single PR comment with results
-  const commentBody = formatResultsComment({
+  // Format check run output with summary, error details, and inline annotations
+  const checkRunOutput = formatCheckRunOutput({
     owner,
     repo,
     headSha,
@@ -610,9 +1150,198 @@ const finalizeAndPostResults = async (
     totalErrors,
   });
 
-  await github.postCommentWithId(token, owner, repo, prNumber, commentBody);
+  // Update check run to completed
+  await github.updateCheckRun(token, {
+    owner,
+    repo,
+    checkRunId,
+    status: "completed",
+    conclusion: hasFailed ? "neutral" : "success",
+    output: {
+      title: hasFailed
+        ? `${totalErrors} error${totalErrors !== 1 ? "s" : ""} found`
+        : "All checks passed",
+      summary: checkRunOutput.summary,
+      text: checkRunOutput.text,
+      annotations: checkRunOutput.annotations,
+    },
+  });
+
+  // Create DB connection (needed for both passing and failing cases)
+  const { db, client } = await createDb(env);
+  let lockAcquired = false;
+
+  try {
+    // When all checks pass, update existing comment to "passing" state
+    // (only if a previous failure comment exists)
+    if (!hasFailed) {
+      const prLock = await acquirePrCommentLock(kv, repository, prNumber);
+      if (!prLock.acquired) {
+        console.log(
+          `[workflow_run] PR comment lock not acquired for ${repository}#${prNumber}, skipping passing comment update`
+        );
+        return { runResults, totalErrors };
+      }
+      lockAcquired = true;
+
+      await updateCommentToPassingState({
+        github,
+        token,
+        kv,
+        db,
+        owner,
+        repo,
+        repository,
+        prNumber,
+        headSha,
+        runs: runResults,
+      });
+
+      return { runResults, totalErrors };
+    }
+
+    // When checks fail, post or update the failure comment
+    // Acquire PR comment lock to prevent race conditions
+    // Note: KV locks are eventually consistent, so rare race conditions are possible.
+    // The DB unique constraint on prComments table is the ultimate safety net.
+    const prLock = await acquirePrCommentLock(kv, repository, prNumber);
+    if (!prLock.acquired) {
+      console.log(
+        `[workflow_run] PR comment lock not acquired for ${repository}#${prNumber}, skipping comment`
+      );
+      return { runResults, totalErrors };
+    }
+    lockAcquired = true;
+
+    const commentBody = formatResultsComment({
+      owner,
+      repo,
+      headSha,
+      runs: runResults,
+      errors: allErrors,
+      totalErrors,
+    });
+
+    // Safety: formatResultsComment returns null if no failures
+    // This shouldn't happen since we check hasFailed above, but handle gracefully
+    if (!commentBody) {
+      console.log(
+        `[workflow_run] No comment body generated for PR #${prNumber}, skipping`
+      );
+      return { runResults, totalErrors };
+    }
+
+    await postOrUpdateComment({
+      github,
+      token,
+      kv,
+      db,
+      owner,
+      repo,
+      repository,
+      prNumber,
+      commentBody,
+    });
+  } finally {
+    await client.end();
+    if (lockAcquired) {
+      await releasePrCommentLock(kv, repository, prNumber);
+    }
+  }
 
   return { runResults, totalErrors };
+};
+
+// Handle workflow_run.in_progress - create a "queued" check run to show users we're watching
+const handleWorkflowRunInProgress = async (
+  c: WebhookContext,
+  payload: WorkflowRunPayload
+) => {
+  const { workflow_run, repository, installation } = payload;
+  const owner = repository.owner.login;
+  const repo = repository.name;
+  const headSha = workflow_run.head_sha;
+  const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
+
+  // Skip if no PR associated (e.g., push to main branch)
+  if (workflow_run.pull_requests.length === 0) {
+    console.log(
+      `[workflow_run] No PR associated with ${workflow_run.name}, skipping [delivery: ${deliveryId}]`
+    );
+    return c.json({
+      message: "skipped",
+      reason: "no_pr",
+      branch: workflow_run.head_branch,
+    });
+  }
+
+  console.log(
+    `[workflow_run] In progress: ${repository.full_name} / ${workflow_run.name} [delivery: ${deliveryId}]`
+  );
+
+  // Check if we already created a check run for this commit
+  const existingCheckRunId = await getStoredCheckRunId(
+    c.env["detent-idempotency"],
+    repository.full_name,
+    headSha
+  );
+
+  if (existingCheckRunId) {
+    console.log(
+      `[workflow_run] Check run ${existingCheckRunId} already exists for ${headSha.slice(0, 7)}`
+    );
+    return c.json({
+      message: "check run already exists",
+      checkRunId: existingCheckRunId,
+    });
+  }
+
+  const github = createGitHubService(c.env);
+
+  try {
+    const token = await github.getInstallationToken(installation.id);
+
+    // Create a "queued" check run so users know we're watching
+    const checkRun = await github.createCheckRun(token, {
+      owner,
+      repo,
+      headSha,
+      name: "Detent Parser",
+      status: "queued",
+      output: {
+        title: "Waiting for CI to complete...",
+        summary: "Detent will analyze CI results once all workflows finish.",
+      },
+    });
+
+    // Store the check run ID for later update
+    await storeCheckRunId(
+      c.env["detent-idempotency"],
+      repository.full_name,
+      headSha,
+      checkRun.id
+    );
+
+    console.log(
+      `[workflow_run] Created queued check run ${checkRun.id} for ${headSha.slice(0, 7)}`
+    );
+
+    return c.json({
+      message: "check run created",
+      checkRunId: checkRun.id,
+      status: "queued",
+    });
+  } catch (error) {
+    console.error(
+      `[workflow_run] Error creating queued check run [delivery: ${deliveryId}]:`,
+      error
+    );
+    // Non-fatal - we'll create the check run on completed if this fails
+    return c.json({
+      message: "failed to create check run",
+      error: sanitizeApiError(error),
+    });
+  }
 };
 
 // Handle workflow_run events (CI completed)
@@ -623,20 +1352,15 @@ const finalizeAndPostResults = async (
 // - Race condition handling: Returns early if another webhook is processing
 // - Error recovery: Cleans up check run on failure
 // - Database-backed deduplication: Unique constraint on (repository, commitSha, runId)
-const handleWorkflowRunEvent = async (
+const handleWorkflowRunCompleted = async (
   c: WebhookContext,
   payload: WorkflowRunPayload
 ) => {
-  const { action, workflow_run, repository, installation } = payload;
+  const { workflow_run, repository, installation } = payload;
   const owner = repository.owner.login;
   const repo = repository.name;
   const headSha = workflow_run.head_sha;
   const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
-
-  // Only process completed runs
-  if (action !== "completed") {
-    return c.json({ message: "ignored", reason: "not completed" });
-  }
 
   console.log(
     `[workflow_run] Completed: ${repository.full_name} / ${workflow_run.name} (${workflow_run.conclusion}) [delivery: ${deliveryId}]`
@@ -680,7 +1404,7 @@ const handleWorkflowRunEvent = async (
 
     if (!prNumber) {
       console.log("[workflow_run] No associated PR found, skipping");
-      await markCommitProcessed(
+      await releaseCommitLock(
         c.env["detent-idempotency"],
         repository.full_name,
         headSha
@@ -717,17 +1441,25 @@ const handleWorkflowRunEvent = async (
       });
     }
 
-    // Database-backed idempotency: verify we haven't already stored runs
-    const hasExistingRuns = await checkExistingRunsInDb(
+    // Run-aware idempotency: check which specific (runId, runAttempt) tuples exist
+    // This enables proper re-run handling - same runId with different runAttempt is a new run
+    const runIdentifiers = workflowRuns.map((r) => ({
+      runId: r.id,
+      runAttempt: r.runAttempt,
+    }));
+
+    const { allExist, existingRuns } = await checkExistingRunAttempts(
       c.env,
       repository.full_name,
-      headSha
+      runIdentifiers
     );
-    if (hasExistingRuns) {
+
+    if (allExist) {
+      // All these specific run attempts already stored - true duplicate
       console.log(
-        `[workflow_run] Commit ${headSha.slice(0, 7)} already has stored runs, skipping [delivery: ${deliveryId}]`
+        `[workflow_run] All ${runIdentifiers.length} run attempts already stored, skipping [delivery: ${deliveryId}]`
       );
-      await markCommitProcessed(
+      await releaseCommitLock(
         c.env["detent-idempotency"],
         repository.full_name,
         headSha
@@ -740,63 +1472,113 @@ const handleWorkflowRunEvent = async (
       });
     }
 
-    // All runs completed! Create check run
-    const checkRun = await github.createCheckRun(token, {
-      owner,
-      repo,
-      headSha,
-      name: "Detent CI Analysis",
-      status: "in_progress",
-      output: {
-        title: "Analyzing CI results...",
-        summary: "Processing workflow runs and extracting errors",
-      },
-    });
-    checkRunId = checkRun.id;
+    // Filter to only runs that need processing (re-runs will pass through)
+    const runsToProcess = workflowRuns.filter(
+      (r) => !existingRuns.has(`${r.id}:${r.runAttempt}`)
+    );
 
-    // Process failed runs
-    const failedRuns = workflowRuns.filter((r) => r.conclusion === "failure");
-    const allErrors = await processFailedRuns(
+    console.log(
+      `[workflow_run] Processing ${runsToProcess.length} new runs (${existingRuns.size} already stored)`
+    );
+
+    // All runs completed! Get or create check run
+    // First, try to retrieve the check run we created on in_progress
+    const storedCheckRunId = await getStoredCheckRunId(
+      c.env["detent-idempotency"],
+      repository.full_name,
+      headSha
+    );
+
+    if (storedCheckRunId) {
+      // Update existing check run to in_progress
+      checkRunId = storedCheckRunId;
+      await github.updateCheckRun(token, {
+        owner,
+        repo,
+        checkRunId,
+        status: "in_progress",
+        output: {
+          title: "Analyzing CI results...",
+          summary: "Processing workflow runs and extracting errors",
+        },
+      });
+      console.log(
+        `[workflow_run] Updated existing check run ${checkRunId} to in_progress`
+      );
+    } else {
+      // No existing check run - create one (fallback if in_progress handler didn't run)
+      const checkRun = await github.createCheckRun(token, {
+        owner,
+        repo,
+        headSha,
+        name: "Detent Parser",
+        status: "in_progress",
+        output: {
+          title: "Analyzing CI results...",
+          summary: "Processing workflow runs and extracting errors",
+        },
+      });
+      checkRunId = checkRun.id;
+      console.log(`[workflow_run] Created new check run ${checkRunId}`);
+    }
+
+    // At this point checkRunId is guaranteed to be set
+    const finalCheckRunId = checkRunId;
+
+    // Process only NEW runs: fetch logs for failures, store with metadata
+    // Re-runs (same runId, different runAttempt) will be in runsToProcess
+    const allErrors = await processAndStoreAllRuns(
       c.env,
       github,
       token,
-      failedRuns,
+      runsToProcess,
       {
         owner,
         repo,
         prNumber,
         headSha,
         repository: repository.full_name,
-        checkRunId,
+        checkRunId: finalCheckRunId,
       }
     );
 
-    // Finalize: update check run and post PR comment
-    const { totalErrors } = await finalizeAndPostResults(github, token, {
-      owner,
-      repo,
-      headSha,
-      prNumber,
-      checkRunId,
-      workflowRuns,
-      allErrors,
-    });
+    // Finalize: update check run and post PR comment (if failures)
+    const { totalErrors } = await finalizeAndPostResults(
+      c.env,
+      github,
+      token,
+      c.env["detent-idempotency"],
+      {
+        owner,
+        repo,
+        repository: repository.full_name,
+        headSha,
+        prNumber,
+        checkRunId: finalCheckRunId,
+        workflowRuns,
+        allErrors,
+      }
+    );
 
-    await markCommitProcessed(
+    // Release lock after successful processing (allows future re-runs to acquire)
+    await releaseCommitLock(
       c.env["detent-idempotency"],
       repository.full_name,
-      headSha,
-      checkRunId
+      headSha
     );
+
+    const failedRunCount = runsToProcess.filter(
+      (r) => r.conclusion === "failure"
+    ).length;
 
     return c.json({
       message: "workflow_run processed",
       repository: repository.full_name,
       prNumber,
-      runsProcessed: workflowRuns.length,
-      failedRuns: failedRuns.length,
+      runsProcessed: runsToProcess.length,
+      failedRuns: failedRunCount,
       totalErrors,
-      checkRunId,
+      checkRunId: finalCheckRunId,
     });
   } catch (error) {
     console.error(
@@ -818,15 +1600,13 @@ const handleWorkflowRunEvent = async (
     return c.json(
       {
         message: "workflow_run error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        // Sanitize error to prevent leaking internal details (DB connection strings, etc.)
+        error: sanitizeApiError(error),
       },
       500
     );
   }
 };
-
-// Generate a unique slug for an organization
-type DbClient = Awaited<ReturnType<typeof createDb>>["db"];
 
 // Auto-link installer to organization if they have an existing Detent account
 const autoLinkInstaller = async (
@@ -1213,7 +1993,7 @@ const handleInstallationEvent = async (
     return c.json(
       {
         message: "installation error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: sanitizeApiError(error),
       },
       500
     );
@@ -1299,7 +2079,7 @@ const handleInstallationRepositoriesEvent = async (
     return c.json(
       {
         message: "installation_repositories error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: sanitizeApiError(error),
       },
       500
     );
@@ -1427,7 +2207,7 @@ const handleRepositoryEvent = async (
     return c.json(
       {
         message: "repository error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: sanitizeApiError(error),
       },
       500
     );
@@ -1539,7 +2319,7 @@ const handleOrganizationEvent = async (
     return c.json(
       {
         message: "organization error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: sanitizeApiError(error),
       },
       500
     );
@@ -1587,14 +2367,14 @@ const handleIssueCommentEvent = async (
 
     switch (command.type) {
       case "heal": {
-        // Post acknowledgment
-        await github.postComment(
-          token,
-          repository.owner.login,
-          repository.name,
-          issue.number,
-          `🔧 **Detent** is analyzing the CI failures${command.dryRun ? " (dry run)" : ""}...`
-        );
+        // HACK: Commenting out acknowledgment comment for now - will be used for cloud healing later
+        // await github.postComment(
+        //   token,
+        //   repository.owner.login,
+        //   repository.name,
+        //   issue.number,
+        //   `🔧 **Detent** is analyzing the CI failures${command.dryRun ? " (dry run)" : ""}...`
+        // );
 
         // Healing flow will:
         // 1. Find latest failed workflow run
@@ -1654,7 +2434,7 @@ const handleIssueCommentEvent = async (
     return c.json(
       {
         message: "issue_comment error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: sanitizeApiError(error),
       },
       500
     );

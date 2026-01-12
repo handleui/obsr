@@ -12,6 +12,7 @@
  * For CI context parsers (log FORMAT), see ../context/
  */
 
+export { createBiomeParser } from "./biome.js";
 export { createESLintParser } from "./eslint.js";
 export { createGenericParser } from "./generic.js";
 export { createGolangParser, GolangParser } from "./golang.js";

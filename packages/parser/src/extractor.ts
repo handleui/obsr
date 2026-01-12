@@ -67,6 +67,11 @@ export class Extractor {
    */
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: main extraction loop requires handling multi-line parsers, context tracking, deduplication, and error recovery in a single pass
   extract(output: string, ctxParser: ContextParser): ExtractedError[] {
+    // Reset all parser state at the start of each extraction to ensure isolation
+    // between multiple extract() calls. This prevents context (like test output tracking)
+    // from leaking between independent parse runs.
+    this.registry.resetAll();
+
     const extracted: ExtractedError[] = [];
     // Use Set for O(1) lookup - more efficient than Map<string, boolean>
     const seen = new Set<string>();
@@ -133,6 +138,13 @@ export class Extractor {
       }
 
       let found: ExtractedError | null = null;
+
+      // Allow parsers to observe line for context tracking BEFORE noise filtering.
+      // This is critical for stateful parsers like GenericParser that need to track
+      // test output context even when marker lines are filtered as noise.
+      for (const parser of this.registry.allParsers()) {
+        parser.observeLine?.(cleanLine);
+      }
 
       // If we have an active multi-line parser, try to continue BEFORE noise check.
       // Multi-line parsers (tracebacks, panics) need to see all lines including

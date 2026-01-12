@@ -1,5 +1,23 @@
 # @detent/api
 
+## 0.5.0
+
+### Minor Changes
+
+- 13c1b2a: Improve check run output with source grouping and collapsible file sections.
+  Errors are now organized by tool (TypeScript, Biome, etc.) with each file in a
+  collapsible `<details>` block for cleaner navigation on large error counts.
+- 6559092: Add organization settings as JSONB with configurable inline annotations and PR comments.
+  Settings can be managed via the API with proper role-based access (owner-only for auto-join,
+  admin/owner for annotations and comments). Webhook handlers now respect these settings with
+  an in-memory cache for performance.
+
+### Patch Changes
+
+- 0c31eac: Rename APP_BASE_URL to NAVIGATOR_BASE_URL and make email sender configurable via RESEND_EMAIL_FROM
+- Updated dependencies [fe49914]
+  - @detent/parser@0.4.0
+
 ## 0.4.0
 
 ### Minor Changes

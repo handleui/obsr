@@ -826,13 +826,21 @@ const createGitHubServiceInternal = (env: Env) => {
 
   // GitHub Check Run Annotation
   // See: https://docs.github.com/en/rest/checks/runs#update-a-check-run
+  //
+  // Annotation levels:
+  // - "failure": Blocks PR merging (if branch protection requires checks), shown as red X
+  // - "warning": Shows warning icon (yellow), does not block
+  // - "notice": Informational (blue info icon), does not block
   interface CheckRunAnnotation {
     path: string;
     start_line: number;
     end_line: number;
+    start_column?: number; // Column precision (same line only)
+    end_column?: number;
     annotation_level: "notice" | "warning" | "failure";
-    message: string;
-    title?: string;
+    message: string; // Max 64 KB
+    title?: string; // Max 255 chars
+    raw_details?: string; // Max 64 KB - additional context (stack traces, etc.)
   }
 
   // Check run output with optional detailed text and annotations

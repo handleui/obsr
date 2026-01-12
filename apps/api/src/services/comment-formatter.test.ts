@@ -5,6 +5,9 @@ import {
   formatResultsComment,
 } from "./comment-formatter";
 
+// Top-level regex for performance (lint rule: useTopLevelRegex)
+const TIMESTAMP_PATTERN = /Updated \w+ \d+, \d{2}:\d{2} UTC/;
+
 // Factory for creating test options
 const createOptions = (
   overrides: Partial<Parameters<typeof formatResultsComment>[0]> = {}
@@ -19,6 +22,54 @@ const createOptions = (
 });
 
 describe("formatResultsComment", () => {
+  describe("edge cases", () => {
+    it("returns null when no workflows fail", () => {
+      const result = formatResultsComment(
+        createOptions({
+          runs: [
+            { name: "Build", id: 123, conclusion: "success", errorCount: 0 },
+            { name: "Test", id: 456, conclusion: "success", errorCount: 0 },
+          ],
+        })
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it("returns null when all workflows are cancelled/skipped", () => {
+      const result = formatResultsComment(
+        createOptions({
+          runs: [
+            { name: "Build", id: 123, conclusion: "cancelled", errorCount: 0 },
+            { name: "Test", id: 456, conclusion: "skipped", errorCount: 0 },
+          ],
+        })
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it("returns null with empty runs array", () => {
+      const result = formatResultsComment(createOptions({ runs: [] }));
+
+      expect(result).toBeNull();
+    });
+
+    it("shows skipped count when workflows are cancelled/skipped", () => {
+      const result = formatResultsComment(
+        createOptions({
+          runs: [
+            { name: "Build", id: 123, conclusion: "failure", errorCount: 3 },
+            { name: "Test", id: 456, conclusion: "cancelled", errorCount: 0 },
+            { name: "Deploy", id: 789, conclusion: "skipped", errorCount: 0 },
+          ],
+        })
+      );
+
+      expect(result).toContain("2 skipped");
+    });
+  });
+
   describe("minimal format", () => {
     it("shows only failed workflows in the table", () => {
       const result = formatResultsComment(
@@ -96,17 +147,28 @@ describe("formatResultsComment", () => {
       expect(result).not.toContain("passed");
     });
 
-    it("includes UTC timestamp", () => {
-      const result = formatResultsComment(createOptions());
+    it("includes UTC timestamp in 24h format", () => {
+      const result = formatResultsComment(
+        createOptions({
+          runs: [
+            { name: "Build", id: 123, conclusion: "failure", errorCount: 1 },
+          ],
+        })
+      );
 
       expect(result).toContain("Updated");
       expect(result).toContain("UTC");
+      // Should use 24h format (e.g., "Jan 12, 15:30")
+      expect(result).toMatch(TIMESTAMP_PATTERN);
     });
 
     it("includes CLI command with short SHA", () => {
       const result = formatResultsComment(
         createOptions({
           headSha: "abc1234567890def",
+          runs: [
+            { name: "Build", id: 123, conclusion: "failure", errorCount: 1 },
+          ],
         })
       );
 
@@ -139,25 +201,6 @@ describe("formatResultsComment", () => {
 
       expect(result).toContain("| Workflow | Status | Errors |");
       expect(result).toContain("|----------|--------|--------|");
-    });
-
-    it("renders empty table when no workflows fail", () => {
-      const result = formatResultsComment(
-        createOptions({
-          runs: [
-            { name: "Build", id: 123, conclusion: "success", errorCount: 0 },
-          ],
-        })
-      );
-
-      // Should still have headers
-      expect(result).toContain("| Workflow | Status | Errors |");
-      // But no data rows (only headers, separator, empty line, footer)
-      const lines = result.split("\n");
-      const dataRows = lines.filter(
-        (line) => line.startsWith("| [") // Data rows start with "| [Name]"
-      );
-      expect(dataRows.length).toBe(0);
     });
   });
 

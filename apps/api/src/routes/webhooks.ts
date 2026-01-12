@@ -27,7 +27,6 @@ import {
   acquirePrCommentLock,
   getStoredCheckRunId,
   getStoredCommentId,
-  markCommitProcessed,
   releaseCommitLock,
   releasePrCommentLock,
   storeCheckRunId,
@@ -407,7 +406,9 @@ const bulkStoreRunsAndErrors = async (
         runCompletedAt: completedAt,
       }));
 
-      await tx.insert(runs).values(runRows);
+      // Safety net: ON CONFLICT DO NOTHING handles rare race conditions
+      // where two webhooks both pass KV/DB checks due to eventual consistency
+      await tx.insert(runs).values(runRows).onConflictDoNothing();
 
       // Collect all errors from all runs into a single array for bulk insert
       const allErrorRows: Array<{
@@ -482,21 +483,53 @@ const bulkStoreRunsAndErrors = async (
 };
 
 // ============================================================================
-// Helper: Check if commit already has stored runs in database
+// Helper: Check which specific run attempts already exist in database
 // ============================================================================
-const checkExistingRunsInDb = async (
+// Run-aware idempotency: Check specific (runId, runAttempt) tuples, not just
+// "any runs for commit". This enables proper re-run handling where the same
+// runId with a different runAttempt should be processed as a new run.
+
+interface RunIdentifier {
+  runId: number;
+  runAttempt: number;
+}
+
+const checkExistingRunAttempts = async (
   env: Env,
   repository: string,
-  headSha: string
-): Promise<boolean> => {
+  runIdentifiers: RunIdentifier[]
+): Promise<{
+  allExist: boolean;
+  existingRuns: Set<string>; // "runId:runAttempt" format
+}> => {
+  if (runIdentifiers.length === 0) {
+    return { allExist: true, existingRuns: new Set() };
+  }
+
   const { db, client } = await createDb(env);
   try {
+    const runIdStrings = runIdentifiers.map((r) => String(r.runId));
+
     const existingRuns = await db
-      .select({ id: runs.id })
+      .select({
+        runId: runs.runId,
+        runAttempt: runs.runAttempt,
+      })
       .from(runs)
-      .where(and(eq(runs.repository, repository), eq(runs.commitSha, headSha)))
-      .limit(1);
-    return existingRuns.length > 0;
+      .where(
+        and(eq(runs.repository, repository), inArray(runs.runId, runIdStrings))
+      );
+
+    // Handle NULL runAttempt (backwards compatibility with legacy data)
+    const existingSet = new Set(
+      existingRuns.map((r) => `${r.runId}:${r.runAttempt ?? 1}`)
+    );
+
+    const allExist = runIdentifiers.every((r) =>
+      existingSet.has(`${r.runId}:${r.runAttempt}`)
+    );
+
+    return { allExist, existingRuns: existingSet };
   } finally {
     await client.end();
   }
@@ -543,6 +576,10 @@ const getCommentIdFromDb = async (
 /**
  * Upserts a comment ID in the database for a PR.
  * Creates new record or updates existing one.
+ *
+ * Performance: Uses single INSERT...ON CONFLICT DO UPDATE query instead of
+ * SELECT+INSERT/UPDATE pattern to reduce DB round-trips from 2 to 1.
+ * Leverages the unique index on (repository, prNumber) for conflict detection.
  */
 const upsertCommentIdInDb = async (
   db: DbClient,
@@ -553,42 +590,27 @@ const upsertCommentIdInDb = async (
   const normalizedRepo = repository.toLowerCase();
 
   try {
-    // Check if record exists
-    const existing = await db
-      .select({ id: prComments.id })
-      .from(prComments)
-      .where(
-        and(
-          eq(prComments.repository, normalizedRepo),
-          eq(prComments.prNumber, prNumber)
-        )
-      )
-      .limit(1);
-
-    if (existing[0]) {
-      // Update existing record
-      await db
-        .update(prComments)
-        .set({
-          commentId,
-          updatedAt: new Date(),
-        })
-        .where(eq(prComments.id, existing[0].id));
-      console.log(
-        `[pr-comments] Updated comment ID in DB for ${repository}#${prNumber}: ${commentId}`
-      );
-    } else {
-      // Insert new record
-      await db.insert(prComments).values({
+    // Single upsert query using ON CONFLICT DO UPDATE
+    // Uses the unique index on (repository, prNumber) for conflict detection
+    await db
+      .insert(prComments)
+      .values({
         id: crypto.randomUUID(),
         repository: normalizedRepo,
         prNumber,
         commentId,
+      })
+      .onConflictDoUpdate({
+        target: [prComments.repository, prComments.prNumber],
+        set: {
+          commentId,
+          updatedAt: new Date(),
+        },
       });
-      console.log(
-        `[pr-comments] Stored new comment ID in DB for ${repository}#${prNumber}: ${commentId}`
-      );
-    }
+
+    console.log(
+      `[pr-comments] Upserted comment ID in DB for ${repository}#${prNumber}: ${commentId}`
+    );
   } catch (error) {
     // Non-critical: KV is also storing this, and we have the unique constraint as safety
     console.error(
@@ -1093,6 +1115,15 @@ const finalizeAndPostResults = async (
       totalErrors,
     });
 
+    // Safety: formatResultsComment returns null if no failures
+    // This shouldn't happen since we check hasFailed above, but handle gracefully
+    if (!commentBody) {
+      console.log(
+        `[workflow_run] No comment body generated for PR #${prNumber}, skipping`
+      );
+      return { runResults, totalErrors };
+    }
+
     await postOrUpdateComment({
       github,
       token,
@@ -1201,7 +1232,7 @@ const handleWorkflowRunInProgress = async (
     // Non-fatal - we'll create the check run on completed if this fails
     return c.json({
       message: "failed to create check run",
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: sanitizeApiError(error),
     });
   }
 };
@@ -1266,7 +1297,7 @@ const handleWorkflowRunCompleted = async (
 
     if (!prNumber) {
       console.log("[workflow_run] No associated PR found, skipping");
-      await markCommitProcessed(
+      await releaseCommitLock(
         c.env["detent-idempotency"],
         repository.full_name,
         headSha
@@ -1303,17 +1334,25 @@ const handleWorkflowRunCompleted = async (
       });
     }
 
-    // Database-backed idempotency: verify we haven't already stored runs
-    const hasExistingRuns = await checkExistingRunsInDb(
+    // Run-aware idempotency: check which specific (runId, runAttempt) tuples exist
+    // This enables proper re-run handling - same runId with different runAttempt is a new run
+    const runIdentifiers = workflowRuns.map((r) => ({
+      runId: r.id,
+      runAttempt: r.runAttempt,
+    }));
+
+    const { allExist, existingRuns } = await checkExistingRunAttempts(
       c.env,
       repository.full_name,
-      headSha
+      runIdentifiers
     );
-    if (hasExistingRuns) {
+
+    if (allExist) {
+      // All these specific run attempts already stored - true duplicate
       console.log(
-        `[workflow_run] Commit ${headSha.slice(0, 7)} already has stored runs, skipping [delivery: ${deliveryId}]`
+        `[workflow_run] All ${runIdentifiers.length} run attempts already stored, skipping [delivery: ${deliveryId}]`
       );
-      await markCommitProcessed(
+      await releaseCommitLock(
         c.env["detent-idempotency"],
         repository.full_name,
         headSha
@@ -1325,6 +1364,15 @@ const handleWorkflowRunCompleted = async (
         status: "duplicate_db",
       });
     }
+
+    // Filter to only runs that need processing (re-runs will pass through)
+    const runsToProcess = workflowRuns.filter(
+      (r) => !existingRuns.has(`${r.id}:${r.runAttempt}`)
+    );
+
+    console.log(
+      `[workflow_run] Processing ${runsToProcess.length} new runs (${existingRuns.size} already stored)`
+    );
 
     // All runs completed! Get or create check run
     // First, try to retrieve the check run we created on in_progress
@@ -1370,12 +1418,13 @@ const handleWorkflowRunCompleted = async (
     // At this point checkRunId is guaranteed to be set
     const finalCheckRunId = checkRunId;
 
-    // Process ALL runs: fetch logs for failures, store all with metadata
+    // Process only NEW runs: fetch logs for failures, store with metadata
+    // Re-runs (same runId, different runAttempt) will be in runsToProcess
     const allErrors = await processAndStoreAllRuns(
       c.env,
       github,
       token,
-      workflowRuns,
+      runsToProcess,
       {
         owner,
         repo,
@@ -1404,14 +1453,14 @@ const handleWorkflowRunCompleted = async (
       }
     );
 
-    await markCommitProcessed(
+    // Release lock after successful processing (allows future re-runs to acquire)
+    await releaseCommitLock(
       c.env["detent-idempotency"],
       repository.full_name,
-      headSha,
-      finalCheckRunId
+      headSha
     );
 
-    const failedRunCount = workflowRuns.filter(
+    const failedRunCount = runsToProcess.filter(
       (r) => r.conclusion === "failure"
     ).length;
 
@@ -1419,7 +1468,7 @@ const handleWorkflowRunCompleted = async (
       message: "workflow_run processed",
       repository: repository.full_name,
       prNumber,
-      runsProcessed: workflowRuns.length,
+      runsProcessed: runsToProcess.length,
       failedRuns: failedRunCount,
       totalErrors,
       checkRunId: finalCheckRunId,
@@ -1837,7 +1886,7 @@ const handleInstallationEvent = async (
     return c.json(
       {
         message: "installation error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: sanitizeApiError(error),
       },
       500
     );
@@ -1923,7 +1972,7 @@ const handleInstallationRepositoriesEvent = async (
     return c.json(
       {
         message: "installation_repositories error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: sanitizeApiError(error),
       },
       500
     );
@@ -2051,7 +2100,7 @@ const handleRepositoryEvent = async (
     return c.json(
       {
         message: "repository error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: sanitizeApiError(error),
       },
       500
     );
@@ -2163,7 +2212,7 @@ const handleOrganizationEvent = async (
     return c.json(
       {
         message: "organization error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: sanitizeApiError(error),
       },
       500
     );
@@ -2278,7 +2327,7 @@ const handleIssueCommentEvent = async (
     return c.json(
       {
         message: "issue_comment error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: sanitizeApiError(error),
       },
       500
     );

@@ -23,20 +23,70 @@ export interface FormatCommentOptions {
 const PIPE_PATTERN = /\|/g;
 const BACKTICK_PATTERN = /`/g;
 
+// GitHub Check Run API limits
+// See: https://docs.github.com/en/rest/checks/runs
+const ANNOTATION_LIMITS = {
+  MAX_PER_REQUEST: 50, // Can call update multiple times to add more
+  MESSAGE_MAX_BYTES: 65_536, // 64 KB
+  TITLE_MAX_CHARS: 255,
+  RAW_DETAILS_MAX_BYTES: 65_536, // 64 KB
+} as const;
+
+// Practical limit for annotation messages (readability in UI)
+// API allows 64 KB but that's excessive for error messages
+const ANNOTATION_MESSAGE_PRACTICAL_LIMIT = 4096;
+
 // Helper: escape text for markdown table cells
 // Pipe chars break table structure, backticks can interfere with inline code
 const escapeTableCell = (text: string): string => {
   return text.replace(PIPE_PATTERN, "\\|").replace(BACKTICK_PATTERN, "\\`");
 };
 
-// Format the main PR comment with error summary (minimal format)
-export const formatResultsComment = (options: FormatCommentOptions): string => {
-  const { owner, repo, headSha, runs } = options;
-  const lines: string[] = [];
+// Format UTC timestamp in ISO-like format (internationally unambiguous)
+// Format: "Jan 12, 15:30" - uses short month name + 24h time
+const formatTimestamp = (date: Date): string => {
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  const month = months[date.getUTCMonth()];
+  const day = date.getUTCDate();
+  const hours = date.getUTCHours().toString().padStart(2, "0");
+  const minutes = date.getUTCMinutes().toString().padStart(2, "0");
+  return `${month} ${day}, ${hours}:${minutes}`;
+};
 
-  // Separate failed and passed runs
+// Format the main PR comment with error summary (minimal format)
+// Returns null if there are no failed workflows (caller should not post comment)
+export const formatResultsComment = (
+  options: FormatCommentOptions
+): string | null => {
+  const { owner, repo, headSha, runs } = options;
+
+  // Separate runs by conclusion
   const failedRuns = runs.filter((r) => r.conclusion === "failure");
   const passedCount = runs.filter((r) => r.conclusion === "success").length;
+  const otherCount = runs.filter(
+    (r) => r.conclusion !== "failure" && r.conclusion !== "success"
+  ).length;
+
+  // No failed workflows = no comment needed
+  // Caller should handle this by not posting/updating the comment
+  if (failedRuns.length === 0) {
+    return null;
+  }
+
+  const lines: string[] = [];
 
   // Table header
   lines.push("| Workflow | Status | Errors |");
@@ -51,37 +101,53 @@ export const formatResultsComment = (options: FormatCommentOptions): string => {
 
   lines.push("");
 
-  // Footer: passed count · timestamp · CLI command
-  const timestamp = new Date().toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "UTC",
-  });
-  const passedText = passedCount > 0 ? `${passedCount} passed` : "";
-  const cliCommand = `\`detent errors --commit ${headSha.slice(0, 7)}\``;
-  const footerParts = [
-    passedText,
-    `Updated ${timestamp} UTC`,
-    cliCommand,
-  ].filter(Boolean);
+  // Footer: passed count · skipped count · timestamp · CLI command
+  const footerParts: string[] = [];
+
+  if (passedCount > 0) {
+    footerParts.push(`${passedCount} passed`);
+  }
+  if (otherCount > 0) {
+    footerParts.push(`${otherCount} skipped`);
+  }
+
+  footerParts.push(`Updated ${formatTimestamp(new Date())} UTC`);
+  footerParts.push(`\`detent errors --commit ${headSha.slice(0, 7)}\``);
+
   lines.push(footerParts.join(" · "));
 
   return lines.join("\n");
 };
 
 // GitHub Check Run Annotation type (matches API spec)
+// See: https://docs.github.com/en/rest/checks/runs#update-a-check-run
+//
+// API Limits (per annotation):
+// - message: 64 KB max
+// - title: 255 characters max
+// - raw_details: 64 KB max
+// - Maximum 50 annotations per API request (can call update multiple times to add more)
+//
+// Annotation levels:
+// - "failure": Blocks PR merging (if branch protection requires checks)
+// - "warning": Shows warning icon, does not block
+// - "notice": Informational, does not block
 export interface CheckRunAnnotation {
   path: string;
   start_line: number;
   end_line: number;
+  start_column?: number;
+  end_column?: number;
   annotation_level: "notice" | "warning" | "failure";
   message: string;
   title?: string;
+  raw_details?: string;
 }
 
 // Enhanced check run output with summary, detailed text, and annotations
+// API Limits:
+// - summary: 65535 characters max (supports Markdown)
+// - text: 65535 characters max (supports Markdown)
 export interface CheckRunOutput {
   summary: string;
   text?: string;
@@ -121,6 +187,306 @@ const truncatePath = (path: string, maxLen = 50): string => {
     return `...${path.slice(-(maxLen - 3))}`;
   }
   return `.../${parts.slice(-2).join("/")}`;
+};
+
+// === ANNOTATION HELPERS ===
+
+// Map ParsedError severity to GitHub annotation level
+// "error" -> failure (red X), "warning" -> warning (yellow), else -> notice (blue info)
+const mapSeverityToAnnotationLevel = (
+  severity?: string
+): "notice" | "warning" | "failure" => {
+  switch (severity?.toLowerCase()) {
+    case "error":
+    case "fatal":
+    case "critical":
+      return "failure";
+    case "warning":
+    case "warn":
+      return "warning";
+    case "info":
+    case "note":
+    case "hint":
+    case "suggestion":
+      return "notice";
+    default:
+      // Default to failure for unknown severity (most CI errors should block)
+      return "failure";
+  }
+};
+
+// Priority scoring for errors - higher = more actionable, should appear first
+// Returns numeric score (higher = more important)
+const calculateErrorPriority = (error: ParsedError): number => {
+  let score = 0;
+
+  // Has file path - more actionable (+100)
+  if (error.filePath) {
+    score += 100;
+  }
+
+  // Has line number - even more actionable (+50)
+  if (error.line) {
+    score += 50;
+  }
+
+  // Has column - most precise (+20)
+  if (error.column) {
+    score += 20;
+  }
+
+  // Severity weight
+  switch (error.severity?.toLowerCase()) {
+    case "error":
+    case "fatal":
+    case "critical":
+      score += 30;
+      break;
+    case "warning":
+    case "warn":
+      score += 20;
+      break;
+    default:
+      score += 10;
+  }
+
+  // Has rule ID - can be looked up (+15)
+  if (error.ruleId) {
+    score += 15;
+  }
+
+  // Has hint/suggestion - actionable (+10)
+  if (error.hint) {
+    score += 10;
+  }
+
+  // Penalize unknown patterns and test output noise
+  if (error.unknownPattern) {
+    score -= 40;
+  }
+  if (error.possiblyTestOutput) {
+    score -= 50;
+  }
+
+  // Source-based priority (well-known tools get boost)
+  const knownSources = [
+    "typescript",
+    "eslint",
+    "biome",
+    "rust",
+    "go",
+    "python",
+  ];
+  if (error.source && knownSources.includes(error.source.toLowerCase())) {
+    score += 10;
+  }
+
+  return score;
+};
+
+// Create a unique key for error deduplication (file:line)
+const createErrorKey = (error: ParsedError): string => {
+  return `${error.filePath ?? "unknown"}:${error.line ?? 0}`;
+};
+
+// Deduplicated error with combined messages from same location
+interface DeduplicatedError extends ParsedError {
+  combinedMessages?: string[];
+  originalCount?: number;
+}
+
+// Merge a new error into an existing deduplicated error
+const mergeIntoExisting = (
+  existing: DeduplicatedError,
+  error: ParsedError
+): void => {
+  // Initialize combined messages if needed
+  if (!existing.combinedMessages) {
+    existing.combinedMessages = [existing.message];
+    existing.originalCount = 1;
+  }
+
+  // Add unique message
+  if (!existing.combinedMessages.includes(error.message)) {
+    existing.combinedMessages.push(error.message);
+    existing.originalCount = (existing.originalCount ?? 1) + 1;
+  }
+
+  // Keep higher severity (failure > warning > notice)
+  const newLevel = mapSeverityToAnnotationLevel(error.severity);
+  const existingLevel = mapSeverityToAnnotationLevel(existing.severity);
+  if (newLevel === "failure" && existingLevel !== "failure") {
+    existing.severity = error.severity;
+  }
+
+  // Merge metadata (keep first non-empty value)
+  existing.ruleId = existing.ruleId ?? error.ruleId;
+  existing.hint = existing.hint ?? error.hint;
+  existing.source = existing.source ?? error.source;
+};
+
+// Deduplicate errors at same file:line by combining messages
+// Returns deduplicated errors with combined messages
+const deduplicateErrors = (errors: ParsedError[]): DeduplicatedError[] => {
+  const errorMap = new Map<string, DeduplicatedError>();
+
+  for (const error of errors) {
+    const key = createErrorKey(error);
+    const existing = errorMap.get(key);
+
+    if (existing) {
+      mergeIntoExisting(existing, error);
+    } else {
+      errorMap.set(key, { ...error });
+    }
+  }
+
+  return Array.from(errorMap.values());
+};
+
+// Generate annotation title: concise, informative header
+// Format: "Source Category [ruleId] (N issues)" - parts omitted if not present
+const generateAnnotationTitle = (error: DeduplicatedError): string => {
+  const parts: string[] = [];
+
+  // Source (e.g., TypeScript, ESLint, Biome)
+  if (error.source) {
+    parts.push(error.source);
+  }
+
+  // Category if different from source (e.g., "type-error", "lint")
+  if (
+    error.category &&
+    error.category.toLowerCase() !== error.source?.toLowerCase()
+  ) {
+    parts.push(error.category);
+  }
+
+  // Rule ID if present (e.g., "@typescript-eslint/no-unused-vars")
+  if (error.ruleId) {
+    parts.push(`[${error.ruleId}]`);
+  }
+
+  // If multiple errors at this location, indicate count
+  if (error.originalCount && error.originalCount > 1) {
+    parts.push(`(${error.originalCount} issues)`);
+  }
+
+  // Fallback to "Error" if nothing else
+  const title = parts.length > 0 ? parts.join(" ") : "Error";
+
+  // Truncate to GitHub's 255 char limit
+  return title.length > ANNOTATION_LIMITS.TITLE_MAX_CHARS
+    ? `${title.slice(0, ANNOTATION_LIMITS.TITLE_MAX_CHARS - 3)}...`
+    : title;
+};
+
+// Generate raw_details content: additional context for the annotation
+// Includes: stack trace, hint, multiple messages, workflow context
+const generateRawDetails = (error: DeduplicatedError): string | undefined => {
+  const sections: string[] = [];
+
+  // Multiple messages at same location
+  if (error.combinedMessages && error.combinedMessages.length > 1) {
+    sections.push("=== All issues at this location ===");
+    for (const [i, msg] of error.combinedMessages.entries()) {
+      sections.push(`${i + 1}. ${msg}`);
+    }
+  }
+
+  // Hint/suggestion
+  if (error.hint) {
+    sections.push("");
+    sections.push("=== Suggestion ===");
+    sections.push(error.hint);
+  }
+
+  // Stack trace (truncated to fit in raw_details)
+  if (error.stackTrace) {
+    sections.push("");
+    sections.push("=== Stack Trace ===");
+    const truncatedStack =
+      error.stackTrace.length > 2000
+        ? `${error.stackTrace.slice(0, 2000)}...[truncated]`
+        : error.stackTrace;
+    sections.push(truncatedStack);
+  }
+
+  // Workflow context
+  if (error.workflowJob || error.workflowStep) {
+    sections.push("");
+    sections.push("=== Workflow Context ===");
+    if (error.workflowJob) {
+      sections.push(`Job: ${error.workflowJob}`);
+    }
+    if (error.workflowStep) {
+      sections.push(`Step: ${error.workflowStep}`);
+    }
+    if (error.workflowAction) {
+      sections.push(`Action: ${error.workflowAction}`);
+    }
+  }
+
+  // Return undefined if no additional details
+  if (sections.length === 0) {
+    return undefined;
+  }
+
+  // Enforce GitHub API limit (64 KB)
+  const result = sections.join("\n");
+  return result.length > ANNOTATION_LIMITS.RAW_DETAILS_MAX_BYTES
+    ? `${result.slice(0, ANNOTATION_LIMITS.RAW_DETAILS_MAX_BYTES - 20)}...[truncated]`
+    : result;
+};
+
+// Create CheckRunAnnotation from ParsedError
+const createAnnotation = (error: DeduplicatedError): CheckRunAnnotation => {
+  // Build the main message
+  let message = error.message;
+
+  // If multiple errors combined, include them in message
+  if (error.combinedMessages && error.combinedMessages.length > 1) {
+    if (error.combinedMessages.length <= 3) {
+      // Show all messages inline for small counts
+      message = error.combinedMessages.join("\n\n");
+    } else {
+      // Summarize for larger counts
+      message = `${error.message}\n\n(+${error.combinedMessages.length - 1} more issues at this location)`;
+    }
+  }
+
+  // Add hint inline if short enough and no multiple messages
+  if (error.hint && error.hint.length < 100 && !error.combinedMessages) {
+    message = `${message}\n\nHint: ${error.hint}`;
+  }
+
+  // Truncate message (API allows 64 KB but keep it readable)
+  if (message.length > ANNOTATION_MESSAGE_PRACTICAL_LIMIT) {
+    message = `${message.slice(0, ANNOTATION_MESSAGE_PRACTICAL_LIMIT - 3)}...`;
+  }
+
+  const annotation: CheckRunAnnotation = {
+    path: error.filePath as string,
+    start_line: error.line as number,
+    end_line: error.line as number,
+    annotation_level: mapSeverityToAnnotationLevel(error.severity),
+    message,
+    title: generateAnnotationTitle(error),
+  };
+
+  // Add column if available (for single-line precision)
+  if (error.column) {
+    annotation.start_column = error.column;
+    annotation.end_column = error.column;
+  }
+
+  // Add raw_details for complex errors (stack traces, multiple messages, hints)
+  const rawDetails = generateRawDetails(error);
+  if (rawDetails) {
+    annotation.raw_details = rawDetails;
+  }
+
+  return annotation;
 };
 
 // Format the check run output (detailed, for the checks UI)
@@ -164,8 +530,13 @@ export const formatCheckRunOutput = (
   // === TEXT: Error details (shown below summary) ===
   const textLines: string[] = [];
 
+  // Sort errors by priority (most actionable first) for display
+  const sortedErrors = [...errors].sort(
+    (a, b) => calculateErrorPriority(b) - calculateErrorPriority(a)
+  );
+
   // Top errors table (max 10)
-  const displayErrors = errors.slice(0, 10);
+  const displayErrors = sortedErrors.slice(0, 10);
   textLines.push("### Top Errors");
   textLines.push("");
   textLines.push("| File | Line | Message |");
@@ -189,20 +560,23 @@ export const formatCheckRunOutput = (
     `\`detent errors --commit ${headSha.slice(0, 7)}\` for full list`
   );
 
-  // === ANNOTATIONS: Inline file annotations (max 50 per API call) ===
-  const annotations: CheckRunAnnotation[] = [];
-  const errorsWithPath = errors.filter((e) => e.filePath && e.line);
+  // === ANNOTATIONS: Inline file annotations ===
+  // Filter to errors with file path and line number (required for annotations)
+  const errorsWithPath = sortedErrors.filter((e) => e.filePath && e.line);
 
-  for (const error of errorsWithPath.slice(0, 50)) {
-    annotations.push({
-      path: error.filePath as string,
-      start_line: error.line as number,
-      end_line: error.line as number,
-      annotation_level: "failure",
-      message: error.message.slice(0, 500), // API limit
-      title: error.source ?? error.category ?? "Error",
-    });
-  }
+  // Deduplicate errors at same file:line to reduce annotation noise
+  const deduplicatedErrors = deduplicateErrors(errorsWithPath);
+
+  // Re-sort deduplicated errors by priority
+  const sortedDeduped = deduplicatedErrors.sort(
+    (a, b) => calculateErrorPriority(b) - calculateErrorPriority(a)
+  );
+
+  // Create annotations using helper (max 50 per request)
+  // Helper handles: severity-based levels, rich titles, raw_details, column info
+  const annotations = sortedDeduped
+    .slice(0, ANNOTATION_LIMITS.MAX_PER_REQUEST)
+    .map(createAnnotation);
 
   return {
     summary: summaryLines.join("\n"),

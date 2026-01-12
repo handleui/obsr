@@ -310,9 +310,19 @@ export const parseGitHubLogs = (logs: string): ExtractedError[] =>
   getDefaultExtractor().extract(logs, githubParser);
 
 /**
- * Reset the default extractor state.
+ * Reset the default extractor and all singleton context parsers.
  * Call this between parsing unrelated log outputs to clear any accumulated state.
+ *
+ * This resets:
+ * - The default extractor's workflow context
+ * - All registered tool parsers
+ * - The singleton GitHub parser's step tracking state
+ * - The singleton Act parser (no-op, included for consistency)
  */
 export const resetDefaultExtractor = (): void => {
   defaultExtractor?.reset();
+  // Reset all singleton context parsers to ensure clean state
+  githubParser.reset();
+  actParser.reset();
+  // passthroughParser is stateless, reset() is a no-op
 };

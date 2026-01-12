@@ -94,6 +94,9 @@ const isNoiseLine = (cleanedLine: string): boolean => {
 /**
  * ActParser extracts context from Act's log output format.
  * Act prefixes each line with [Job Name/Step Name] to indicate the current job and step.
+ *
+ * This parser is STATELESS - each line contains its full context in the prefix.
+ * The reset() method is a no-op but required by the ContextParser interface.
  */
 class ActParser implements ContextParser {
   /**
@@ -134,6 +137,13 @@ class ActParser implements ContextParser {
       cleanLine,
       skip: isNoise,
     };
+  };
+
+  /**
+   * Reset parser state. No-op for ActParser since it's stateless.
+   */
+  reset = (): void => {
+    // No state to reset - each line contains its full context in the prefix
   };
 }
 

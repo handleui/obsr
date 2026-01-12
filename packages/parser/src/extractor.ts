@@ -127,13 +127,15 @@ export class Extractor {
       }
 
       // Convert CI context to workflow context
-      if (ctx.job) {
+      // Update when job OR step changes (step tracking for GitHub Actions)
+      if (ctx.job || ctx.step) {
         this.currentWorkflowCtx = {
-          job: ctx.job,
+          job: ctx.job || this.currentWorkflowCtx?.job,
           step: ctx.step || undefined,
+          action: ctx.action || undefined,
         };
         parseCtx.workflowContext = this.currentWorkflowCtx;
-        parseCtx.job = ctx.job;
+        parseCtx.job = ctx.job || parseCtx.job;
         parseCtx.step = ctx.step;
       }
 

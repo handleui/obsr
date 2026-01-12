@@ -21,6 +21,10 @@ export interface ParsedError {
   workflowJob?: string;
   workflowStep?: string;
   workflowAction?: string;
+  /** True if matched by generic fallback parser */
+  unknownPattern?: boolean;
+  /** True if error may be test output noise (vitest/jest progress, etc.) */
+  possiblyTestOutput?: boolean;
 }
 
 export interface ParseMetadata {
@@ -63,6 +67,8 @@ const mapToParsedError = (error: ExtractedError): ParsedError => ({
   workflowJob: error.workflowJob ?? error.workflowContext?.job,
   workflowStep: error.workflowContext?.step,
   workflowAction: error.workflowContext?.action,
+  unknownPattern: error.unknownPattern,
+  possiblyTestOutput: error.possiblyTestOutput,
 });
 
 // Generate a technical fallback error when parsing finds nothing

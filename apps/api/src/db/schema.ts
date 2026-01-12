@@ -336,6 +336,7 @@ export const runErrors = pgTable(
     }>(),
     exitCode: integer("exit_code"),
     isInfrastructure: boolean("is_infrastructure"),
+    possiblyTestOutput: boolean("possibly_test_output"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [

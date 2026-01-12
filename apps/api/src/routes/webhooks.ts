@@ -1,3 +1,4 @@
+import type { KVNamespace } from "@cloudflare/workers-types";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -22,8 +23,12 @@ import {
 import { createGitHubService } from "../services/github";
 import {
   acquireCommitLock,
+  getStoredCheckRunId,
+  getStoredCommentId,
   markCommitProcessed,
   releaseCommitLock,
+  storeCheckRunId,
+  storeCommentId,
 } from "../services/idempotency";
 import type { Env } from "../types/env";
 
@@ -187,8 +192,21 @@ app.post("/github", webhookSignatureMiddleware, (c: WebhookContext) => {
 
   // Route by event type
   switch (event) {
-    case "workflow_run":
-      return handleWorkflowRunEvent(c, payload as WorkflowRunPayload);
+    case "workflow_run": {
+      const workflowPayload = payload as WorkflowRunPayload;
+      // Route based on action type
+      if (workflowPayload.action === "in_progress") {
+        return handleWorkflowRunInProgress(c, workflowPayload);
+      }
+      if (workflowPayload.action === "completed") {
+        return handleWorkflowRunCompleted(c, workflowPayload);
+      }
+      // Ignore other actions (requested, etc.)
+      return c.json({
+        message: "ignored",
+        reason: `action ${workflowPayload.action} not handled`,
+      });
+    }
 
     case "issue_comment":
       return handleIssueCommentEvent(c, payload as IssueCommentPayload);
@@ -411,6 +429,15 @@ const processFailedRuns = async (
         run.id
       );
 
+      // DEBUG: Log first 2000 chars of raw log content
+      console.log(
+        `[DEBUG] Run ${run.id} raw logs (first 2000 chars):\n`,
+        logsResult.logs.slice(0, 2000)
+      );
+      console.log(
+        `[DEBUG] Run ${run.id} log stats: ${logsResult.totalBytes} bytes, ${logsResult.jobCount} jobs`
+      );
+
       // Parse logs and extract errors (with fallback if none found)
       const parseResult = parseWorkflowLogsWithFallback(
         logsResult.logs,
@@ -419,6 +446,12 @@ const processFailedRuns = async (
           totalBytes: logsResult.totalBytes,
           jobCount: logsResult.jobCount,
         }
+      );
+
+      // DEBUG: Log parsed errors
+      console.log(
+        `[DEBUG] Run ${run.id} parsed ${parseResult.errors.length} errors:`,
+        JSON.stringify(parseResult.errors.slice(0, 5), null, 2)
       );
 
       // Attach workflow context to each error
@@ -543,9 +576,11 @@ interface WorkflowRun {
 const finalizeAndPostResults = async (
   github: ReturnType<typeof createGitHubService>,
   token: string,
+  kv: KVNamespace,
   context: {
     owner: string;
     repo: string;
+    repository: string;
     headSha: string;
     prNumber: number;
     checkRunId: number;
@@ -564,6 +599,7 @@ const finalizeAndPostResults = async (
   const {
     owner,
     repo,
+    repository,
     headSha,
     prNumber,
     checkRunId,
@@ -600,19 +636,138 @@ const finalizeAndPostResults = async (
     },
   });
 
-  // Post single PR comment with results
-  const commentBody = formatResultsComment({
-    owner,
-    repo,
-    headSha,
-    runs: runResults,
-    errors: allErrors,
-    totalErrors,
-  });
+  // Only post/update comment if there are failures
+  // If all checks pass, just update the check run (no comment spam)
+  if (hasFailed) {
+    const commentBody = formatResultsComment({
+      owner,
+      repo,
+      headSha,
+      runs: runResults,
+      errors: allErrors,
+      totalErrors,
+    });
 
-  await github.postCommentWithId(token, owner, repo, prNumber, commentBody);
+    // Check if we already have a comment for this PR - update instead of create new
+    const existingCommentId = await getStoredCommentId(
+      kv,
+      repository,
+      prNumber
+    );
+
+    if (existingCommentId) {
+      // Update existing comment (prevents spam)
+      await github.updateComment(
+        token,
+        owner,
+        repo,
+        existingCommentId,
+        commentBody
+      );
+      console.log(
+        `[workflow_run] Updated existing comment ${existingCommentId} on PR #${prNumber}`
+      );
+    } else {
+      // Create new comment and store ID for future updates
+      const { id: commentId } = await github.postCommentWithId(
+        token,
+        owner,
+        repo,
+        prNumber,
+        commentBody
+      );
+      await storeCommentId(kv, repository, prNumber, commentId);
+      console.log(
+        `[workflow_run] Posted new comment ${commentId} on PR #${prNumber}`
+      );
+    }
+  } else {
+    console.log(
+      `[workflow_run] All checks passed - no comment posted on PR #${prNumber}`
+    );
+  }
 
   return { runResults, totalErrors };
+};
+
+// Handle workflow_run.in_progress - create a "queued" check run to show users we're watching
+const handleWorkflowRunInProgress = async (
+  c: WebhookContext,
+  payload: WorkflowRunPayload
+) => {
+  const { workflow_run, repository, installation } = payload;
+  const owner = repository.owner.login;
+  const repo = repository.name;
+  const headSha = workflow_run.head_sha;
+  const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
+
+  console.log(
+    `[workflow_run] In progress: ${repository.full_name} / ${workflow_run.name} [delivery: ${deliveryId}]`
+  );
+
+  // Check if we already created a check run for this commit
+  const existingCheckRunId = await getStoredCheckRunId(
+    c.env["detent-idempotency"],
+    repository.full_name,
+    headSha
+  );
+
+  if (existingCheckRunId) {
+    console.log(
+      `[workflow_run] Check run ${existingCheckRunId} already exists for ${headSha.slice(0, 7)}`
+    );
+    return c.json({
+      message: "check run already exists",
+      checkRunId: existingCheckRunId,
+    });
+  }
+
+  const github = createGitHubService(c.env);
+
+  try {
+    const token = await github.getInstallationToken(installation.id);
+
+    // Create a "queued" check run so users know we're watching
+    const checkRun = await github.createCheckRun(token, {
+      owner,
+      repo,
+      headSha,
+      name: "Detent Parser",
+      status: "queued",
+      output: {
+        title: "Waiting for CI to complete...",
+        summary: "Detent will analyze CI results once all workflows finish.",
+      },
+    });
+
+    // Store the check run ID for later update
+    await storeCheckRunId(
+      c.env["detent-idempotency"],
+      repository.full_name,
+      headSha,
+      checkRun.id
+    );
+
+    console.log(
+      `[workflow_run] Created queued check run ${checkRun.id} for ${headSha.slice(0, 7)}`
+    );
+
+    return c.json({
+      message: "check run created",
+      checkRunId: checkRun.id,
+      status: "queued",
+    });
+  } catch (error) {
+    console.error(
+      `[workflow_run] Error creating queued check run [delivery: ${deliveryId}]:`,
+      error
+    );
+    // Non-fatal - we'll create the check run on completed if this fails
+    return c.json({
+      message: "failed to create check run",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
 };
 
 // Handle workflow_run events (CI completed)
@@ -623,20 +778,15 @@ const finalizeAndPostResults = async (
 // - Race condition handling: Returns early if another webhook is processing
 // - Error recovery: Cleans up check run on failure
 // - Database-backed deduplication: Unique constraint on (repository, commitSha, runId)
-const handleWorkflowRunEvent = async (
+const handleWorkflowRunCompleted = async (
   c: WebhookContext,
   payload: WorkflowRunPayload
 ) => {
-  const { action, workflow_run, repository, installation } = payload;
+  const { workflow_run, repository, installation } = payload;
   const owner = repository.owner.login;
   const repo = repository.name;
   const headSha = workflow_run.head_sha;
   const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
-
-  // Only process completed runs
-  if (action !== "completed") {
-    return c.json({ message: "ignored", reason: "not completed" });
-  }
 
   console.log(
     `[workflow_run] Completed: ${repository.full_name} / ${workflow_run.name} (${workflow_run.conclusion}) [delivery: ${deliveryId}]`
@@ -740,19 +890,49 @@ const handleWorkflowRunEvent = async (
       });
     }
 
-    // All runs completed! Create check run
-    const checkRun = await github.createCheckRun(token, {
-      owner,
-      repo,
-      headSha,
-      name: "Detent CI Analysis",
-      status: "in_progress",
-      output: {
-        title: "Analyzing CI results...",
-        summary: "Processing workflow runs and extracting errors",
-      },
-    });
-    checkRunId = checkRun.id;
+    // All runs completed! Get or create check run
+    // First, try to retrieve the check run we created on in_progress
+    const storedCheckRunId = await getStoredCheckRunId(
+      c.env["detent-idempotency"],
+      repository.full_name,
+      headSha
+    );
+
+    if (storedCheckRunId) {
+      // Update existing check run to in_progress
+      checkRunId = storedCheckRunId;
+      await github.updateCheckRun(token, {
+        owner,
+        repo,
+        checkRunId,
+        status: "in_progress",
+        output: {
+          title: "Analyzing CI results...",
+          summary: "Processing workflow runs and extracting errors",
+        },
+      });
+      console.log(
+        `[workflow_run] Updated existing check run ${checkRunId} to in_progress`
+      );
+    } else {
+      // No existing check run - create one (fallback if in_progress handler didn't run)
+      const checkRun = await github.createCheckRun(token, {
+        owner,
+        repo,
+        headSha,
+        name: "Detent Parser",
+        status: "in_progress",
+        output: {
+          title: "Analyzing CI results...",
+          summary: "Processing workflow runs and extracting errors",
+        },
+      });
+      checkRunId = checkRun.id;
+      console.log(`[workflow_run] Created new check run ${checkRunId}`);
+    }
+
+    // At this point checkRunId is guaranteed to be set
+    const finalCheckRunId = checkRunId;
 
     // Process failed runs
     const failedRuns = workflowRuns.filter((r) => r.conclusion === "failure");
@@ -767,26 +947,32 @@ const handleWorkflowRunEvent = async (
         prNumber,
         headSha,
         repository: repository.full_name,
-        checkRunId,
+        checkRunId: finalCheckRunId,
       }
     );
 
-    // Finalize: update check run and post PR comment
-    const { totalErrors } = await finalizeAndPostResults(github, token, {
-      owner,
-      repo,
-      headSha,
-      prNumber,
-      checkRunId,
-      workflowRuns,
-      allErrors,
-    });
+    // Finalize: update check run and post PR comment (if failures)
+    const { totalErrors } = await finalizeAndPostResults(
+      github,
+      token,
+      c.env["detent-idempotency"],
+      {
+        owner,
+        repo,
+        repository: repository.full_name,
+        headSha,
+        prNumber,
+        checkRunId: finalCheckRunId,
+        workflowRuns,
+        allErrors,
+      }
+    );
 
     await markCommitProcessed(
       c.env["detent-idempotency"],
       repository.full_name,
       headSha,
-      checkRunId
+      finalCheckRunId
     );
 
     return c.json({
@@ -796,7 +982,7 @@ const handleWorkflowRunEvent = async (
       runsProcessed: workflowRuns.length,
       failedRuns: failedRuns.length,
       totalErrors,
-      checkRunId,
+      checkRunId: finalCheckRunId,
     });
   } catch (error) {
     console.error(
@@ -1587,14 +1773,14 @@ const handleIssueCommentEvent = async (
 
     switch (command.type) {
       case "heal": {
-        // Post acknowledgment
-        await github.postComment(
-          token,
-          repository.owner.login,
-          repository.name,
-          issue.number,
-          `🔧 **Detent** is analyzing the CI failures${command.dryRun ? " (dry run)" : ""}...`
-        );
+        // HACK: Commenting out acknowledgment comment for now - will be used for cloud healing later
+        // await github.postComment(
+        //   token,
+        //   repository.owner.login,
+        //   repository.name,
+        //   issue.number,
+        //   `🔧 **Detent** is analyzing the CI failures${command.dryRun ? " (dry run)" : ""}...`
+        // );
 
         // Healing flow will:
         // 1. Find latest failed workflow run

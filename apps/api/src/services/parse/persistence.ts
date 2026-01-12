@@ -65,6 +65,7 @@ const mapErrorToRow = (
     : undefined,
   exitCode: error.exitCode,
   isInfrastructure: error.isInfrastructure,
+  possiblyTestOutput: error.possiblyTestOutput,
 });
 
 export const persistParseRun = async (

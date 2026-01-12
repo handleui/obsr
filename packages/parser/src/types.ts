@@ -56,6 +56,7 @@ export const isValidCategory = (cat: string): cat is ErrorCategory =>
  * Error sources for attribution and filtering.
  */
 export type ErrorSource =
+  | "biome"
   | "eslint"
   | "typescript"
   | "go"
@@ -69,6 +70,7 @@ export type ErrorSource =
   | "generic";
 
 export const ErrorSources = {
+  Biome: "biome" as const,
   ESLint: "eslint" as const,
   TypeScript: "typescript" as const,
   Go: "go" as const,
@@ -176,6 +178,8 @@ export interface ExtractedError {
   readonly exitCode?: number;
   /** Whether this is CI configuration vs code error */
   readonly isInfrastructure?: boolean;
+  /** True if error may be test output noise (vitest/jest progress, etc.) */
+  readonly possiblyTestOutput?: boolean;
 }
 
 /**
@@ -205,6 +209,7 @@ export interface MutableExtractedError {
   hint?: string;
   exitCode?: number;
   isInfrastructure?: boolean;
+  possiblyTestOutput?: boolean;
 }
 
 /**

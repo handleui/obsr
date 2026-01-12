@@ -980,6 +980,66 @@ const attemptCheckRunCleanup = async (
 };
 
 // ============================================================================
+// Helper: Handle early return when no PR is associated with workflow run
+// ============================================================================
+// Cleans up any orphaned check run and releases the commit lock before returning.
+const handleNoPrEarlyReturn = async (
+  github: ReturnType<typeof createGitHubService>,
+  token: string,
+  kv: KVNamespace,
+  context: {
+    installationId: number;
+    owner: string;
+    repo: string;
+    repository: string;
+    headSha: string;
+    runId: number;
+    deliveryId: string;
+    storedCheckRunId: number | null;
+  }
+): Promise<{
+  message: string;
+  repository: string;
+  runId: number;
+  status: string;
+}> => {
+  const {
+    installationId,
+    owner,
+    repo,
+    repository,
+    headSha,
+    runId,
+    deliveryId,
+    storedCheckRunId,
+  } = context;
+
+  console.log("[workflow_run] No associated PR found, skipping");
+
+  // Clean up any existing check run since we won't process this
+  if (storedCheckRunId) {
+    await attemptCheckRunCleanup(
+      github,
+      token,
+      installationId,
+      owner,
+      repo,
+      storedCheckRunId,
+      deliveryId
+    );
+  }
+
+  await releaseCommitLock(kv, repository, headSha);
+
+  return {
+    message: "workflow_run processed",
+    repository,
+    runId,
+    status: "no_pr",
+  };
+};
+
+// ============================================================================
 // Helper: Post or update PR comment with deduplication
 // ============================================================================
 // Handles the comment lifecycle: check KV → check DB → update or create → persist
@@ -1522,18 +1582,23 @@ const handleWorkflowRunCompleted = async (
       (await github.getPullRequestForRun(token, owner, repo, workflow_run.id));
 
     if (!prNumber) {
-      console.log("[workflow_run] No associated PR found, skipping");
-      await releaseCommitLock(
-        c.env["detent-idempotency"],
-        repository.full_name,
-        headSha
+      return c.json(
+        await handleNoPrEarlyReturn(
+          github,
+          token,
+          c.env["detent-idempotency"],
+          {
+            installationId: installation.id,
+            owner,
+            repo,
+            repository: repository.full_name,
+            headSha,
+            runId: workflow_run.id,
+            deliveryId,
+            storedCheckRunId: storedCheckRunIdForRecovery,
+          }
+        )
       );
-      return c.json({
-        message: "workflow_run processed",
-        repository: repository.full_name,
-        runId: workflow_run.id,
-        status: "no_pr",
-      });
     }
 
     // Check if ALL workflow runs for this commit are done BEFORE creating check run

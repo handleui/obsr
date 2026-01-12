@@ -366,7 +366,7 @@ export const getStoredCheckRunId = async (
       return checkRunId;
     }
     // Expected for first-time lookups before check run creation
-    console.debug(
+    console.log(
       `[idempotency] getStoredCheckRunId: no check run found for ${repository}@${headSha.slice(0, 7)}`
     );
     return null;

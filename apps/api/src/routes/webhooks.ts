@@ -62,7 +62,7 @@ interface IssueCommentPayload {
   action: string;
   comment: {
     body: string;
-    user: { login: string };
+    user: { login: string; type: string };
   };
   issue: {
     number: number;
@@ -168,8 +168,7 @@ interface OrganizationPayload {
 }
 
 interface DetentCommand {
-  type: "heal" | "status" | "help" | "unknown";
-  dryRun?: boolean;
+  type: "status" | "help" | "unknown";
 }
 
 // Variables stored in context by middleware
@@ -940,6 +939,232 @@ const cleanupCheckRunOnError = async (
 };
 
 // ============================================================================
+// Helper: Attempt check run cleanup with token recovery
+// ============================================================================
+// When errors occur, try to clean up the check run to avoid orphaned "queued" state.
+// If token isn't available, attempt to recover it first.
+const attemptCheckRunCleanup = async (
+  github: ReturnType<typeof createGitHubService>,
+  token: string | undefined,
+  installationId: number,
+  owner: string,
+  repo: string,
+  checkRunId: number,
+  deliveryId: string
+): Promise<void> => {
+  if (token) {
+    await cleanupCheckRunOnError(github, token, owner, repo, checkRunId);
+    return;
+  }
+
+  // Token failed to obtain - try to get it again for cleanup
+  console.log(
+    `[workflow_run] Attempting token recovery for check run cleanup [delivery: ${deliveryId}]`
+  );
+  try {
+    const recoveryToken = await github.getInstallationToken(installationId);
+    await cleanupCheckRunOnError(
+      github,
+      recoveryToken,
+      owner,
+      repo,
+      checkRunId
+    );
+  } catch (tokenError) {
+    console.error(
+      `[workflow_run] Failed to recover token for cleanup, check run ${checkRunId} may be orphaned [delivery: ${deliveryId}]:`,
+      tokenError
+    );
+  }
+};
+
+// ============================================================================
+// Helper: Handle early return when no PR is associated with workflow run
+// ============================================================================
+// Cleans up any orphaned check run and releases the commit lock before returning.
+const handleNoPrEarlyReturn = async (
+  github: ReturnType<typeof createGitHubService>,
+  token: string,
+  kv: KVNamespace,
+  context: {
+    installationId: number;
+    owner: string;
+    repo: string;
+    repository: string;
+    headSha: string;
+    runId: number;
+    deliveryId: string;
+    storedCheckRunId: number | null;
+  }
+): Promise<{
+  message: string;
+  repository: string;
+  runId: number;
+  status: string;
+}> => {
+  const {
+    installationId,
+    owner,
+    repo,
+    repository,
+    headSha,
+    runId,
+    deliveryId,
+    storedCheckRunId,
+  } = context;
+
+  console.log("[workflow_run] No associated PR found, skipping");
+
+  // Clean up any existing check run since we won't process this
+  if (storedCheckRunId) {
+    await attemptCheckRunCleanup(
+      github,
+      token,
+      installationId,
+      owner,
+      repo,
+      storedCheckRunId,
+      deliveryId
+    );
+  }
+
+  await releaseCommitLock(kv, repository, headSha);
+
+  return {
+    message: "workflow_run processed",
+    repository,
+    runId,
+    status: "no_pr",
+  };
+};
+
+// ============================================================================
+// Helper: Handle early return when waiting for other runs to complete
+// ============================================================================
+// Cleans up any orphaned check run and releases the commit lock before returning.
+const handleWaitingForRunsEarlyReturn = async (
+  github: ReturnType<typeof createGitHubService>,
+  token: string,
+  kv: KVNamespace,
+  context: {
+    installationId: number;
+    owner: string;
+    repo: string;
+    repository: string;
+    headSha: string;
+    deliveryId: string;
+    storedCheckRunId: number | null;
+    completedCount: number;
+    pendingCount: number;
+  }
+): Promise<{
+  message: string;
+  repository: string;
+  completed: number;
+  pending: number;
+}> => {
+  const {
+    installationId,
+    owner,
+    repo,
+    repository,
+    headSha,
+    deliveryId,
+    storedCheckRunId,
+    completedCount,
+    pendingCount,
+  } = context;
+
+  console.log(
+    `[workflow_run] Waiting for ${pendingCount} more runs to complete`
+  );
+
+  // Clean up any existing check run since we're returning early
+  if (storedCheckRunId) {
+    await attemptCheckRunCleanup(
+      github,
+      token,
+      installationId,
+      owner,
+      repo,
+      storedCheckRunId,
+      deliveryId
+    );
+  }
+
+  await releaseCommitLock(kv, repository, headSha);
+
+  return {
+    message: "waiting for other runs",
+    repository,
+    completed: completedCount,
+    pending: pendingCount,
+  };
+};
+
+// ============================================================================
+// Helper: Handle early return when all runs already processed (duplicate)
+// ============================================================================
+// Cleans up any orphaned check run and releases the commit lock before returning.
+const handleAllRunsProcessedEarlyReturn = async (
+  github: ReturnType<typeof createGitHubService>,
+  token: string,
+  kv: KVNamespace,
+  context: {
+    installationId: number;
+    owner: string;
+    repo: string;
+    repository: string;
+    headSha: string;
+    deliveryId: string;
+    storedCheckRunId: number | null;
+    runCount: number;
+  }
+): Promise<{
+  message: string;
+  repository: string;
+  headSha: string;
+  status: string;
+}> => {
+  const {
+    installationId,
+    owner,
+    repo,
+    repository,
+    headSha,
+    deliveryId,
+    storedCheckRunId,
+    runCount,
+  } = context;
+
+  console.log(
+    `[workflow_run] All ${runCount} run attempts already stored, skipping [delivery: ${deliveryId}]`
+  );
+
+  // Clean up any existing check run since we're returning early
+  if (storedCheckRunId) {
+    await attemptCheckRunCleanup(
+      github,
+      token,
+      installationId,
+      owner,
+      repo,
+      storedCheckRunId,
+      deliveryId
+    );
+  }
+
+  await releaseCommitLock(kv, repository, headSha);
+
+  return {
+    message: "already processed (db check)",
+    repository,
+    headSha,
+    status: "duplicate_db",
+  };
+};
+
+// ============================================================================
 // Helper: Post or update PR comment with deduplication
 // ============================================================================
 // Handles the comment lifecycle: check KV → check DB → update or create → persist
@@ -1415,7 +1640,7 @@ const handleWorkflowRunInProgress = async (
 // Robustness features:
 // - Idempotency: Uses KV-backed lock to prevent duplicate processing (survives Worker restarts)
 // - Race condition handling: Returns early if another webhook is processing
-// - Error recovery: Cleans up check run on failure
+// - Error recovery: Cleans up check run on failure (retrieves stored ID early)
 // - Database-backed deduplication: Unique constraint on (repository, commitSha, runId)
 const handleWorkflowRunCompleted = async (
   c: WebhookContext,
@@ -1458,6 +1683,20 @@ const handleWorkflowRunCompleted = async (
   let checkRunId: number | undefined;
   let token: string | undefined;
 
+  // IMPORTANT: Retrieve stored check run ID early for error recovery
+  // This ensures we can clean up the check run if errors occur before we
+  // would normally fetch it. Without this, check runs can get stuck as "queued" forever.
+  const storedCheckRunIdForRecovery = await getStoredCheckRunId(
+    c.env["detent-idempotency"],
+    repository.full_name,
+    headSha
+  );
+  if (storedCheckRunIdForRecovery) {
+    console.log(
+      `[workflow_run] Found stored check run ${storedCheckRunIdForRecovery} for recovery [delivery: ${deliveryId}]`
+    );
+  }
+
   try {
     token = await github.getInstallationToken(installation.id);
 
@@ -1468,18 +1707,23 @@ const handleWorkflowRunCompleted = async (
       (await github.getPullRequestForRun(token, owner, repo, workflow_run.id));
 
     if (!prNumber) {
-      console.log("[workflow_run] No associated PR found, skipping");
-      await releaseCommitLock(
-        c.env["detent-idempotency"],
-        repository.full_name,
-        headSha
+      return c.json(
+        await handleNoPrEarlyReturn(
+          github,
+          token,
+          c.env["detent-idempotency"],
+          {
+            installationId: installation.id,
+            owner,
+            repo,
+            repository: repository.full_name,
+            headSha,
+            runId: workflow_run.id,
+            deliveryId,
+            storedCheckRunId: storedCheckRunIdForRecovery,
+          }
+        )
       );
-      return c.json({
-        message: "workflow_run processed",
-        repository: repository.full_name,
-        runId: workflow_run.id,
-        status: "no_pr",
-      });
     }
 
     // Check if ALL workflow runs for this commit are done BEFORE creating check run
@@ -1487,23 +1731,28 @@ const handleWorkflowRunCompleted = async (
       await github.listWorkflowRunsForCommit(token, owner, repo, headSha);
 
     if (!allCompleted) {
-      await releaseCommitLock(
-        c.env["detent-idempotency"],
-        repository.full_name,
-        headSha
-      );
       const pendingCount = workflowRuns.filter(
         (r) => r.status !== "completed"
       ).length;
-      console.log(
-        `[workflow_run] Waiting for ${pendingCount} more runs to complete`
+      return c.json(
+        await handleWaitingForRunsEarlyReturn(
+          github,
+          token,
+          c.env["detent-idempotency"],
+          {
+            installationId: installation.id,
+            owner,
+            repo,
+            repository: repository.full_name,
+            headSha,
+            deliveryId,
+            storedCheckRunId: storedCheckRunIdForRecovery,
+            completedCount: workflowRuns.filter((r) => r.status === "completed")
+              .length,
+            pendingCount,
+          }
+        )
       );
-      return c.json({
-        message: "waiting for other runs",
-        repository: repository.full_name,
-        completed: workflowRuns.filter((r) => r.status === "completed").length,
-        pending: pendingCount,
-      });
     }
 
     // Run-aware idempotency: check which specific (runId, runAttempt) tuples exist
@@ -1523,21 +1772,23 @@ const handleWorkflowRunCompleted = async (
       );
 
     if (allExist) {
-      // All these specific run attempts already stored - true duplicate
-      console.log(
-        `[workflow_run] All ${runIdentifiers.length} run attempts already stored, skipping [delivery: ${deliveryId}]`
+      return c.json(
+        await handleAllRunsProcessedEarlyReturn(
+          github,
+          token,
+          c.env["detent-idempotency"],
+          {
+            installationId: installation.id,
+            owner,
+            repo,
+            repository: repository.full_name,
+            headSha,
+            deliveryId,
+            storedCheckRunId: storedCheckRunIdForRecovery,
+            runCount: runIdentifiers.length,
+          }
+        )
       );
-      await releaseCommitLock(
-        c.env["detent-idempotency"],
-        repository.full_name,
-        headSha
-      );
-      return c.json({
-        message: "already processed (db check)",
-        repository: repository.full_name,
-        headSha,
-        status: "duplicate_db",
-      });
     }
 
     // Filter to only runs that need processing (re-runs will pass through)
@@ -1550,16 +1801,10 @@ const handleWorkflowRunCompleted = async (
     );
 
     // All runs completed! Get or create check run
-    // First, try to retrieve the check run we created on in_progress
-    const storedCheckRunId = await getStoredCheckRunId(
-      c.env["detent-idempotency"],
-      repository.full_name,
-      headSha
-    );
-
-    if (storedCheckRunId) {
+    // Use the check run ID we retrieved early for error recovery
+    if (storedCheckRunIdForRecovery) {
       // Update existing check run to in_progress
-      checkRunId = storedCheckRunId;
+      checkRunId = storedCheckRunIdForRecovery;
       await github.updateCheckRun(token, {
         owner,
         repo,
@@ -1656,9 +1901,19 @@ const handleWorkflowRunCompleted = async (
       error
     );
 
-    // Error recovery: Clean up check run if we created one
-    if (checkRunId && token) {
-      await cleanupCheckRunOnError(github, token, owner, repo, checkRunId);
+    // Error recovery: Clean up check run if we have one
+    // Use storedCheckRunIdForRecovery as fallback if checkRunId wasn't set yet
+    const checkRunToCleanup = checkRunId ?? storedCheckRunIdForRecovery;
+    if (checkRunToCleanup) {
+      await attemptCheckRunCleanup(
+        github,
+        token,
+        installation.id,
+        owner,
+        repo,
+        checkRunToCleanup,
+        deliveryId
+      );
     }
 
     await releaseCommitLock(
@@ -2415,6 +2670,11 @@ const handleIssueCommentEvent = async (
     return c.json({ message: "ignored", reason: "not a pull request" });
   }
 
+  // Ignore comments from bots (e.g., changeset-bot mentions @detent/cli package names)
+  if (comment.user.type === "Bot") {
+    return c.json({ message: "ignored", reason: "bot comment" });
+  }
+
   // Check for @detent mention
   const body = comment.body.toLowerCase();
   if (!body.includes("@detent")) {
@@ -2436,32 +2696,6 @@ const handleIssueCommentEvent = async (
     const token = await github.getInstallationToken(installation.id);
 
     switch (command.type) {
-      case "heal": {
-        // HACK: Commenting out acknowledgment comment for now - will be used for cloud healing later
-        // await github.postComment(
-        //   token,
-        //   repository.owner.login,
-        //   repository.name,
-        //   issue.number,
-        //   `🔧 **Detent** is analyzing the CI failures${command.dryRun ? " (dry run)" : ""}...`
-        // );
-
-        // Healing flow will:
-        // 1. Find latest failed workflow run
-        // 2. Fetch and parse logs with @detent/parser
-        // 3. Run healing loop with Claude via @detent/healing
-        // 4. Push fix (if not dry run)
-        // 5. Post results
-
-        return c.json({
-          message: "heal command received",
-          repository: repository.full_name,
-          issue: issue.number,
-          dryRun: command.dryRun,
-          status: "acknowledged",
-        });
-      }
-
       case "status": {
         // Future: Report current error status from stored analysis
         await github.postComment(
@@ -2515,11 +2749,6 @@ const handleIssueCommentEvent = async (
 const parseDetentCommand = (body: string): DetentCommand => {
   const lower = body.toLowerCase();
 
-  if (lower.includes("@detent heal")) {
-    const dryRun = lower.includes("--dry") || lower.includes("--dry-run");
-    return { type: "heal", dryRun };
-  }
-
   if (lower.includes("@detent status")) {
     return { type: "status" };
   }
@@ -2534,8 +2763,6 @@ const parseDetentCommand = (body: string): DetentCommand => {
 // Format help message
 const formatHelpMessage = (): string => {
   return `**Available commands:**
-- \`@detent heal\` - Analyze errors and attempt automatic fixes
-- \`@detent heal --dry-run\` - Analyze without pushing changes
 - \`@detent status\` - Show current error status
 - \`@detent help\` - Show this message`;
 };

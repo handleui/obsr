@@ -346,6 +346,9 @@ export const getStoredCheckRunId = async (
 ): Promise<number | null> => {
   const validated = validateInputs(repository, headSha);
   if (!validated) {
+    console.warn(
+      `[idempotency] getStoredCheckRunId: validation failed for ${repository}@${headSha.slice(0, 7)}`
+    );
     return null;
   }
 
@@ -355,9 +358,23 @@ export const getStoredCheckRunId = async (
     const value = await kv.get(key, {
       cacheTtl: KV_CACHE_TTL_SECONDS,
     });
-    return value ? Number.parseInt(value, 10) : null;
+    if (value) {
+      const checkRunId = Number.parseInt(value, 10);
+      console.log(
+        `[idempotency] getStoredCheckRunId: found ${checkRunId} for ${repository}@${headSha.slice(0, 7)}`
+      );
+      return checkRunId;
+    }
+    // Expected for first-time lookups before check run creation
+    console.log(
+      `[idempotency] getStoredCheckRunId: no check run found for ${repository}@${headSha.slice(0, 7)}`
+    );
+    return null;
   } catch (error) {
-    console.error("[idempotency] getStoredCheckRunId failed:", error);
+    console.error(
+      `[idempotency] getStoredCheckRunId failed for ${repository}@${headSha.slice(0, 7)}:`,
+      error
+    );
     return null;
   }
 };

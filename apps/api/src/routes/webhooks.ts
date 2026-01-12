@@ -644,7 +644,7 @@ const handleWorkflowRunEvent = async (
 
   // Idempotency check: Prevent duplicate processing of same commit (KV-backed)
   const lockResult = await acquireCommitLock(
-    c.env.IDEMPOTENCY,
+    c.env["detent-idempotency"],
     repository.full_name,
     headSha
   );
@@ -681,7 +681,7 @@ const handleWorkflowRunEvent = async (
     if (!prNumber) {
       console.log("[workflow_run] No associated PR found, skipping");
       await markCommitProcessed(
-        c.env.IDEMPOTENCY,
+        c.env["detent-idempotency"],
         repository.full_name,
         headSha
       );
@@ -698,7 +698,11 @@ const handleWorkflowRunEvent = async (
       await github.listWorkflowRunsForCommit(token, owner, repo, headSha);
 
     if (!allCompleted) {
-      await releaseCommitLock(c.env.IDEMPOTENCY, repository.full_name, headSha);
+      await releaseCommitLock(
+        c.env["detent-idempotency"],
+        repository.full_name,
+        headSha
+      );
       const pendingCount = workflowRuns.filter(
         (r) => r.status !== "completed"
       ).length;
@@ -724,7 +728,7 @@ const handleWorkflowRunEvent = async (
         `[workflow_run] Commit ${headSha.slice(0, 7)} already has stored runs, skipping [delivery: ${deliveryId}]`
       );
       await markCommitProcessed(
-        c.env.IDEMPOTENCY,
+        c.env["detent-idempotency"],
         repository.full_name,
         headSha
       );
@@ -779,7 +783,7 @@ const handleWorkflowRunEvent = async (
     });
 
     await markCommitProcessed(
-      c.env.IDEMPOTENCY,
+      c.env["detent-idempotency"],
       repository.full_name,
       headSha,
       checkRunId
@@ -805,7 +809,11 @@ const handleWorkflowRunEvent = async (
       await cleanupCheckRunOnError(github, token, owner, repo, checkRunId);
     }
 
-    await releaseCommitLock(c.env.IDEMPOTENCY, repository.full_name, headSha);
+    await releaseCommitLock(
+      c.env["detent-idempotency"],
+      repository.full_name,
+      headSha
+    );
 
     return c.json(
       {

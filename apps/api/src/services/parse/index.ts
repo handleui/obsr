@@ -1,8 +1,6 @@
 import {
   AllCategories,
-  type CodeSnippet,
   type ErrorCategory,
-  type ErrorSeverity,
   type ErrorSource,
   ErrorSources,
   extractSnippetsForErrors,
@@ -11,62 +9,26 @@ import {
   parseActLogs,
   parseGitHubLogs,
   resetDefaultExtractor,
-  type WorkflowContext,
 } from "@detent/parser";
+import type { Env } from "../../types/env";
+import { persistParseRun } from "./persistence";
+import {
+  type ApiExtractedError,
+  type LogFormat,
+  type ParseRequest,
+  type ParseResponse,
+  type ParseResult,
+  type ParseSource,
+  ParseTimeoutError,
+} from "./types";
+import { validateParseRequest } from "./validation";
 
-export interface ApiExtractedError {
-  readonly message: string;
-  readonly filePath?: string;
-  readonly line?: number;
-  readonly column?: number;
-  readonly severity?: ErrorSeverity;
-  readonly stackTrace?: string;
-  readonly ruleId?: string;
-  readonly category?: ErrorCategory;
-  readonly workflowContext?: WorkflowContext;
-  readonly workflowJob?: string;
-  readonly source?: ErrorSource;
-  readonly unknownPattern?: boolean;
-  readonly codeSnippet?: CodeSnippet;
-  readonly suggestions?: readonly string[];
-  readonly lineKnown?: boolean;
-  readonly columnKnown?: boolean;
-  readonly stackTraceTruncated?: boolean;
-  readonly messageTruncated?: boolean;
-  readonly hint?: string;
-  readonly exitCode?: number;
-  readonly isInfrastructure?: boolean;
-}
+// Types and errors exported via types.ts (import directly from "./parse/types" to avoid barrel)
 
-type ParseFormat = "github-actions" | "act" | "gitlab" | "auto";
-type ParseSource = "github" | "gitlab" | "unknown";
+// Timeout for parsing (30 seconds)
+const PARSE_TIMEOUT_MS = 30_000;
 
-interface ParseOptions {
-  format?: ParseFormat;
-  source?: ParseSource | "auto";
-  logs: string;
-  runId?: string;
-  workspacePath?: string;
-}
-
-interface ParseRunMetadata {
-  runId?: string;
-  source: ParseSource;
-  format: ParseFormat;
-  logBytes: number;
-  errorCount: number;
-}
-
-interface ParseResult {
-  errors: ApiExtractedError[];
-  summary: {
-    total: number;
-    byCategory: Record<ErrorCategory, number>;
-    bySource: Record<ErrorSource, number>;
-  };
-  metadata: ParseRunMetadata;
-}
-
+// Source detection signals
 const sourceSignals = {
   github: [
     "##[group]",
@@ -87,9 +49,7 @@ const sourceSignals = {
 
 const ACT_LOGS_PATTERN = /^\[[^\n\]]+\/[^\n\]]+\]/m;
 
-const looksLikeActLogs = (logs: string): boolean => {
-  return ACT_LOGS_PATTERN.test(logs);
-};
+const looksLikeActLogs = (logs: string): boolean => ACT_LOGS_PATTERN.test(logs);
 
 const inferSourceFromLogs = (logs: string): ParseSource => {
   const lowered = logs.toLowerCase();
@@ -112,9 +72,9 @@ const inferSourceFromLogs = (logs: string): ParseSource => {
 
 const resolveFormat = (
   logs: string,
-  format: ParseFormat | undefined,
+  format: LogFormat | undefined,
   source: ParseSource | "auto" | undefined
-): { format: ParseFormat; source: ParseSource } => {
+): { format: LogFormat; source: ParseSource } => {
   const inferredSource = inferSourceFromLogs(logs);
   const resolvedSource = source && source !== "auto" ? source : inferredSource;
 
@@ -204,53 +164,114 @@ const addSnippets = async (
   return withSnippets;
 };
 
-const recordParseRun = async (_metadata: ParseRunMetadata): Promise<void> => {
-  await Promise.resolve();
-};
+interface ParseInternalOptions {
+  logs: string;
+  format: LogFormat;
+  source: ParseSource | "auto";
+  runId?: string;
+  workspacePath?: string;
+}
 
-export const parseService = {
-  // Parse CI logs and extract errors
-  parse: async (options: ParseOptions): Promise<ParseResult> => {
-    resetDefaultExtractor();
-    const resolved = resolveFormat(
-      options.logs,
-      options.format,
-      options.source
-    );
+const parseLogsInternal = async (
+  options: ParseInternalOptions
+): Promise<ParseResult> => {
+  resetDefaultExtractor();
+  const resolved = resolveFormat(options.logs, options.format, options.source);
 
-    let errors: ParserExtractedError[];
-    switch (resolved.format) {
-      case "act":
-        errors = parseActLogs(options.logs);
-        break;
-      case "github-actions":
-        errors = parseGitHubLogs(options.logs);
-        break;
-      case "gitlab":
-        errors = parse(options.logs);
-        break;
-      default:
-        errors = parse(options.logs);
-        break;
-    }
+  let errors: ParserExtractedError[];
+  switch (resolved.format) {
+    case "act":
+      errors = parseActLogs(options.logs);
+      break;
+    case "github-actions":
+      errors = parseGitHubLogs(options.logs);
+      break;
+    case "gitlab":
+      errors = parse(options.logs);
+      break;
+    default:
+      errors = parse(options.logs);
+      break;
+  }
 
-    const errorsWithSnippets = await addSnippets(errors, options.workspacePath);
-    const summary = summarizeErrors(errorsWithSnippets);
-    const logBytes = new TextEncoder().encode(options.logs).length;
-    const metadata: ParseRunMetadata = {
+  const errorsWithSnippets = await addSnippets(errors, options.workspacePath);
+  const summary = summarizeErrors(errorsWithSnippets);
+  const logBytes = new TextEncoder().encode(options.logs).length;
+
+  return {
+    errors: errorsWithSnippets.map(mapError),
+    summary,
+    metadata: {
       runId: options.runId,
       source: resolved.source,
       format: resolved.format,
       logBytes,
       errorCount: summary.total,
-    };
+    },
+  };
+};
 
-    await recordParseRun(metadata);
+const parseWithTimeout = (
+  options: ParseInternalOptions
+): Promise<ParseResult> => {
+  let timeoutId: ReturnType<typeof setTimeout>;
 
-    return {
-      errors: errorsWithSnippets.map(mapError),
-      summary,
-      metadata,
-    };
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new ParseTimeoutError());
+    }, PARSE_TIMEOUT_MS);
+  });
+
+  return Promise.race([parseLogsInternal(options), timeoutPromise]).finally(
+    () => {
+      clearTimeout(timeoutId);
+    }
+  );
+};
+
+export const parseService = {
+  /**
+   * Parse CI logs and extract errors (without persistence).
+   * Useful for testing and cases where persistence is not needed.
+   */
+  parse: (options: {
+    logs: string;
+    format?: LogFormat;
+    source?: ParseSource | "auto";
+    runId?: string;
+    workspacePath?: string;
+  }): Promise<ParseResult> =>
+    parseWithTimeout({
+      logs: options.logs,
+      format: options.format ?? "auto",
+      source: options.source ?? "auto",
+      runId: options.runId,
+      workspacePath: options.workspacePath,
+    }),
+
+  /**
+   * Parse CI logs, extract errors, and persist to database.
+   * This is the main entry point for the parse flow.
+   */
+  parseAndPersist: async (
+    request: ParseRequest,
+    env: Env
+  ): Promise<ParseResponse> => {
+    // 1. Validate input (throws ValidationError on failure)
+    const validated = validateParseRequest(request);
+
+    // 2. Parse logs with timeout (throws ParseTimeoutError on timeout)
+    const result = await parseWithTimeout({
+      logs: validated.logs,
+      format: validated.format,
+      source: validated.source,
+      runId: validated.runId,
+      workspacePath: validated.workspacePath,
+    });
+
+    // 3. Persist to database (returns persisted: false on failure)
+    const { persisted } = await persistParseRun(env, result, validated);
+
+    return { ...result, persisted };
   },
 };

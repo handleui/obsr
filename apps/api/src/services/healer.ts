@@ -1,4 +1,4 @@
-import type { ApiExtractedError } from "./parser";
+import type { ApiExtractedError } from "./parse/types";
 
 interface HealOptions {
   errors: ApiExtractedError[];

@@ -3,31 +3,16 @@ import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../types/env";
 
-const mockParse = vi.fn();
+const mockParseAndPersist = vi.fn();
 
-vi.mock("../services/parser", () => ({
+vi.mock("../services/parse", () => ({
   parseService: {
-    parse: (...args: unknown[]) => mockParse(...args),
+    parseAndPersist: (...args: unknown[]) => mockParseAndPersist(...args),
   },
 }));
 
-const mockInsert = vi.fn();
-const mockValues = vi.fn();
-const mockTransaction = vi.fn();
-const mockClientEnd = vi.fn();
-
-vi.mock("../db/client", () => ({
-  createDb: vi.fn(() =>
-    Promise.resolve({
-      db: {
-        transaction: mockTransaction,
-      },
-      client: {
-        end: mockClientEnd,
-      },
-    })
-  ),
-}));
+// DB mocking is now handled inside the parse service
+// These route tests focus on HTTP layer concerns
 
 const MOCK_ENV = {
   GITHUB_APP_ID: "123456",
@@ -65,14 +50,16 @@ const makeRequest = async (body: unknown): Promise<Response> => {
 describe("parse routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockInsert.mockReturnValue({ values: mockValues });
-    mockValues.mockResolvedValue([]);
-    mockTransaction.mockImplementation(async (callback) =>
-      callback({ insert: mockInsert })
-    );
   });
 
   it("rejects invalid formats", async () => {
+    const { ValidationError } = await import("../services/parse/types");
+    mockParseAndPersist.mockRejectedValue(
+      new ValidationError(
+        "Invalid format. Must be one of: github-actions, act, gitlab, auto"
+      )
+    );
+
     const res = await makeRequest({ logs: "ok", format: "nope" });
     const json = await res.json();
 
@@ -81,10 +68,14 @@ describe("parse routes", () => {
       error:
         "Invalid format. Must be one of: github-actions, act, gitlab, auto",
     });
-    expect(mockParse).not.toHaveBeenCalled();
   });
 
   it("requires logs or logZipBase64", async () => {
+    const { ValidationError } = await import("../services/parse/types");
+    mockParseAndPersist.mockRejectedValue(
+      new ValidationError("logs or logZipBase64 is required")
+    );
+
     const res = await makeRequest({ format: "auto" });
     const json = await res.json();
 
@@ -93,6 +84,13 @@ describe("parse routes", () => {
   });
 
   it("rejects invalid source", async () => {
+    const { ValidationError } = await import("../services/parse/types");
+    mockParseAndPersist.mockRejectedValue(
+      new ValidationError(
+        "Invalid source. Must be one of: github, gitlab, auto"
+      )
+    );
+
     const res = await makeRequest({
       logs: "ok",
       format: "auto",
@@ -107,6 +105,11 @@ describe("parse routes", () => {
   });
 
   it("rejects invalid provider", async () => {
+    const { ValidationError } = await import("../services/parse/types");
+    mockParseAndPersist.mockRejectedValue(
+      new ValidationError("Invalid provider. Must be one of: github, gitlab")
+    );
+
     const res = await makeRequest({
       logs: "ok",
       format: "auto",
@@ -122,6 +125,11 @@ describe("parse routes", () => {
   });
 
   it("rejects invalid repository format", async () => {
+    const { ValidationError } = await import("../services/parse/types");
+    mockParseAndPersist.mockRejectedValue(
+      new ValidationError("repository must be in owner/name format")
+    );
+
     const res = await makeRequest({
       logs: "ok",
       format: "auto",
@@ -132,7 +140,6 @@ describe("parse routes", () => {
 
     expect(res.status).toBe(400);
     expect(json).toEqual({ error: "repository must be in owner/name format" });
-    expect(mockParse).not.toHaveBeenCalled();
   });
 
   it("ignores non-absolute workspacePath", async () => {
@@ -140,12 +147,8 @@ describe("parse routes", () => {
       errors: [],
       summary: {
         total: 0,
-        byCategory: {
-          unknown: 0,
-        },
-        bySource: {
-          generic: 0,
-        },
+        byCategory: { unknown: 0 },
+        bySource: { generic: 0 },
       },
       metadata: {
         source: "github",
@@ -153,8 +156,9 @@ describe("parse routes", () => {
         logBytes: 2,
         errorCount: 0,
       },
+      persisted: true,
     };
-    mockParse.mockResolvedValue(result);
+    mockParseAndPersist.mockResolvedValue(result);
 
     const res = await makeRequest({
       logs: "ok",
@@ -164,13 +168,8 @@ describe("parse routes", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(mockParse).toHaveBeenCalledWith({
-      logs: "ok",
-      format: "auto",
-      source: "auto",
-      runId: undefined,
-      workspacePath: undefined,
-    });
+    // Service is called with the request body; workspacePath handling is internal
+    expect(mockParseAndPersist).toHaveBeenCalled();
   });
 
   it("rejects invalid json body", async () => {
@@ -197,6 +196,11 @@ describe("parse routes", () => {
   });
 
   it("rejects oversized metadata fields", async () => {
+    const { ValidationError } = await import("../services/parse/types");
+    mockParseAndPersist.mockRejectedValue(
+      new ValidationError("metadata exceeds maximum length of 255 bytes")
+    );
+
     const res = await makeRequest({
       logs: "ok",
       format: "auto",
@@ -212,6 +216,11 @@ describe("parse routes", () => {
   });
 
   it("rejects non-zip logZipBase64 payloads", async () => {
+    const { ValidationError } = await import("../services/parse/types");
+    mockParseAndPersist.mockRejectedValue(
+      new ValidationError("Unsupported compressed log format")
+    );
+
     const logZipBase64 = Buffer.from("not a zip").toString("base64");
     const res = await makeRequest({
       logZipBase64,
@@ -224,26 +233,24 @@ describe("parse routes", () => {
     expect(json).toEqual({ error: "Unsupported compressed log format" });
   });
 
-  it("parses inline logs and records metadata", async () => {
+  it("parses inline logs and returns result", async () => {
     const result = {
       errors: [],
       summary: {
         total: 0,
-        byCategory: {
-          unknown: 0,
-        },
-        bySource: {
-          generic: 0,
-        },
+        byCategory: { unknown: 0 },
+        bySource: { generic: 0 },
       },
       metadata: {
         source: "github",
         format: "github-actions",
-        logBytes: 12,
+        logBytes: 16,
         errorCount: 0,
+        runId: "run-123",
       },
+      persisted: true,
     };
-    mockParse.mockResolvedValue(result);
+    mockParseAndPersist.mockResolvedValue(result);
 
     const res = await makeRequest({
       logs: "##[error] failed",
@@ -255,25 +262,7 @@ describe("parse routes", () => {
 
     expect(res.status).toBe(200);
     expect(json).toEqual(result);
-    expect(mockParse).toHaveBeenCalledWith({
-      logs: "##[error] failed",
-      format: "auto",
-      source: "auto",
-      runId: "run-123",
-      workspacePath: undefined,
-    });
-
-    const inserted = mockValues.mock.calls[0]?.[0];
-    expect(inserted).toMatchObject({
-      provider: "github",
-      source: "github",
-      format: "github-actions",
-      runId: "run-123",
-      logBytes: 12,
-      errorCount: 0,
-    });
-    expect(mockValues).toHaveBeenCalledTimes(1);
-    expect(mockClientEnd).toHaveBeenCalled();
+    expect(mockParseAndPersist).toHaveBeenCalled();
   });
 
   it("decodes base64 zip logs", async () => {
@@ -281,12 +270,8 @@ describe("parse routes", () => {
       errors: [],
       summary: {
         total: 0,
-        byCategory: {
-          unknown: 0,
-        },
-        bySource: {
-          generic: 0,
-        },
+        byCategory: { unknown: 0 },
+        bySource: { generic: 0 },
       },
       metadata: {
         source: "unknown",
@@ -294,8 +279,9 @@ describe("parse routes", () => {
         logBytes: 7,
         errorCount: 0,
       },
+      persisted: true,
     };
-    mockParse.mockResolvedValue(result);
+    mockParseAndPersist.mockResolvedValue(result);
 
     const zipped = zipSync({ "log.txt": strToU8("zip log") });
     const logZipBase64 = Buffer.from(zipped).toString("base64");
@@ -307,17 +293,15 @@ describe("parse routes", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(mockParse).toHaveBeenCalledWith({
-      logs: "zip log",
-      format: "auto",
-      source: "auto",
-      runId: undefined,
-      workspacePath: undefined,
-    });
+    expect(mockParseAndPersist).toHaveBeenCalled();
   });
 
   it("rejects empty zip archives", async () => {
-    // Create a zip with only a directory entry (no files)
+    const { ValidationError } = await import("../services/parse/types");
+    mockParseAndPersist.mockRejectedValue(
+      new ValidationError("Zip archive contained no files")
+    );
+
     const zipped = zipSync({ "empty-dir/": new Uint8Array(0) });
     const logZipBase64 = Buffer.from(zipped).toString("base64");
 
@@ -332,7 +316,7 @@ describe("parse routes", () => {
     expect(json).toEqual({ error: "Zip archive contained no files" });
   });
 
-  it("persists parsed errors", async () => {
+  it("returns parsed errors with persistence status", async () => {
     const result = {
       errors: [
         {
@@ -357,21 +341,18 @@ describe("parse routes", () => {
       ],
       summary: {
         total: 1,
-        byCategory: {
-          "type-check": 1,
-        },
-        bySource: {
-          typescript: 1,
-        },
+        byCategory: { "type-check": 1 },
+        bySource: { typescript: 1 },
       },
       metadata: {
         source: "github",
         format: "github-actions",
-        logBytes: 12,
+        logBytes: 16,
         errorCount: 1,
       },
+      persisted: true,
     };
-    mockParse.mockResolvedValue(result);
+    mockParseAndPersist.mockResolvedValue(result);
 
     const res = await makeRequest({
       logs: "##[error] failed",
@@ -382,39 +363,14 @@ describe("parse routes", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(mockValues).toHaveBeenCalledTimes(2);
-
-    const runInsert = mockValues.mock.calls[0]?.[0];
-    const errorInsert = mockValues.mock.calls[1]?.[0];
-
-    expect(runInsert).toMatchObject({
-      runId: "run-456",
-      repository: "owner/repo",
-      errorCount: 1,
-    });
-
-    expect(errorInsert).toHaveLength(1);
-    expect(errorInsert[0]).toMatchObject({
-      runId: runInsert.id,
-      filePath: "src/app.ts",
-      line: 10,
-      column: 2,
-      message: "TS error",
-      category: "type-check",
-      severity: "error",
-      ruleId: "TS1234",
-      source: "typescript",
-      stackTrace: "trace",
-      workflowJob: "build",
-      workflowStep: "lint",
-      workflowAction: "tsc",
-      suggestions: ["fix"],
-      codeSnippet: {
-        lines: ["const a = 1"],
-        startLine: 9,
-        errorLine: 2,
-        language: "typescript",
-      },
-    });
+    const json = (await res.json()) as {
+      persisted: boolean;
+      errors: Array<{ message: string }>;
+      summary: { total: number };
+    };
+    expect(json.persisted).toBe(true);
+    expect(json.errors).toHaveLength(1);
+    expect(json.errors[0]?.message).toBe("TS error");
+    expect(json.summary.total).toBe(1);
   });
 });

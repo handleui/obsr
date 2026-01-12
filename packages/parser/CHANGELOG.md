@@ -1,5 +1,13 @@
 # @detent/parser
 
+## 0.2.0
+
+### Minor Changes
+
+- f747d88: Add Biome linter parser supporting console and GitHub Actions reporter formats.
+  Introduce observeLine hook for context tracking across noise-filtered lines,
+  state isolation between extract calls, and test output context detection.
+
 ## 0.1.2
 
 ### Patch Changes

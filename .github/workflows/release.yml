@@ -50,6 +50,10 @@ jobs:
       - name: Trigger Build workflow
         run: |
           VERSION="v$(node -p "require('./apps/cli/package.json').version")"
+          if ! git ls-remote --tags origin "refs/tags/$VERSION" | grep -q "refs/tags/${VERSION}$"; then
+            echo "Tag $VERSION not on origin yet, skipping build trigger"
+            exit 0
+          fi
           # Check if release already exists for this version
           if gh release view "$VERSION" &>/dev/null; then
             echo "Release $VERSION already exists, skipping build trigger"
@@ -59,4 +63,3 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

@@ -194,7 +194,7 @@ const noisePatterns: readonly RegExp[] = [
   // === URLs AND PATHS (often contain "error" in path names) ===
   /(?:https?:\/\/\S+error)/i,
   /(?:\/errors?\/)/i, // Path containing /error/ or /errors/
-  /(?:error\.(js|ts|go|py))/i, // Error module files
+  /(?:^|[/\\])error\.(js|ts|go|py)/i, // Error module files (e.g. /path/error.ts)
 ];
 
 /**

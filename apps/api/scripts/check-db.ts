@@ -45,6 +45,7 @@ const main = async () => {
       source: runErrors.source,
       workflowJob: runErrors.workflowJob,
       unknownPattern: runErrors.unknownPattern,
+      possiblyTestOutput: runErrors.possiblyTestOutput,
     })
     .from(runErrors)
     .limit(30);
@@ -56,8 +57,8 @@ const main = async () => {
       line: e.line,
       category: e.category,
       source: e.source,
-      workflowJob: e.workflowJob,
-      unknownPattern: e.unknownPattern,
+      testOutput: e.possiblyTestOutput,
+      unknownPat: e.unknownPattern,
       message: `${e.message?.slice(0, 50)}${e.message && e.message.length > 50 ? "..." : ""}`,
     }))
   );

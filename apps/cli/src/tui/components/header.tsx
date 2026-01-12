@@ -35,7 +35,7 @@ export const printHeader = (command: string): void => {
 
 /**
  * Prints header with cached update check (instant, no network).
- * Cache is populated by `detent update` or periodic checks.
+ * Cache is populated by `dt update` or periodic checks.
  *
  * NOTE: Update banner temporarily disabled to reduce latency.
  * The update logic in utils/update.ts remains intact for `dt update`.

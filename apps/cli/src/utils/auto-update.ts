@@ -628,7 +628,7 @@ export const maybeAutoUpdate = async (
 
   // Skip if disabled (env, CI, or preference)
   if (isAutoUpdateDisabled()) {
-    // Still refresh cache in background for manual `detent update`
+    // Still refresh cache in background for manual `dt update`
     const cache = loadCache();
     if (!cache || Date.now() - cache.lastCheck >= CACHE_DURATION_MS) {
       spawnBackgroundRefresh();
@@ -659,7 +659,7 @@ export const maybeAutoUpdate = async (
 
   try {
     if (!silent) {
-      console.log(`Updating detent: v${currentVersion} → ${latestVersion}`);
+      console.log(`Updating dt: v${currentVersion} → ${latestVersion}`);
     }
 
     const success = await runUpdate();
@@ -691,7 +691,7 @@ export const maybeAutoUpdate = async (
 
 /**
  * Force a version check, ignoring cache.
- * Used by the `detent update` command.
+ * Used by the `dt update` command.
  */
 export const forceCheckForUpdate = async (
   currentVersion: string

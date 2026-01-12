@@ -20,7 +20,12 @@ import type { ContextParser, ParseLineResult } from "./types.js";
 /**
  * Maximum step name length to prevent memory exhaustion from malicious input.
  * Step names longer than this are truncated with a "[TRUNCATED]" suffix.
- * 256 characters is generous for legitimate step names while limiting abuse.
+ *
+ * 256 was chosen because:
+ * - Aligns with common filesystem path component limits (255 on most systems)
+ * - Power of 2 (2^8), efficient for memory allocation
+ * - Generous for legitimate step names (typical are 20-80 chars)
+ * - Standard limit in many logging/monitoring systems
  */
 const MAX_STEP_NAME_LENGTH = 256;
 

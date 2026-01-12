@@ -289,6 +289,15 @@ describe("edge cases", () => {
     expect(result.ctx.action).toBe("google-github-actions/auth@v2");
   });
 
+  it("handles local action paths (./.github/actions/my-action@v1)", () => {
+    parser.parseLine(
+      `${TIMESTAMP} ##[group]Run ./.github/actions/my-action@v1`
+    );
+    const result = parser.parseLine(normalOutput);
+    expect(result.ctx.step).toBe("my-action");
+    expect(result.ctx.action).toBe("./.github/actions/my-action@v1");
+  });
+
   it("handles step with special characters in name", () => {
     parser.parseLine(`${TIMESTAMP} ##[group]Run echo "Hello, World!"`);
     const result = parser.parseLine(normalOutput);

@@ -1,5 +1,12 @@
 # @detent/healing
 
+## 0.3.0
+
+### Minor Changes
+
+- 1164f26: Add eval module with LLM-as-Judge scorers and Braintrust integration.
+  Includes cost tracking, tracing utilities, live mode support, and expanded test dataset.
+
 ## 0.2.0
 
 ### Minor Changes

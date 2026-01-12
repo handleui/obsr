@@ -62,7 +62,7 @@ interface IssueCommentPayload {
   action: string;
   comment: {
     body: string;
-    user: { login: string };
+    user: { login: string; type: string };
   };
   issue: {
     number: number;
@@ -168,8 +168,7 @@ interface OrganizationPayload {
 }
 
 interface DetentCommand {
-  type: "heal" | "status" | "help" | "unknown";
-  dryRun?: boolean;
+  type: "status" | "help" | "unknown";
 }
 
 // Variables stored in context by middleware
@@ -1040,6 +1039,68 @@ const handleNoPrEarlyReturn = async (
 };
 
 // ============================================================================
+// Helper: Handle early return when all runs already processed (duplicate)
+// ============================================================================
+// Cleans up any orphaned check run and releases the commit lock before returning.
+const handleAllRunsProcessedEarlyReturn = async (
+  github: ReturnType<typeof createGitHubService>,
+  token: string,
+  kv: KVNamespace,
+  context: {
+    installationId: number;
+    owner: string;
+    repo: string;
+    repository: string;
+    headSha: string;
+    deliveryId: string;
+    storedCheckRunId: number | null;
+    runCount: number;
+  }
+): Promise<{
+  message: string;
+  repository: string;
+  headSha: string;
+  status: string;
+}> => {
+  const {
+    installationId,
+    owner,
+    repo,
+    repository,
+    headSha,
+    deliveryId,
+    storedCheckRunId,
+    runCount,
+  } = context;
+
+  console.log(
+    `[workflow_run] All ${runCount} run attempts already stored, skipping [delivery: ${deliveryId}]`
+  );
+
+  // Clean up any existing check run since we're returning early
+  if (storedCheckRunId) {
+    await attemptCheckRunCleanup(
+      github,
+      token,
+      installationId,
+      owner,
+      repo,
+      storedCheckRunId,
+      deliveryId
+    );
+  }
+
+  await releaseCommitLock(kv, repository, headSha);
+
+  return {
+    message: "already processed (db check)",
+    repository,
+    headSha,
+    status: "duplicate_db",
+  };
+};
+
+// ============================================================================
 // Helper: Post or update PR comment with deduplication
 // ============================================================================
 // Handles the comment lifecycle: check KV → check DB → update or create → persist
@@ -1642,21 +1703,23 @@ const handleWorkflowRunCompleted = async (
       );
 
     if (allExist) {
-      // All these specific run attempts already stored - true duplicate
-      console.log(
-        `[workflow_run] All ${runIdentifiers.length} run attempts already stored, skipping [delivery: ${deliveryId}]`
+      return c.json(
+        await handleAllRunsProcessedEarlyReturn(
+          github,
+          token,
+          c.env["detent-idempotency"],
+          {
+            installationId: installation.id,
+            owner,
+            repo,
+            repository: repository.full_name,
+            headSha,
+            deliveryId,
+            storedCheckRunId: storedCheckRunIdForRecovery,
+            runCount: runIdentifiers.length,
+          }
+        )
       );
-      await releaseCommitLock(
-        c.env["detent-idempotency"],
-        repository.full_name,
-        headSha
-      );
-      return c.json({
-        message: "already processed (db check)",
-        repository: repository.full_name,
-        headSha,
-        status: "duplicate_db",
-      });
     }
 
     // Filter to only runs that need processing (re-runs will pass through)
@@ -2538,6 +2601,11 @@ const handleIssueCommentEvent = async (
     return c.json({ message: "ignored", reason: "not a pull request" });
   }
 
+  // Ignore comments from bots (e.g., changeset-bot mentions @detent/cli package names)
+  if (comment.user.type === "Bot") {
+    return c.json({ message: "ignored", reason: "bot comment" });
+  }
+
   // Check for @detent mention
   const body = comment.body.toLowerCase();
   if (!body.includes("@detent")) {
@@ -2559,32 +2627,6 @@ const handleIssueCommentEvent = async (
     const token = await github.getInstallationToken(installation.id);
 
     switch (command.type) {
-      case "heal": {
-        // HACK: Commenting out acknowledgment comment for now - will be used for cloud healing later
-        // await github.postComment(
-        //   token,
-        //   repository.owner.login,
-        //   repository.name,
-        //   issue.number,
-        //   `🔧 **Detent** is analyzing the CI failures${command.dryRun ? " (dry run)" : ""}...`
-        // );
-
-        // Healing flow will:
-        // 1. Find latest failed workflow run
-        // 2. Fetch and parse logs with @detent/parser
-        // 3. Run healing loop with Claude via @detent/healing
-        // 4. Push fix (if not dry run)
-        // 5. Post results
-
-        return c.json({
-          message: "heal command received",
-          repository: repository.full_name,
-          issue: issue.number,
-          dryRun: command.dryRun,
-          status: "acknowledged",
-        });
-      }
-
       case "status": {
         // Future: Report current error status from stored analysis
         await github.postComment(
@@ -2638,11 +2680,6 @@ const handleIssueCommentEvent = async (
 const parseDetentCommand = (body: string): DetentCommand => {
   const lower = body.toLowerCase();
 
-  if (lower.includes("@detent heal")) {
-    const dryRun = lower.includes("--dry") || lower.includes("--dry-run");
-    return { type: "heal", dryRun };
-  }
-
   if (lower.includes("@detent status")) {
     return { type: "status" };
   }
@@ -2657,8 +2694,6 @@ const parseDetentCommand = (body: string): DetentCommand => {
 // Format help message
 const formatHelpMessage = (): string => {
   return `**Available commands:**
-- \`@detent heal\` - Analyze errors and attempt automatic fixes
-- \`@detent heal --dry-run\` - Analyze without pushing changes
 - \`@detent status\` - Show current error status
 - \`@detent help\` - Show this message`;
 };

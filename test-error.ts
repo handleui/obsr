@@ -8,3 +8,7 @@ const unused = "this is unused";
 export const broken = () => {
   return x + y;
 };
+
+// More type errors
+const z: boolean = "also wrong";
+const arr: number[] = "not an array";

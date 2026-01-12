@@ -1,5 +1,11 @@
 # @detent/web
 
+## 0.2.1
+
+### Patch Changes
+
+- 6cde710: Remove unused blob API route (handled by vercel.json rewrite)
+
 ## 0.2.0
 
 ### Minor Changes

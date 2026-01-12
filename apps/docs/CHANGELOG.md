@@ -1,5 +1,11 @@
 # @detent/docs
 
+## 0.1.1
+
+### Patch Changes
+
+- 6cde710: Update example URLs to use navigator.detent.sh in self-hosting docs
+
 ## 0.1.0
 
 ### Minor Changes

@@ -1,21 +1,19 @@
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+
+import { getDetentHome } from "../../../lib/env.js";
 import { ACT_VERSION } from "./version.js";
 
 /**
- * Gets the global detent directory (~/.detent)
- * Used for shared resources like the act binary
+ * Gets the global detent directory
+ * Uses ~/.detent-dev in development and ~/.detent in production
  */
-export const getGlobalDetentDir = (): string => {
-  const home = process.env.DETENT_HOME || homedir();
-  return join(home, ".detent");
-};
+export const getGlobalDetentDir = getDetentHome;
 
 /**
  * @deprecated Use getGlobalDetentDir() instead
  */
-export const getDetentDir = getGlobalDetentDir;
+export const getDetentDir = getDetentHome;
 
 export const getBinDir = (): string => {
   return join(getGlobalDetentDir(), "bin");

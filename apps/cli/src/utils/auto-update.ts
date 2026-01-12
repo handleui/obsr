@@ -12,7 +12,7 @@
  *
  * Disable via:
  * - DETENT_NO_AUTO_UPDATE=1 environment variable
- * - `detent config set autoUpdate off`
+ * - `dt config set autoUpdate off`
  */
 
 import { spawn } from "node:child_process";
@@ -23,8 +23,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { compare, valid } from "semver";
 
 // ============================================================================
@@ -55,8 +54,6 @@ const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 500;
 
 const VERSION_PREFIX_REGEX = /^v/;
-/** Matches Windows absolute paths (C:\ or C:/) */
-const WINDOWS_DRIVE_PATTERN = /^[A-Za-z]:[/\\]/;
 
 /** Commands that should skip auto-update to prevent loops */
 const SKIP_UPDATE_COMMANDS = new Set([
@@ -128,24 +125,11 @@ export interface AutoUpdateResult {
 // Path Helpers
 // ============================================================================
 
-const isAbsolutePath = (p: string): boolean =>
-  p.startsWith("/") || WINDOWS_DRIVE_PATTERN.test(p);
+// Import from centralized env module
+import { getDetentHome } from "../lib/env.js";
 
-const getDetentDir = (): string => {
-  const override = process.env.DETENT_HOME;
-  if (!(override && isAbsolutePath(override))) {
-    return join(homedir(), ".detent");
-  }
-  // Normalize path and verify it remains absolute after resolution
-  const normalized = resolve(override);
-  if (!isAbsolutePath(normalized)) {
-    return join(homedir(), ".detent");
-  }
-  return normalized;
-};
-
-const getCachePath = (): string => join(getDetentDir(), CACHE_FILE);
-const getLockPath = (): string => join(getDetentDir(), LOCK_FILE);
+const getCachePath = (): string => join(getDetentHome(), CACHE_FILE);
+const getLockPath = (): string => join(getDetentHome(), LOCK_FILE);
 
 // ============================================================================
 // Lock File Management
@@ -644,7 +628,7 @@ export const maybeAutoUpdate = async (
 
   // Skip if disabled (env, CI, or preference)
   if (isAutoUpdateDisabled()) {
-    // Still refresh cache in background for manual `detent update`
+    // Still refresh cache in background for manual `dt update`
     const cache = loadCache();
     if (!cache || Date.now() - cache.lastCheck >= CACHE_DURATION_MS) {
       spawnBackgroundRefresh();
@@ -675,7 +659,7 @@ export const maybeAutoUpdate = async (
 
   try {
     if (!silent) {
-      console.log(`Updating detent: v${currentVersion} → ${latestVersion}`);
+      console.log(`Updating dt: v${currentVersion} → ${latestVersion}`);
     }
 
     const success = await runUpdate();
@@ -707,7 +691,7 @@ export const maybeAutoUpdate = async (
 
 /**
  * Force a version check, ignoring cache.
- * Used by the `detent update` command.
+ * Used by the `dt update` command.
  */
 export const forceCheckForUpdate = async (
   currentVersion: string

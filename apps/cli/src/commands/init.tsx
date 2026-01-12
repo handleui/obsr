@@ -113,7 +113,7 @@ const runVerboseInit = (
   }
 
   console.log("\nInitialization complete!");
-  console.log("Run 'detent mock' to scan for errors.");
+  console.log("Run 'dt mock' to scan for errors.");
 };
 
 // ============================================================================
@@ -325,7 +325,7 @@ const InitTUI = ({ repoRoot, force }: InitTUIProps): JSX.Element => {
 export const initCommand = defineCommand({
   meta: {
     name: "init",
-    description: "Initialize detent in the current repository",
+    description: "Initialize dt in the current repository",
   },
   args: {
     force: {

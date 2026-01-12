@@ -11,7 +11,7 @@ const errorAnsi = hexToAnsi(colors.error);
 export const updateCommand = defineCommand({
   meta: {
     name: "update",
-    description: "Update detent to the latest version",
+    description: "Update dt to the latest version",
   },
   run: async () => {
     printHeader("update");

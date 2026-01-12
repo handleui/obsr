@@ -124,13 +124,13 @@ export const mockCommand = defineCommand({
       "Run GitHub Actions workflows locally using act and extract errors\n\n" +
       "EXAMPLES\n" +
       "  # Run all workflows\n" +
-      "  detent mock\n\n" +
+      "  dt mock\n\n" +
       "  # Run specific workflow\n" +
-      "  detent mock ci.yml\n\n" +
+      "  dt mock ci.yml\n\n" +
       "  # Run specific job in a workflow\n" +
-      "  detent mock ci.yml build\n\n" +
+      "  dt mock ci.yml build\n\n" +
       "  # Show detailed output\n" +
-      "  detent mock --verbose",
+      "  dt mock --verbose",
   },
   args: {
     workflow: {
@@ -159,8 +159,8 @@ export const mockCommand = defineCommand({
       console.error(
         "Error: Job argument requires a workflow to be specified\n" +
           "\n" +
-          "Usage: detent mock <workflow> <job>\n" +
-          "Example: detent mock ci.yml build"
+          "Usage: dt mock <workflow> <job>\n" +
+          "Example: dt mock ci.yml build"
       );
       process.exit(1);
     }

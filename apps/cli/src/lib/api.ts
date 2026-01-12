@@ -4,7 +4,7 @@
  * Handles authenticated requests to the Detent API.
  */
 
-const API_BASE_URL = process.env.DETENT_API_URL ?? "https://api.detent.dev";
+const API_BASE_URL = process.env.DETENT_API_URL ?? "https://api.detent.sh";
 
 interface ApiOptions {
   method?: "GET" | "POST" | "PUT" | "DELETE";
@@ -58,7 +58,7 @@ export const apiRequest = async <T>(
   if (!response.ok) {
     if (response.status === 401) {
       throw new ApiAuthError(
-        "Authentication failed. Your session may have expired. Run `detent auth login` to re-authenticate."
+        "Authentication failed. Your session may have expired. Run `dt auth login` to re-authenticate."
       );
     }
 

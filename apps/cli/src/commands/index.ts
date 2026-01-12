@@ -3,7 +3,7 @@ import { getVersion } from "../utils/version.js";
 
 export const main = defineCommand({
   meta: {
-    name: "detent",
+    name: "dt",
     version: getVersion(),
     description: "Run GitHub Actions locally with enhanced error reporting",
   },

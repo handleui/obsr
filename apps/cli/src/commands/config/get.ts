@@ -53,7 +53,7 @@ export const configGetCommand = defineCommand({
       console.error(
         "Error: API key cannot be retrieved via CLI for security reasons."
       );
-      console.error("Use 'detent config list' to see a masked version.");
+      console.error("Use 'dt config list' to see a masked version.");
       process.exit(1);
     }
 

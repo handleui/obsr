@@ -97,7 +97,8 @@ const compileBinary = async (
 
   // Optional environment variables with production defaults
   const detentApiUrl = process.env.DETENT_API_URL ?? "https://api.detent.sh";
-  const detentAuthUrl = process.env.DETENT_AUTH_URL ?? "https://app.detent.sh";
+  const detentAuthUrl =
+    process.env.DETENT_AUTH_URL ?? "https://navigator.detent.sh";
 
   const proc = Bun.spawn({
     cmd: [

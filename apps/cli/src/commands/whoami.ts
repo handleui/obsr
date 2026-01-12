@@ -14,10 +14,10 @@ const handleAuthError = (error: unknown, debug: boolean): never => {
   const message = error instanceof Error ? error.message : String(error);
 
   if (message.includes("Not logged in")) {
-    console.error("Not logged in. Run `detent auth login` first.");
+    console.error("Not logged in. Run `dt auth login` first.");
   } else if (message.includes("refresh")) {
     console.error(
-      "Session expired and refresh failed. Run `detent auth login` to re-authenticate."
+      "Session expired and refresh failed. Run `dt auth login` to re-authenticate."
     );
     if (debug) {
       console.error("  Error:", message);
@@ -35,7 +35,7 @@ const displayTokenClaims = (accessToken: string): void => {
     const expiry = claims.exp
       ? new Date(claims.exp * 1000).toISOString()
       : "N/A";
-    const apiUrl = process.env.DETENT_API_URL ?? "https://api.detent.dev";
+    const apiUrl = process.env.DETENT_API_URL ?? "https://api.detent.sh";
 
     console.log("Token claims:");
     console.log(`  iss: ${claims.iss}`);

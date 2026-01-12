@@ -110,7 +110,7 @@ describe("link commands", () => {
         linkCommand.run?.({ args: { force: false } })
       ).rejects.toThrow(ExitError);
       expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "Not logged in. Run `detent auth login` first."
+        "Not logged in. Run `dt auth login` first."
       );
       expect(processExitSpy).toHaveBeenCalledWith(1);
     });

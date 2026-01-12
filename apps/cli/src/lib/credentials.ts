@@ -12,8 +12,9 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+
+import { getDetentHome } from "./env.js";
 
 export interface Credentials {
   access_token: string;
@@ -21,9 +22,7 @@ export interface Credentials {
   expires_at: number;
 }
 
-const DETENT_DIR_NAME = ".detent";
 const CREDENTIALS_FILE = "credentials.json";
-const WINDOWS_DRIVE_PATTERN = /^[A-Za-z]:\\/;
 
 // In-memory cache for credentials to avoid repeated file reads
 let cachedCredentials: Credentials | null | undefined;
@@ -35,20 +34,8 @@ export const resetCredentialsCache = (): void => {
   cachedCredentials = undefined;
 };
 
-const getGlobalDetentDir = (): string => {
-  const override = process.env.DETENT_HOME;
-  if (
-    override &&
-    !override.includes("..") &&
-    (override.startsWith("/") || WINDOWS_DRIVE_PATTERN.test(override))
-  ) {
-    return override;
-  }
-  return join(homedir(), DETENT_DIR_NAME);
-};
-
 const getCredentialsPath = (): string => {
-  return join(getGlobalDetentDir(), CREDENTIALS_FILE);
+  return join(getDetentHome(), CREDENTIALS_FILE);
 };
 
 const isValidCredentials = (data: unknown): data is Credentials => {
@@ -96,7 +83,7 @@ export const loadCredentials = (): Credentials | null => {
 };
 
 export const saveCredentials = (credentials: Credentials): void => {
-  const dir = getGlobalDetentDir();
+  const dir = getDetentHome();
 
   if (!existsSync(dir)) {
     mkdirSync(dir, { mode: 0o700, recursive: true });

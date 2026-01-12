@@ -4,7 +4,7 @@ import { getVersion } from "../utils/version.js";
 export const versionCommand = defineCommand({
   meta: {
     name: "version",
-    description: "Show detent version",
+    description: "Show dt version",
   },
   run: () => {
     console.log(getVersion());

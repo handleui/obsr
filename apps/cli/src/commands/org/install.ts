@@ -54,7 +54,7 @@ const validateOrgFromFlag = (
 
   if (found.already_installed) {
     console.log(
-      `${found.login} is already installed. Run 'detent org list' to see your organizations.`
+      `${found.login} is already installed. Run 'dt org list' to see your organizations.`
     );
     process.exit(0);
   }
@@ -80,7 +80,7 @@ const openInstallPage = async (
     console.log("\nOpening GitHub to install Detent...");
   }
   console.log(
-    "After installing, run 'detent org list' to see your organizations.\n"
+    "After installing, run 'dt org list' to see your organizations.\n"
   );
 
   try {
@@ -111,7 +111,7 @@ export const installCommand = defineCommand({
     try {
       accessToken = await getAccessToken();
     } catch {
-      console.error("Not logged in. Run `detent auth login` first.");
+      console.error("Not logged in. Run `dt auth login` first.");
       process.exit(1);
     }
 
@@ -142,7 +142,7 @@ export const installCommand = defineCommand({
       );
       if (allInstalled) {
         console.log("\nAll your organizations already have Detent installed.");
-        console.log("Run 'detent org list' to see your organizations.");
+        console.log("Run 'dt org list' to see your organizations.");
         return;
       }
 

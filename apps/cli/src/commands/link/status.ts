@@ -28,7 +28,7 @@ export const statusCommand = defineCommand({
     const projectConfig = getProjectConfig(repoRoot);
     if (!projectConfig) {
       console.log("\nThis repository is not linked to any organization.");
-      console.log("Run `detent link` to link it to an organization.");
+      console.log("Run `dt link` to link it to an organization.");
       return;
     }
 
@@ -43,7 +43,7 @@ export const statusCommand = defineCommand({
       accessToken = await getAccessToken();
     } catch {
       console.log(
-        "\nNote: Not logged in. Run `detent auth login` for more details."
+        "\nNote: Not logged in. Run `dt auth login` for more details."
       );
       return;
     }
@@ -65,9 +65,7 @@ export const statusCommand = defineCommand({
       console.log(
         "\nWarning: You are not a member of the linked organization."
       );
-      console.log(
-        "Run `detent link --force` to link to a different organization."
-      );
+      console.log("Run `dt link --force` to link to a different organization.");
       return;
     }
 

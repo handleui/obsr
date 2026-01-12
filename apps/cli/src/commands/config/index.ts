@@ -7,7 +7,7 @@ import { configSetCommand } from "./set.js";
 export const configCommand = defineCommand({
   meta: {
     name: "config",
-    description: "Manage detent configuration",
+    description: "Manage dt configuration",
   },
   subCommands: {
     edit: configEditCommand,

@@ -20,7 +20,7 @@
     },
     "apps/api": {
       "name": "@detent/api",
-      "version": "0.4.0",
+      "version": "0.6.0",
       "dependencies": {
         "@detent/healing": "*",
         "@detent/parser": "*",
@@ -47,7 +47,7 @@
     },
     "apps/cli": {
       "name": "@detent/cli",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "bin": {
         "dt": "./dist/index.js",
       },
@@ -93,7 +93,7 @@
     },
     "apps/navigator": {
       "name": "@detent/navigator",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@detent/ui": "*",
         "@workos-inc/node": "^7.81.0",
@@ -117,7 +117,6 @@
       "name": "@detent/web",
       "version": "0.2.0",
       "dependencies": {
-        "@vercel/blob": "^0.27.1",
         "next": "16.1.1",
         "react": "19.2.3",
         "react-dom": "19.2.3",
@@ -160,7 +159,7 @@
     },
     "packages/parser": {
       "name": "@detent/parser",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "devDependencies": {
         "@detent/typescript-config": "*",
         "@types/node": "^25.0.3",

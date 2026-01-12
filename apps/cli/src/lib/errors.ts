@@ -8,11 +8,11 @@ export const handleGitHubOrgError = (error: unknown): never => {
   if (message.includes("GitHub account not connected")) {
     console.error("GitHub account not connected.");
     console.error(
-      "Please authenticate with GitHub: run `detent auth login --force`"
+      "Please authenticate with GitHub: run `dt auth login --force`"
     );
   } else if (message.includes("authorization expired")) {
     console.error("GitHub authorization expired.");
-    console.error("Please re-authenticate: run `detent auth login --force`");
+    console.error("Please re-authenticate: run `dt auth login --force`");
   } else {
     console.error("Failed to fetch GitHub organizations:", message);
   }

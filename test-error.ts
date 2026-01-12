@@ -22,3 +22,6 @@ const tuple: [string, number] = [1, "wrong order"];
 
 // Trigger #5 - permissions accepted now
 const promise: Promise<string> = 42;
+
+// Trigger #6 - testing queued check run
+const map: Map<string, number> = "not a map";

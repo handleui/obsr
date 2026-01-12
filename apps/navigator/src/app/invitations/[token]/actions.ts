@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getWorkOSCookiePassword } from "@/lib/auth";
 import { API_BASE_URL, COOKIE_NAMES } from "@/lib/constants";
+import { isValidTokenFormat } from "@/lib/validation";
 import { workos } from "@/lib/workos";
 
 export interface AcceptState {
@@ -26,16 +27,6 @@ interface AcceptError {
   code?: string;
   message?: string;
 }
-
-/** Token format regex - alphanumeric with hyphens/underscores, 8-128 chars */
-const TOKEN_FORMAT_REGEX = /^[a-zA-Z0-9_-]{8,128}$/;
-
-/**
- * Validate invitation token format
- * This prevents injection attacks and ensures safe URL/request construction
- */
-const isValidTokenFormat = (token: string): boolean =>
-  TOKEN_FORMAT_REGEX.test(token);
 
 /** Map HTTP status codes to user-friendly error messages */
 const getErrorForStatus = (
@@ -160,7 +151,12 @@ export const acceptInvitation = async (
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      const errorData = (await response.json()) as AcceptError;
+      let errorData: AcceptError = { error: "Unknown error" };
+      try {
+        errorData = (await response.json()) as AcceptError;
+      } catch {
+        // Fall through with default error
+      }
 
       // Authentication required - redirect to login
       if (response.status === 401) {

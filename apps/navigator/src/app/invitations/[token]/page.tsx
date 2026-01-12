@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getUser } from "@/lib/auth";
 import { API_BASE_URL } from "@/lib/constants";
+import { isValidTokenFormat } from "@/lib/validation";
 import { InvitationForm } from "./invitation-form";
 
 interface InvitationPageProps {
@@ -44,7 +45,10 @@ const formatExpiry = (expiresAt: string): string => {
   const diffMs = expiry.getTime() - now.getTime();
   const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
-  if (diffDays <= 0) {
+  if (diffDays < 0) {
+    return "expired";
+  }
+  if (diffDays === 0) {
     return "expires soon";
   }
   if (diffDays === 1) {
@@ -56,17 +60,6 @@ const formatExpiry = (expiresAt: string): string => {
 const formatRole = (role: string): string => {
   return role.charAt(0).toUpperCase() + role.slice(1);
 };
-
-/** Token format regex - alphanumeric with hyphens/underscores, 8-128 chars */
-const TOKEN_FORMAT_REGEX = /^[a-zA-Z0-9_-]{8,128}$/;
-
-/**
- * Validate invitation token format
- * Tokens should be alphanumeric with hyphens/underscores, reasonable length
- * This prevents injection attacks and ensures safe URL construction
- */
-const isValidTokenFormat = (token: string): boolean =>
-  TOKEN_FORMAT_REGEX.test(token);
 
 interface ErrorPageProps {
   title: string;
@@ -213,7 +206,12 @@ const InvitationPage = async ({ params }: InvitationPageProps) => {
 
   // Handle error responses
   if (!response.ok) {
-    const errorData = (await response.json()) as InvitationError;
+    let errorData: InvitationError = { error: "Unknown error" };
+    try {
+      errorData = (await response.json()) as InvitationError;
+    } catch {
+      // Fall through with default error
+    }
     return renderApiError(response.status, errorData);
   }
 

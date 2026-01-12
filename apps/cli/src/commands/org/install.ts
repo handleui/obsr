@@ -12,7 +12,7 @@ import { openBrowser } from "../../lib/browser.js";
 import { handleGitHubOrgError } from "../../lib/errors.js";
 
 const GITHUB_APP_INSTALL_URL =
-  "https://github.com/apps/detent/installations/new";
+  "https://github.com/apps/detent-app/installations/new";
 
 // Display org status (info only, no selection)
 const displayOrgStatus = (orgs: GitHubOrgWithStatus[]): void => {

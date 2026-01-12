@@ -295,3 +295,22 @@ export const sanitizeReturnUrl = (
 ): string => {
   return isValidReturnUrl(url) ? url : fallback;
 };
+
+/**
+ * Get and clear the returnTo cookie
+ * Used after successful authentication to redirect user to their original destination
+ * Returns null on any error to ensure safe fallback to default redirect
+ */
+export const getAndClearReturnTo = async (): Promise<string | null> => {
+  try {
+    const cookieStore = await cookies();
+    const returnTo = cookieStore.get(CookieNames.returnTo)?.value;
+    if (returnTo) {
+      cookieStore.delete(CookieNames.returnTo);
+    }
+    return returnTo ?? null;
+  } catch {
+    // Cookie access failed - return null for safe fallback to "/"
+    return null;
+  }
+};

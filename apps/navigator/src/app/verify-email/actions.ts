@@ -6,8 +6,10 @@ import {
   clearPendingVerification,
   createSecureCookieOptions,
   createSession,
+  getAndClearReturnTo,
   getPendingVerification,
   getWorkOSClientId,
+  sanitizeReturnUrl,
 } from "@/lib/auth";
 import {
   AUTH_DURATIONS,
@@ -160,8 +162,10 @@ export const verifyEmailCode = async (
     return { error: "Verification failed. Please try again." };
   }
 
-  // Redirect after successful verification
-  redirect("/");
+  // Redirect after successful verification (respects returnTo for CLI auth flow)
+  const returnTo = await getAndClearReturnTo();
+  const redirectUrl = sanitizeReturnUrl(returnTo);
+  redirect(redirectUrl);
 };
 
 export const resendVerificationEmail = async (

@@ -3,6 +3,7 @@ import {
   createPendingVerificationToken,
   createSecureCookieOptions,
   createSession,
+  getAndClearReturnTo,
   getWorkOSClientId,
   getWorkOSCookiePassword,
   sanitizeReturnUrl,
@@ -84,19 +85,6 @@ const setPendingVerificationCookie = async (
       maxAge: AUTH_DURATIONS.pendingVerificationMaxAgeSec,
     })
   );
-};
-
-/**
- * Get and clear the returnTo cookie
- */
-const getAndClearReturnTo = async (): Promise<string | null> => {
-  const { cookies } = await import("next/headers");
-  const cookieStore = await cookies();
-  const returnTo = cookieStore.get(COOKIE_NAMES.returnTo)?.value;
-  if (returnTo) {
-    cookieStore.delete(COOKIE_NAMES.returnTo);
-  }
-  return returnTo ?? null;
 };
 
 export const GET = async (request: Request) => {

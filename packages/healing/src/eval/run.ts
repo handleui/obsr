@@ -21,6 +21,7 @@ if (!process.env.BRAINTRUST_API_KEY) {
   process.exit(1);
 }
 
+import { randomUUID } from "node:crypto";
 import { Eval } from "braintrust";
 import { Client } from "../client.js";
 import { HealLoop } from "../loop.js";
@@ -101,7 +102,7 @@ const liveTask = async (input: HealingTestCase): Promise<HealingEvalResult> => {
     const ctx = createToolContext(
       process.cwd(),
       process.cwd(),
-      `eval-${input.id}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`
+      `eval-${input.id}-${Date.now()}-${randomUUID().slice(0, 8)}`
     );
 
     const registry = createToolRegistry(ctx);

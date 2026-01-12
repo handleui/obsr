@@ -266,3 +266,50 @@ export const getGitHubOrgs = (
   accessToken: string
 ): Promise<GitHubOrgsResponse> =>
   apiRequest<GitHubOrgsResponse>("/v1/auth/github-orgs", { accessToken });
+
+// ============================================================================
+// Errors Types
+// ============================================================================
+
+export interface RunInfo {
+  id: string;
+  runId: string | null;
+  workflowName: string | null;
+  conclusion: string | null;
+  runAttempt: number | null;
+  errorCount: number | null;
+  headBranch: string | null;
+  completedAt: string | null;
+}
+
+export interface ErrorInfo {
+  id: string;
+  filePath: string | null;
+  line: number | null;
+  column: number | null;
+  message: string;
+  category: string | null;
+  severity: string | null;
+  source: string | null;
+  ruleId: string | null;
+  hint: string | null;
+  workflowJob: string | null;
+}
+
+export interface ErrorsResponse {
+  commit: string | null;
+  repository: string;
+  runs: RunInfo[];
+  errors: ErrorInfo[];
+}
+
+// Errors API methods
+export const getErrors = (
+  accessToken: string,
+  commit: string,
+  repository: string
+): Promise<ErrorsResponse> =>
+  apiRequest<ErrorsResponse>(
+    `/v1/errors?commit=${encodeURIComponent(commit)}&repository=${encodeURIComponent(repository)}`,
+    { accessToken }
+  );

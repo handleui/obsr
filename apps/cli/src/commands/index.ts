@@ -15,6 +15,7 @@ export const main = defineCommand({
     whoami: () => import("./whoami.js").then((m) => m.whoamiCommand),
     org: () => import("./org/index.js").then((m) => m.orgCommand),
     link: () => import("./link/index.js").then((m) => m.linkCommand),
+    errors: () => import("./errors.js").then((m) => m.errorsCommand),
     mock: () => import("./mock/index.js").then((m) => m.mockCommand),
     jobs: () => import("./mock/jobs.js").then((m) => m.jobsCommand),
     update: () => import("./update.js").then((m) => m.updateCommand),

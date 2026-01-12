@@ -63,6 +63,7 @@ export type ErrorSource =
   | "go-test"
   | "python"
   | "rust"
+  | "vitest"
   | "docker"
   | "nodejs"
   | "metadata"
@@ -77,6 +78,7 @@ export const ErrorSources = {
   GoTest: "go-test" as const,
   Python: "python" as const,
   Rust: "rust" as const,
+  Vitest: "vitest" as const,
   Docker: "docker" as const,
   NodeJS: "nodejs" as const,
   Metadata: "metadata" as const,

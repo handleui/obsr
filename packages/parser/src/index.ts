@@ -54,9 +54,11 @@ export {
   createPythonParser,
   createRustParser,
   createTypeScriptParser,
+  createVitestParser,
   GolangParser,
   PythonParser,
   TypeScriptParser,
+  VitestParser,
 } from "./parsers/index.js";
 
 // ============================================================================
@@ -197,6 +199,7 @@ import {
   createPythonParser,
   createRustParser,
   createTypeScriptParser,
+  createVitestParser,
 } from "./parsers/index.js";
 import { createRegistry, type ParserRegistry } from "./registry.js";
 
@@ -205,7 +208,7 @@ import { createRegistry, type ParserRegistry } from "./registry.js";
  * Parsers are registered in priority order (automatic sorting by registry).
  *
  * Priority order (highest to lowest):
- * - Language-specific (80): Go, Python, Rust, TypeScript
+ * - Language-specific (80): Go, Python, Rust, TypeScript, Vitest
  * - Linter (75): Biome, ESLint
  * - Infrastructure (70): CI/CD infrastructure failures
  * - Generic (10): Fallback for unknown formats
@@ -218,6 +221,7 @@ export const createDefaultRegistry = (): ParserRegistry => {
   registry.register(createPythonParser());
   registry.register(createRustParser());
   registry.register(createTypeScriptParser());
+  registry.register(createVitestParser());
 
   // Linter parsers (priority 75)
   registry.register(createBiomeParser());

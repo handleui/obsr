@@ -401,15 +401,19 @@ const generateRawDetails = (error: DeduplicatedError): string | undefined => {
     sections.push(error.hint);
   }
 
-  // Stack trace (truncated to fit in raw_details)
+  // Stack trace (truncated to first 5 lines for readability)
   if (error.stackTrace) {
     sections.push("");
     sections.push("=== Stack Trace ===");
-    const truncatedStack =
-      error.stackTrace.length > 2000
-        ? `${error.stackTrace.slice(0, 2000)}...[truncated]`
-        : error.stackTrace;
-    sections.push(truncatedStack);
+    const stackLines = error.stackTrace.split("\n");
+    const maxLines = 5;
+    if (stackLines.length > maxLines) {
+      sections.push(
+        `${stackLines.slice(0, maxLines).join("\n")}\n...[${stackLines.length - maxLines} more lines]`
+      );
+    } else {
+      sections.push(error.stackTrace);
+    }
   }
 
   // Workflow context
@@ -465,11 +469,18 @@ const createAnnotation = (error: DeduplicatedError): CheckRunAnnotation => {
     message = `${message.slice(0, ANNOTATION_MESSAGE_PRACTICAL_LIMIT - 3)}...`;
   }
 
+  // Determine annotation level from severity, but downgrade unknownPattern to notice
+  // (lower confidence errors from generic fallback parser shouldn't block PRs)
+  let annotationLevel = mapSeverityToAnnotationLevel(error.severity);
+  if (error.unknownPattern) {
+    annotationLevel = "notice";
+  }
+
   const annotation: CheckRunAnnotation = {
     path: error.filePath as string,
     start_line: error.line as number,
     end_line: error.line as number,
-    annotation_level: mapSeverityToAnnotationLevel(error.severity),
+    annotation_level: annotationLevel,
     message,
     title: generateAnnotationTitle(error),
   };
@@ -562,7 +573,10 @@ export const formatCheckRunOutput = (
 
   // === ANNOTATIONS: Inline file annotations ===
   // Filter to errors with file path and line number (required for annotations)
-  const errorsWithPath = sortedErrors.filter((e) => e.filePath && e.line);
+  // Also filter out test output noise (vitest/jest progress, etc.)
+  const errorsWithPath = sortedErrors.filter(
+    (e) => e.filePath && e.line && !e.possiblyTestOutput
+  );
 
   // Deduplicate errors at same file:line to reduce annotation noise
   const deduplicatedErrors = deduplicateErrors(errorsWithPath);

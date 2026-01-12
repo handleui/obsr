@@ -18,6 +18,76 @@ interface CallbackServer {
 }
 
 /**
+ * Escape HTML special characters to prevent XSS
+ */
+const escapeHtml = (text: string): string =>
+  text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+/**
+ * Generate HTML success page shown in browser after CLI authorization
+ */
+const generateSuccessPage = (email: string) => `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Detent CLI - Authorized</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #fff;
+    }
+    .container {
+      text-align: center;
+      padding: 2rem;
+      max-width: 400px;
+    }
+    .icon {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 1.5rem;
+      color: #22c55e;
+    }
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #171717;
+      margin-bottom: 0.5rem;
+    }
+    .email {
+      color: #171717;
+      font-weight: 500;
+    }
+    p {
+      font-size: 0.875rem;
+      color: #737373;
+      margin: 0.5rem 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <svg class="icon" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+    </svg>
+    <h1>Authorized Successfully</h1>
+    <p>Signed in as <span class="email">${escapeHtml(email)}</span></p>
+    <p>You can close this tab and return to the terminal.</p>
+  </div>
+</body>
+</html>`;
+
+/**
  * Start a temporary localhost server to receive OAuth callback
  * Optimized for fast shutdown by tracking and destroying connections
  */
@@ -42,13 +112,11 @@ export const startCallbackServer = (
       if (url.pathname === "/callback") {
         const code = url.searchParams.get("code");
         const state = url.searchParams.get("state");
+        const email = url.searchParams.get("email") ?? "your account";
 
-        // Minimal response - Navigator already showed success page
-        // Try to close the browser tab automatically
+        // Show success page with user email and close instructions
         res.writeHead(200, { "Content-Type": "text/html" });
-        res.end(
-          "<!DOCTYPE html><html><head><script>window.close()</script></head><body></body></html>"
-        );
+        res.end(generateSuccessPage(email));
 
         // Verify state
         if (state !== expectedState) {

@@ -1,4 +1,4 @@
-import { EncryptJWT } from "jose";
+import { decodeJwt, EncryptJWT } from "jose";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getWorkOSCookiePassword } from "@/lib/auth";
@@ -17,62 +17,6 @@ const isSealedSessionsEnabled = () => {
     return false;
   }
 };
-
-/**
- * Generate HTML response for success page that displays briefly before redirect
- */
-const generateSuccessHtml = (redirectUrl: string) => `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="refresh" content="0; url=${redirectUrl}">
-  <title>Authorization Successful - Detent CLI</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #fff;
-    }
-    .container {
-      text-align: center;
-      padding: 2rem;
-      max-width: 400px;
-    }
-    .icon {
-      width: 48px;
-      height: 48px;
-      margin: 0 auto 1.5rem;
-      color: #22c55e;
-    }
-    h1 {
-      font-size: 1.25rem;
-      font-weight: 600;
-      color: #171717;
-      margin-bottom: 0.5rem;
-    }
-    p {
-      font-size: 0.875rem;
-      color: #737373;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <svg class="icon" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
-      <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-    </svg>
-    <h1>Authorization Successful</h1>
-    <p>You can close this window and return to the CLI.</p>
-  </div>
-</body>
-</html>
-`;
 
 /**
  * Create encrypted one-time code containing tokens
@@ -114,6 +58,19 @@ export const GET = async (request: Request) => {
   if (!(port && state)) {
     return NextResponse.redirect(
       new URL("/cli/auth?error=missing_params", request.url)
+    );
+  }
+
+  // Validate port is a valid number to prevent URL manipulation attacks
+  const portNumber = Number.parseInt(port, 10);
+  if (
+    Number.isNaN(portNumber) ||
+    portNumber < 1 ||
+    portNumber > 65_535 ||
+    port !== String(portNumber)
+  ) {
+    return NextResponse.redirect(
+      new URL("/cli/auth?error=invalid_port", request.url)
     );
   }
 
@@ -166,21 +123,22 @@ export const GET = async (request: Request) => {
       throw new Error("Missing tokens in session");
     }
 
+    // Extract user email from access token for success page display
+    const { email } = decodeJwt(accessToken) as { email?: string };
+
     // Create encrypted one-time code
     const encryptedCode = await createEncryptedCode(accessToken, refreshToken);
 
-    // Build redirect URL to CLI's localhost server
-    const cliCallbackUrl = new URL(`http://localhost:${port}/callback`);
+    // Build redirect URL to CLI's localhost server (use validated portNumber)
+    const cliCallbackUrl = new URL(`http://localhost:${portNumber}/callback`);
     cliCallbackUrl.searchParams.set("code", encryptedCode);
     cliCallbackUrl.searchParams.set("state", state);
+    if (email) {
+      cliCallbackUrl.searchParams.set("email", email);
+    }
 
-    // Return HTML success page with redirect
-    return new NextResponse(generateSuccessHtml(cliCallbackUrl.toString()), {
-      status: 200,
-      headers: {
-        "Content-Type": "text/html",
-      },
-    });
+    // Redirect directly to CLI callback (success page shown by CLI)
+    return NextResponse.redirect(cliCallbackUrl.toString());
   } catch (err) {
     console.error("[cli/auth/authorize] Error:", err);
     return NextResponse.redirect(

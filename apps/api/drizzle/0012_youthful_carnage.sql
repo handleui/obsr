@@ -1,1 +1,0 @@
-ALTER TABLE "run_errors" ADD COLUMN "possibly_test_output" boolean;

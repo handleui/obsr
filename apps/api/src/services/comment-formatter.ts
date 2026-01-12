@@ -20,7 +20,6 @@ export interface FormatCommentOptions {
 }
 
 // Top-level regex for performance (avoid creating in loops)
-const WHITESPACE_PATTERN = /\s+/g;
 const PIPE_PATTERN = /\|/g;
 const BACKTICK_PATTERN = /`/g;
 
@@ -30,171 +29,44 @@ const escapeTableCell = (text: string): string => {
   return text.replace(PIPE_PATTERN, "\\|").replace(BACKTICK_PATTERN, "\\`");
 };
 
-// Helper: URL encode file path for GitHub blob links
-// Encodes each path segment separately to preserve slashes
-const encodeFilePath = (filePath: string): string => {
-  return filePath
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-};
-
-// Helper: truncate file path for display
-const truncatePath = (path: string, maxLen = 40): string => {
-  if (path.length <= maxLen) {
-    return path;
-  }
-  const parts = path.split("/");
-  if (parts.length <= 2) {
-    // For flat paths, truncate from start with ellipsis prefix
-    return `...${path.slice(-(maxLen - 3))}`;
-  }
-  return `.../${parts.slice(-2).join("/")}`;
-};
-
-// Helper: truncate and sanitize message for table display
-const truncateMessage = (message: string, maxLen = 60): string => {
-  // Remove newlines and extra whitespace
-  const clean = message.replace(WHITESPACE_PATTERN, " ").trim();
-  // Escape pipe chars to prevent table breakage
-  const escaped = escapeTableCell(clean);
-  if (escaped.length <= maxLen) {
-    return escaped;
-  }
-  return `${escaped.slice(0, maxLen - 3)}...`;
-};
-
-// Helper: build GitHub blob URL with proper encoding
-const buildFileLink = (
-  filePath: string,
-  line: number | undefined,
-  owner: string,
-  repo: string,
-  headSha: string
-): string => {
-  const displayPath = truncatePath(filePath);
-  const encodedPath = encodeFilePath(filePath);
-  const lineAnchor = line ? `#L${line}` : "";
-  return `[\`${displayPath}\`](https://github.com/${owner}/${repo}/blob/${headSha}/${encodedPath}${lineAnchor})`;
-};
-
-// Helper: format a single workflow run row
-const formatWorkflowRow = (
-  run: WorkflowRunResult,
-  owner: string,
-  repo: string
-): string => {
-  const status = run.conclusion === "success" ? "Passed" : "Failed";
-  const statusIcon = run.conclusion === "success" ? "✅" : "❌";
-  const safeName = escapeTableCell(run.name);
-  return `| [${safeName}](https://github.com/${owner}/${repo}/actions/runs/${run.id}) | ${statusIcon} ${status} | ${run.errorCount} |`;
-};
-
-// Helper: format a single error row (with Source column)
-const formatErrorRow = (
-  error: ParsedError,
-  owner: string,
-  repo: string,
-  headSha: string
-): string => {
-  const file = error.filePath
-    ? buildFileLink(error.filePath, error.line, owner, repo, headSha)
-    : "_unknown_";
-  const line = error.line ?? "-";
-  const message = truncateMessage(error.message, 60);
-  const rawSource = error.source ?? error.category ?? "-";
-  const source = escapeTableCell(rawSource);
-  return `| ${file} | ${line} | ${message} | ${source} |`;
-};
-
-// Helper: format error row for uncertain errors (without Source column)
-const formatUncertainErrorRow = (
-  error: ParsedError,
-  owner: string,
-  repo: string,
-  headSha: string
-): string => {
-  const file = error.filePath
-    ? buildFileLink(error.filePath, error.line, owner, repo, headSha)
-    : "_unknown_";
-  const line = error.line ?? "-";
-  const message = truncateMessage(error.message, 60);
-  return `| ${file} | ${line} | ${message} |`;
-};
-
-// Helper: check if an error is uncertain (possibly test output or unknown pattern)
-const isUncertainError = (error: ParsedError): boolean =>
-  error.possiblyTestOutput === true || error.unknownPattern === true;
-
-// Format the main PR comment with error summary
+// Format the main PR comment with error summary (minimal format)
 export const formatResultsComment = (options: FormatCommentOptions): string => {
-  const { owner, repo, headSha, runs, errors } = options;
+  const { owner, repo, headSha, runs } = options;
   const lines: string[] = [];
 
-  // Separate errors into certain and uncertain
-  const certainErrors = errors.filter((e) => !isUncertainError(e));
-  const uncertainErrors = errors.filter(isUncertainError);
+  // Separate failed and passed runs
+  const failedRuns = runs.filter((r) => r.conclusion === "failure");
+  const passedCount = runs.filter((r) => r.conclusion === "success").length;
 
-  // Header
-  lines.push("## Detent CI Analysis");
+  // Table header
+  lines.push("| Workflow | Status | Errors |");
+  lines.push("|----------|--------|--------|");
+
+  // Only show failed runs in the table
+  for (const run of failedRuns) {
+    const safeName = escapeTableCell(run.name);
+    const link = `https://github.com/${owner}/${repo}/actions/runs/${run.id}`;
+    lines.push(`| [${safeName}](${link}) | Failed | ${run.errorCount} |`);
+  }
+
   lines.push("");
 
-  // Workflow summary table (only show if runs exist)
-  if (runs.length > 0) {
-    lines.push("| Workflow | Status | Errors |");
-    lines.push("|----------|--------|--------|");
-    for (const run of runs) {
-      lines.push(formatWorkflowRow(run, owner, repo));
-    }
-    lines.push("");
-  }
-
-  // Certain errors section (top 10)
-  if (certainErrors.length > 0) {
-    const displayCount = Math.min(certainErrors.length, 10);
-    const totalCertain = certainErrors.length;
-    lines.push(`### Top Errors (${displayCount} of ${totalCertain})`);
-    lines.push("");
-    lines.push("| File | Line | Message | Source |");
-    lines.push("|------|------|---------|--------|");
-
-    for (const error of certainErrors.slice(0, 10)) {
-      lines.push(formatErrorRow(error, owner, repo, headSha));
-    }
-    lines.push("");
-  } else if (uncertainErrors.length === 0) {
-    lines.push("### No errors found");
-    lines.push("");
-  }
-
-  // Uncertain errors section (possibly test output or unknown pattern)
-  if (uncertainErrors.length > 0) {
-    lines.push("### Possibly Test Console Output");
-    lines.push(
-      "_The following may be captured from test mocks, not actual errors:_"
-    );
-    lines.push("");
-    lines.push("| File | Line | Message |");
-    lines.push("|------|------|---------|");
-
-    for (const error of uncertainErrors.slice(0, 10)) {
-      lines.push(formatUncertainErrorRow(error, owner, repo, headSha));
-    }
-    if (uncertainErrors.length > 10) {
-      lines.push(
-        `| ... | ... | _${uncertainErrors.length - 10} more uncertain errors_ |`
-      );
-    }
-    lines.push("");
-  }
-
-  // Footer with CLI commands
-  lines.push("---");
-  lines.push("");
-  lines.push(
-    `**Full list:** \`detent errors --commit ${headSha.slice(0, 7)}\``
-  );
-  lines.push("**Auto-fix:** Comment `@detent heal` to attempt fixes");
+  // Footer: passed count · timestamp · CLI command
+  const timestamp = new Date().toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  });
+  const passedText = passedCount > 0 ? `${passedCount} passed` : "";
+  const cliCommand = `\`detent errors --commit ${headSha.slice(0, 7)}\``;
+  const footerParts = [
+    passedText,
+    `Updated ${timestamp} UTC`,
+    cliCommand,
+  ].filter(Boolean);
+  lines.push(footerParts.join(" · "));
 
   return lines.join("\n");
 };
@@ -223,12 +95,11 @@ export const formatCheckSummary = (
     lines.push("| Workflow | Status |");
     lines.push("|----------|--------|");
     for (const run of runs) {
-      const icon = run.conclusion === "success" ? "✅" : "❌";
       // Escape workflow name to prevent table breakage
       const safeName = escapeTableCell(run.name);
-      // Escape conclusion in case it contains special chars
-      const safeConclusion = escapeTableCell(run.conclusion);
-      lines.push(`| ${safeName} | ${icon} ${safeConclusion} |`);
+      // Capitalize status for display
+      const status = run.conclusion === "success" ? "Passed" : "Failed";
+      lines.push(`| ${safeName} | ${status} |`);
     }
   }
 

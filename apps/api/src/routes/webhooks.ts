@@ -241,28 +241,156 @@ app.post("/github", webhookSignatureMiddleware, (c: WebhookContext) => {
 
 // ParsedError is imported from ../services/error-parser
 
-// Store run and errors in the database
-const storeRunAndErrors = async (
-  env: Env,
-  data: {
-    runId: number;
-    runName: string;
-    prNumber: number;
-    headSha: string;
-    errors: ParsedError[];
-    repository: string;
-    checkRunId?: number;
+// ============================================================================
+// Input Validation Helpers for GitHub Data
+// ============================================================================
+// Defense-in-depth: Validate GitHub API response data before database storage.
+// While webhooks are signed, we validate data shapes and bounds to prevent
+// issues from malformed responses or unexpected GitHub API changes.
+
+// Maximum lengths for text fields to prevent database bloat
+const MAX_WORKFLOW_NAME_LENGTH = 255;
+const MAX_BRANCH_NAME_LENGTH = 255;
+const MAX_CONCLUSION_LENGTH = 50;
+const MAX_REPOSITORY_LENGTH = 200;
+const MAX_ERROR_MESSAGE_LENGTH = 10_000;
+const MAX_FILE_PATH_LENGTH = 1000;
+const MAX_STACK_TRACE_LENGTH = 50_000;
+
+// Validation ranges for numeric fields
+const MAX_RUN_ID = Number.MAX_SAFE_INTEGER;
+const MAX_PR_NUMBER = 1_000_000_000; // GitHub PR numbers are 32-bit integers
+
+// SHA validation regex (40 hex characters)
+const SHA_REGEX = /^[a-fA-F0-9]{40}$/;
+const MAX_RUN_ATTEMPT = 10_000; // GitHub allows re-runs but has practical limits
+const MAX_LINE_NUMBER = 10_000_000;
+const MAX_COLUMN_NUMBER = 100_000;
+
+/**
+ * Validates and clamps a numeric value to safe bounds.
+ * Returns null if the value is not a valid positive integer.
+ */
+const validatePositiveInt = (value: unknown, max: number): number | null => {
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    return null;
   }
-): Promise<string> => {
+  return Math.min(value, max);
+};
+
+/**
+ * Truncates a string to maximum length, returning null for non-strings.
+ */
+const truncateString = (value: unknown, maxLength: number): string | null => {
+  if (typeof value !== "string") {
+    return null;
+  }
+  return value.length > maxLength ? value.slice(0, maxLength) : value;
+};
+
+// Data structure for prepared run data (after validation)
+interface PreparedRunData {
+  runRecordId: string;
+  runId: number;
+  runName: string;
+  prNumber: number;
+  headSha: string;
+  errors: ParsedError[];
+  repository: string;
+  checkRunId: number | null;
+  conclusion: string | null;
+  headBranch: string;
+  runAttempt: number;
+  runStartedAt: Date | null;
+}
+
+/**
+ * Validates run data and prepares it for database insertion.
+ * Returns null if validation fails for critical fields.
+ */
+const prepareRunData = (data: {
+  runId: number;
+  runName: string;
+  prNumber: number;
+  headSha: string;
+  errors: ParsedError[];
+  repository: string;
+  checkRunId?: number;
+  conclusion: string | null;
+  headBranch: string;
+  runAttempt: number;
+  runStartedAt: Date | null;
+}): PreparedRunData | null => {
+  // Validate critical numeric fields
+  const validatedRunId = validatePositiveInt(data.runId, MAX_RUN_ID);
+  const validatedPrNumber = validatePositiveInt(data.prNumber, MAX_PR_NUMBER);
+  const validatedRunAttempt =
+    validatePositiveInt(data.runAttempt, MAX_RUN_ATTEMPT) ?? 1;
+  const validatedCheckRunId = data.checkRunId
+    ? validatePositiveInt(data.checkRunId, MAX_RUN_ID)
+    : null;
+
+  if (validatedRunId === null || validatedPrNumber === null) {
+    console.error(
+      `[workflow_run] Invalid run ID (${data.runId}) or PR number (${data.prNumber})`
+    );
+    return null;
+  }
+
+  // Validate headSha format (40 hex characters)
+  if (!SHA_REGEX.test(data.headSha)) {
+    console.error(
+      `[workflow_run] Invalid SHA format: ${data.headSha.slice(0, 20)}...`
+    );
+    return null;
+  }
+
+  return {
+    runRecordId: crypto.randomUUID(),
+    runId: validatedRunId,
+    runName:
+      truncateString(data.runName, MAX_WORKFLOW_NAME_LENGTH) ?? "Unknown",
+    prNumber: validatedPrNumber,
+    headSha: data.headSha.toLowerCase(),
+    errors: data.errors,
+    repository: truncateString(data.repository, MAX_REPOSITORY_LENGTH) ?? "",
+    checkRunId: validatedCheckRunId,
+    conclusion: data.conclusion
+      ? truncateString(data.conclusion, MAX_CONCLUSION_LENGTH)
+      : null,
+    headBranch:
+      truncateString(data.headBranch, MAX_BRANCH_NAME_LENGTH) ?? "unknown",
+    runAttempt: validatedRunAttempt,
+    runStartedAt: data.runStartedAt,
+  };
+};
+
+/**
+ * Bulk store multiple runs and their errors in a single transaction.
+ *
+ * Performance optimizations (critical for Cloudflare Workers 128MB limit):
+ * - Single database connection for all runs (vs N connections)
+ * - Single transaction with bulk inserts (vs N transactions)
+ * - Reduces DB round-trips from 2N to 2 (one for runs, one for errors)
+ * - Respects Cloudflare Workers' 6 concurrent TCP connection limit
+ */
+const bulkStoreRunsAndErrors = async (
+  env: Env,
+  preparedRuns: PreparedRunData[]
+): Promise<void> => {
+  if (preparedRuns.length === 0) {
+    return;
+  }
+
   const { db, client } = await createDb(env);
+  const completedAt = new Date();
 
   try {
-    const runRecordId = crypto.randomUUID();
-
     await db.transaction(async (tx) => {
-      await tx.insert(runs).values({
-        id: runRecordId,
-        provider: "github",
+      // Bulk insert all runs in a single query
+      const runRows = preparedRuns.map((data) => ({
+        id: data.runRecordId,
+        provider: "github" as const,
         source: "github",
         format: "github-actions",
         runId: String(data.runId),
@@ -271,34 +399,83 @@ const storeRunAndErrors = async (
         prNumber: data.prNumber,
         checkRunId: data.checkRunId ? String(data.checkRunId) : null,
         errorCount: data.errors.length,
-      });
+        workflowName: data.runName,
+        conclusion: data.conclusion,
+        headBranch: data.headBranch,
+        runAttempt: data.runAttempt,
+        runStartedAt: data.runStartedAt,
+        runCompletedAt: completedAt,
+      }));
 
-      if (data.errors.length > 0) {
-        const errorRows = data.errors.map((error) => ({
-          id: crypto.randomUUID(),
-          runId: runRecordId,
-          filePath: error.filePath ?? null,
-          line: error.line ?? null,
-          column: error.column ?? null,
-          message: error.message,
-          category: error.category ?? null,
-          severity: error.severity ?? null,
-          ruleId: error.ruleId ?? null,
-          source: error.source ?? null,
-          stackTrace: error.stackTrace ?? null,
-          hint: error.hint ?? null,
-          workflowJob: error.workflowJob ?? data.runName,
-          workflowStep: error.workflowStep ?? null,
-          workflowAction: error.workflowAction ?? null,
-        }));
-        await tx.insert(runErrors).values(errorRows);
+      await tx.insert(runs).values(runRows);
+
+      // Collect all errors from all runs into a single array for bulk insert
+      const allErrorRows: Array<{
+        id: string;
+        runId: string;
+        filePath: string | null;
+        line: number | null;
+        column: number | null;
+        message: string;
+        category: string | null;
+        severity: string | null;
+        ruleId: string | null;
+        source: string | null;
+        stackTrace: string | null;
+        hint: string | null;
+        workflowJob: string | null;
+        workflowStep: string | null;
+        workflowAction: string | null;
+      }> = [];
+
+      for (const data of preparedRuns) {
+        for (const error of data.errors) {
+          allErrorRows.push({
+            id: crypto.randomUUID(),
+            runId: data.runRecordId,
+            filePath: truncateString(error.filePath, MAX_FILE_PATH_LENGTH),
+            line: validatePositiveInt(error.line, MAX_LINE_NUMBER),
+            column: validatePositiveInt(error.column, MAX_COLUMN_NUMBER),
+            message:
+              truncateString(error.message, MAX_ERROR_MESSAGE_LENGTH) ??
+              "Unknown error",
+            category: truncateString(error.category, 100),
+            severity: truncateString(error.severity, 50),
+            ruleId: truncateString(error.ruleId, 200),
+            source: truncateString(error.source, 100),
+            stackTrace: truncateString(
+              error.stackTrace,
+              MAX_STACK_TRACE_LENGTH
+            ),
+            hint: truncateString(error.hint, MAX_ERROR_MESSAGE_LENGTH),
+            workflowJob:
+              truncateString(error.workflowJob, MAX_WORKFLOW_NAME_LENGTH) ??
+              data.runName,
+            workflowStep: truncateString(
+              error.workflowStep,
+              MAX_WORKFLOW_NAME_LENGTH
+            ),
+            workflowAction: truncateString(
+              error.workflowAction,
+              MAX_WORKFLOW_NAME_LENGTH
+            ),
+          });
+        }
+      }
+
+      // Bulk insert all errors in a single query
+      if (allErrorRows.length > 0) {
+        await tx.insert(runErrors).values(allErrorRows);
       }
     });
 
-    console.log(
-      `[workflow_run] Stored run ${data.runId} with ${data.errors.length} errors`
+    const totalErrors = preparedRuns.reduce(
+      (sum, r) => sum + r.errors.length,
+      0
     );
-    return runRecordId;
+    console.log(
+      `[workflow_run] Bulk stored ${preparedRuns.length} runs with ${totalErrors} total errors in single transaction`
+    );
   } finally {
     await client.end();
   }
@@ -476,19 +653,76 @@ const sanitizeErrorMessage = (error: unknown): string => {
 };
 
 // ============================================================================
-// Helper: Process and store failed runs with batched parallel execution
+// Helper: Sanitize error messages for JSON API responses
+// ============================================================================
+// Prevents leaking internal implementation details (e.g., database connection
+// strings, file paths, stack traces) in error responses.
+//
+// Safe patterns: Errors that describe high-level issues without exposing internals
+const SAFE_API_ERROR_PATTERNS = [
+  /^Failed to get installation token/i,
+  /^Rate limit exceeded/i,
+  /^Failed to fetch logs/i,
+  /^Repository not found/i,
+  /^Check run not found/i,
+  /^Comment not found/i,
+  /^Workflow run not found/i,
+  /^Invalid (owner|repo|SHA)/i,
+  /^PR not found/i,
+  // Validation errors from prepareRunData - safe to expose as they describe input issues
+  /^\[workflow_run\] Invalid/i,
+];
+
+const sanitizeApiError = (error: unknown): string => {
+  if (!(error instanceof Error)) {
+    return "An unexpected error occurred";
+  }
+
+  const message = error.message;
+
+  // Check if the error message matches a safe pattern
+  for (const pattern of SAFE_API_ERROR_PATTERNS) {
+    if (pattern.test(message)) {
+      // Return a truncated version to prevent overly long messages
+      return message.slice(0, 200);
+    }
+  }
+
+  // For unknown errors, return generic message to avoid leaking internals
+  // Full error is logged server-side for debugging
+  return "An internal error occurred";
+};
+
+// ============================================================================
+// Helper: Process and store ALL runs with bulk database operations
 // ============================================================================
 //
-// Performance notes (Cloudflare Workers - 128MB limit):
+// Stores ALL workflow runs (not just failures) for comprehensive tracking.
+// - Failed runs: fetch logs, parse errors, store with errors
+// - Other runs: store with metadata only (no errors)
+//
+// Performance optimizations (Cloudflare Workers - 128MB memory, 6 TCP connections):
 // - Fetches logs in parallel batches (MAX_CONCURRENT_FETCHES) to reduce latency
 // - Parses logs immediately after fetch to free memory before next batch
-// - Stores runs in parallel batches to reduce database round-trips
-// - Each batch completes before next starts to bound memory usage
-const processFailedRuns = async (
+// - BULK INSERTS: All runs stored in single transaction (1 connection, not N)
+// - Reduces DB round-trips from 2N to 2 (one INSERT for runs, one for errors)
+
+// Run metadata from GitHub API
+interface WorkflowRunMeta {
+  id: number;
+  name: string;
+  status: string;
+  conclusion: string | null;
+  headBranch: string;
+  runAttempt: number;
+  runStartedAt: Date | null;
+}
+
+const processAndStoreAllRuns = async (
   env: Env,
   github: ReturnType<typeof createGitHubService>,
   token: string,
-  failedRuns: Array<{ id: number; name: string }>,
+  allRuns: WorkflowRunMeta[],
   context: {
     owner: string;
     repo: string;
@@ -501,24 +735,15 @@ const processFailedRuns = async (
   // Limit concurrent fetches to avoid memory pressure from multiple ZIP files
   // Each workflow log can be up to 30MB compressed, so we keep this conservative
   const MAX_CONCURRENT_FETCHES = 3;
-  const MAX_CONCURRENT_STORES = 5;
 
   const allErrors: ParsedError[] = [];
-  const runDataList: Array<{
-    runId: number;
-    runName: string;
-    errors: ParsedError[];
-  }> = [];
+  const failedRuns = allRuns.filter((r) => r.conclusion === "failure");
 
-  // Process a single run: fetch logs, parse, and return result
-  const processRun = async (run: {
-    id: number;
-    name: string;
-  }): Promise<{
-    runId: number;
-    runName: string;
-    errors: ParsedError[];
-  }> => {
+  // Map to store errors by run ID
+  const errorsByRunId = new Map<number, ParsedError[]>();
+
+  // Process a single failed run: fetch logs, parse, and return errors
+  const processFailedRun = async (run: WorkflowRunMeta): Promise<void> => {
     try {
       // Fetch logs from GitHub API
       const logsResult = await github.fetchWorkflowLogs(
@@ -548,14 +773,10 @@ const processFailedRuns = async (
         `[workflow_run] Parsed ${errorsWithContext.length} errors from run ${run.id} (${run.name})`
       );
 
-      return {
-        runId: run.id,
-        runName: run.name,
-        errors: errorsWithContext,
-      };
+      errorsByRunId.set(run.id, errorsWithContext);
+      allErrors.push(...errorsWithContext);
     } catch (error) {
       // If log fetching/parsing fails, use a fallback error
-      // Log full error internally for debugging
       console.error(
         `[workflow_run] Failed to fetch/parse logs for run ${run.id}:`,
         error
@@ -571,44 +792,40 @@ const processFailedRuns = async (
         workflowJob: run.name,
       };
 
-      return {
-        runId: run.id,
-        runName: run.name,
-        errors: [fallbackError],
-      };
+      errorsByRunId.set(run.id, [fallbackError]);
+      allErrors.push(fallbackError);
     }
   };
 
-  // Fetch and parse logs in parallel batches
-  // This reduces total latency while bounding memory usage
+  // Fetch and parse logs for failed runs in parallel batches
   for (let i = 0; i < failedRuns.length; i += MAX_CONCURRENT_FETCHES) {
     const batch = failedRuns.slice(i, i + MAX_CONCURRENT_FETCHES);
-    const results = await Promise.all(batch.map(processRun));
+    await Promise.all(batch.map(processFailedRun));
+  }
 
-    // Collect results from this batch
-    for (const result of results) {
-      allErrors.push(...result.errors);
-      runDataList.push(result);
+  // Prepare all runs for bulk storage (validates and sanitizes data)
+  const preparedRuns: PreparedRunData[] = [];
+  for (const run of allRuns) {
+    const prepared = prepareRunData({
+      runId: run.id,
+      runName: run.name,
+      prNumber: context.prNumber,
+      headSha: context.headSha,
+      errors: errorsByRunId.get(run.id) ?? [],
+      repository: context.repository,
+      checkRunId: context.checkRunId,
+      conclusion: run.conclusion,
+      headBranch: run.headBranch,
+      runAttempt: run.runAttempt,
+      runStartedAt: run.runStartedAt,
+    });
+    if (prepared) {
+      preparedRuns.push(prepared);
     }
   }
 
-  // Store runs in batches to avoid memory pressure (Workers: 128MB limit)
-  for (let i = 0; i < runDataList.length; i += MAX_CONCURRENT_STORES) {
-    const batch = runDataList.slice(i, i + MAX_CONCURRENT_STORES);
-    await Promise.all(
-      batch.map((runData) =>
-        storeRunAndErrors(env, {
-          runId: runData.runId,
-          runName: runData.runName,
-          prNumber: context.prNumber,
-          headSha: context.headSha,
-          errors: runData.errors,
-          repository: context.repository,
-          checkRunId: context.checkRunId,
-        })
-      )
-    );
-  }
+  // Bulk store all runs in a single transaction for efficiency
+  await bulkStoreRunsAndErrors(env, preparedRuns);
 
   return allErrors;
 };
@@ -821,7 +1038,7 @@ const finalizeAndPostResults = async (
     repo,
     checkRunId,
     status: "completed",
-    conclusion: hasFailed ? "failure" : "success",
+    conclusion: hasFailed ? "neutral" : "success",
     output: {
       title: hasFailed
         ? `${totalErrors} error${totalErrors !== 1 ? "s" : ""} found`
@@ -1141,13 +1358,12 @@ const handleWorkflowRunCompleted = async (
     // At this point checkRunId is guaranteed to be set
     const finalCheckRunId = checkRunId;
 
-    // Process failed runs
-    const failedRuns = workflowRuns.filter((r) => r.conclusion === "failure");
-    const allErrors = await processFailedRuns(
+    // Process ALL runs: fetch logs for failures, store all with metadata
+    const allErrors = await processAndStoreAllRuns(
       c.env,
       github,
       token,
-      failedRuns,
+      workflowRuns,
       {
         owner,
         repo,
@@ -1183,12 +1399,16 @@ const handleWorkflowRunCompleted = async (
       finalCheckRunId
     );
 
+    const failedRunCount = workflowRuns.filter(
+      (r) => r.conclusion === "failure"
+    ).length;
+
     return c.json({
       message: "workflow_run processed",
       repository: repository.full_name,
       prNumber,
       runsProcessed: workflowRuns.length,
-      failedRuns: failedRuns.length,
+      failedRuns: failedRunCount,
       totalErrors,
       checkRunId: finalCheckRunId,
     });
@@ -1212,7 +1432,8 @@ const handleWorkflowRunCompleted = async (
     return c.json(
       {
         message: "workflow_run error",
-        error: error instanceof Error ? error.message : "Unknown error",
+        // Sanitize error to prevent leaking internal details (DB connection strings, etc.)
+        error: sanitizeApiError(error),
       },
       500
     );

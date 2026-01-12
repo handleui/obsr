@@ -302,6 +302,10 @@ interface WorkflowRunsResponse {
     name: string;
     status: string;
     conclusion: string | null;
+    head_branch: string;
+    run_attempt: number;
+    run_started_at: string | null;
+    // Note: GitHub doesn't have run_completed_at, we use receivedAt instead
   }>;
 }
 
@@ -677,6 +681,7 @@ const createGitHubServiceInternal = (env: Env) => {
 
   // GET /repos/{owner}/{repo}/actions/runs?head_sha={sha}
   // Returns all workflow runs for a commit and whether they're all completed
+  // Includes metadata for run tracking (branch, attempt, timing)
   const listWorkflowRunsForCommit = async (
     token: string,
     owner: string,
@@ -689,6 +694,9 @@ const createGitHubServiceInternal = (env: Env) => {
       name: string;
       status: string;
       conclusion: string | null;
+      headBranch: string;
+      runAttempt: number;
+      runStartedAt: Date | null;
     }>;
   }> => {
     const context = `listWorkflowRunsForCommit(${owner}/${repo}@${headSha.slice(0, 7)})`;
@@ -725,6 +733,9 @@ const createGitHubServiceInternal = (env: Env) => {
       name: run.name ?? "Unknown",
       status: run.status ?? "unknown",
       conclusion: run.conclusion,
+      headBranch: run.head_branch ?? "unknown",
+      runAttempt: run.run_attempt ?? 1,
+      runStartedAt: run.run_started_at ? new Date(run.run_started_at) : null,
     }));
 
     // Empty runs array means no workflows configured or SHA not found

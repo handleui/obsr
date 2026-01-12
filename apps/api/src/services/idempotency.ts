@@ -328,6 +328,39 @@ const buildCommentKey = (repository: string, prNumber: number): string =>
   `${COMMENT_KEY_PREFIX}:${repository}:${prNumber}`;
 
 /**
+ * Validates repository and PR number for comment/lock operations.
+ * Returns normalized repository (lowercase) if valid, null otherwise.
+ */
+const validatePrInputs = (
+  repository: string,
+  prNumber: number
+): string | null => {
+  // PR numbers must be positive integers within reasonable bounds
+  // GitHub uses 32-bit integers, max is ~2.1 billion
+  if (
+    !Number.isInteger(prNumber) ||
+    prNumber <= 0 ||
+    prNumber > 2_147_483_647
+  ) {
+    console.warn(`[idempotency] Invalid PR number rejected: ${prNumber}`);
+    return null;
+  }
+
+  // Validate repository format (same as commit lock validation)
+  if (
+    repository.length > MAX_REPOSITORY_LENGTH ||
+    !REPOSITORY_REGEX.test(repository)
+  ) {
+    console.warn(
+      `[idempotency] Invalid repository format for PR operation: ${repository.substring(0, 50)}...`
+    );
+    return null;
+  }
+
+  return repository.toLowerCase();
+};
+
+/**
  * Stores the comment ID for a PR. Used to update existing comments instead of
  * creating new ones on subsequent webhook calls.
  */
@@ -337,11 +370,18 @@ export const storeCommentId = async (
   prNumber: number,
   commentId: number
 ): Promise<void> => {
-  if (repository.length > 200 || prNumber <= 0) {
+  const normalizedRepo = validatePrInputs(repository, prNumber);
+  if (!normalizedRepo) {
     return;
   }
 
-  const key = buildCommentKey(repository.toLowerCase(), prNumber);
+  // Validate commentId is a positive integer
+  if (!Number.isInteger(commentId) || commentId <= 0) {
+    console.warn(`[idempotency] Invalid comment ID rejected: ${commentId}`);
+    return;
+  }
+
+  const key = buildCommentKey(normalizedRepo, prNumber);
 
   try {
     await kv.put(key, String(commentId), {
@@ -361,17 +401,27 @@ export const getStoredCommentId = async (
   repository: string,
   prNumber: number
 ): Promise<number | null> => {
-  if (repository.length > 200 || prNumber <= 0) {
+  const normalizedRepo = validatePrInputs(repository, prNumber);
+  if (!normalizedRepo) {
     return null;
   }
 
-  const key = buildCommentKey(repository.toLowerCase(), prNumber);
+  const key = buildCommentKey(normalizedRepo, prNumber);
 
   try {
     const value = await kv.get(key, {
       cacheTtl: KV_CACHE_TTL_SECONDS,
     });
-    return value ? Number.parseInt(value, 10) : null;
+    if (!value) {
+      return null;
+    }
+    // Validate parsed value is a positive integer
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      console.warn(`[idempotency] Invalid stored comment ID: ${value}`);
+      return null;
+    }
+    return parsed;
   } catch (error) {
     console.error("[idempotency] getStoredCommentId failed:", error);
     return null;
@@ -416,13 +466,15 @@ export const acquirePrCommentLock = async (
   acquired: boolean;
   lockId?: string;
   kvError?: boolean;
+  validationError?: boolean;
 }> => {
-  if (repository.length > MAX_REPOSITORY_LENGTH || prNumber <= 0) {
-    // Invalid input - fail open to avoid blocking legitimate requests
-    return { acquired: true };
+  const normalizedRepo = validatePrInputs(repository, prNumber);
+  if (!normalizedRepo) {
+    // Invalid input - fail open but flag validation error for monitoring
+    return { acquired: true, validationError: true };
   }
 
-  const key = buildPrCommentLockKey(repository.toLowerCase(), prNumber);
+  const key = buildPrCommentLockKey(normalizedRepo, prNumber);
   const lockId = crypto.randomUUID();
 
   try {
@@ -490,11 +542,13 @@ export const releasePrCommentLock = async (
   repository: string,
   prNumber: number
 ): Promise<void> => {
-  if (repository.length > MAX_REPOSITORY_LENGTH || prNumber <= 0) {
+  const normalizedRepo = validatePrInputs(repository, prNumber);
+  if (!normalizedRepo) {
+    // Skip release for invalid inputs - TTL will clean up anyway
     return;
   }
 
-  const key = buildPrCommentLockKey(repository.toLowerCase(), prNumber);
+  const key = buildPrCommentLockKey(normalizedRepo, prNumber);
 
   try {
     await kv.delete(key);

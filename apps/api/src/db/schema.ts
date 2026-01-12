@@ -262,8 +262,13 @@ export const projects = pgTable(
 );
 
 // ============================================================================
-// Runs (Log ingestion metadata)
+// Runs (Workflow run tracking and log ingestion metadata)
 // ============================================================================
+// Stores ALL workflow runs we observe (not just failures) to build a complete
+// picture of CI activity. This enables:
+// - Run ID → commit/PR/branch mapping (intelligence GitHub makes hard to get)
+// - Workflow reliability analytics
+// - Processing audit trail ("why wasn't this commit processed?")
 
 export const runs = pgTable(
   "runs",
@@ -276,6 +281,9 @@ export const runs = pgTable(
     provider: providerEnum("provider"),
     source: varchar("source", { length: 32 }),
     format: varchar("format", { length: 32 }),
+    // IMPORTANT: runId, repository, and runAttempt form the unique constraint.
+    // Code in webhooks.ts always provides non-NULL values for these fields.
+    // Schema allows NULL for backwards compatibility with existing data.
     runId: varchar("run_id", { length: 255 }),
     repository: varchar("repository", { length: 500 }),
     commitSha: varchar("commit_sha", { length: 64 }),
@@ -284,17 +292,42 @@ export const runs = pgTable(
     logBytes: integer("log_bytes"),
     errorCount: integer("error_count"),
     receivedAt: timestamp("received_at").defaultNow().notNull(),
+
+    // Workflow identity (maps run ID back to workflow)
+    workflowName: varchar("workflow_name", { length: 255 }),
+
+    // Execution result (success, failure, cancelled, skipped, neutral, timed_out, etc.)
+    conclusion: varchar("conclusion", { length: 32 }),
+
+    // Branch context (enables branch-based analytics)
+    headBranch: varchar("head_branch", { length: 255 }),
+
+    // Re-run tracking (GitHub increments this on re-runs, starts at 1)
+    runAttempt: integer("run_attempt").default(1),
+
+    // Timing for analytics (when GitHub started/completed the run)
+    runStartedAt: timestamp("run_started_at"),
+    runCompletedAt: timestamp("run_completed_at"),
   },
   (table) => [
     index("runs_project_id_idx").on(table.projectId),
     index("runs_provider_run_id_idx").on(table.provider, table.runId),
     index("runs_commit_sha_idx").on(table.commitSha),
     index("runs_pr_number_idx").on(table.prNumber),
-    uniqueIndex("runs_repository_commit_run_unique_idx").on(
+    // Primary deduplication: unique per repository + run ID + attempt
+    // GitHub re-runs have same runId but increment runAttempt (starts at 1)
+    // NOTE: This index also serves lookups by (repository, runId) since those
+    // columns are the leading prefix - no separate index needed for that pattern
+    uniqueIndex("runs_repository_run_attempt_unique_idx").on(
       table.repository,
-      table.commitSha,
-      table.runId
+      table.runId,
+      table.runAttempt
     ),
+    // Workflow analytics: query by workflow name (for reliability dashboards)
+    index("runs_workflow_name_idx").on(table.workflowName),
+    // NOTE: Removed runs_conclusion_idx - low cardinality (6-7 values) makes it
+    // ineffective. Queries filtering by conclusion should use a composite index
+    // or full table scan, which is often faster for low-selectivity predicates.
   ]
 );
 

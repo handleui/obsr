@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatCheckRunOutput,
   formatCheckSummary,
+  formatPassingComment,
   formatResultsComment,
 } from "./comment-formatter";
 
@@ -396,7 +397,7 @@ describe("formatCheckRunOutput", () => {
         end_line: 42,
         annotation_level: "failure",
         message: "Type 'string' is not assignable",
-        title: "typescript",
+        title: "TypeScript",
       });
     });
 
@@ -443,5 +444,103 @@ describe("formatCheckRunOutput", () => {
 
       expect(result.annotations).toBeUndefined();
     });
+  });
+});
+
+// Factory for creating passing comment options
+const createPassingOptions = (
+  overrides: Partial<Parameters<typeof formatPassingComment>[0]> = {}
+) => ({
+  runs: [],
+  headSha: "abc1234567890def",
+  ...overrides,
+});
+
+describe("formatPassingComment", () => {
+  it("shows success message", () => {
+    const result = formatPassingComment(
+      createPassingOptions({
+        runs: [
+          { name: "Build", id: 123, conclusion: "success", errorCount: 0 },
+          { name: "Test", id: 456, conclusion: "success", errorCount: 0 },
+        ],
+      })
+    );
+
+    expect(result).toContain("✓ All checks passed");
+  });
+
+  it("shows passed count", () => {
+    const result = formatPassingComment(
+      createPassingOptions({
+        runs: [
+          { name: "Build", id: 123, conclusion: "success", errorCount: 0 },
+          { name: "Test", id: 456, conclusion: "success", errorCount: 0 },
+        ],
+      })
+    );
+
+    expect(result).toContain("2 passed");
+  });
+
+  it("shows skipped count when some workflows are skipped/cancelled", () => {
+    const result = formatPassingComment(
+      createPassingOptions({
+        runs: [
+          { name: "Build", id: 123, conclusion: "success", errorCount: 0 },
+          { name: "Deploy", id: 456, conclusion: "skipped", errorCount: 0 },
+          { name: "Notify", id: 789, conclusion: "cancelled", errorCount: 0 },
+        ],
+      })
+    );
+
+    expect(result).toContain("1 passed");
+    expect(result).toContain("2 skipped");
+  });
+
+  it("includes UTC timestamp", () => {
+    const result = formatPassingComment(
+      createPassingOptions({
+        runs: [
+          { name: "Build", id: 123, conclusion: "success", errorCount: 0 },
+        ],
+      })
+    );
+
+    expect(result).toContain("Updated");
+    expect(result).toContain("UTC");
+    expect(result).toMatch(TIMESTAMP_PATTERN);
+  });
+
+  it("includes short SHA", () => {
+    const result = formatPassingComment(
+      createPassingOptions({
+        headSha: "abc1234567890def",
+        runs: [
+          { name: "Build", id: 123, conclusion: "success", errorCount: 0 },
+        ],
+      })
+    );
+
+    expect(result).toContain("`abc1234`");
+  });
+
+  it("uses middle dot separator between footer elements", () => {
+    const result = formatPassingComment(
+      createPassingOptions({
+        runs: [
+          { name: "Build", id: 123, conclusion: "success", errorCount: 0 },
+        ],
+      })
+    );
+
+    expect(result).toContain(" · ");
+  });
+
+  it("handles empty runs array", () => {
+    const result = formatPassingComment(createPassingOptions({ runs: [] }));
+
+    expect(result).toContain("✓ All checks passed");
+    expect(result).not.toContain("passed ·"); // No "0 passed" shown
   });
 });

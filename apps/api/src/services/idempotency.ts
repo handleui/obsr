@@ -12,6 +12,13 @@ export interface ProcessingState {
   lockId?: string;
 }
 
+/** Internal type for commit lock state with required lockId (used in write-then-verify) */
+interface CommitLockState {
+  timestamp: number;
+  processing: boolean;
+  lockId: string;
+}
+
 interface LockAcquireResult {
   acquired: boolean;
   state?: ProcessingState;
@@ -119,8 +126,21 @@ const buildKey = (repository: string, headSha: string): string =>
 // ultimate safety net for deduplication.
 
 /**
+ * Default blocking predicate: block if lock is not stale (age-based only).
+ */
+const defaultShouldBlock = <T extends { lockId: string; timestamp: number }>(
+  _existing: T,
+  ageMs: number,
+  staleThresholdMs: number
+): boolean => ageMs <= staleThresholdMs;
+
+/**
  * Generic lock acquisition with write-then-verify pattern.
  * Handles stale lock recovery and race detection.
+ *
+ * @param shouldBlock - Optional predicate to determine if existing lock should block.
+ *                      Default blocks if lock is not stale (age <= staleThresholdMs).
+ *                      Return true to block acquisition, false to allow takeover.
  */
 const tryAcquireLock = async <T extends { lockId: string; timestamp: number }>(
   kv: KVNamespace,
@@ -128,7 +148,12 @@ const tryAcquireLock = async <T extends { lockId: string; timestamp: number }>(
   ttlSeconds: number,
   staleThresholdMs: number,
   buildState: (lockId: string) => T,
-  logPrefix: string
+  logPrefix: string,
+  shouldBlock: (
+    existing: T,
+    ageMs: number,
+    staleThresholdMs: number
+  ) => boolean = defaultShouldBlock
 ): Promise<{ acquired: boolean; state?: T; lockId?: string }> => {
   const lockId = crypto.randomUUID();
 
@@ -141,14 +166,14 @@ const tryAcquireLock = async <T extends { lockId: string; timestamp: number }>(
   if (existing) {
     const ageMs = Date.now() - existing.timestamp;
 
-    // Block if lock is active (not stale)
-    if (ageMs <= staleThresholdMs) {
+    // Use predicate to determine if we should block
+    if (shouldBlock(existing, ageMs, staleThresholdMs)) {
       return { acquired: false, state: existing };
     }
 
-    // Stale lock - log and attempt takeover
+    // Lock can be taken over - log and proceed
     console.log(
-      `[${logPrefix}] Stale lock for ${key} (age: ${Math.round(ageMs / 1000)}s), taking over`
+      `[${logPrefix}] Taking over lock for ${key} (age: ${Math.round(ageMs / 1000)}s)`
     );
   }
 
@@ -186,6 +211,18 @@ const tryAcquireLock = async <T extends { lockId: string; timestamp: number }>(
  * deduplication where occasional duplicate processing is acceptable but should
  * be minimized.
  */
+/**
+ * Blocking predicate for commit locks: block only if actively processing AND not stale.
+ * This allows re-acquisition for:
+ * 1. Completed processing (processing=false) - enables re-run handling
+ * 2. Stale locks (processing=true but > threshold) - crashed worker recovery
+ */
+const commitLockShouldBlock = (
+  existing: CommitLockState,
+  ageMs: number,
+  staleThresholdMs: number
+): boolean => existing.processing && ageMs <= staleThresholdMs;
+
 export const acquireCommitLock = async (
   kv: KVNamespace,
   repository: string,
@@ -202,51 +239,24 @@ export const acquireCommitLock = async (
   const key = buildKey(validated.repository, validated.headSha);
 
   try {
-    // Check for existing lock with edge caching
-    const existing = await kv.get<ProcessingState>(key, {
-      type: "json",
-      cacheTtl: KV_CACHE_TTL_SECONDS,
-    });
+    const result = await tryAcquireLock<CommitLockState>(
+      kv,
+      key,
+      IDEMPOTENCY_TTL_SECONDS,
+      STALE_LOCK_THRESHOLD_MS,
+      (lockId) => ({
+        timestamp: Date.now(),
+        processing: true,
+        lockId,
+      }),
+      "idempotency",
+      commitLockShouldBlock
+    );
 
-    if (existing) {
-      const ageMs = Date.now() - existing.timestamp;
-
-      // ONLY block if actively processing AND not stale
-      // This allows re-acquisition for:
-      // 1. Completed processing (processing=false) - enables re-run handling
-      // 2. Stale locks (processing=true but > 2 min) - crashed worker recovery
-      if (existing.processing && ageMs <= STALE_LOCK_THRESHOLD_MS) {
-        return { acquired: false, state: existing };
-      }
-
-      const reason = existing.processing ? "stale" : "completed";
-      console.log(
-        `[idempotency] Lock for ${key} is ${reason} (age: ${Math.round(ageMs / 1000)}s), re-acquiring`
-      );
-    }
-
-    // Attempt to acquire with write-then-verify
-    const lockId = crypto.randomUUID();
-    const state: ProcessingState = {
-      timestamp: Date.now(),
-      processing: true,
-      lockId,
+    return {
+      acquired: result.acquired,
+      state: result.state,
     };
-    await kv.put(key, JSON.stringify(state), {
-      expirationTtl: IDEMPOTENCY_TTL_SECONDS,
-    });
-
-    // Verify ownership (skip cache for fresh read)
-    const verification = await kv.get<ProcessingState>(key, "json");
-
-    if (verification && verification.lockId !== lockId) {
-      console.log(
-        `[idempotency] Lost lock race for ${key}, another worker acquired it`
-      );
-      return { acquired: false, state: verification };
-    }
-
-    return { acquired: true, state };
   } catch (error) {
     // Fail-open: if KV fails, allow processing (DB constraint is safety net)
     console.error(

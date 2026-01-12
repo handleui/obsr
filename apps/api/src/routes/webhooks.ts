@@ -15,7 +15,9 @@ import {
 import { webhookSignatureMiddleware } from "../middleware/webhook-signature";
 import {
   formatCheckRunOutput,
+  formatPassingComment,
   formatResultsComment,
+  type WorkflowRunResult,
 } from "../services/comment-formatter";
 import {
   type ParsedError,
@@ -996,6 +998,90 @@ const createNewComment = async (ctx: PostCommentContext): Promise<void> => {
 };
 
 // ============================================================================
+// Helper: Update existing comment to passing state
+// ============================================================================
+// When all checks pass, update any existing failure comment to show success
+// Only updates if a comment already exists (no new comment created for passing)
+
+interface UpdatePassingCommentContext {
+  github: ReturnType<typeof createGitHubService>;
+  token: string;
+  kv: KVNamespace;
+  db: DbClient;
+  owner: string;
+  repo: string;
+  repository: string;
+  prNumber: number;
+  headSha: string;
+  runs: WorkflowRunResult[];
+}
+
+const updateCommentToPassingState = async (
+  ctx: UpdatePassingCommentContext
+): Promise<boolean> => {
+  const {
+    github,
+    token,
+    kv,
+    db,
+    owner,
+    repo,
+    repository,
+    prNumber,
+    headSha,
+    runs,
+  } = ctx;
+
+  // Check KV first (fast path)
+  let existingCommentId = await getStoredCommentId(kv, repository, prNumber);
+
+  // Fall back to DB if not in KV
+  if (!existingCommentId) {
+    const dbCommentId = await getCommentIdFromDb(db, repository, prNumber);
+    if (dbCommentId) {
+      existingCommentId = Number.parseInt(dbCommentId, 10);
+    }
+  }
+
+  // No existing comment = PR never had failures, nothing to update
+  if (!existingCommentId) {
+    console.log(
+      `[workflow_run] All checks passed - no existing comment to update for PR #${prNumber}`
+    );
+    return false;
+  }
+
+  // Format and update the comment to passing state
+  const passingBody = formatPassingComment({ runs, headSha });
+
+  try {
+    await github.updateComment(
+      token,
+      owner,
+      repo,
+      existingCommentId,
+      passingBody
+    );
+    console.log(
+      `[workflow_run] Updated comment ${existingCommentId} to passing state for PR #${prNumber}`
+    );
+    return true;
+  } catch (error) {
+    // Comment may have been deleted - that's fine, no need to recreate for passing state
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isNotFound =
+      errorMessage.includes("404") || errorMessage.includes("not found");
+    if (isNotFound) {
+      console.log(
+        `[workflow_run] Comment ${existingCommentId} was deleted, skipping passing comment for PR #${prNumber}`
+      );
+      return false;
+    }
+    throw error;
+  }
+};
+
+// ============================================================================
 // Helper: Finalize check run and post PR comment with results
 // ============================================================================
 interface WorkflowRun {
@@ -1081,19 +1167,40 @@ const finalizeAndPostResults = async (
     },
   });
 
-  // Only post/update comment if there are failures
-  if (!hasFailed) {
-    console.log(
-      `[workflow_run] All checks passed - no comment posted on PR #${prNumber}`
-    );
-    return { runResults, totalErrors };
-  }
-
-  // Create DB connection before acquiring lock (reduces lock hold time)
+  // Create DB connection (needed for both passing and failing cases)
   const { db, client } = await createDb(env);
   let lockAcquired = false;
 
   try {
+    // When all checks pass, update existing comment to "passing" state
+    // (only if a previous failure comment exists)
+    if (!hasFailed) {
+      const prLock = await acquirePrCommentLock(kv, repository, prNumber);
+      if (!prLock.acquired) {
+        console.log(
+          `[workflow_run] PR comment lock not acquired for ${repository}#${prNumber}, skipping passing comment update`
+        );
+        return { runResults, totalErrors };
+      }
+      lockAcquired = true;
+
+      await updateCommentToPassingState({
+        github,
+        token,
+        kv,
+        db,
+        owner,
+        repo,
+        repository,
+        prNumber,
+        headSha,
+        runs: runResults,
+      });
+
+      return { runResults, totalErrors };
+    }
+
+    // When checks fail, post or update the failure comment
     // Acquire PR comment lock to prevent race conditions
     // Note: KV locks are eventually consistent, so rare race conditions are possible.
     // The DB unique constraint on prComments table is the ultimate safety net.

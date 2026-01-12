@@ -119,6 +119,46 @@ export const formatResultsComment = (
   return lines.join("\n");
 };
 
+// Options for formatting a "passing" comment (when all checks pass)
+export interface FormatPassingCommentOptions {
+  runs: WorkflowRunResult[];
+  headSha: string;
+}
+
+// Format a "passing" comment to update an existing failure comment when all checks pass.
+// This replaces the failure table with a success message while preserving the comment.
+export const formatPassingComment = (
+  options: FormatPassingCommentOptions
+): string => {
+  const { runs, headSha } = options;
+
+  const passedCount = runs.filter((r) => r.conclusion === "success").length;
+  const otherCount = runs.filter(
+    (r) => r.conclusion !== "failure" && r.conclusion !== "success"
+  ).length;
+
+  const lines: string[] = [];
+
+  lines.push("✓ All checks passed");
+  lines.push("");
+
+  // Footer: passed count · skipped count · timestamp
+  const footerParts: string[] = [];
+
+  if (passedCount > 0) {
+    footerParts.push(`${passedCount} passed`);
+  }
+  if (otherCount > 0) {
+    footerParts.push(`${otherCount} skipped`);
+  }
+  footerParts.push(`Updated ${formatTimestamp(new Date())} UTC`);
+  footerParts.push(`\`${headSha.slice(0, 7)}\``);
+
+  lines.push(footerParts.join(" · "));
+
+  return lines.join("\n");
+};
+
 // GitHub Check Run Annotation type (matches API spec)
 // See: https://docs.github.com/en/rest/checks/runs#update-a-check-run
 //
@@ -261,8 +301,10 @@ const calculateErrorPriority = (error: ParsedError): number => {
   }
 
   // Penalize unknown patterns and test output noise
+  // Use moderate penalty (-20) for unknownPattern since they're real errors
+  // that just didn't match a known parser - still actionable
   if (error.unknownPattern) {
-    score -= 40;
+    score -= 20;
   }
   if (error.possiblyTestOutput) {
     score -= 50;
@@ -344,30 +386,74 @@ const deduplicateErrors = (errors: ParsedError[]): DeduplicatedError[] => {
   return Array.from(errorMap.values());
 };
 
-// Generate annotation title: concise, informative header
-// Format: "Source Category [ruleId] (N issues)" - parts omitted if not present
+// Extract simplified rule name from full rule ID path
+// "lint/correctness/noUnusedVariables" → "noUnusedVariables"
+// "@typescript-eslint/no-unused-vars" → "no-unused-vars"
+// "TS2345" → "TS2345"
+const simplifyRuleId = (ruleId: string): string => {
+  // Handle scoped packages (@org/rule-name)
+  if (ruleId.startsWith("@")) {
+    const parts = ruleId.split("/");
+    return parts.at(-1) ?? ruleId;
+  }
+  // Handle path-style rules (category/subcategory/ruleName)
+  if (ruleId.includes("/")) {
+    const parts = ruleId.split("/");
+    return parts.at(-1) ?? ruleId;
+  }
+  return ruleId;
+};
+
+// Capitalize first letter of source name for display
+const capitalizeSource = (source: string): string => {
+  if (!source) {
+    return source;
+  }
+  // Handle known sources with preferred casing
+  const knownSources: Record<string, string> = {
+    typescript: "TypeScript",
+    eslint: "ESLint",
+    biome: "Biome",
+    "go-test": "Go Test",
+    go: "Go",
+    rust: "Rust",
+    python: "Python",
+    docker: "Docker",
+    nodejs: "Node.js",
+  };
+  return knownSources[source.toLowerCase()] ?? source;
+};
+
+// Generate annotation title: concise, scannable header
+// Format: "Source: rule" or "Source: category" - clean and minimal
 const generateAnnotationTitle = (error: DeduplicatedError): string => {
   const parts: string[] = [];
 
-  // Source (e.g., TypeScript, ESLint, Biome)
-  if (error.source) {
-    parts.push(error.source);
-  }
+  // Source with proper casing (e.g., "TypeScript", "ESLint", "Biome")
+  const source = error.source ? capitalizeSource(error.source) : "";
 
-  // Category if different from source (e.g., "type-error", "lint")
-  if (
-    error.category &&
-    error.category.toLowerCase() !== error.source?.toLowerCase()
-  ) {
+  // Simplified rule ID (extract last segment)
+  const rule = error.ruleId ? simplifyRuleId(error.ruleId) : "";
+
+  // Build title based on available data
+  if (source && rule) {
+    // "Biome: noUnusedVariables"
+    parts.push(`${source}: ${rule}`);
+  } else if (source && error.category) {
+    // "TypeScript: type-check"
+    parts.push(`${source}: ${error.category}`);
+  } else if (source) {
+    // "Biome"
+    parts.push(source);
+  } else if (rule) {
+    // "noUnusedVariables"
+    parts.push(rule);
+  } else if (error.category) {
+    // "lint"
     parts.push(error.category);
   }
 
-  // Rule ID if present (e.g., "@typescript-eslint/no-unused-vars")
-  if (error.ruleId) {
-    parts.push(`[${error.ruleId}]`);
-  }
-
-  // If multiple errors at this location, indicate count
+  // If multiple errors at this location, append count
   if (error.originalCount && error.originalCount > 1) {
     parts.push(`(${error.originalCount} issues)`);
   }

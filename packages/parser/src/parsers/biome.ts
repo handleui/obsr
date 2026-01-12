@@ -135,18 +135,13 @@ const hasBiomeTitle = (line: string): boolean => {
 /** Parse key=value parameters from param string */
 const parseParams = (paramStr: string): Map<string, string> => {
   const params = new Map<string, string>();
-  const pattern = new RegExp(PARAM_PATTERN_GLOBAL.source, "g");
-  let match = pattern.exec(paramStr);
-
-  while (match !== null) {
+  for (const match of paramStr.matchAll(PARAM_PATTERN_GLOBAL)) {
     const key = match[1];
     const value = match[2]?.trim();
     if (key && value) {
       params.set(key.toLowerCase(), value);
     }
-    match = pattern.exec(paramStr);
   }
-
   return params;
 };
 

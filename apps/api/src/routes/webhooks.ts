@@ -940,6 +940,46 @@ const cleanupCheckRunOnError = async (
 };
 
 // ============================================================================
+// Helper: Attempt check run cleanup with token recovery
+// ============================================================================
+// When errors occur, try to clean up the check run to avoid orphaned "queued" state.
+// If token isn't available, attempt to recover it first.
+const attemptCheckRunCleanup = async (
+  github: ReturnType<typeof createGitHubService>,
+  token: string | undefined,
+  installationId: number,
+  owner: string,
+  repo: string,
+  checkRunId: number,
+  deliveryId: string
+): Promise<void> => {
+  if (token) {
+    await cleanupCheckRunOnError(github, token, owner, repo, checkRunId);
+    return;
+  }
+
+  // Token failed to obtain - try to get it again for cleanup
+  console.log(
+    `[workflow_run] Attempting token recovery for check run cleanup [delivery: ${deliveryId}]`
+  );
+  try {
+    const recoveryToken = await github.getInstallationToken(installationId);
+    await cleanupCheckRunOnError(
+      github,
+      recoveryToken,
+      owner,
+      repo,
+      checkRunId
+    );
+  } catch (tokenError) {
+    console.error(
+      `[workflow_run] Failed to recover token for cleanup, check run ${checkRunId} may be orphaned [delivery: ${deliveryId}]:`,
+      tokenError
+    );
+  }
+};
+
+// ============================================================================
 // Helper: Post or update PR comment with deduplication
 // ============================================================================
 // Handles the comment lifecycle: check KV → check DB → update or create → persist
@@ -1415,7 +1455,7 @@ const handleWorkflowRunInProgress = async (
 // Robustness features:
 // - Idempotency: Uses KV-backed lock to prevent duplicate processing (survives Worker restarts)
 // - Race condition handling: Returns early if another webhook is processing
-// - Error recovery: Cleans up check run on failure
+// - Error recovery: Cleans up check run on failure (retrieves stored ID early)
 // - Database-backed deduplication: Unique constraint on (repository, commitSha, runId)
 const handleWorkflowRunCompleted = async (
   c: WebhookContext,
@@ -1457,6 +1497,20 @@ const handleWorkflowRunCompleted = async (
   const github = createGitHubService(c.env);
   let checkRunId: number | undefined;
   let token: string | undefined;
+
+  // IMPORTANT: Retrieve stored check run ID early for error recovery
+  // This ensures we can clean up the check run if errors occur before we
+  // would normally fetch it. Without this, check runs can get stuck as "queued" forever.
+  const storedCheckRunIdForRecovery = await getStoredCheckRunId(
+    c.env["detent-idempotency"],
+    repository.full_name,
+    headSha
+  );
+  if (storedCheckRunIdForRecovery) {
+    console.log(
+      `[workflow_run] Found stored check run ${storedCheckRunIdForRecovery} for recovery [delivery: ${deliveryId}]`
+    );
+  }
 
   try {
     token = await github.getInstallationToken(installation.id);
@@ -1550,16 +1604,11 @@ const handleWorkflowRunCompleted = async (
     );
 
     // All runs completed! Get or create check run
-    // First, try to retrieve the check run we created on in_progress
-    const storedCheckRunId = await getStoredCheckRunId(
-      c.env["detent-idempotency"],
-      repository.full_name,
-      headSha
-    );
-
-    if (storedCheckRunId) {
+    // Use the check run ID we retrieved early (for error recovery)
+    // This avoids a redundant KV call and ensures consistency
+    if (storedCheckRunIdForRecovery) {
       // Update existing check run to in_progress
-      checkRunId = storedCheckRunId;
+      checkRunId = storedCheckRunIdForRecovery;
       await github.updateCheckRun(token, {
         owner,
         repo,
@@ -1656,9 +1705,19 @@ const handleWorkflowRunCompleted = async (
       error
     );
 
-    // Error recovery: Clean up check run if we created one
-    if (checkRunId && token) {
-      await cleanupCheckRunOnError(github, token, owner, repo, checkRunId);
+    // Error recovery: Clean up check run if we have one
+    // Use storedCheckRunIdForRecovery as fallback if checkRunId wasn't set yet
+    const checkRunToCleanup = checkRunId ?? storedCheckRunIdForRecovery;
+    if (checkRunToCleanup) {
+      await attemptCheckRunCleanup(
+        github,
+        token,
+        installation.id,
+        owner,
+        repo,
+        checkRunToCleanup,
+        deliveryId
+      );
     }
 
     await releaseCommitLock(

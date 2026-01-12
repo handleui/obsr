@@ -73,10 +73,10 @@ const getStatusText = (org: GitHubOrgWithStatus): string => {
 
 const getActionText = (org: GitHubOrgWithStatus): string => {
   if (org.already_installed) {
-    return "detent org list (default)";
+    return "dt org list (default)";
   }
   if (org.can_install) {
-    return "detent org install";
+    return "dt org install";
   }
   return "Ask org admin";
 };
@@ -107,9 +107,7 @@ const displayAvailableOrgs = (orgs: GitHubOrgWithStatus[]): void => {
     );
   }
 
-  console.log(
-    "\nUse 'detent org install' to install Detent on an organization."
-  );
+  console.log("\nUse 'dt org install' to install Detent on an organization.");
 };
 
 const listAvailableOrgs = async (accessToken: string): Promise<void> => {
@@ -139,7 +137,7 @@ const listMemberOrgs = async (
   if (response.organizations.length === 0) {
     console.log("You are not a member of any organizations.\n");
     console.log(
-      "To install Detent on a GitHub organization, run: detent org install"
+      "To install Detent on a GitHub organization, run: dt org install"
     );
     return;
   }
@@ -206,7 +204,7 @@ export const listCommand = defineCommand({
     try {
       accessToken = await getAccessToken();
     } catch {
-      console.error("Not logged in. Run `detent auth login` first.");
+      console.error("Not logged in. Run `dt auth login` first.");
       process.exit(1);
     }
 

@@ -16,7 +16,7 @@ import {
 const WORKOS_API_BASE = "https://api.workos.com";
 
 const getAuthUrl = (): string => {
-  return process.env.DETENT_AUTH_URL ?? "https://app.detent.sh";
+  return process.env.DETENT_AUTH_URL ?? "https://navigator.detent.sh";
 };
 
 /**
@@ -139,7 +139,7 @@ export const pollForTokens = async (
   }
 
   throw new Error(
-    "Authentication timed out. Please try again with `detent auth login`."
+    "Authentication timed out. Please try again with `dt auth login`."
   );
 };
 
@@ -186,7 +186,7 @@ export const getAccessToken = async (): Promise<string> => {
   const credentials = loadCredentials();
 
   if (!credentials) {
-    throw new Error("Not logged in. Run `detent auth login` first.");
+    throw new Error("Not logged in. Run `dt auth login` first.");
   }
 
   if (!isTokenExpired(credentials)) {

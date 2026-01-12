@@ -72,7 +72,7 @@ export const membersCommand = defineCommand({
     try {
       accessToken = await getAccessToken();
     } catch {
-      console.error("Not logged in. Run `detent auth login` first.");
+      console.error("Not logged in. Run `dt auth login` first.");
       process.exit(1);
     }
 

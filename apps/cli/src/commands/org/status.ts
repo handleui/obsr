@@ -44,7 +44,7 @@ const displayOrgStatus = (status: OrgStatusResponse): void => {
       console.log("GitHub App:   Installed ✓");
     } else {
       console.log("GitHub App:   Not installed");
-      console.log("\nRun `detent org install` to install the GitHub App.");
+      console.log("\nRun `dt org install` to install the GitHub App.");
     }
   }
 
@@ -79,7 +79,7 @@ export const statusCommand = defineCommand({
     try {
       accessToken = await getAccessToken();
     } catch {
-      console.error("Not logged in. Run `detent auth login` first.");
+      console.error("Not logged in. Run `dt auth login` first.");
       process.exit(1);
     }
 

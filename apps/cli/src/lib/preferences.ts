@@ -6,8 +6,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, isAbsolute, join, normalize } from "node:path";
+import { dirname, join } from "node:path";
 
 // ============================================================================
 // Types
@@ -38,21 +37,11 @@ const DEFAULTS: Preferences = {
 // Path Helpers
 // ============================================================================
 
-const isValidOverridePath = (path: string): boolean => {
-  const normalized = normalize(path);
-  return isAbsolute(normalized) && !normalized.includes("..");
-};
-
-const getPreferencesDir = (): string => {
-  const override = process.env.DETENT_HOME;
-  if (override && isValidOverridePath(override)) {
-    return normalize(override);
-  }
-  return join(homedir(), ".detent");
-};
+// Import from centralized env module
+import { getDetentHome } from "./env.js";
 
 const getPreferencesPath = (): string =>
-  join(getPreferencesDir(), PREFERENCES_FILE);
+  join(getDetentHome(), PREFERENCES_FILE);
 
 // ============================================================================
 // Load / Save

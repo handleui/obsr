@@ -1018,7 +1018,7 @@ const ErrorSummary = ({
       </Box>
       <Box marginLeft={2}>
         <Text color={colors.muted}>
-          Run 'detent heal' to auto-fix or fix manually and re-run
+          Run 'dt heal' to auto-fix or fix manually and re-run
         </Text>
       </Box>
     </Box>

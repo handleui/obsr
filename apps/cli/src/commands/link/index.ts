@@ -49,7 +49,7 @@ export const linkCommand = defineCommand({
     try {
       accessToken = await getAccessToken();
     } catch {
-      console.error("Not logged in. Run `detent auth login` first.");
+      console.error("Not logged in. Run `dt auth login` first.");
       process.exit(1);
     }
 
@@ -59,10 +59,8 @@ export const linkCommand = defineCommand({
       console.log(
         `\nThis repository is already linked to organization: ${existingConfig.organizationSlug}`
       );
-      console.log(
-        "Run `detent link --force` to link to a different organization."
-      );
-      console.log("Run `detent link status` to see details.");
+      console.log("Run `dt link --force` to link to a different organization.");
+      console.log("Run `dt link status` to see details.");
       return;
     }
 
@@ -124,6 +122,6 @@ export const linkCommand = defineCommand({
     console.log(
       `\nLinked to organization: ${selectedOrganization.organization_name} (${selectedOrganization.organization_slug})`
     );
-    console.log("\nRun `detent link status` to see details.");
+    console.log("\nRun `dt link status` to see details.");
   },
 });

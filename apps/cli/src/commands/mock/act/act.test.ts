@@ -66,7 +66,8 @@ describe("paths", () => {
     const originalEnv = process.env.DETENT_HOME;
 
     process.env.DETENT_HOME = "/custom/home";
-    expect(getDetentDir()).toBe("/custom/home/.detent");
+    // DETENT_HOME is used directly as the data directory
+    expect(getDetentDir()).toBe("/custom/home");
 
     if (originalEnv) {
       process.env.DETENT_HOME = originalEnv;
@@ -75,22 +76,23 @@ describe("paths", () => {
     }
   });
 
-  test("getDetentDir defaults to user home directory", () => {
+  test("getDetentDir defaults to user home directory with .detent-dev in dev mode", () => {
     const originalEnv = process.env.DETENT_HOME;
     process.env.DETENT_HOME = undefined;
 
     const dir = getDetentDir();
-    expect(dir).toContain(".detent");
-    expect(dir).not.toBe("/.detent");
+    // In development mode (tests), uses .detent-dev
+    expect(dir).toContain(".detent-dev");
+    expect(dir).not.toBe("/.detent-dev");
 
     if (originalEnv) {
       process.env.DETENT_HOME = originalEnv;
     }
   });
 
-  test("getBinDir returns .detent/bin path", () => {
+  test("getBinDir returns detent-dev/bin path in dev mode", () => {
     const binDir = getBinDir();
-    expect(binDir).toContain(".detent");
+    expect(binDir).toContain(".detent-dev");
     expect(binDir).toContain("bin");
   });
 

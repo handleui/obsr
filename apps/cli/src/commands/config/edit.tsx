@@ -598,7 +598,7 @@ export const configEditCommand = defineCommand({
   run: async () => {
     if (!shouldUseTUI()) {
       console.error(
-        "Interactive mode requires a TTY. Use 'detent config get <key>' or 'detent config set <key> <value>' for scripting."
+        "Interactive mode requires a TTY. Use 'dt config get <key>' or 'dt config set <key> <value>' for scripting."
       );
       process.exit(1);
     }

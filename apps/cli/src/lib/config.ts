@@ -7,7 +7,6 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 // ============================================================================
@@ -92,41 +91,24 @@ const ALLOWED_MODELS = [
   "claude-haiku-4-5",
 ] as const;
 
-const WINDOWS_DRIVE_PATTERN = /^[A-Za-z]:\\/;
-
 // ============================================================================
 // Path Helpers
 // ============================================================================
 
-const validateOverridePath = (path: string): string | null => {
-  if (path.includes("..")) {
-    return null;
-  }
-  if (!(path.startsWith("/") || WINDOWS_DRIVE_PATTERN.test(path))) {
-    return null;
-  }
-  return path;
-};
+// Import from centralized env module
+import { getDetentHome } from "./env.js";
 
 /**
- * Gets the global detent directory path (~/.detent)
- * Used for shared resources like act binary and debug logs
+ * Gets the global detent directory path
+ * Uses ~/.detent-dev in development and ~/.detent in production
+ * Can be overridden via DETENT_HOME env var
  */
-export const getGlobalDetentDir = (): string => {
-  const override = process.env.DETENT_HOME;
-  if (override) {
-    const validated = validateOverridePath(override);
-    if (validated) {
-      return validated;
-    }
-  }
-  return join(homedir(), DETENT_DIR_NAME);
-};
+export const getGlobalDetentDir = getDetentHome;
 
 /**
  * @deprecated Use getGlobalDetentDir() instead
  */
-export const getDetentDir = getGlobalDetentDir;
+export const getDetentDir = getDetentHome;
 
 /**
  * Gets the per-repo detent directory path (<repo>/.detent)
@@ -147,7 +129,7 @@ export const getRepoConfigPath = (repoRoot: string): string => {
  * @deprecated Use getRepoConfigPath() for per-repo config
  */
 export const getConfigPath = (): string => {
-  return join(getGlobalDetentDir(), GLOBAL_CONFIG_FILE);
+  return join(getDetentHome(), GLOBAL_CONFIG_FILE);
 };
 
 /**
@@ -327,7 +309,7 @@ const mergeConfig = (global: GlobalConfig): Config => {
  * @param repoRoot - If provided, saves to per-repo .detent/config.json
  */
 export const saveConfig = (config: GlobalConfig, repoRoot?: string): void => {
-  const dir = repoRoot ? getRepoDetentDir(repoRoot) : getGlobalDetentDir();
+  const dir = repoRoot ? getRepoDetentDir(repoRoot) : getDetentHome();
   const filename = repoRoot ? REPO_CONFIG_FILE : GLOBAL_CONFIG_FILE;
 
   if (!existsSync(dir)) {

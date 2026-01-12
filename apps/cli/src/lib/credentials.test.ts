@@ -61,7 +61,7 @@ describe("credentials", () => {
 
       expect(result).toBeNull();
       expect(existsSync).toHaveBeenCalledWith(
-        join("/home/testuser", ".detent", "credentials.json")
+        join("/home/testuser", ".detent-dev", "credentials.json")
       );
     });
 
@@ -190,7 +190,7 @@ describe("credentials", () => {
       loadCredentials();
 
       expect(existsSync).toHaveBeenCalledWith(
-        join("/home/testuser", ".detent", "credentials.json")
+        join("/home/testuser", ".detent-dev", "credentials.json")
       );
     });
 
@@ -201,7 +201,7 @@ describe("credentials", () => {
       loadCredentials();
 
       expect(existsSync).toHaveBeenCalledWith(
-        join("/home/testuser", ".detent", "credentials.json")
+        join("/home/testuser", ".detent-dev", "credentials.json")
       );
     });
 
@@ -223,7 +223,7 @@ describe("credentials", () => {
 
       saveCredentials(createValidCredentials());
 
-      expect(mkdirSync).toHaveBeenCalledWith("/home/testuser/.detent", {
+      expect(mkdirSync).toHaveBeenCalledWith("/home/testuser/.detent-dev", {
         mode: 0o700,
         recursive: true,
       });
@@ -244,7 +244,7 @@ describe("credentials", () => {
       saveCredentials(creds);
 
       expect(writeFileSync).toHaveBeenCalledWith(
-        "/home/testuser/.detent/credentials.json",
+        "/home/testuser/.detent-dev/credentials.json",
         expect.stringContaining('"access_token"'),
         { mode: 0o600 }
       );
@@ -270,7 +270,7 @@ describe("credentials", () => {
 
       expect(result).toBe(true);
       expect(unlinkSync).toHaveBeenCalledWith(
-        "/home/testuser/.detent/credentials.json"
+        "/home/testuser/.detent-dev/credentials.json"
       );
     });
 

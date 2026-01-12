@@ -153,13 +153,13 @@ export const jobsCommand = defineCommand({
     description:
       "List all jobs in GitHub Actions workflows with sensitivity markers\n\n" +
       "Jobs that perform deployment, publishing, or release operations are marked\n" +
-      "as sensitive and will be skipped during `detent mock` to prevent accidental\n" +
+      "as sensitive and will be skipped during `dt mock` to prevent accidental\n" +
       "production releases.\n\n" +
       "EXAMPLES\n" +
       "  # List all jobs\n" +
-      "  detent jobs\n\n" +
+      "  dt jobs\n\n" +
       "  # Show why jobs are marked sensitive\n" +
-      "  detent jobs --verbose",
+      "  dt jobs --verbose",
   },
   args: {
     verbose: {

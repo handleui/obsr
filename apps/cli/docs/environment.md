@@ -2,6 +2,25 @@
 
 The CLI handles environment variables differently in development vs production.
 
+## Data Directory
+
+The CLI stores data (credentials, preferences, cache, etc.) in different directories:
+
+| Environment | Directory | Description |
+|-------------|-----------|-------------|
+| Development | `~/.detent-dev` | Used when running from source |
+| Production | `~/.detent` | Used in compiled binaries |
+
+This separation ensures local development doesn't interfere with production installations.
+
+### Override
+
+Set `DETENT_HOME` to use a custom directory:
+
+```bash
+DETENT_HOME=/path/to/custom/dir detent mock
+```
+
 ## Development
 
 Create a `.env` file in `apps/cli/`:
@@ -13,6 +32,9 @@ WORKOS_CLIENT_ID=client_xxx
 # Optional - point to local services
 DETENT_API_URL=http://localhost:8787
 DETENT_AUTH_URL=http://localhost:3001
+
+# Optional - use custom data directory (defaults to ~/.detent-dev in dev)
+# DETENT_HOME=~/.detent-custom
 ```
 
 The CLI loads this file automatically via `dotenv` when running in dev mode.
@@ -27,7 +49,7 @@ When building binaries (`bun run build:binaries`), the build script:
 |----------|-----------|---------|
 | `WORKOS_CLIENT_ID` | Yes | - |
 | `DETENT_API_URL` | No | `https://api.detent.sh` |
-| `DETENT_AUTH_URL` | No | `https://app.detent.sh` |
+| `DETENT_AUTH_URL` | No | `https://navigator.detent.sh` |
 
 Example build command:
 

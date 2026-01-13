@@ -29,13 +29,18 @@ const checkDatabaseWithTimeout = async (
     );
   });
 
-  const { client } = await createDb(env);
   try {
-    await Promise.race([client.query("SELECT 1"), timeoutPromise]);
+    const { client } = await createDb(env);
+    try {
+      await Promise.race([client.query("SELECT 1"), timeoutPromise]);
+      return "operational";
+    } finally {
+      clearTimeout(timeoutId);
+      await client.end();
+    }
+  } catch (error) {
     clearTimeout(timeoutId);
-    return "operational";
-  } finally {
-    await client.end();
+    throw error;
   }
 };
 

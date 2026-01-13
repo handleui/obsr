@@ -1,6 +1,7 @@
 import { Logger } from "@logtail/next";
 import { headers } from "next/headers";
 import Link from "next/link";
+import { scrubStringNullable } from "@/lib/scrub";
 
 export default async function NotFound() {
   const log = new Logger({ source: "not-found.tsx" });
@@ -9,7 +10,7 @@ export default async function NotFound() {
 
   log.warn("Page not found", {
     statusCode: 404,
-    referer,
+    referer: scrubStringNullable(referer),
   });
   await log.flush();
 

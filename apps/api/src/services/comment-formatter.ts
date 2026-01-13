@@ -14,6 +14,8 @@ export interface FormatCommentOptions {
   owner: string;
   repo: string;
   headSha: string;
+  /** First line of the commit message (for display in footer) */
+  headCommitMessage?: string;
   runs: WorkflowRunResult[];
   errors: ParsedError[];
   totalErrors: number;
@@ -196,7 +198,10 @@ const formatDetailedJobErrors = (
     lines.push(link ? `**${safeJob}** · [view](${link})` : `**${safeJob}**`);
 
     for (const stepGroup of jobGroup.steps) {
-      const safeStep = escapeHtml(stepGroup.step);
+      const safeStep = escapeHtml(stepGroup.step).replace(
+        BACKTICK_PATTERN,
+        "'"
+      );
       const errorText =
         stepGroup.errorCount === 1
           ? "1 error"
@@ -225,12 +230,21 @@ const formatFallbackRunErrors = (
   lines.push("");
 };
 
+// Truncate commit message to first line and max length
+const truncateCommitMessage = (message: string, maxLen = 50): string => {
+  const firstLine = message.split("\n")[0] ?? message;
+  if (firstLine.length <= maxLen) {
+    return firstLine;
+  }
+  return `${firstLine.slice(0, maxLen - 1)}…`;
+};
+
 // Format the main PR comment with error summary (list format with job + step)
 // Returns null if there are no failed workflows (caller should not post comment)
 export const formatResultsComment = (
   options: FormatCommentOptions
 ): string | null => {
-  const { owner, repo, headSha, runs, errors } = options;
+  const { owner, repo, headSha, headCommitMessage, runs, errors } = options;
 
   const failedRuns = runs.filter((r) => r.conclusion === "failure");
   const passedCount = runs.filter((r) => r.conclusion === "success").length;
@@ -264,7 +278,15 @@ export const formatResultsComment = (
     footerParts.push(`${otherCount} skipped`);
   }
   footerParts.push(`${formatTimestamp(new Date())} UTC`);
-  footerParts.push(`\`dt errors --commit ${headSha.slice(0, 7)}\``);
+
+  // Show commit SHA with message if available
+  const shortSha = headSha.slice(0, 7);
+  if (headCommitMessage) {
+    const truncatedMsg = truncateCommitMessage(headCommitMessage);
+    footerParts.push(`\`${shortSha}\` ${truncatedMsg}`);
+  } else {
+    footerParts.push(`\`${shortSha}\``);
+  }
 
   lines.push(footerParts.join(" · "));
 

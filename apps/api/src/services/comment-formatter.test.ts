@@ -180,7 +180,7 @@ describe("formatResultsComment", () => {
       expect(result).toMatch(TIMESTAMP_PATTERN);
     });
 
-    it("includes CLI command with short SHA", () => {
+    it("includes short SHA in footer", () => {
       const result = formatResultsComment(
         createOptions({
           headSha: "abc1234567890def",
@@ -190,7 +190,38 @@ describe("formatResultsComment", () => {
         })
       );
 
-      expect(result).toContain("`dt errors --commit abc1234`");
+      expect(result).toContain("`abc1234`");
+    });
+
+    it("includes commit message when provided", () => {
+      const result = formatResultsComment(
+        createOptions({
+          headSha: "abc1234567890def",
+          headCommitMessage: "fix: improve error handling",
+          runs: [
+            { name: "Build", id: 123, conclusion: "failure", errorCount: 1 },
+          ],
+        })
+      );
+
+      expect(result).toContain("`abc1234` fix: improve error handling");
+    });
+
+    it("truncates long commit messages", () => {
+      const result = formatResultsComment(
+        createOptions({
+          headSha: "abc1234567890def",
+          headCommitMessage:
+            "feat: this is a very long commit message that should be truncated to keep the footer readable",
+          runs: [
+            { name: "Build", id: 123, conclusion: "failure", errorCount: 1 },
+          ],
+        })
+      );
+
+      // Should be truncated with ellipsis
+      expect(result).toContain("…");
+      expect(result).not.toContain("readable");
     });
 
     it("uses middle dot separator between footer elements", () => {

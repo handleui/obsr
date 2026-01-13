@@ -48,6 +48,9 @@ interface WorkflowRunPayload {
     conclusion: string | null;
     head_branch: string;
     head_sha: string;
+    head_commit?: {
+      message: string;
+    };
     pull_requests: Array<{ number: number }>;
   };
   repository: {
@@ -887,7 +890,7 @@ const classifyError = (error: unknown): ClassifiedError => {
   }
 
   // Validation errors (safe to expose)
-  if (message.startsWith("[workflow_run] invalid")) {
+  if (message.includes("[workflow_run] invalid")) {
     return {
       code: ERROR_CODES.WORKFLOW_VALIDATION,
       message: error.message.slice(0, 200),
@@ -1527,6 +1530,7 @@ const finalizeAndPostResults = async (
     repo: string;
     repository: string;
     headSha: string;
+    headCommitMessage?: string;
     prNumber: number;
     checkRunId: number;
     workflowRuns: WorkflowRun[];
@@ -1550,6 +1554,7 @@ const finalizeAndPostResults = async (
     repo,
     repository,
     headSha,
+    headCommitMessage,
     prNumber,
     checkRunId,
     workflowRuns,
@@ -1660,6 +1665,7 @@ const finalizeAndPostResults = async (
       owner,
       repo,
       headSha,
+      headCommitMessage,
       runs: runResults,
       errors: allErrors,
       totalErrors,
@@ -1809,6 +1815,7 @@ const handleWorkflowRunCompleted = async (
   const owner = repository.owner.login;
   const repo = repository.name;
   const headSha = workflow_run.head_sha;
+  const headCommitMessage = workflow_run.head_commit?.message;
   const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
 
   console.log(
@@ -2020,6 +2027,7 @@ const handleWorkflowRunCompleted = async (
         repo,
         repository: repository.full_name,
         headSha,
+        headCommitMessage,
         prNumber,
         checkRunId: finalCheckRunId,
         workflowRuns,

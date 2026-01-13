@@ -198,15 +198,12 @@ const formatDetailedJobErrors = (
     lines.push(link ? `**${safeJob}** · [view](${link})` : `**${safeJob}**`);
 
     for (const stepGroup of jobGroup.steps) {
-      const safeStep = escapeHtml(stepGroup.step).replace(
-        BACKTICK_PATTERN,
-        "'"
-      );
+      const safeStep = escapeHtml(stepGroup.step);
       const errorText =
         stepGroup.errorCount === 1
           ? "1 error"
           : `${stepGroup.errorCount} errors`;
-      lines.push(`- \`${safeStep}\` · ${errorText}`);
+      lines.push(`- **${safeStep}** · ${errorText}`);
     }
 
     lines.push("");

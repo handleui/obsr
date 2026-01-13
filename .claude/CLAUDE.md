@@ -39,6 +39,9 @@ The API uses Drizzle ORM with a **migration-based workflow**. NEVER edit SQL fil
 - Shared packages: `packages/*` (ui, parser, git, healing, persistence, typescript-config)
 - Formatter: Biome via ultracite (`bun run fix` auto-fixes)
 
+## Production
+- **URL**: `detent.sh`
+
 ## Style Deviations from Defaults
 - **Files**: kebab-case (`user-profile.tsx`)
 - **Types**: Interfaces over type aliases; import with `type` keyword

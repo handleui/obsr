@@ -21,26 +21,29 @@ const healthTimeoutException = () =>
 const checkDatabaseWithTimeout = async (
   env: Env
 ): Promise<"operational" | "down"> => {
+  let client: Awaited<ReturnType<typeof createDb>>["client"] | undefined;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(
-      () => reject(new Error("Database check timeout")),
-      DB_CHECK_TIMEOUT_MS
-    );
-  });
 
   try {
-    const { client } = await createDb(env);
-    try {
-      await Promise.race([client.query("SELECT 1"), timeoutPromise]);
-      return "operational";
-    } finally {
-      clearTimeout(timeoutId);
+    return await Promise.race([
+      (async () => {
+        const { client: dbClient } = await createDb(env);
+        client = dbClient;
+        await client.query("SELECT 1");
+        return "operational" as const;
+      })(),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error("Database check timeout")),
+          DB_CHECK_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeoutId);
+    if (client) {
       await client.end();
     }
-  } catch (error) {
-    clearTimeout(timeoutId);
-    throw error;
   }
 };
 

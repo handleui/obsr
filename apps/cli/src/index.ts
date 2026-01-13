@@ -1,8 +1,26 @@
 #!/usr/bin/env node
 import { runMain } from "citty";
 import { main } from "./commands/index.js";
+import { captureException, flush, initSentry } from "./lib/sentry.js";
 import { maybeAutoUpdate } from "./utils/auto-update.js";
 import { getVersion } from "./utils/version.js";
+
+// Initialize Sentry early (lazy-loaded, no startup overhead if disabled)
+await initSentry();
+
+// Capture uncaught errors and flush before exit
+process.on("uncaughtException", async (error) => {
+  captureException(error);
+  try {
+    await flush();
+  } finally {
+    process.exit(1);
+  }
+});
+
+process.on("unhandledRejection", (reason) => {
+  captureException(reason);
+});
 
 // Injected at compile time for standalone binaries
 declare const DETENT_PRODUCTION: boolean | undefined;

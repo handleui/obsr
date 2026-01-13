@@ -6,8 +6,17 @@ import {
   getUnsupportedToolDisplayName,
   isUnsupportedToolID,
   parseGitHubLogs,
+  reportUnknownPatterns,
   resetDefaultExtractor,
+  setUnknownPatternReporter,
 } from "@detent/parser";
+import { createUnknownPatternReporter } from "../lib/sentry";
+
+// Re-export and import separately to satisfy both type checker and linter
+export type { ParserContext } from "../lib/sentry";
+
+// Import for local use
+import type { ParserContext } from "../lib/sentry";
 
 // Interface expected by webhooks.ts (matches the existing definition there)
 export interface ParsedError {
@@ -41,6 +50,8 @@ export interface WorkflowParseResult {
   metadata: ParseMetadata;
   /** Unique unsupported tool display names detected from step commands */
   detectedUnsupportedTools: string[];
+  /** Parser context for Sentry error reporting (pass to captureWebhookError) */
+  parserContext: ParserContext;
 }
 
 // Available parsers in the default registry
@@ -56,6 +67,16 @@ const AVAILABLE_PARSERS = [
   "Infrastructure",
   "Generic",
 ];
+
+// Initialize unknown pattern reporter for Sentry telemetry
+// Called lazily to ensure Sentry is initialized before setting reporter
+let reporterInitialized = false;
+const ensureReporterInitialized = (): void => {
+  if (!reporterInitialized) {
+    setUnknownPatternReporter(createUnknownPatternReporter());
+    reporterInitialized = true;
+  }
+};
 
 // Map ExtractedError from @detent/parser to ParsedError for webhooks
 const mapToParsedError = (error: ExtractedError): ParsedError => ({
@@ -140,17 +161,32 @@ export const parseWorkflowLogs = (
   logs: string,
   metadata: { totalBytes: number; jobCount: number }
 ): WorkflowParseResult => {
+  // Ensure unknown pattern reporter is wired up for Sentry telemetry
+  ensureReporterInitialized();
+
   // Reset extractor state before parsing (clean slate for each workflow)
   resetDefaultExtractor();
 
   // Parse logs using GitHub Actions context parser
   const extractedErrors = parseGitHubLogs(logs);
 
+  // Report unknown patterns to Sentry (if any errors have unknownPattern: true)
+  reportUnknownPatterns(extractedErrors);
+
   // Map to ParsedError format
   const errors = extractedErrors.map(mapToParsedError);
 
   // Detect unsupported tools from step commands
   const detectedUnsupportedTools = detectUnsupportedToolsFromSteps(errors);
+
+  // Create parser context for Sentry (returned to caller for use with captureWebhookError)
+  const parserContext: ParserContext = {
+    logBytes: metadata.totalBytes,
+    jobCount: metadata.jobCount,
+    errorCount: errors.length,
+    parsersAvailable: AVAILABLE_PARSERS,
+    detectedUnsupportedTools,
+  };
 
   return {
     errors,
@@ -160,6 +196,7 @@ export const parseWorkflowLogs = (
       parsersAvailable: AVAILABLE_PARSERS,
     },
     detectedUnsupportedTools,
+    parserContext,
   };
 };
 

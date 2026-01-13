@@ -1,5 +1,17 @@
 # @detent/api
 
+## 0.8.0
+
+### Minor Changes
+
+- db9f7a4: Display unsupported tools in CI comments and check run output.
+  Refactor check run text format to use flat file list with source badges and clickable links.
+
+### Patch Changes
+
+- Updated dependencies [db9f7a4]
+  - @detent/parser@0.5.0
+
 ## 0.7.0
 
 ### Minor Changes

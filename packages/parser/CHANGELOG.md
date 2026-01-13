@@ -1,5 +1,11 @@
 # @detent/parser
 
+## 0.5.1
+
+### Patch Changes
+
+- b4c69a9: Filter out internal vitest runner stack frames and CI wrapper errors for cleaner output
+
 ## 0.5.0
 
 ### Minor Changes

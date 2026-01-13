@@ -326,12 +326,9 @@ const refreshGitHubTokenInternal = async (
 
     saveCredentials(newCredentials);
     return newCredentials;
-  } catch (error) {
-    // Log but don't throw - caller will handle missing token
-    console.error(
-      "Failed to refresh GitHub token:",
-      error instanceof Error ? error.message : String(error)
-    );
+  } catch {
+    // Return null silently - caller decides how to handle missing token
+    // This avoids displaying error messages when CLI gracefully falls back
     return null;
   }
 };

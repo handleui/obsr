@@ -368,6 +368,9 @@ app.get("/me", async (c) => {
 // Accepts: classic PATs (ghp_), fine-grained PATs (github_pat_), and OAuth tokens (ghu_, gho_)
 const GITHUB_TOKEN_REGEX = /^(ghp_|gho_|ghu_|github_pat_)[a-zA-Z0-9_]+$/;
 
+// GitHub refresh token format validation (ghr_ prefix for GitHub App refresh tokens)
+const GITHUB_REFRESH_TOKEN_REGEX = /^ghr_[a-zA-Z0-9_]+$/;
+
 /**
  * Validate GitHub token format to prevent injection and ensure basic validity
  * Returns true if token matches known GitHub token patterns
@@ -472,8 +475,11 @@ const verifyGitHubTokenOwnership = async (
       id: number;
       login: string;
     };
-  } catch {
-    console.error("Failed to parse GitHub user response as JSON");
+  } catch (error) {
+    console.error(
+      "Failed to parse GitHub user response as JSON",
+      error instanceof Error ? error.message : error
+    );
     return { success: false };
   }
 
@@ -493,8 +499,11 @@ const verifyGitHubTokenOwnership = async (
   let identities: WorkOSIdentitiesResponse;
   try {
     identities = (await identitiesResponse.json()) as WorkOSIdentitiesResponse;
-  } catch {
-    console.error("Failed to parse WorkOS identities response as JSON");
+  } catch (error) {
+    console.error(
+      "Failed to parse WorkOS identities response as JSON",
+      error instanceof Error ? error.message : error
+    );
     return { success: false };
   }
 
@@ -515,7 +524,7 @@ const verifyGitHubTokenOwnership = async (
 };
 
 // Valid HTTP status codes for token and API error responses
-type TokenErrorStatus = 400 | 401 | 429 | 500;
+type TokenErrorStatus = 400 | 401 | 403 | 429 | 500;
 
 // Result types for token acquisition and error handling
 interface TokenErrorResult {
@@ -608,6 +617,17 @@ const handleGitHubApiError = (response: Response): TokenErrorResult => {
       error: "GitHub API rate limit exceeded. Please try again later.",
       code: "rate_limit_exceeded",
       status: 429,
+    };
+  }
+
+  // Permission denied (403 without rate limit indicator)
+  if (status === 403) {
+    console.error("GitHub API returned 403 - insufficient permissions");
+    return {
+      error:
+        "GitHub access denied - insufficient permissions. Please re-authenticate with `dt auth login --force`.",
+      code: "github_permission_denied",
+      status: 403,
     };
   }
 
@@ -803,9 +823,9 @@ app.post("/github-token/refresh", async (c) => {
     );
   }
 
-  // Validate refresh token format (ghr_ prefix for GitHub App refresh tokens)
+  // Validate refresh token format including character set (consistent with access token validation)
   if (
-    !refreshToken.startsWith("ghr_") ||
+    !GITHUB_REFRESH_TOKEN_REGEX.test(refreshToken) ||
     refreshToken.length < 20 ||
     refreshToken.length > 300
   ) {

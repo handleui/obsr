@@ -21,6 +21,8 @@ export interface FormatCommentOptions {
   totalErrors: number;
   /** Unsupported tools detected from step commands */
   detectedUnsupportedTools?: string[];
+  /** Detent check run ID for linking to parsed error summary */
+  checkRunId?: number;
 }
 
 // Top-level regex for performance (avoid creating in loops)
@@ -113,6 +115,15 @@ const formatTimestamp = (date: Date): string => {
   return `${month} ${day}, ${hours}:${minutes}`;
 };
 
+// Detent documentation URL for comment headers
+const DOCS_URL = "https://detent.dev/docs";
+
+// Format friendly header with context-specific message
+// Each comment type gets a different first line, but all share the docs link
+const formatHeader = (message: string): string => {
+  return `${message}\nNot sure what's happening? [Read the docs](${DOCS_URL})`;
+};
+
 // Maximum number of unsupported tools to display before truncating
 const MAX_UNSUPPORTED_TOOLS_TO_DISPLAY = 10;
 
@@ -183,19 +194,11 @@ const groupErrorsByJobAndStep = (errors: ParsedError[]): JobErrors[] => {
 // Format detailed job/step breakdown (when errors have job/step info)
 const formatDetailedJobErrors = (
   lines: string[],
-  jobErrors: JobErrors[],
-  runByName: Map<string, { id: number; errorCount: number }>,
-  owner: string,
-  repo: string
+  jobErrors: JobErrors[]
 ): void => {
   for (const jobGroup of jobErrors) {
-    const runInfo = runByName.get(jobGroup.job);
-    const link = runInfo
-      ? `https://github.com/${owner}/${repo}/actions/runs/${runInfo.id}`
-      : null;
-
     const safeJob = escapeHtml(jobGroup.job);
-    lines.push(link ? `**${safeJob}** · [view](${link})` : `**${safeJob}**`);
+    lines.push(`**${safeJob}**`);
 
     for (const stepGroup of jobGroup.steps) {
       const safeStep = escapeHtml(stepGroup.step);
@@ -213,16 +216,13 @@ const formatDetailedJobErrors = (
 // Format fallback run-level errors (when errors lack job/step info)
 const formatFallbackRunErrors = (
   lines: string[],
-  failedRuns: WorkflowRunResult[],
-  owner: string,
-  repo: string
+  failedRuns: WorkflowRunResult[]
 ): void => {
   for (const run of failedRuns) {
-    const link = `https://github.com/${owner}/${repo}/actions/runs/${run.id}`;
     const safeJob = escapeHtml(run.name);
     const errorText =
       run.errorCount === 1 ? "1 error" : `${run.errorCount} errors`;
-    lines.push(`**${safeJob}** · ${errorText} · [view](${link})`);
+    lines.push(`- **${safeJob}** · ${errorText}`);
   }
   lines.push("");
 };
@@ -241,7 +241,8 @@ const truncateCommitMessage = (message: string, maxLen = 50): string => {
 export const formatResultsComment = (
   options: FormatCommentOptions
 ): string | null => {
-  const { owner, repo, headSha, headCommitMessage, runs, errors } = options;
+  const { owner, repo, headSha, headCommitMessage, runs, errors, checkRunId } =
+    options;
 
   const failedRuns = runs.filter((r) => r.conclusion === "failure");
   const passedCount = runs.filter((r) => r.conclusion === "success").length;
@@ -254,19 +255,32 @@ export const formatResultsComment = (
   }
 
   const lines: string[] = [];
+  const shortSha = headSha.slice(0, 7);
+
+  // Detent header - error context
+  lines.push(formatHeader("Detent found some issues in your CI."));
+  lines.push("");
+
+  // CI status line with view link and CLI command
+  const statusParts: string[] = ["CI"];
+  if (checkRunId) {
+    statusParts.push(
+      `[view](https://github.com/${owner}/${repo}/runs/${checkRunId})`
+    );
+  }
+  statusParts.push(`\`dt errors --commit ${shortSha}\``);
+  lines.push(statusParts.join(" · "));
+  lines.push("");
+
+  // Job/step breakdown
   const jobErrors = groupErrorsByJobAndStep(errors);
-
-  const runByName = new Map<string, { id: number; errorCount: number }>();
-  for (const run of failedRuns) {
-    runByName.set(run.name, { id: run.id, errorCount: run.errorCount });
-  }
-
   if (jobErrors.length > 0) {
-    formatDetailedJobErrors(lines, jobErrors, runByName, owner, repo);
+    formatDetailedJobErrors(lines, jobErrors);
   } else {
-    formatFallbackRunErrors(lines, failedRuns, owner, repo);
+    formatFallbackRunErrors(lines, failedRuns);
   }
 
+  // Footer with timestamp and commit info
   const footerParts: string[] = [];
   if (passedCount > 0) {
     footerParts.push(`${passedCount} passed`);
@@ -277,7 +291,6 @@ export const formatResultsComment = (
   footerParts.push(`${formatTimestamp(new Date())} UTC`);
 
   // Show commit SHA with message if available
-  const shortSha = headSha.slice(0, 7);
   if (headCommitMessage) {
     const truncatedMsg = truncateCommitMessage(headCommitMessage);
     footerParts.push(`\`${shortSha}\` ${truncatedMsg}`);
@@ -302,6 +315,8 @@ export const formatResultsComment = (
 export interface FormatPassingCommentOptions {
   runs: WorkflowRunResult[];
   headSha: string;
+  /** First line of the commit message */
+  headCommitMessage?: string;
 }
 
 // Format a "passing" comment to update an existing failure comment when all checks pass.
@@ -309,7 +324,8 @@ export interface FormatPassingCommentOptions {
 export const formatPassingComment = (
   options: FormatPassingCommentOptions
 ): string => {
-  const { runs, headSha } = options;
+  const { runs, headSha, headCommitMessage } = options;
+  const shortSha = headSha.slice(0, 7);
 
   const passedCount = runs.filter((r) => r.conclusion === "success").length;
   const otherCount = runs.filter(
@@ -318,10 +334,14 @@ export const formatPassingComment = (
 
   const lines: string[] = [];
 
+  // Detent header - success context
+  lines.push(formatHeader("All clear! Nothing to fix here."));
+  lines.push("");
+
   lines.push("✓ All checks passed");
   lines.push("");
 
-  // Footer: passed count · skipped count · timestamp
+  // Footer: passed count · skipped count · timestamp · commit
   const footerParts: string[] = [];
 
   if (passedCount > 0) {
@@ -331,7 +351,14 @@ export const formatPassingComment = (
     footerParts.push(`${otherCount} skipped`);
   }
   footerParts.push(`Updated ${formatTimestamp(new Date())} UTC`);
-  footerParts.push(`\`${headSha.slice(0, 7)}\``);
+
+  // Show commit SHA with message if available
+  if (headCommitMessage) {
+    const truncatedMsg = truncateCommitMessage(headCommitMessage);
+    footerParts.push(`\`${shortSha}\` ${truncatedMsg}`);
+  } else {
+    footerParts.push(`\`${shortSha}\``);
+  }
 
   lines.push(footerParts.join(" · "));
 
@@ -573,24 +600,6 @@ const deduplicateErrors = (errors: ParsedError[]): DeduplicatedError[] => {
   return Array.from(errorMap.values());
 };
 
-// Extract simplified rule name from full rule ID path
-// "lint/correctness/noUnusedVariables" → "noUnusedVariables"
-// "@typescript-eslint/no-unused-vars" → "no-unused-vars"
-// "TS2345" → "TS2345"
-const simplifyRuleId = (ruleId: string): string => {
-  // Handle scoped packages (@org/rule-name)
-  if (ruleId.startsWith("@")) {
-    const parts = ruleId.split("/");
-    return parts.at(-1) ?? ruleId;
-  }
-  // Handle path-style rules (category/subcategory/ruleName)
-  if (ruleId.includes("/")) {
-    const parts = ruleId.split("/");
-    return parts.at(-1) ?? ruleId;
-  }
-  return ruleId;
-};
-
 // Capitalize first letter of source name for display
 const capitalizeSource = (source: string): string => {
   if (!source) {
@@ -766,94 +775,12 @@ const formatFileGroup = (
   lines.push("");
 };
 
-// Generate annotation title: concise, scannable header
-// Format: "Source: rule" or "Source: category" - clean and minimal
+// Generate annotation title from source name (e.g., "TypeScript", "Biome")
 const generateAnnotationTitle = (error: DeduplicatedError): string => {
-  const parts: string[] = [];
-
-  // Source with proper casing (e.g., "TypeScript", "ESLint", "Biome")
-  const source = error.source ? capitalizeSource(error.source) : "";
-
-  // Simplified rule ID (extract last segment)
-  const rule = error.ruleId ? simplifyRuleId(error.ruleId) : "";
-
-  // Build title based on available data
-  if (source && rule) {
-    // "Biome: noUnusedVariables"
-    parts.push(`${source}: ${rule}`);
-  } else if (source && error.category) {
-    // "TypeScript: type-check"
-    parts.push(`${source}: ${error.category}`);
-  } else if (source) {
-    // "Biome"
-    parts.push(source);
-  } else if (rule) {
-    // "noUnusedVariables"
-    parts.push(rule);
-  } else if (error.category) {
-    // "lint"
-    parts.push(error.category);
-  }
-
-  // If multiple errors at this location, append count
-  if (error.originalCount && error.originalCount > 1) {
-    parts.push(`(${error.originalCount} issues)`);
-  }
-
-  // Fallback to "Error" if nothing else
-  const title = parts.length > 0 ? parts.join(" ") : "Error";
-
-  // Truncate to GitHub's 255 char limit
+  const title = error.source ? capitalizeSource(error.source) : "Error";
   return title.length > ANNOTATION_LIMITS.TITLE_MAX_CHARS
     ? `${title.slice(0, ANNOTATION_LIMITS.TITLE_MAX_CHARS - 3)}...`
     : title;
-};
-
-// Generate raw_details content: additional context for the annotation
-// Includes: stack trace, hint, multiple messages
-const generateRawDetails = (error: DeduplicatedError): string | undefined => {
-  const sections: string[] = [];
-
-  // Multiple messages at same location
-  if (error.combinedMessages && error.combinedMessages.length > 1) {
-    sections.push("=== All issues at this location ===");
-    for (const [i, msg] of error.combinedMessages.entries()) {
-      sections.push(`${i + 1}. ${msg}`);
-    }
-  }
-
-  // Hint/suggestion
-  if (error.hint) {
-    sections.push("");
-    sections.push("=== Suggestion ===");
-    sections.push(error.hint);
-  }
-
-  // Stack trace (truncated to first 5 lines for readability)
-  if (error.stackTrace) {
-    sections.push("");
-    sections.push("=== Stack Trace ===");
-    const stackLines = error.stackTrace.split("\n");
-    const maxLines = 5;
-    if (stackLines.length > maxLines) {
-      sections.push(
-        `${stackLines.slice(0, maxLines).join("\n")}\n...[${stackLines.length - maxLines} more lines]`
-      );
-    } else {
-      sections.push(error.stackTrace);
-    }
-  }
-
-  // Return undefined if no additional details
-  if (sections.length === 0) {
-    return undefined;
-  }
-
-  // Enforce GitHub API limit (64 KB)
-  const result = sections.join("\n");
-  return result.length > ANNOTATION_LIMITS.RAW_DETAILS_MAX_BYTES
-    ? `${result.slice(0, ANNOTATION_LIMITS.RAW_DETAILS_MAX_BYTES - 20)}...[truncated]`
-    : result;
 };
 
 // Create CheckRunAnnotation from ParsedError
@@ -902,12 +829,6 @@ const createAnnotation = (error: DeduplicatedError): CheckRunAnnotation => {
   if (error.column) {
     annotation.start_column = error.column;
     annotation.end_column = error.column;
-  }
-
-  // Add raw_details for complex errors (stack traces, multiple messages, hints)
-  const rawDetails = generateRawDetails(error);
-  if (rawDetails) {
-    annotation.raw_details = rawDetails;
   }
 
   return annotation;
@@ -1023,6 +944,42 @@ export const formatCheckRunOutput = (
     text,
     annotations: annotations.length > 0 ? annotations : undefined,
   };
+};
+
+// Options for formatting a "waiting" comment (when CI is still running)
+export interface FormatWaitingCommentOptions {
+  headSha: string;
+  /** First line of the commit message */
+  headCommitMessage?: string;
+}
+
+// Format a "waiting" comment posted immediately when a PR is created.
+// This comment is updated with actual results when CI completes.
+export const formatWaitingComment = (
+  options: FormatWaitingCommentOptions
+): string => {
+  const { headSha, headCommitMessage } = options;
+  const shortSha = headSha.slice(0, 7);
+
+  const lines: string[] = [];
+
+  // Detent header - waiting context
+  lines.push(
+    formatHeader(
+      "Detent is watching this PR. When CI finishes, any errors will be summarized here."
+    )
+  );
+  lines.push("");
+
+  // Show which commit we're waiting on
+  if (headCommitMessage) {
+    const truncatedMsg = truncateCommitMessage(headCommitMessage);
+    lines.push(`Waiting on \`${shortSha}\` ${truncatedMsg}`);
+  } else {
+    lines.push(`Waiting on \`${shortSha}\``);
+  }
+
+  return lines.join("\n");
 };
 
 // Legacy format for backwards compatibility (simple string output)

@@ -4,6 +4,7 @@ import {
   formatCheckSummary,
   formatPassingComment,
   formatResultsComment,
+  formatWaitingComment,
 } from "./comment-formatter";
 
 // Top-level regex for performance (lint rule: useTopLevelRegex)
@@ -72,6 +73,19 @@ describe("formatResultsComment", () => {
   });
 
   describe("list format", () => {
+    it("includes friendly Detent header for errors", () => {
+      const result = formatResultsComment(
+        createOptions({
+          runs: [
+            { name: "Build", id: 123, conclusion: "failure", errorCount: 3 },
+          ],
+        })
+      );
+
+      expect(result).toContain("Detent found some issues in your CI");
+      expect(result).toContain("Read the docs](https://detent.dev/docs)");
+    });
+
     it("shows only failed workflows in the list", () => {
       const result = formatResultsComment(
         createOptions({
@@ -91,20 +105,40 @@ describe("formatResultsComment", () => {
       expect(result).not.toContain("**Test**");
     });
 
-    it("includes workflow links to GitHub Actions", () => {
+    it("includes view link in header when checkRunId provided", () => {
       const result = formatResultsComment(
         createOptions({
           owner: "my-org",
           repo: "my-repo",
+          headSha: "abc1234567890def",
+          runs: [
+            { name: "Build", id: 12_345, conclusion: "failure", errorCount: 3 },
+          ],
+          checkRunId: 98_765,
+        })
+      );
+
+      // Header should have view link and CLI command
+      expect(result).toContain(
+        "CI · [view](https://github.com/my-org/my-repo/runs/98765) · `dt errors --commit abc1234`"
+      );
+    });
+
+    it("omits view link from header when checkRunId is not provided", () => {
+      const result = formatResultsComment(
+        createOptions({
+          owner: "my-org",
+          repo: "my-repo",
+          headSha: "abc1234567890def",
           runs: [
             { name: "Build", id: 12_345, conclusion: "failure", errorCount: 3 },
           ],
         })
       );
 
-      expect(result).toContain(
-        "https://github.com/my-org/my-repo/actions/runs/12345"
-      );
+      // Header should only have CI and CLI command (no view link)
+      expect(result).toContain("CI · `dt errors --commit abc1234`");
+      expect(result).not.toContain("[view]");
     });
 
     it("shows error count per workflow in fallback mode", () => {
@@ -235,6 +269,20 @@ describe("formatResultsComment", () => {
       );
 
       expect(result).toContain(" · ");
+    });
+
+    it("includes CLI command in header", () => {
+      const result = formatResultsComment(
+        createOptions({
+          headSha: "abc1234567890def",
+          runs: [
+            { name: "Build", id: 123, conclusion: "failure", errorCount: 1 },
+          ],
+        })
+      );
+
+      // CLI command should be in the header line
+      expect(result).toContain("CI · `dt errors --commit abc1234`");
     });
   });
 
@@ -651,6 +699,19 @@ const createPassingOptions = (
 });
 
 describe("formatPassingComment", () => {
+  it("includes friendly Detent header for success", () => {
+    const result = formatPassingComment(
+      createPassingOptions({
+        runs: [
+          { name: "Build", id: 123, conclusion: "success", errorCount: 0 },
+        ],
+      })
+    );
+
+    expect(result).toContain("All clear! Nothing to fix here");
+    expect(result).toContain("Read the docs](https://detent.dev/docs)");
+  });
+
   it("shows success message", () => {
     const result = formatPassingComment(
       createPassingOptions({
@@ -662,6 +723,19 @@ describe("formatPassingComment", () => {
     );
 
     expect(result).toContain("✓ All checks passed");
+  });
+
+  it("includes commit message when provided", () => {
+    const result = formatPassingComment(
+      createPassingOptions({
+        runs: [
+          { name: "Build", id: 123, conclusion: "success", errorCount: 0 },
+        ],
+        headCommitMessage: "fix: improve error handling",
+      })
+    );
+
+    expect(result).toContain("`abc1234` fix: improve error handling");
   });
 
   it("shows passed count", () => {
@@ -1032,5 +1106,46 @@ describe("GitHub API limits", () => {
     );
 
     expect(result.annotations).toHaveLength(50);
+  });
+});
+
+describe("formatWaitingComment", () => {
+  it("includes friendly Detent header for waiting", () => {
+    const result = formatWaitingComment({ headSha: "abc1234567890def" });
+
+    expect(result).toContain("Detent is watching this PR");
+    expect(result).toContain("Read the docs](https://detent.dev/docs)");
+  });
+
+  it("explains errors will be summarized", () => {
+    const result = formatWaitingComment({ headSha: "abc1234567890def" });
+
+    expect(result).toContain("any errors will be summarized here");
+  });
+
+  it("shows waiting on commit with short SHA", () => {
+    const result = formatWaitingComment({ headSha: "abc1234567890def" });
+
+    expect(result).toContain("Waiting on `abc1234`");
+  });
+
+  it("includes commit message when provided", () => {
+    const result = formatWaitingComment({
+      headSha: "abc1234567890def",
+      headCommitMessage: "fix: improve error handling",
+    });
+
+    expect(result).toContain(
+      "Waiting on `abc1234` fix: improve error handling"
+    );
+  });
+
+  it("uses 7-character short SHA", () => {
+    const result = formatWaitingComment({
+      headSha: "1234567890abcdef1234567890abcdef12345678",
+    });
+
+    expect(result).toContain("`1234567`");
+    expect(result).not.toContain("890abcdef");
   });
 });

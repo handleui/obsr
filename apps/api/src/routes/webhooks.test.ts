@@ -493,7 +493,7 @@ describe("webhooks - installation events", () => {
   });
 
   describe("error handling", () => {
-    it("returns 500 on database error", async () => {
+    it("returns 500 on database error with structured response", async () => {
       mockLimit.mockRejectedValueOnce(new Error("Database connection failed"));
 
       const payload = createInstallationPayload("created");
@@ -502,10 +502,14 @@ describe("webhooks - installation events", () => {
       const json = await res.json();
 
       expect(res.status).toBe(500);
-      // Error is sanitized to avoid leaking internal details (e.g., DB connection strings)
+      // Error is classified and includes debugging context
       expect(json).toEqual({
         message: "installation error",
-        error: "An internal error occurred",
+        errorCode: "WEBHOOK_DB_CONNECTION",
+        error: "Database connection error",
+        hint: "Transient database issue - webhook will be retried automatically",
+        deliveryId: "test-delivery-id",
+        account: "test-org",
       });
     });
 

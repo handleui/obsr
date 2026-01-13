@@ -48,10 +48,12 @@ const checkDatabaseWithTimeout = async (
 };
 
 // Health check - verifies API and database connectivity
-// OpenStatus monitors this endpoint for uptime
+// Better Stack monitors this endpoint for uptime
 app.use("/", timeout(REQUEST_TIMEOUT_MS, healthTimeoutException));
 
 app.get("/", async (c) => {
+  const startTime = Date.now();
+
   const checks: {
     database: "operational" | "down";
   } = {
@@ -72,6 +74,7 @@ app.get("/", async (c) => {
       status,
       version: pkg.version,
       timestamp: new Date().toISOString(),
+      latencyMs: Date.now() - startTime,
       checks,
     },
     status === "operational" ? 200 : 503

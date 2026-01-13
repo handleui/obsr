@@ -15,8 +15,9 @@ process.on("uncaughtException", async (error) => {
   throw error;
 });
 
-process.on("unhandledRejection", (reason) => {
+process.on("unhandledRejection", async (reason) => {
   captureException(reason);
+  await flush();
 });
 
 // Injected at compile time for standalone binaries

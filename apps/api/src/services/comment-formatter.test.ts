@@ -133,9 +133,9 @@ describe("formatResultsComment", () => {
 
       // Should show job header
       expect(result).toContain("**CI**");
-      // Should show steps as bullet points
-      expect(result).toContain("- `test` · 2 errors");
-      expect(result).toContain("- `lint` · 1 error");
+      // Should show steps as bullet points (bold, not backticks, to avoid formatting issues)
+      expect(result).toContain("- **test** · 2 errors");
+      expect(result).toContain("- **lint** · 1 error");
     });
   });
 

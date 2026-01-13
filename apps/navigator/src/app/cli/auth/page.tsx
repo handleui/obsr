@@ -1,5 +1,3 @@
-import { Button } from "@detent/ui/button";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getUser } from "@/lib/auth";
 
@@ -43,13 +41,16 @@ const getErrorMessage = (error: string): string => {
   if (error === "sealed_sessions_required") {
     return "CLI authentication is not configured. Please contact your administrator.";
   }
+  if (error === "invalid_port") {
+    return "Invalid port parameter. Please try again from the CLI.";
+  }
   return `An error occurred: ${error}`;
 };
 
 const CLIAuthPage = async ({ searchParams }: CLIAuthPageProps) => {
   const params = await searchParams;
   const { port, state, error } = params;
-  const { isAuthenticated, user } = await getUser();
+  const { isAuthenticated } = await getUser();
 
   // Show error page if there's an error
   if (error) {
@@ -82,7 +83,7 @@ const CLIAuthPage = async ({ searchParams }: CLIAuthPageProps) => {
           <p className="text-neutral-600 text-sm">
             This page should be accessed from the Detent CLI. Run{" "}
             <code className="rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-sm">
-              detent login
+              dt login
             </code>{" "}
             to authenticate.
           </p>
@@ -97,34 +98,9 @@ const CLIAuthPage = async ({ searchParams }: CLIAuthPageProps) => {
     redirect(`/login?returnTo=${encodeURIComponent(returnTo)}`);
   }
 
-  // Build the authorize URL
+  // Authenticated - auto-redirect to authorize endpoint (skip manual button click)
   const authorizeUrl = `/cli/auth/authorize?port=${encodeURIComponent(port)}&state=${encodeURIComponent(state)}`;
-
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-white">
-      <div className="w-full max-w-md space-y-6 p-8 text-center">
-        <div className="flex justify-center">
-          <TerminalIcon />
-        </div>
-        <h1 className="font-semibold text-neutral-900 text-xl">
-          Authorize Detent CLI
-        </h1>
-
-        <p className="text-neutral-600 text-sm">
-          Authorize the CLI to access your account as{" "}
-          <span className="font-medium text-neutral-900">{user?.email}</span>?
-        </p>
-
-        <Button asChild className="w-full">
-          <Link href={authorizeUrl}>Authorize CLI</Link>
-        </Button>
-
-        <p className="text-neutral-500 text-xs">
-          After authorization, you can close this window and return to the CLI.
-        </p>
-      </div>
-    </main>
-  );
+  redirect(authorizeUrl);
 };
 
 export default CLIAuthPage;

@@ -329,7 +329,8 @@ let cachedAppId: string | null = null;
 const createGitHubServiceInternal = (env: Env) => {
   const config: GitHubServiceConfig = {
     appId: env.GITHUB_APP_ID,
-    privateKey: env.GITHUB_APP_PRIVATE_KEY,
+    // Handle literal \n from .dev.vars (dotenv doesn't parse multiline values)
+    privateKey: env.GITHUB_APP_PRIVATE_KEY.replace(/\\n/g, "\n"),
   };
 
   const getInstallationToken = async (

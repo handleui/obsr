@@ -173,7 +173,7 @@ describe("formatResultsComment", () => {
         })
       );
 
-      expect(result).toContain("`detent errors --commit abc1234`");
+      expect(result).toContain("`dt errors --commit abc1234`");
     });
 
     it("uses middle dot separator between footer elements", () => {
@@ -363,7 +363,7 @@ describe("formatCheckRunOutput", () => {
         })
       );
 
-      expect(result.text).toContain("`detent errors --commit abc1234`");
+      expect(result.text).toContain("`dt errors --commit abc1234`");
     });
 
     it("returns undefined text when no errors", () => {

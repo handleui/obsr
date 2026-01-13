@@ -145,7 +145,7 @@ export const formatResultsComment = (
   }
 
   footerParts.push(`Updated ${formatTimestamp(new Date())} UTC`);
-  footerParts.push(`\`detent errors --commit ${headSha.slice(0, 7)}\``);
+  footerParts.push(`\`dt errors --commit ${headSha.slice(0, 7)}\``);
 
   lines.push(footerParts.join(" · "));
 
@@ -810,9 +810,7 @@ export const formatCheckRunOutput = (
   }
 
   // Footer with CLI command
-  textLines.push(
-    `\`detent errors --commit ${headSha.slice(0, 7)}\` for full list`
-  );
+  textLines.push(`\`dt errors --commit ${headSha.slice(0, 7)}\` for full list`);
 
   let text = textLines.join("\n");
 

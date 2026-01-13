@@ -747,44 +747,169 @@ const sanitizeErrorMessage = (error: unknown): string => {
 };
 
 // ============================================================================
-// Helper: Sanitize error messages for JSON API responses
+// Error codes for webhook processing - helps with debugging and correlation
 // ============================================================================
+// Each error code identifies a specific failure category for easier diagnosis.
+// Format: WEBHOOK_<EVENT>_<CATEGORY> (e.g., WEBHOOK_WORKFLOW_TOKEN_FAILED)
+const ERROR_CODES = {
+  // Token/auth errors
+  TOKEN_FAILED: "WEBHOOK_TOKEN_FAILED",
+
+  // GitHub API errors
+  GITHUB_RATE_LIMIT: "WEBHOOK_GITHUB_RATE_LIMIT",
+  GITHUB_NOT_FOUND: "WEBHOOK_GITHUB_NOT_FOUND",
+  GITHUB_API_ERROR: "WEBHOOK_GITHUB_API_ERROR",
+
+  // Database errors
+  DB_CONNECTION: "WEBHOOK_DB_CONNECTION",
+
+  // Workflow processing errors
+  WORKFLOW_LOG_FETCH: "WEBHOOK_WORKFLOW_LOG_FETCH",
+  WORKFLOW_VALIDATION: "WEBHOOK_WORKFLOW_VALIDATION",
+
+  // Generic errors
+  UNKNOWN: "WEBHOOK_UNKNOWN_ERROR",
+} as const;
+
+type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
+
+interface ClassifiedError {
+  code: ErrorCode;
+  message: string;
+  hint?: string;
+}
+
+// ============================================================================
+// Helper: Classify and sanitize error for API responses
+// ============================================================================
+// Returns a structured error with:
+// - code: Machine-readable error code for programmatic handling
+// - message: Human-readable description (sanitized for security)
+// - hint: Optional troubleshooting suggestion
+//
 // Prevents leaking internal implementation details (e.g., database connection
 // strings, file paths, stack traces) in error responses.
-//
-// Safe patterns: Errors that describe high-level issues without exposing internals
-const SAFE_API_ERROR_PATTERNS = [
-  /^Failed to get installation token/i,
-  /^Rate limit exceeded/i,
-  /^Failed to fetch logs/i,
-  /^Repository not found/i,
-  /^Check run not found/i,
-  /^Comment not found/i,
-  /^Workflow run not found/i,
-  /^Invalid (owner|repo|SHA)/i,
-  /^PR not found/i,
-  // Validation errors from prepareRunData - safe to expose as they describe input issues
-  /^\[workflow_run\] Invalid/i,
-];
+// Helper: Detect which resource is not found from error message
+const detectNotFoundResource = (message: string): string => {
+  if (message.includes("repository")) {
+    return "repository";
+  }
+  if (message.includes("check run")) {
+    return "check run";
+  }
+  if (message.includes("comment")) {
+    return "comment";
+  }
+  if (message.includes("workflow")) {
+    return "workflow run";
+  }
+  if (message.includes("pull request") || message.includes("pr")) {
+    return "pull request";
+  }
+  return "resource";
+};
 
-const sanitizeApiError = (error: unknown): string => {
+// Helper: Check if message indicates token/auth error
+const isTokenError = (message: string): boolean =>
+  message.includes("installation token") ||
+  message.includes("bad credentials") ||
+  message.includes("authentication");
+
+// Helper: Check if message indicates database error
+// Note: Avoid provider-specific identifiers to prevent implementation leakage
+const isDatabaseError = (message: string): boolean =>
+  message.includes("database") ||
+  message.includes("connection") ||
+  message.includes("econnrefused") ||
+  message.includes("postgres") ||
+  message.includes("sql");
+
+// Helper: Check if message indicates GitHub API error
+const isGitHubApiError = (message: string): boolean =>
+  message.includes("github") ||
+  message.includes("octokit") ||
+  message.includes("api");
+
+const classifyError = (error: unknown): ClassifiedError => {
   if (!(error instanceof Error)) {
-    return "An unexpected error occurred";
+    return {
+      code: ERROR_CODES.UNKNOWN,
+      message: "An unexpected error occurred",
+      hint: "Check server logs with the delivery ID for details",
+    };
   }
 
-  const message = error.message;
+  const message = error.message.toLowerCase();
 
-  // Check if the error message matches a safe pattern
-  for (const pattern of SAFE_API_ERROR_PATTERNS) {
-    if (pattern.test(message)) {
-      // Return a truncated version to prevent overly long messages
-      return message.slice(0, 200);
-    }
+  // Token/auth errors
+  if (isTokenError(message)) {
+    return {
+      code: ERROR_CODES.TOKEN_FAILED,
+      message: "Failed to authenticate with GitHub",
+      hint: "The GitHub App installation may be suspended or the app needs to be reinstalled",
+    };
   }
 
-  // For unknown errors, return generic message to avoid leaking internals
-  // Full error is logged server-side for debugging
-  return "An internal error occurred";
+  // Rate limiting
+  if (message.includes("rate limit")) {
+    return {
+      code: ERROR_CODES.GITHUB_RATE_LIMIT,
+      message: "GitHub API rate limit exceeded",
+      hint: "Wait a few minutes and retry, or check for excessive API calls",
+    };
+  }
+
+  // Not found errors
+  if (message.includes("not found") || message.includes("404")) {
+    const resource = detectNotFoundResource(message);
+    return {
+      code: ERROR_CODES.GITHUB_NOT_FOUND,
+      message: `${resource.charAt(0).toUpperCase() + resource.slice(1)} not found`,
+      hint: `The ${resource} may have been deleted, or the app may not have access`,
+    };
+  }
+
+  // Database errors
+  if (isDatabaseError(message)) {
+    return {
+      code: ERROR_CODES.DB_CONNECTION,
+      message: "Database connection error",
+      hint: "Transient database issue - webhook will be retried automatically",
+    };
+  }
+
+  // Log fetching errors
+  if (message.includes("fetch") && message.includes("log")) {
+    return {
+      code: ERROR_CODES.WORKFLOW_LOG_FETCH,
+      message: "Failed to fetch workflow logs",
+      hint: "GitHub may be experiencing issues, or logs may have expired",
+    };
+  }
+
+  // Validation errors (safe to expose)
+  if (message.startsWith("[workflow_run] invalid")) {
+    return {
+      code: ERROR_CODES.WORKFLOW_VALIDATION,
+      message: error.message.slice(0, 200),
+    };
+  }
+
+  // GitHub API errors (generic)
+  if (isGitHubApiError(message)) {
+    return {
+      code: ERROR_CODES.GITHUB_API_ERROR,
+      message: "GitHub API request failed",
+      hint: "Check GitHub status page or retry the webhook",
+    };
+  }
+
+  // Default: unknown error
+  return {
+    code: ERROR_CODES.UNKNOWN,
+    message: "An internal error occurred",
+    hint: "Check server logs with the delivery ID for details",
+  };
 };
 
 // ============================================================================
@@ -944,8 +1069,14 @@ const cleanupCheckRunOnError = async (
   token: string,
   owner: string,
   repo: string,
-  checkRunId: number
+  checkRunId: number,
+  context?: { deliveryId?: string; error?: unknown }
 ): Promise<void> => {
+  const classified = context?.error
+    ? classifyError(context.error)
+    : { code: ERROR_CODES.UNKNOWN, message: "Unknown error" };
+  const deliveryId = context?.deliveryId ?? "unknown";
+
   try {
     await github.updateCheckRun(token, {
       owner,
@@ -954,13 +1085,24 @@ const cleanupCheckRunOnError = async (
       status: "completed",
       conclusion: "cancelled",
       output: {
-        title: "Analysis failed",
-        summary:
-          "An error occurred while analyzing CI results. This webhook may be retried.",
+        title: `Analysis failed: ${classified.code}`,
+        summary: [
+          `**Error:** ${classified.message}`,
+          "",
+          classified.hint ? `**Hint:** ${classified.hint}` : "",
+          "",
+          "---",
+          `**Delivery ID:** \`${deliveryId}\``,
+          "",
+          "Use the delivery ID to correlate with server logs for detailed debugging.",
+          "This webhook may be automatically retried by GitHub.",
+        ]
+          .filter(Boolean)
+          .join("\n"),
       },
     });
     console.log(
-      `[workflow_run] Cleaned up check run ${checkRunId} after error`
+      `[workflow_run] Cleaned up check run ${checkRunId} after error [delivery: ${deliveryId}]`
     );
   } catch (cleanupError) {
     console.error(
@@ -982,10 +1124,20 @@ const attemptCheckRunCleanup = async (
   owner: string,
   repo: string,
   checkRunId: number,
-  deliveryId: string
+  deliveryId: string,
+  originalError?: unknown
 ): Promise<void> => {
+  const errorContext = { deliveryId, error: originalError };
+
   if (token) {
-    await cleanupCheckRunOnError(github, token, owner, repo, checkRunId);
+    await cleanupCheckRunOnError(
+      github,
+      token,
+      owner,
+      repo,
+      checkRunId,
+      errorContext
+    );
     return;
   }
 
@@ -1000,7 +1152,8 @@ const attemptCheckRunCleanup = async (
       recoveryToken,
       owner,
       repo,
-      checkRunId
+      checkRunId,
+      errorContext
     );
   } catch (tokenError) {
     console.error(
@@ -1629,9 +1782,14 @@ const handleWorkflowRunInProgress = async (
       error
     );
     // Non-fatal - we'll create the check run on completed if this fails
+    const classified = classifyError(error);
     return c.json({
       message: "failed to create check run",
-      error: sanitizeApiError(error),
+      errorCode: classified.code,
+      error: classified.message,
+      hint: classified.hint,
+      deliveryId,
+      repository: repository.full_name,
     });
   }
 };
@@ -1910,7 +2068,8 @@ const handleWorkflowRunCompleted = async (
         owner,
         repo,
         checkRunToCleanup,
-        deliveryId
+        deliveryId,
+        error
       );
     }
 
@@ -1920,11 +2079,15 @@ const handleWorkflowRunCompleted = async (
       headSha
     );
 
+    const classified = classifyError(error);
     return c.json(
       {
         message: "workflow_run error",
-        // Sanitize error to prevent leaking internal details (DB connection strings, etc.)
-        error: sanitizeApiError(error),
+        errorCode: classified.code,
+        error: classified.message,
+        hint: classified.hint,
+        deliveryId,
+        repository: repository.full_name,
       },
       500
     );
@@ -2204,9 +2367,10 @@ const handleInstallationEvent = async (
 ) => {
   const { action, installation, repositories } = payload;
   const { account } = installation;
+  const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
 
   console.log(
-    `[installation] ${action}: ${account.login} (${account.type}, installation ${installation.id})`
+    `[installation] ${action}: ${account.login} (${account.type}, installation ${installation.id}) [delivery: ${deliveryId}]`
   );
 
   const { db, client } = await createDb(c.env);
@@ -2312,11 +2476,19 @@ const handleInstallationEvent = async (
         return c.json({ message: "ignored", action });
     }
   } catch (error) {
-    console.error("[installation] Error processing:", error);
+    console.error(
+      `[installation] Error processing [delivery: ${deliveryId}]:`,
+      error
+    );
+    const classified = classifyError(error);
     return c.json(
       {
         message: "installation error",
-        error: sanitizeApiError(error),
+        errorCode: classified.code,
+        error: classified.message,
+        hint: classified.hint,
+        deliveryId,
+        account: account.login,
       },
       500
     );
@@ -2332,9 +2504,10 @@ const handleInstallationRepositoriesEvent = async (
 ) => {
   const { action, installation, repositories_added, repositories_removed } =
     payload;
+  const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
 
   console.log(
-    `[installation_repositories] ${action}: installation ${installation.id}, added=${repositories_added.length}, removed=${repositories_removed.length}`
+    `[installation_repositories] ${action}: installation ${installation.id}, added=${repositories_added.length}, removed=${repositories_removed.length} [delivery: ${deliveryId}]`
   );
 
   const { db, client } = await createDb(c.env);
@@ -2398,11 +2571,19 @@ const handleInstallationRepositoriesEvent = async (
       projects_removed: repositories_removed.length,
     });
   } catch (error) {
-    console.error("[installation_repositories] Error processing:", error);
+    console.error(
+      `[installation_repositories] Error processing [delivery: ${deliveryId}]:`,
+      error
+    );
+    const classified = classifyError(error);
     return c.json(
       {
         message: "installation_repositories error",
-        error: sanitizeApiError(error),
+        errorCode: classified.code,
+        error: classified.message,
+        hint: classified.hint,
+        deliveryId,
+        installationId: installation.id,
       },
       500
     );
@@ -2417,6 +2598,7 @@ const handleRepositoryEvent = async (
   payload: RepositoryPayload
 ) => {
   const { action, repository, installation } = payload;
+  const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
 
   // Only process if we have an installation ID (app is installed)
   if (!installation?.id) {
@@ -2424,7 +2606,7 @@ const handleRepositoryEvent = async (
   }
 
   console.log(
-    `[repository] ${action}: ${repository.full_name} (repo ID: ${repository.id})`
+    `[repository] ${action}: ${repository.full_name} (repo ID: ${repository.id}) [delivery: ${deliveryId}]`
   );
 
   const { db, client } = await createDb(c.env);
@@ -2526,11 +2708,19 @@ const handleRepositoryEvent = async (
         return c.json({ message: "ignored", action });
     }
   } catch (error) {
-    console.error("[repository] Error processing:", error);
+    console.error(
+      `[repository] Error processing [delivery: ${deliveryId}]:`,
+      error
+    );
+    const classified = classifyError(error);
     return c.json(
       {
         message: "repository error",
-        error: sanitizeApiError(error),
+        errorCode: classified.code,
+        error: classified.message,
+        hint: classified.hint,
+        deliveryId,
+        repository: repository.full_name,
       },
       500
     );
@@ -2545,6 +2735,7 @@ const handleOrganizationEvent = async (
   payload: OrganizationPayload
 ) => {
   const { action, organization, changes, installation } = payload;
+  const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
 
   // Only process if we have an installation ID (app is installed)
   if (!installation?.id) {
@@ -2552,7 +2743,7 @@ const handleOrganizationEvent = async (
   }
 
   console.log(
-    `[organization] ${action}: ${organization.login} (org ID: ${organization.id})`
+    `[organization] ${action}: ${organization.login} (org ID: ${organization.id}) [delivery: ${deliveryId}]`
   );
 
   // Only handle renamed action for now
@@ -2638,11 +2829,19 @@ const handleOrganizationEvent = async (
       new_slug: updates.slug ?? org.slug,
     });
   } catch (error) {
-    console.error("[organization] Error processing:", error);
+    console.error(
+      `[organization] Error processing [delivery: ${deliveryId}]:`,
+      error
+    );
+    const classified = classifyError(error);
     return c.json(
       {
         message: "organization error",
-        error: sanitizeApiError(error),
+        errorCode: classified.code,
+        error: classified.message,
+        hint: classified.hint,
+        deliveryId,
+        organization: organization.login,
       },
       500
     );
@@ -2839,10 +3038,15 @@ const handleCheckSuiteRequested = async (
 
     // Return 500 to be consistent with other error handlers in this file
     // The check run will be created when workflow_run.in_progress fires as fallback
+    const classified = classifyError(error);
     return c.json(
       {
         message: "failed to create check run",
-        error: sanitizeApiError(error),
+        errorCode: classified.code,
+        error: classified.message,
+        hint: classified.hint,
+        deliveryId,
+        repository: repository.full_name,
       },
       500
     );
@@ -2855,6 +3059,7 @@ const handleIssueCommentEvent = async (
   payload: IssueCommentPayload
 ) => {
   const { action, comment, issue, repository, installation } = payload;
+  const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
 
   // Only process new comments
   if (action !== "created") {
@@ -2930,11 +3135,19 @@ const handleIssueCommentEvent = async (
       }
     }
   } catch (error) {
-    console.error("[issue_comment] Error processing:", error);
+    console.error(
+      `[issue_comment] Error processing [delivery: ${deliveryId}]:`,
+      error
+    );
+    const classified = classifyError(error);
     return c.json(
       {
         message: "issue_comment error",
-        error: sanitizeApiError(error),
+        errorCode: classified.code,
+        error: classified.message,
+        hint: classified.hint,
+        deliveryId,
+        repository: repository.full_name,
       },
       500
     );

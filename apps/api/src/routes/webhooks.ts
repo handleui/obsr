@@ -821,7 +821,6 @@ const isDatabaseError = (message: string): boolean =>
   message.includes("database") ||
   message.includes("connection") ||
   message.includes("econnrefused") ||
-  message.includes("postgres") ||
   message.includes("sql");
 
 // Helper: Check if message indicates GitHub API error

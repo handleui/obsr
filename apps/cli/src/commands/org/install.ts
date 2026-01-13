@@ -116,8 +116,8 @@ export const installCommand = defineCommand({
     }
 
     // Fetch GitHub organizations to show status
-    // Pass GitHub OAuth token if available (avoids need for WorkOS Pipes)
-    const githubToken = getGitHubToken();
+    // Pass GitHub OAuth token if available (auto-refreshes if expired)
+    const githubToken = await getGitHubToken();
     const orgsResponse = await getGitHubOrgs(accessToken, githubToken).catch(
       handleGitHubOrgError
     );

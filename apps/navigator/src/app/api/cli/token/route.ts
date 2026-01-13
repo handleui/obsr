@@ -79,15 +79,22 @@ export const POST = async (request: Request) => {
       ? new Date(exp * 1000).toISOString()
       : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
+    // GitHub refresh tokens expire after 6 months (15897600 seconds)
+    const GITHUB_REFRESH_TOKEN_LIFETIME_MS = 15_897_600 * 1000;
+
     return NextResponse.json({
       access_token: accessToken,
       refresh_token: refreshToken,
       expires_at: expiresAt,
-      // Include GitHub OAuth token if available (from "Return GitHub OAuth tokens" setting)
+      // Include GitHub OAuth tokens if available (from "Return GitHub OAuth tokens" setting)
       // Note: expiresAt from WorkOS is in Unix seconds, convert to milliseconds for CLI
       ...(oauthTokens && {
         github_token: oauthTokens.accessToken,
         github_token_expires_at: oauthTokens.expiresAt * 1000,
+        // Include refresh token for automatic token refresh (6-month lifetime)
+        github_refresh_token: oauthTokens.refreshToken,
+        github_refresh_token_expires_at:
+          Date.now() + GITHUB_REFRESH_TOKEN_LIFETIME_MS,
       }),
     });
   } catch (err) {

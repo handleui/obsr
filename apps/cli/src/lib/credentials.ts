@@ -20,9 +20,12 @@ export interface Credentials {
   access_token: string;
   refresh_token: string;
   expires_at: number;
-  // GitHub OAuth token (from WorkOS "Return GitHub OAuth tokens" setting)
+  // GitHub OAuth tokens (from WorkOS "Return GitHub OAuth tokens" setting)
+  // Access token expires in ~8 hours, refresh token expires in ~6 months
   github_token?: string;
   github_token_expires_at?: number;
+  github_refresh_token?: string;
+  github_refresh_token_expires_at?: number;
 }
 
 const CREDENTIALS_FILE = "credentials.json";
@@ -46,11 +49,36 @@ const isValidCredentials = (data: unknown): data is Credentials => {
     return false;
   }
   const obj = data as Record<string, unknown>;
-  return (
+
+  // Validate required fields
+  const hasRequiredFields =
     typeof obj.access_token === "string" &&
     typeof obj.refresh_token === "string" &&
-    typeof obj.expires_at === "number"
-  );
+    typeof obj.expires_at === "number";
+
+  if (!hasRequiredFields) {
+    return false;
+  }
+
+  // If github_token exists, github_token_expires_at must also exist and be a number
+  if (
+    obj.github_token !== undefined &&
+    (typeof obj.github_token !== "string" ||
+      typeof obj.github_token_expires_at !== "number")
+  ) {
+    return false;
+  }
+
+  // If github_refresh_token exists, github_refresh_token_expires_at must also exist
+  if (
+    obj.github_refresh_token !== undefined &&
+    (typeof obj.github_refresh_token !== "string" ||
+      typeof obj.github_refresh_token_expires_at !== "number")
+  ) {
+    return false;
+  }
+
+  return true;
 };
 
 export const loadCredentials = (): Credentials | null => {

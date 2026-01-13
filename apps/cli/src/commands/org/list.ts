@@ -112,8 +112,8 @@ const displayAvailableOrgs = (orgs: GitHubOrgWithStatus[]): void => {
 
 const listAvailableOrgs = async (accessToken: string): Promise<void> => {
   try {
-    // Pass GitHub OAuth token if available (avoids need for WorkOS Pipes)
-    const githubToken = getGitHubToken();
+    // Pass GitHub OAuth token if available (auto-refreshes if expired)
+    const githubToken = await getGitHubToken();
     const response = await getGitHubOrgs(accessToken, githubToken);
 
     if (response.orgs.length === 0) {

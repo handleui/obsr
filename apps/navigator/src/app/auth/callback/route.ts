@@ -68,6 +68,24 @@ const isEmailVerificationError = (
 };
 
 /**
+ * Type guard for GitHub OAuth tokens from WorkOS
+ * Validates that the object has the expected shape before casting
+ */
+const isValidGitHubOAuthTokens = (data: unknown): data is GitHubOAuthTokens => {
+  if (typeof data !== "object" || data === null) {
+    return false;
+  }
+  const obj = data as Record<string, unknown>;
+  return (
+    typeof obj.accessToken === "string" &&
+    typeof obj.refreshToken === "string" &&
+    typeof obj.expiresAt === "number" &&
+    Array.isArray(obj.scopes) &&
+    obj.scopes.every((scope) => typeof scope === "string")
+  );
+};
+
+/**
  * Set pending verification cookie for email verification flow
  * Uses signed JWT to protect the pendingAuthenticationToken from tampering
  */
@@ -175,9 +193,13 @@ export const GET = async (request: Request) => {
     // Note: oauthTokens are only returned during initial authentication and are NOT
     // stored in the WorkOS sealed session. We must persist them in a separate cookie
     // for later use (e.g., CLI auth flow that needs the GitHub token).
-    if ("oauthTokens" in authResponse && authResponse.oauthTokens) {
-      const oauthTokens = authResponse.oauthTokens as GitHubOAuthTokens;
-      const oauthTokensJwt = await createGitHubOAuthTokensToken(oauthTokens);
+    if (
+      "oauthTokens" in authResponse &&
+      isValidGitHubOAuthTokens(authResponse.oauthTokens)
+    ) {
+      const oauthTokensJwt = await createGitHubOAuthTokensToken(
+        authResponse.oauthTokens
+      );
       response.cookies.set(
         createSecureCookieOptions({
           name: COOKIE_NAMES.githubOAuthTokens,

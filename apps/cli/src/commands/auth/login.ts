@@ -115,10 +115,15 @@ export const loginCommand = defineCommand({
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       expires_at: getJwtExpiration(tokens.access_token),
-      // Store GitHub OAuth token if available (from Navigator flow)
+      // Store GitHub OAuth tokens if available (from Navigator flow)
       ...(tokens.github_token && {
         github_token: tokens.github_token,
         github_token_expires_at: tokens.github_token_expires_at,
+      }),
+      // Store GitHub refresh token for automatic token refresh (6-month lifetime)
+      ...(tokens.github_refresh_token && {
+        github_refresh_token: tokens.github_refresh_token,
+        github_refresh_token_expires_at: tokens.github_refresh_token_expires_at,
       }),
     };
 

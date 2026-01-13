@@ -373,24 +373,61 @@ const GITHUB_TOKEN_REGEX = /^(ghp_|gho_|ghu_|github_pat_)[a-zA-Z0-9_]+$/;
  * Returns true if token matches known GitHub token patterns
  */
 const isValidGitHubTokenFormat = (token: string): boolean => {
-  // Token should be reasonable length (GitHub tokens are typically 40-255 chars)
-  if (token.length < 20 || token.length > 300) {
+  // Token should be reasonable length
+  // Classic PATs (ghp_) are 40 chars, fine-grained (github_pat_) are ~93 chars
+  // OAuth tokens (ghu_, gho_) are similar to classic PATs
+  if (token.length < 40 || token.length > 300) {
     return false;
   }
   // Must match known GitHub token prefixes
   return GITHUB_TOKEN_REGEX.test(token);
 };
 
+// Required GitHub OAuth scopes for organization operations
+const REQUIRED_SCOPES = ["read:org"] as const;
+
+// Result type for token verification with rate limit info and scope validation
+interface VerifyTokenSuccessResult {
+  success: true;
+  user: { id: number; login: string };
+  scopes: string[];
+}
+
+interface VerifyTokenFailureResult {
+  success: false;
+  rateLimited?: boolean;
+  missingScopes?: string[];
+}
+
+type VerifyTokenResult = VerifyTokenSuccessResult | VerifyTokenFailureResult;
+
+const parseOAuthScopes = (scopeHeader: string | null): string[] => {
+  if (!scopeHeader) {
+    return [];
+  }
+  return scopeHeader
+    .split(",")
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+};
+
+const findMissingScopes = (
+  actualScopes: string[],
+  requiredScopes: readonly string[]
+): string[] => {
+  return requiredScopes.filter((required) => !actualScopes.includes(required));
+};
+
 /**
  * Verify a GitHub token belongs to the expected user by checking the authenticated user's GitHub ID
- * against the WorkOS identity. Returns the GitHub user data if verified, null otherwise.
+ * against the WorkOS identity. Also validates that the token has required scopes.
+ * Returns the GitHub user data and scopes if verified, or failure info otherwise.
  */
 const verifyGitHubTokenOwnership = async (
   githubToken: string,
   userId: string,
   workosApiKey: string
-): Promise<{ id: number; login: string } | null> => {
-  // Fetch GitHub user info with the provided token
+): Promise<VerifyTokenResult> => {
   const githubUserResponse = await fetch("https://api.github.com/user", {
     headers: {
       Authorization: `Bearer ${githubToken}`,
@@ -399,16 +436,47 @@ const verifyGitHubTokenOwnership = async (
     },
   });
 
-  if (!githubUserResponse.ok) {
-    return null;
+  if (
+    githubUserResponse.status === 403 &&
+    githubUserResponse.headers.get("x-ratelimit-remaining") === "0"
+  ) {
+    const resetTime = githubUserResponse.headers.get("x-ratelimit-reset");
+    const resetDate = resetTime
+      ? new Date(Number.parseInt(resetTime, 10) * 1000).toISOString()
+      : "soon";
+    console.error(
+      `GitHub API rate limit exceeded during token verification, resets at ${resetDate}`
+    );
+    return { success: false, rateLimited: true };
   }
 
-  const githubUser = (await githubUserResponse.json()) as {
-    id: number;
-    login: string;
-  };
+  if (!githubUserResponse.ok) {
+    return { success: false };
+  }
 
-  // Fetch the user's WorkOS identities to get their expected GitHub ID
+  const scopes = parseOAuthScopes(
+    githubUserResponse.headers.get("x-oauth-scopes")
+  );
+
+  const missingScopes = findMissingScopes(scopes, REQUIRED_SCOPES);
+  if (missingScopes.length > 0) {
+    console.error(
+      `GitHub token missing required scopes: ${missingScopes.join(", ")}`
+    );
+    return { success: false, missingScopes };
+  }
+
+  let githubUser: { id: number; login: string };
+  try {
+    githubUser = (await githubUserResponse.json()) as {
+      id: number;
+      login: string;
+    };
+  } catch {
+    console.error("Failed to parse GitHub user response as JSON");
+    return { success: false };
+  }
+
   const identitiesResponse = await fetch(
     `https://api.workos.com/user_management/users/${userId}/identities`,
     {
@@ -419,35 +487,41 @@ const verifyGitHubTokenOwnership = async (
   );
 
   if (!identitiesResponse.ok) {
-    return null;
+    return { success: false };
   }
 
-  const identities =
-    (await identitiesResponse.json()) as WorkOSIdentitiesResponse;
+  let identities: WorkOSIdentitiesResponse;
+  try {
+    identities = (await identitiesResponse.json()) as WorkOSIdentitiesResponse;
+  } catch {
+    console.error("Failed to parse WorkOS identities response as JSON");
+    return { success: false };
+  }
+
   const githubIdentity = identities.data?.find(
     (identity) => identity.provider === "GitHubOAuth"
   );
 
   if (!githubIdentity) {
-    return null;
+    return { success: false };
   }
 
-  // Verify the token's GitHub user ID matches the user's linked identity
   if (String(githubUser.id) !== githubIdentity.idp_id) {
-    console.error(
-      `GitHub token ownership mismatch: token user ${githubUser.id} != linked identity ${githubIdentity.idp_id}`
-    );
-    return null;
+    console.error("GitHub token ownership verification failed for user");
+    return { success: false };
   }
 
-  return githubUser;
+  return { success: true, user: githubUser, scopes };
 };
+
+// Valid HTTP status codes for token and API error responses
+type TokenErrorStatus = 400 | 401 | 429 | 500;
 
 // Result types for token acquisition and error handling
 interface TokenErrorResult {
   error: string;
   code?: string;
-  status: number;
+  status: TokenErrorStatus;
 }
 
 type TokenResult =
@@ -456,7 +530,7 @@ type TokenResult =
 
 /**
  * Get a verified GitHub token from the X-GitHub-Token header
- * Validates format and verifies token ownership against user's WorkOS identity
+ * Validates format, verifies token ownership, and checks required scopes
  */
 const getVerifiedGitHubToken = async (
   providedToken: string | undefined,
@@ -482,13 +556,29 @@ const getVerifiedGitHubToken = async (
     };
   }
 
-  const verifiedUser = await verifyGitHubTokenOwnership(
+  const verifyResult = await verifyGitHubTokenOwnership(
     providedToken,
     userId,
     workosApiKey
   );
 
-  if (!verifiedUser) {
+  if (!verifyResult.success) {
+    if (verifyResult.rateLimited) {
+      return {
+        success: false,
+        error: "GitHub API rate limit exceeded. Please try again later.",
+        code: "rate_limit_exceeded",
+        status: 429,
+      };
+    }
+    if (verifyResult.missingScopes && verifyResult.missingScopes.length > 0) {
+      return {
+        success: false,
+        error: `GitHub token is missing required scopes: ${verifyResult.missingScopes.join(", ")}. Please re-authenticate with \`dt auth login --force\` to grant the necessary permissions.`,
+        code: "missing_scopes",
+        status: 401,
+      };
+    }
     return {
       success: false,
       error:
@@ -564,7 +654,7 @@ app.get("/github-orgs", async (c) => {
         error: tokenResult.error,
         ...(tokenResult.code && { code: tokenResult.code }),
       },
-      tokenResult.status as 400 | 401 | 429 | 500
+      tokenResult.status
     );
   }
 
@@ -586,7 +676,7 @@ app.get("/github-orgs", async (c) => {
         error: errorResult.error,
         ...(errorResult.code && { code: errorResult.code }),
       },
-      errorResult.status as 401 | 429 | 500
+      errorResult.status
     );
   }
 
@@ -653,6 +743,179 @@ app.get("/github-orgs", async (c) => {
   } finally {
     await client.end();
   }
+});
+
+// GitHub token refresh response
+interface GitHubTokenRefreshResponse {
+  access_token: string;
+  expires_in: number;
+  refresh_token: string;
+  refresh_token_expires_in: number;
+  scope: string;
+  token_type: string;
+}
+
+// GitHub token refresh error response
+interface GitHubTokenRefreshError {
+  error: string;
+  error_description?: string;
+}
+
+/**
+ * POST /github-token/refresh
+ * Refresh a GitHub OAuth token using the refresh token.
+ * This endpoint keeps the GitHub App client secret server-side.
+ *
+ * GitHub user access tokens expire after 8 hours, refresh tokens after 6 months.
+ * When the access token expires, the CLI calls this endpoint to get a new one.
+ */
+app.post("/github-token/refresh", async (c) => {
+  const auth = c.get("auth");
+
+  // Validate GITHUB_CLIENT_SECRET is configured
+  if (!c.env.GITHUB_CLIENT_SECRET) {
+    console.error(
+      "GITHUB_CLIENT_SECRET not configured - GitHub token refresh unavailable"
+    );
+    return c.json(
+      {
+        error: "GitHub token refresh not configured on server",
+        code: "refresh_not_configured",
+      },
+      501
+    );
+  }
+
+  // Parse request body
+  let body: { refresh_token?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body", code: "invalid_request" }, 400);
+  }
+
+  const { refresh_token: refreshToken } = body;
+
+  if (!refreshToken) {
+    return c.json(
+      { error: "refresh_token is required", code: "missing_refresh_token" },
+      400
+    );
+  }
+
+  // Validate refresh token format (ghr_ prefix for GitHub App refresh tokens)
+  if (
+    !refreshToken.startsWith("ghr_") ||
+    refreshToken.length < 20 ||
+    refreshToken.length > 300
+  ) {
+    return c.json(
+      { error: "Invalid refresh token format", code: "invalid_token_format" },
+      400
+    );
+  }
+
+  // Call GitHub's token endpoint to refresh
+  const githubResponse = await fetch(
+    "https://github.com/login/oauth/access_token",
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        client_id: c.env.GITHUB_CLIENT_ID,
+        client_secret: c.env.GITHUB_CLIENT_SECRET,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      }),
+    }
+  );
+
+  if (!githubResponse.ok) {
+    console.error(
+      `GitHub token refresh failed: ${githubResponse.status} ${githubResponse.statusText}`
+    );
+    return c.json(
+      {
+        error: "Failed to refresh GitHub token",
+        code: "github_refresh_failed",
+      },
+      502
+    );
+  }
+
+  let tokenData: GitHubTokenRefreshResponse | GitHubTokenRefreshError;
+  try {
+    tokenData = await githubResponse.json();
+  } catch {
+    console.error("Failed to parse GitHub token refresh response");
+    return c.json(
+      { error: "Invalid response from GitHub", code: "invalid_response" },
+      502
+    );
+  }
+
+  // Check for error response from GitHub
+  if ("error" in tokenData) {
+    const errorData = tokenData as GitHubTokenRefreshError;
+    console.error(
+      `GitHub token refresh error: ${errorData.error} - ${errorData.error_description}`
+    );
+
+    // Map common GitHub errors to user-friendly messages
+    if (errorData.error === "bad_refresh_token") {
+      return c.json(
+        {
+          error:
+            "GitHub refresh token is invalid or expired. Please re-authenticate with `dt auth login --force`.",
+          code: "refresh_token_expired",
+        },
+        401
+      );
+    }
+
+    return c.json(
+      {
+        error: "GitHub token refresh failed. Please re-authenticate.",
+        code: "github_refresh_failed",
+      },
+      401
+    );
+  }
+
+  const successData = tokenData as GitHubTokenRefreshResponse;
+
+  // Verify the new token belongs to the authenticated user
+  const verifyResult = await verifyGitHubTokenOwnership(
+    successData.access_token,
+    auth.userId,
+    c.env.WORKOS_API_KEY
+  );
+
+  if (!verifyResult.success) {
+    console.error("Refreshed GitHub token ownership verification failed");
+    return c.json(
+      {
+        error: "Token ownership verification failed",
+        code: "ownership_verification_failed",
+      },
+      401
+    );
+  }
+
+  // Log successful token refresh for security auditing
+  console.log(`[audit] GitHub token refreshed for user ${auth.userId}`);
+
+  // Return new tokens with expiry timestamps
+  const now = Date.now();
+  return c.json({
+    access_token: successData.access_token,
+    access_token_expires_at: now + successData.expires_in * 1000,
+    refresh_token: successData.refresh_token,
+    refresh_token_expires_at: now + successData.refresh_token_expires_in * 1000,
+  });
 });
 
 /**

@@ -22,7 +22,8 @@ export const COOKIE_NAMES = {
   /** Return URL after authentication */
   returnTo: "return_to",
   /**
-   * GitHub OAuth tokens cookie - stores encrypted GitHub access/refresh tokens
+   * GitHub OAuth tokens cookie - stores signed GitHub access/refresh tokens (HS256 JWT)
+   * Tokens are base64-encoded and integrity-protected via HMAC signing, not encrypted
    * These are captured from initial WorkOS authentication when "Return GitHub OAuth tokens" is enabled
    * Note: oauthTokens are NOT stored in WorkOS sealed session, so we persist them separately
    */

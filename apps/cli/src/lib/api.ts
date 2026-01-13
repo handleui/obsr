@@ -275,6 +275,25 @@ export const getGitHubOrgs = (
     ...(githubToken && { headers: { "X-GitHub-Token": githubToken } }),
   });
 
+// GitHub Token Refresh types
+export interface GitHubTokenRefreshResponse {
+  access_token: string;
+  access_token_expires_at: number;
+  refresh_token: string;
+  refresh_token_expires_at: number;
+}
+
+// GitHub Token Refresh API method
+export const refreshGitHubToken = (
+  accessToken: string,
+  githubRefreshToken: string
+): Promise<GitHubTokenRefreshResponse> =>
+  apiRequest<GitHubTokenRefreshResponse>("/v1/auth/github-token/refresh", {
+    accessToken,
+    method: "POST",
+    body: { refresh_token: githubRefreshToken },
+  });
+
 // ============================================================================
 // Errors Types
 // ============================================================================

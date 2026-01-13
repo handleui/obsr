@@ -4,6 +4,8 @@
 
 GITHUB_APP_ID=your_app_id
 GITHUB_CLIENT_ID=your_client_id
+# GitHub App Client Secret (for OAuth token refresh) - found in GitHub App settings
+GITHUB_CLIENT_SECRET=your_client_secret
 # IMPORTANT: Private key must be single-line with literal \n (dotenv doesn't support multiline)
 # Convert with: awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' your-key.pem
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n...\n-----END RSA PRIVATE KEY-----"

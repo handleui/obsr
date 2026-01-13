@@ -9,6 +9,14 @@ Always use Context7 for library/API documentation, code generation, or configura
 - **Lint/Fix**: `bun run lint` / `bun run fix`
 - **Types**: `bun run check-types`
 
+## Database (Critical)
+
+- **Provider**: PlanetScale PostgreSQL (production)
+- **ORM**: Drizzle with `drizzle-orm/pg-core`
+- **Local**: PostgreSQL 17 via Homebrew
+
+PlanetScale's Insights dashboard may show slow system introspection queries (e.g., `pg_catalog` bloat analysis). These are internal PostgreSQL queries, not application queries—ignore them.
+
 ## Database Migrations (Critical)
 
 The API uses Drizzle ORM with a **migration-based workflow**. NEVER edit SQL files directly.

@@ -65,6 +65,7 @@ jobs:
         working-directory: apps/cli
         env:
           WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+          SENTRY_DSN: ${{ secrets.SENTRY_CLI_DSN }}
 
       - name: Verify binary version
         run: |

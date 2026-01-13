@@ -99,6 +99,7 @@ const compileBinary = async (
   const detentApiUrl = process.env.DETENT_API_URL ?? "https://api.detent.sh";
   const detentAuthUrl =
     process.env.DETENT_AUTH_URL ?? "https://navigator.detent.sh";
+  const sentryDsn = process.env.SENTRY_DSN ?? "";
 
   const proc = Bun.spawn({
     cmd: [
@@ -112,6 +113,7 @@ const compileBinary = async (
       `--define=process.env.WORKOS_CLIENT_ID=${JSON.stringify(workosClientId)}`,
       `--define=process.env.DETENT_API_URL=${JSON.stringify(detentApiUrl)}`,
       `--define=process.env.DETENT_AUTH_URL=${JSON.stringify(detentAuthUrl)}`,
+      `--define=process.env.SENTRY_DSN=${JSON.stringify(sentryDsn)}`,
       "--minify",
       "--external=@aws-sdk/client-s3",
       SRC_ENTRY,

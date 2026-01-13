@@ -21,6 +21,7 @@ import {
   formatCheckRunOutput,
   formatPassingComment,
   formatResultsComment,
+  formatWaitingComment,
   type WorkflowRunResult,
 } from "../services/comment-formatter";
 import {
@@ -1470,6 +1471,8 @@ interface UpdatePassingCommentContext {
   repository: string;
   prNumber: number;
   headSha: string;
+  /** First line of the commit message */
+  headCommitMessage?: string;
   runs: WorkflowRunResult[];
 }
 
@@ -1486,6 +1489,7 @@ const updateCommentToPassingState = async (
     repository,
     prNumber,
     headSha,
+    headCommitMessage,
     runs,
   } = ctx;
 
@@ -1509,7 +1513,11 @@ const updateCommentToPassingState = async (
   }
 
   // Format and update the comment to passing state
-  const passingBody = formatPassingComment({ runs, headSha });
+  const passingBody = formatPassingComment({
+    runs,
+    headSha,
+    headCommitMessage,
+  });
 
   try {
     await github.updateComment(
@@ -1670,6 +1678,7 @@ const finalizeAndPostResults = async (
         repository,
         prNumber,
         headSha,
+        headCommitMessage,
         runs: runResults,
       });
 
@@ -1698,6 +1707,7 @@ const finalizeAndPostResults = async (
       errors: allErrors,
       totalErrors,
       detectedUnsupportedTools,
+      checkRunId,
     });
 
     // Safety: formatResultsComment returns null if no failures
@@ -3014,6 +3024,85 @@ const checkOrgOwnerAndPostComment = async (
   }
 };
 
+// ============================================================================
+// Helper: Post "waiting" comment immediately when PR is created
+// ============================================================================
+// Posts a waiting comment to explain that Detent is monitoring CI.
+// This comment will be updated with actual results when CI completes.
+
+interface PostWaitingCommentContext {
+  env: Env;
+  token: string;
+  owner: string;
+  repo: string;
+  repository: string;
+  prNumber: number;
+  headSha: string;
+  /** Optional commit message (not available in check_suite payload) */
+  headCommitMessage?: string;
+}
+
+const postWaitingComment = async (
+  ctx: PostWaitingCommentContext
+): Promise<void> => {
+  const {
+    env,
+    token,
+    owner,
+    repo,
+    repository,
+    prNumber,
+    headSha,
+    headCommitMessage,
+  } = ctx;
+  const kv = env["detent-idempotency"];
+
+  try {
+    // Check if a comment already exists (e.g., from a previous push to the same PR)
+    const existingCommentId = await getStoredCommentId(
+      kv,
+      repository,
+      prNumber
+    );
+    if (existingCommentId) {
+      console.log(
+        `[check_suite] Comment ${existingCommentId} already exists for PR #${prNumber}, skipping waiting comment`
+      );
+      return;
+    }
+
+    // Format and post the waiting comment
+    const waitingBody = formatWaitingComment({ headSha, headCommitMessage });
+    const github = createGitHubService(env);
+
+    const { id: commentId } = await github.postCommentWithId(
+      token,
+      owner,
+      repo,
+      prNumber,
+      waitingBody
+    );
+
+    // Store comment ID in KV for later updates
+    await storeCommentId(kv, repository, prNumber, commentId);
+
+    // Store in DB for persistence (fire-and-forget, non-blocking)
+    const { db, client } = await createDb(env);
+    try {
+      await upsertCommentIdInDb(db, repository, prNumber, String(commentId));
+    } finally {
+      await client.end();
+    }
+
+    console.log(
+      `[check_suite] Posted waiting comment ${commentId} on ${repository}#${prNumber}`
+    );
+  } catch (error) {
+    // Non-fatal - the comment will be created when workflow completes if this fails
+    console.error("[check_suite] Error posting waiting comment:", error);
+  }
+};
+
 // Handle check_suite.requested - create a "queued" check run immediately
 const handleCheckSuiteRequested = async (
   c: WebhookContext,
@@ -3096,6 +3185,16 @@ const handleCheckSuiteRequested = async (
       Promise.all([
         // Store check run ID for later retrieval
         storeCheckRunId(kv, repository.full_name, headSha, checkRun.id),
+        // Post waiting comment immediately so users know we're watching
+        postWaitingComment({
+          env: c.env,
+          token,
+          owner: repository.owner.login,
+          repo: repository.name,
+          repository: repository.full_name,
+          prNumber,
+          headSha,
+        }),
         // Check org owner status and post claim comment if needed
         checkOrgOwnerAndPostComment(
           c.env,

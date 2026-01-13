@@ -1,5 +1,11 @@
 # @detent/navigator
 
+## 0.2.1
+
+### Patch Changes
+
+- d35c1c1: Fix returnTo redirect preservation after email verification in CLI auth flow
+
 ## 0.2.0
 
 ### Minor Changes

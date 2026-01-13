@@ -1,5 +1,11 @@
 # @detent/cli
 
+## 0.5.1
+
+### Patch Changes
+
+- d35c1c1: Fix GitHub App installation URL to use correct app name
+
 ## 0.5.0
 
 ### Minor Changes

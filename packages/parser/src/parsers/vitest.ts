@@ -95,6 +95,17 @@ const stackFramePattern = /^\s*(?:[❯>]|at)\s+(\S+):(\d+):(\d+)/;
 /** Stack frame with function: "at functionName (/path/to/file.ts:20:28)" */
 const stackFrameWithFuncPattern = /^\s*at\s+\S+\s+\(([^:]+):(\d+):(\d+)\)/;
 
+/**
+ * Pattern to detect internal vitest/test runner stack frames that should be filtered.
+ * These are not useful for debugging - users care about their test code, not runner internals.
+ * Matches paths like:
+ * - node_modules/@vitest/runner/dist/index.js
+ * - node_modules/vitest/dist/...
+ * - node_modules/bun/@vitest+runner@.../...
+ */
+const vitestInternalFramePattern =
+  /node_modules\/(?:\.bun\/)?(?:@?vitest[+/]|vitest\/)/i;
+
 /** Diff expected line: "- Expected  "4"" or "Expected: 4" */
 const diffExpectedPattern = /^\s*[-−]\s*Expected\s*/i;
 
@@ -412,6 +423,11 @@ export class VitestParser
         stackFramePattern.exec(stripped) ||
         stackFrameWithFuncPattern.exec(stripped);
       if (stackMatch) {
+        // Filter out internal vitest runner frames - they're not useful for debugging
+        const file = stackMatch[1];
+        if (file && vitestInternalFramePattern.test(file)) {
+          return 0;
+        }
         this.lastFormat = "stack-frame";
         this.lastMatch = stackMatch;
         return 0.8;
@@ -831,6 +847,13 @@ export class VitestParser
   ): ParseResult {
     const [, file, lineStr, colStr] = matches;
     if (!(file && lineStr && colStr)) {
+      return null;
+    }
+
+    // Filter out internal vitest runner frames - they're not useful for debugging.
+    // Users care about their test code, not the test runner's internal stack.
+    // This follows Vitest's own onStackTrace recommendation to filter node_modules.
+    if (vitestInternalFramePattern.test(file)) {
       return null;
     }
 

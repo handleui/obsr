@@ -1,5 +1,13 @@
 # @detent/navigator
 
+## 0.4.0
+
+### Minor Changes
+
+- 67811d7: Add Sentry and Better Stack observability integration.
+  Includes error boundaries, structured logging with PII scrubbing, session replay with privacy masking,
+  health check endpoint, and request logging middleware for API routes.
+
 ## 0.3.0
 
 ### Minor Changes

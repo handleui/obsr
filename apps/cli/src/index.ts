@@ -11,11 +11,8 @@ await initSentry();
 // Capture uncaught errors and flush before exit
 process.on("uncaughtException", async (error) => {
   captureException(error);
-  try {
-    await flush();
-  } finally {
-    process.exit(1);
-  }
+  await flush();
+  throw error;
 });
 
 process.on("unhandledRejection", (reason) => {

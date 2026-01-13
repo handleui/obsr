@@ -83,7 +83,7 @@ const CLIAuthPage = async ({ searchParams }: CLIAuthPageProps) => {
           <p className="text-neutral-600 text-sm">
             This page should be accessed from the Detent CLI. Run{" "}
             <code className="rounded bg-neutral-100 px-1.5 py-0.5 font-mono text-sm">
-              detent login
+              dt login
             </code>{" "}
             to authenticate.
           </p>

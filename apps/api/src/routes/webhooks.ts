@@ -935,6 +935,7 @@ interface WorkflowRunMeta {
   headBranch: string;
   runAttempt: number;
   runStartedAt: Date | null;
+  event: string;
 }
 
 const processAndStoreAllRuns = async (

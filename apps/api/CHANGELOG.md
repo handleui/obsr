@@ -1,5 +1,13 @@
 # @detent/api
 
+## 0.9.1
+
+### Patch Changes
+
+- b4c69a9: Improve webhook error handling with structured responses including error codes, hints, and debugging context
+- Updated dependencies [b4c69a9]
+  - @detent/parser@0.5.1
+
 ## 0.9.0
 
 ### Minor Changes

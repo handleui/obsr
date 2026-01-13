@@ -12,6 +12,7 @@ import {
   verifyAndClearOAuthState,
 } from "@/lib/auth";
 import { AUTH_DURATIONS, COOKIE_NAMES } from "@/lib/constants";
+import { type BetterStackRequest, withLogging } from "@/lib/logger";
 import { workos } from "@/lib/workos";
 
 /**
@@ -107,7 +108,8 @@ const setPendingVerificationCookie = async (
   );
 };
 
-export const GET = async (request: Request) => {
+const handler = async (request: BetterStackRequest) => {
+  const { log } = request;
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
@@ -116,7 +118,7 @@ export const GET = async (request: Request) => {
 
   // Check for OAuth errors from WorkOS
   if (error) {
-    console.error("[auth/callback] OAuth error:", error, errorDescription);
+    log.error("OAuth callback error", { error, errorDescription });
     return NextResponse.redirect(
       new URL(
         `/login?error=${encodeURIComponent(error)}&message=${encodeURIComponent(errorDescription || "")}`,
@@ -129,12 +131,14 @@ export const GET = async (request: Request) => {
   const isValidState = await verifyAndClearOAuthState(state);
 
   if (!isValidState) {
+    log.warn("OAuth callback: invalid state (potential CSRF)");
     return NextResponse.redirect(
       new URL("/login?error=invalid_state", request.url)
     );
   }
 
   if (!code) {
+    log.warn("OAuth callback: missing code");
     return NextResponse.redirect(new URL("/login?error=no_code", request.url));
   }
 
@@ -193,12 +197,13 @@ export const GET = async (request: Request) => {
     // Note: oauthTokens are only returned during initial authentication and are NOT
     // stored in the WorkOS sealed session. We must persist them in a separate cookie
     // for later use (e.g., CLI auth flow that needs the GitHub token).
-    if (
+    const hasGitHubTokens =
       "oauthTokens" in authResponse &&
-      isValidGitHubOAuthTokens(authResponse.oauthTokens)
-    ) {
+      isValidGitHubOAuthTokens(authResponse.oauthTokens);
+
+    if (hasGitHubTokens) {
       const oauthTokensJwt = await createGitHubOAuthTokensToken(
-        authResponse.oauthTokens
+        authResponse.oauthTokens as GitHubOAuthTokens
       );
       response.cookies.set(
         createSecureCookieOptions({
@@ -209,10 +214,20 @@ export const GET = async (request: Request) => {
       );
     }
 
+    log.info("User authenticated successfully", {
+      userId: user.id,
+      hasGitHubTokens,
+      sealedSession: shouldSealSession,
+    });
+
     return response;
   } catch (error) {
     // Handle email verification required error (GitHub OAuth specific)
     if (isEmailVerificationError(error)) {
+      log.info("Email verification required", {
+        email: error.rawData.email,
+      });
+
       const pendingData = {
         pendingAuthenticationToken: error.rawData.pending_authentication_token,
         email: error.rawData.email,
@@ -226,9 +241,14 @@ export const GET = async (request: Request) => {
       return response;
     }
 
-    console.error("[auth/callback] Auth error:", error);
+    log.error("Authentication failed", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return NextResponse.redirect(
       new URL("/login?error=auth_failed", request.url)
     );
   }
 };
+
+export const GET = withLogging(handler, "auth/callback");

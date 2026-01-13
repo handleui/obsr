@@ -1,6 +1,7 @@
 import { decodeJwt, jwtDecrypt } from "jose";
 import { NextResponse } from "next/server";
 import { getWorkOSCookiePassword } from "@/lib/auth";
+import { type BetterStackRequest, withLogging } from "@/lib/logger";
 
 interface OAuthTokens {
   accessToken: string;
@@ -24,12 +25,15 @@ interface TokenRequestBody {
  * API route to exchange encrypted one-time code for tokens
  * This is called by the CLI after receiving the encrypted code from the callback
  */
-export const POST = async (request: Request) => {
+const handler = async (request: BetterStackRequest) => {
+  const { log } = request;
+
   try {
     const body = (await request.json()) as TokenRequestBody;
     const { code } = body;
 
     if (!code) {
+      log.warn("Token exchange failed: missing code");
       return NextResponse.json(
         { error: "missing_code", message: "Code is required" },
         { status: 400 }
@@ -48,6 +52,7 @@ export const POST = async (request: Request) => {
       const result = await jwtDecrypt(code, encryptionKey);
       payload = result.payload as unknown as TokenPayload;
     } catch {
+      log.warn("Token exchange failed: invalid code");
       return NextResponse.json(
         { error: "invalid_code", message: "Invalid or expired code" },
         { status: 400 }
@@ -57,6 +62,7 @@ export const POST = async (request: Request) => {
     // Verify expiration (jose already handles this, but double-check)
     const now = Math.floor(Date.now() / 1000);
     if (payload.exp && payload.exp < now) {
+      log.warn("Token exchange failed: expired code");
       return NextResponse.json(
         { error: "expired_code", message: "Code has expired" },
         { status: 400 }
@@ -67,6 +73,7 @@ export const POST = async (request: Request) => {
     const { accessToken, refreshToken, oauthTokens } = payload;
 
     if (!(accessToken && refreshToken)) {
+      log.warn("Token exchange failed: invalid payload");
       return NextResponse.json(
         { error: "invalid_payload", message: "Invalid token payload" },
         { status: 400 }
@@ -81,6 +88,10 @@ export const POST = async (request: Request) => {
 
     // GitHub refresh tokens expire after 6 months (15897600 seconds)
     const GITHUB_REFRESH_TOKEN_LIFETIME_MS = 15_897_600 * 1000;
+
+    log.info("Token exchange successful", {
+      hasGitHubTokens: !!oauthTokens,
+    });
 
     return NextResponse.json({
       access_token: accessToken,
@@ -98,10 +109,15 @@ export const POST = async (request: Request) => {
       }),
     });
   } catch (err) {
-    console.error("[api/cli/token] Error:", err);
+    log.error("Token exchange error", {
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     return NextResponse.json(
       { error: "server_error", message: "An unexpected error occurred" },
       { status: 500 }
     );
   }
 };
+
+export const POST = withLogging(handler, "api/cli/token");

@@ -1,3 +1,5 @@
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK official pattern
+import * as Sentry from "@sentry/cloudflare";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { timeout } from "hono/timeout";
@@ -47,11 +49,38 @@ const checkDatabaseWithTimeout = async (
   }
 };
 
+/**
+ * Report health check failure to Sentry
+ * Uses warning level since failures are expected during outages
+ * but we still want visibility for debugging
+ */
+const reportHealthFailure = (
+  check: string,
+  error: unknown,
+  latencyMs: number
+): void => {
+  Sentry.withScope((scope) => {
+    scope.setLevel("warning");
+    scope.setTag("health.check", check);
+    scope.setTag("health.status", "down");
+    // Group all health check failures together
+    scope.setFingerprint(["health_check", check]);
+    scope.setContext("health", {
+      check,
+      latencyMs,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    Sentry.captureException(error);
+  });
+};
+
 // Health check - verifies API and database connectivity
 // OpenStatus monitors this endpoint for uptime
 app.use("/", timeout(REQUEST_TIMEOUT_MS, healthTimeoutException));
 
 app.get("/", async (c) => {
+  const startTime = Date.now();
+
   const checks: {
     database: "operational" | "down";
   } = {
@@ -62,9 +91,10 @@ app.get("/", async (c) => {
 
   try {
     checks.database = await checkDatabaseWithTimeout(c.env);
-  } catch {
+  } catch (error) {
     checks.database = "down";
     status = "down";
+    reportHealthFailure("database", error, Date.now() - startTime);
   }
 
   return c.json(
@@ -72,6 +102,7 @@ app.get("/", async (c) => {
       status,
       version: pkg.version,
       timestamp: new Date().toISOString(),
+      latencyMs: Date.now() - startTime,
       checks,
     },
     status === "operational" ? 200 : 503

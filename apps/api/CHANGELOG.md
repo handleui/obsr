@@ -1,5 +1,17 @@
 # @detent/api
 
+## 0.10.0
+
+### Minor Changes
+
+- bddee33: Add Sentry integration for comprehensive error tracking and observability.
+  Includes structured error capture with webhook context, fingerprinting for actionable alerts,
+  sensitive data scrubbing, request tracing via middleware, and unknown pattern telemetry.
+
+### Patch Changes
+
+- 67811d7: Improve health check error handling with database query timeout and request-level timeout middleware
+
 ## 0.9.1
 
 ### Patch Changes

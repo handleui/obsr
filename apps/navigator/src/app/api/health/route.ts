@@ -98,14 +98,21 @@ const checkSentry = (): CheckStatus =>
 
 /**
  * Determine overall status from individual checks
+ * Note: Only WorkOS is critical (blocking for auth). API connectivity is
+ * reported but non-critical to avoid cascading failures during API outages.
  */
 const computeOverallStatus = (checks: HealthChecks): CheckStatus => {
-  // Critical dependencies that cause "down" status
-  if (checks.workos === "down" || checks.api === "down") {
+  // Only WorkOS is critical - Navigator can't authenticate without it
+  if (checks.workos === "down") {
     return "down";
   }
 
-  // Any degraded service causes degraded status
+  // API down = degraded (reported, but Navigator still serves traffic)
+  if (checks.api === "down") {
+    return "degraded";
+  }
+
+  // Any other degraded service
   if (Object.values(checks).some((status) => status === "degraded")) {
     return "degraded";
   }

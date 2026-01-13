@@ -327,7 +327,7 @@ describe("formatCheckRunOutput", () => {
   });
 
   describe("text (error details)", () => {
-    it("includes errors grouped by source when errors exist", () => {
+    it("includes errors grouped by file with source badges", () => {
       const result = formatCheckRunOutput(
         createCheckRunOptions({
           errors: [
@@ -348,10 +348,10 @@ describe("formatCheckRunOutput", () => {
         })
       );
 
-      expect(result.text).toContain("### TypeScript (2 errors)");
-      expect(result.text).toContain("| Line | Message |");
-      expect(result.text).toContain("src/app.ts");
-      expect(result.text).toContain("42");
+      // Files should be linked and errors shown as bullet list with badges
+      expect(result.text).toContain("[src/app.ts]");
+      expect(result.text).toContain("- `42` [TS]");
+      expect(result.text).toContain("Type error");
     });
 
     it("includes CLI command in text", () => {
@@ -379,7 +379,7 @@ describe("formatCheckRunOutput", () => {
       expect(result.text).toBeUndefined();
     });
 
-    it("should group errors by source tool", () => {
+    it("should show source badges inline for different sources", () => {
       const result = formatCheckRunOutput(
         createCheckRunOptions({
           errors: [
@@ -406,11 +406,16 @@ describe("formatCheckRunOutput", () => {
         })
       );
 
-      expect(result.text).toContain("### TypeScript (2 errors)");
-      expect(result.text).toContain("### Biome (1 error)");
+      // Source badges should appear inline with each error
+      expect(result.text).toContain("[TS]");
+      expect(result.text).toContain("[Biome]");
+      // Files should be listed separately
+      expect(result.text).toContain("[a.ts]");
+      expect(result.text).toContain("[b.ts]");
+      expect(result.text).toContain("[c.ts]");
     });
 
-    it("should group errors by file within source", () => {
+    it("should group multiple errors under same file", () => {
       const result = formatCheckRunOutput(
         createCheckRunOptions({
           errors: [
@@ -437,11 +442,38 @@ describe("formatCheckRunOutput", () => {
         })
       );
 
-      expect(result.text).toContain("<summary>src/a.ts (2 errors)</summary>");
-      expect(result.text).toContain("<summary>src/b.ts (1 error)</summary>");
+      // Files should appear as clickable links
+      expect(result.text).toContain("[src/a.ts]");
+      expect(result.text).toContain("[src/b.ts]");
+      // Errors as bullet list with line numbers
+      expect(result.text).toContain("- `10`");
+      expect(result.text).toContain("- `20`");
+      expect(result.text).toContain("- `5`");
     });
 
-    it("should use collapsible details tags", () => {
+    it("should use collapsible details only for overflow files (>10)", () => {
+      // Create 12 files to trigger overflow
+      const errors = Array.from({ length: 12 }, (_, i) => ({
+        message: `Error ${i + 1}`,
+        source: "typescript",
+        filePath: `src/file${i + 1}.ts`,
+        line: i + 1,
+      }));
+
+      const result = formatCheckRunOutput(
+        createCheckRunOptions({
+          errors,
+          totalErrors: 12,
+        })
+      );
+
+      // Should have details tag for overflow
+      expect(result.text).toContain("<details>");
+      expect(result.text).toContain("View 2 more files");
+      expect(result.text).toContain("</details>");
+    });
+
+    it("should not use details tags when 10 or fewer files", () => {
       const result = formatCheckRunOutput(
         createCheckRunOptions({
           errors: [
@@ -451,8 +483,8 @@ describe("formatCheckRunOutput", () => {
         })
       );
 
-      expect(result.text).toContain("<details>");
-      expect(result.text).toContain("</details>");
+      // No details tags for single file
+      expect(result.text).not.toContain("<details>");
     });
 
     it("should show annotation note at top when errors have file and line", () => {
@@ -478,11 +510,13 @@ describe("formatCheckRunOutput", () => {
         })
       );
 
-      // Unknown source should show as capitalized
-      expect(result.text).toContain("unknown");
+      // Error should appear without a source badge (no [TS] or similar)
+      expect(result.text).toContain("- `1` Unknown error");
+      // File link should still exist
+      expect(result.text).toContain("[test.ts]");
     });
 
-    it("should handle more than 10 errors", () => {
+    it("should handle more than 10 errors in same file", () => {
       const errors = Array.from({ length: 25 }, (_, i) => ({
         message: `Error ${i + 1}`,
         source: "typescript",
@@ -494,8 +528,9 @@ describe("formatCheckRunOutput", () => {
         createCheckRunOptions({ errors, totalErrors: 25 })
       );
 
-      // Should show all 25 errors, not just 10
-      expect(result.text).toContain("| 25 |");
+      // Should show all 25 errors as bullet points
+      expect(result.text).toContain("- `25`");
+      expect(result.text).toContain("Error 25");
     });
   });
 
@@ -743,6 +778,27 @@ describe("XSS prevention", () => {
     expect(result.text).toContain("&lt;");
     expect(result.text).not.toContain("&amp;amp;");
     expect(result.text).not.toContain("&amp;lt;");
+  });
+
+  it("escapes brackets in file paths to prevent markdown link injection", () => {
+    const result = formatCheckRunOutput(
+      createCheckRunOptions({
+        errors: [
+          {
+            message: "Error",
+            filePath: "src/test[1].ts",
+            line: 1,
+            source: "typescript",
+          },
+        ],
+        totalErrors: 1,
+      })
+    );
+
+    // Brackets should be escaped to prevent breaking markdown link syntax
+    // "[src/test[1].ts](url)" would break; "[src/test\[1\].ts](url)" is correct
+    expect(result.text).not.toContain("[src/test[1]");
+    expect(result.text).toContain("\\[1\\]");
   });
 });
 

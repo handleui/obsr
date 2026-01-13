@@ -825,12 +825,16 @@ const processAndStoreAllRuns = async (
     repository: string;
     checkRunId: number;
   }
-): Promise<ParsedError[]> => {
+): Promise<{
+  errors: ParsedError[];
+  detectedUnsupportedTools: string[];
+}> => {
   // Limit concurrent fetches to avoid memory pressure from multiple ZIP files
   // Each workflow log can be up to 30MB compressed, so we keep this conservative
   const MAX_CONCURRENT_FETCHES = 3;
 
   const allErrors: ParsedError[] = [];
+  const allUnsupportedTools = new Set<string>();
   const failedRuns = allRuns.filter((r) => r.conclusion === "failure");
 
   // Map to store errors by run ID
@@ -862,6 +866,11 @@ const processAndStoreAllRuns = async (
         ...e,
         workflowJob: e.workflowJob ?? run.name,
       }));
+
+      // Collect unsupported tools
+      for (const tool of parseResult.detectedUnsupportedTools) {
+        allUnsupportedTools.add(tool);
+      }
 
       console.log(
         `[workflow_run] Parsed ${errorsWithContext.length} errors from run ${run.id} (${run.name})`
@@ -921,7 +930,10 @@ const processAndStoreAllRuns = async (
   // Bulk store all runs in a single transaction for efficiency
   await bulkStoreRunsAndErrors(env, preparedRuns);
 
-  return allErrors;
+  return {
+    errors: allErrors,
+    detectedUnsupportedTools: [...allUnsupportedTools].sort(),
+  };
 };
 
 // ============================================================================
@@ -1367,6 +1379,7 @@ const finalizeAndPostResults = async (
     checkRunId: number;
     workflowRuns: WorkflowRun[];
     allErrors: ParsedError[];
+    detectedUnsupportedTools: string[];
     // Feature settings
     enableInlineAnnotations: boolean;
     enablePrComments: boolean;
@@ -1389,6 +1402,7 @@ const finalizeAndPostResults = async (
     checkRunId,
     workflowRuns,
     allErrors,
+    detectedUnsupportedTools,
     enableInlineAnnotations,
     enablePrComments,
   } = context;
@@ -1415,6 +1429,7 @@ const finalizeAndPostResults = async (
     runs: runResults,
     errors: allErrors,
     totalErrors,
+    detectedUnsupportedTools,
   });
 
   // Update check run to completed
@@ -1496,6 +1511,7 @@ const finalizeAndPostResults = async (
       runs: runResults,
       errors: allErrors,
       totalErrors,
+      detectedUnsupportedTools,
     });
 
     // Safety: formatResultsComment returns null if no failures
@@ -1826,20 +1842,15 @@ const handleWorkflowRunCompleted = async (
 
     // Process only NEW runs: fetch logs for failures, store with metadata
     // Re-runs (same runId, different runAttempt) will be in runsToProcess
-    const allErrors = await processAndStoreAllRuns(
-      c.env,
-      github,
-      token,
-      runsToProcess,
-      {
+    const { errors: allErrors, detectedUnsupportedTools } =
+      await processAndStoreAllRuns(c.env, github, token, runsToProcess, {
         owner,
         repo,
         prNumber,
         headSha,
         repository: repository.full_name,
         checkRunId: finalCheckRunId,
-      }
-    );
+      });
 
     // Finalize: update check run and post PR comment (if failures)
     const { totalErrors } = await finalizeAndPostResults(
@@ -1856,6 +1867,7 @@ const handleWorkflowRunCompleted = async (
         checkRunId: finalCheckRunId,
         workflowRuns,
         allErrors,
+        detectedUnsupportedTools,
         enableInlineAnnotations: orgSettings.enableInlineAnnotations,
         enablePrComments: orgSettings.enablePrComments,
       }

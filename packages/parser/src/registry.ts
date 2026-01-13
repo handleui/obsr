@@ -191,7 +191,7 @@ const toolPatterns: readonly ToolPattern[] = [
     displayName: "tsc",
   },
   {
-    pattern: /(?:^|\s)bunx?\s+tsc\b/,
+    pattern: /(?:^|\s)bunx\s+tsc\b/,
     parserID: "typescript",
     displayName: "tsc",
   },
@@ -216,7 +216,7 @@ const toolPatterns: readonly ToolPattern[] = [
     displayName: "eslint",
   },
   {
-    pattern: /(?:^|\s)bunx?\s+eslint\b/,
+    pattern: /(?:^|\s)bunx\s+eslint\b/,
     parserID: "eslint",
     displayName: "eslint",
   },
@@ -250,7 +250,7 @@ const toolPatterns: readonly ToolPattern[] = [
     displayName: "biome",
   },
   {
-    pattern: /(?:^|\s)bunx?\s+biome\b/,
+    pattern: /(?:^|\s)bunx\s+biome\b/,
     parserID: "biome",
     displayName: "biome",
   },
@@ -337,7 +337,7 @@ const toolPatterns: readonly ToolPattern[] = [
     displayName: "vitest",
   },
   {
-    pattern: /(?:^|\s)bunx?\s+vitest\b/,
+    pattern: /(?:^|\s)bunx\s+vitest\b/,
     parserID: "vitest",
     displayName: "vitest",
   },
@@ -352,6 +352,148 @@ const toolPatterns: readonly ToolPattern[] = [
     pattern: /(?:^|\s)yarn\s+[^\n]*\bvitest\b/,
     parserID: "vitest",
     displayName: "vitest",
+  },
+
+  // ============================================================================
+  // Unsupported Tools (detected but no dedicated parser)
+  // These use "unsupported:" prefix to distinguish from supported tools
+  // ============================================================================
+
+  // Test runners (unsupported)
+  {
+    pattern: /(?:^|\s|\/)jest\b/,
+    parserID: "unsupported:jest",
+    displayName: "Jest",
+  },
+  {
+    pattern: /(?:^|\s)npx\s+jest\b/,
+    parserID: "unsupported:jest",
+    displayName: "Jest",
+  },
+  {
+    pattern: /(?:^|\s)bunx\s+jest\b/,
+    parserID: "unsupported:jest",
+    displayName: "Jest",
+  },
+  {
+    // HACK: Use [^\n]* instead of .* to prevent ReDoS - limits backtracking
+    pattern: /(?:^|\s)pnpm\s+[^\n]*\bjest\b/,
+    parserID: "unsupported:jest",
+    displayName: "Jest",
+  },
+  {
+    // HACK: Use [^\n]* instead of .* to prevent ReDoS - limits backtracking
+    pattern: /(?:^|\s)yarn\s+[^\n]*\bjest\b/,
+    parserID: "unsupported:jest",
+    displayName: "Jest",
+  },
+  {
+    pattern: /(?:^|\s|\/)mocha\b/,
+    parserID: "unsupported:mocha",
+    displayName: "Mocha",
+  },
+  {
+    pattern: /(?:^|\s|\/)ava\b/,
+    parserID: "unsupported:ava",
+    displayName: "AVA",
+  },
+  {
+    pattern: /(?:^|\s|\/)jasmine\b/,
+    parserID: "unsupported:jasmine",
+    displayName: "Jasmine",
+  },
+  {
+    pattern: /(?:^|\s|\/)playwright\b/,
+    parserID: "unsupported:playwright",
+    displayName: "Playwright",
+  },
+  {
+    pattern: /(?:^|\s)npx\s+playwright\b/,
+    parserID: "unsupported:playwright",
+    displayName: "Playwright",
+  },
+  {
+    pattern: /(?:^|\s|\/)cypress\b/,
+    parserID: "unsupported:cypress",
+    displayName: "Cypress",
+  },
+  {
+    pattern: /(?:^|\s)npx\s+cypress\b/,
+    parserID: "unsupported:cypress",
+    displayName: "Cypress",
+  },
+
+  // Formatters (unsupported)
+  {
+    pattern: /(?:^|\s|\/)prettier\b/,
+    parserID: "unsupported:prettier",
+    displayName: "Prettier",
+  },
+  {
+    pattern: /(?:^|\s)npx\s+prettier\b/,
+    parserID: "unsupported:prettier",
+    displayName: "Prettier",
+  },
+  {
+    pattern: /(?:^|\s)bunx\s+prettier\b/,
+    parserID: "unsupported:prettier",
+    displayName: "Prettier",
+  },
+  {
+    // HACK: Use [^\n]* instead of .* to prevent ReDoS - limits backtracking
+    pattern: /(?:^|\s)pnpm\s+[^\n]*\bprettier\b/,
+    parserID: "unsupported:prettier",
+    displayName: "Prettier",
+  },
+  {
+    // HACK: Use [^\n]* instead of .* to prevent ReDoS - limits backtracking
+    pattern: /(?:^|\s)yarn\s+[^\n]*\bprettier\b/,
+    parserID: "unsupported:prettier",
+    displayName: "Prettier",
+  },
+  {
+    pattern: /(?:^|\s|\/)stylelint\b/,
+    parserID: "unsupported:stylelint",
+    displayName: "stylelint",
+  },
+
+  // Bundlers (unsupported)
+  {
+    pattern: /(?:^|\s|\/)webpack\b/,
+    parserID: "unsupported:webpack",
+    displayName: "webpack",
+  },
+  {
+    pattern: /(?:^|\s|\/)vite\s+(build|dev|preview)\b/,
+    parserID: "unsupported:vite",
+    displayName: "Vite",
+  },
+  {
+    pattern: /(?:^|\s|\/)esbuild\b/,
+    parserID: "unsupported:esbuild",
+    displayName: "esbuild",
+  },
+  {
+    pattern: /(?:^|\s|\/)rollup\b/,
+    parserID: "unsupported:rollup",
+    displayName: "Rollup",
+  },
+  {
+    pattern: /(?:^|\s|\/)turbo\s+(run|build)\b/,
+    parserID: "unsupported:turbo",
+    displayName: "Turbo",
+  },
+
+  // Other linters (unsupported)
+  {
+    pattern: /(?:^|\s|\/)oxlint\b/,
+    parserID: "unsupported:oxlint",
+    displayName: "oxlint",
+  },
+  {
+    pattern: /(?:^|\s|\/)deno\s+(lint|check|test)\b/,
+    parserID: "unsupported:deno",
+    displayName: "Deno",
   },
 ];
 
@@ -415,6 +557,27 @@ export const unsupportedTools = (
  */
 export const allSupported = (result: DetectionResult): boolean =>
   result.tools.every((t) => t.supported);
+
+/**
+ * Check if a tool ID represents an unsupported tool.
+ * Unsupported tools use the "unsupported:" prefix convention.
+ */
+export const isUnsupportedToolID = (id: string): boolean =>
+  id.startsWith("unsupported:");
+
+/**
+ * Get display name for an unsupported tool ID.
+ * Returns undefined if the ID is not an unsupported tool or pattern not found.
+ */
+export const getUnsupportedToolDisplayName = (
+  id: string
+): string | undefined => {
+  if (!id.startsWith("unsupported:")) {
+    return undefined;
+  }
+  const pattern = toolPatterns.find((p) => p.parserID === id);
+  return pattern?.displayName;
+};
 
 // ============================================================================
 // Parser Registry
@@ -533,6 +696,10 @@ export class ParserRegistry {
    * Check if the registry has a non-generic parser for the given ID.
    */
   hasDedicatedParser(id: string): boolean {
+    // Unsupported tools explicitly have no dedicated parser
+    if (id.startsWith("unsupported:")) {
+      return false;
+    }
     const p = this.byID.get(id);
     if (!p) {
       return false;

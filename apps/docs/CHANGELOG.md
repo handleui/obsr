@@ -1,5 +1,11 @@
 # @detent/docs
 
+## 0.1.2
+
+### Patch Changes
+
+- d35c1c1: Document check_suite webhook handling
+
 ## 0.1.1
 
 ### Patch Changes

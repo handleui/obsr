@@ -1,5 +1,13 @@
 # @detent/api
 
+## 0.7.0
+
+### Minor Changes
+
+- d35c1c1: Add early check run creation on PR open and equalize admin/owner permissions.
+  First GitHub admin on ownerless org now becomes owner automatically.
+  Includes atomic operations to prevent race conditions and composite index for performance.
+
 ## 0.6.1
 
 ### Patch Changes

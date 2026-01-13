@@ -822,15 +822,13 @@ const isTokenError = (message: string): boolean =>
 // Note: Avoid provider-specific identifiers to prevent implementation leakage
 const isDatabaseError = (message: string): boolean =>
   message.includes("database") ||
-  message.includes("connection") ||
+  (message.includes("connection") && !message.includes("github")) ||
   message.includes("econnrefused") ||
   message.includes("sql");
 
 // Helper: Check if message indicates GitHub API error
 const isGitHubApiError = (message: string): boolean =>
-  message.includes("github") ||
-  message.includes("octokit") ||
-  message.includes("api");
+  message.includes("github api") || message.includes("octokit");
 
 const classifyError = (error: unknown): ClassifiedError => {
   if (!(error instanceof Error)) {

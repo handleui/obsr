@@ -7,7 +7,7 @@
 
 import { defineCommand } from "citty";
 import { type GitHubOrgWithStatus, getGitHubOrgs } from "../../lib/api.js";
-import { getAccessToken } from "../../lib/auth.js";
+import { getAccessToken, getGitHubToken } from "../../lib/auth.js";
 import { openBrowser } from "../../lib/browser.js";
 import { handleGitHubOrgError } from "../../lib/errors.js";
 
@@ -116,8 +116,11 @@ export const installCommand = defineCommand({
     }
 
     // Fetch GitHub organizations to show status
-    const orgsResponse =
-      await getGitHubOrgs(accessToken).catch(handleGitHubOrgError);
+    // Pass GitHub OAuth token if available (avoids need for WorkOS Pipes)
+    const githubToken = getGitHubToken();
+    const orgsResponse = await getGitHubOrgs(accessToken, githubToken).catch(
+      handleGitHubOrgError
+    );
 
     // If --org flag provided, validate and open with target_id
     if (args.org) {

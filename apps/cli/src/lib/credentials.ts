@@ -20,6 +20,9 @@ export interface Credentials {
   access_token: string;
   refresh_token: string;
   expires_at: number;
+  // GitHub OAuth token (from WorkOS "Return GitHub OAuth tokens" setting)
+  github_token?: string;
+  github_token_expires_at?: number;
 }
 
 const CREDENTIALS_FILE = "credentials.json";

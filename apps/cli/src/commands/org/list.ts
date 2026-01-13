@@ -14,7 +14,7 @@ import {
   type Organization,
   type Project,
 } from "../../lib/api.js";
-import { getAccessToken } from "../../lib/auth.js";
+import { getAccessToken, getGitHubToken } from "../../lib/auth.js";
 import { handleGitHubOrgError } from "../../lib/errors.js";
 
 const formatVisibility = (isPrivate: boolean): string =>
@@ -112,7 +112,9 @@ const displayAvailableOrgs = (orgs: GitHubOrgWithStatus[]): void => {
 
 const listAvailableOrgs = async (accessToken: string): Promise<void> => {
   try {
-    const response = await getGitHubOrgs(accessToken);
+    // Pass GitHub OAuth token if available (avoids need for WorkOS Pipes)
+    const githubToken = getGitHubToken();
+    const response = await getGitHubOrgs(accessToken, githubToken);
 
     if (response.orgs.length === 0) {
       console.log("No GitHub organizations found.\n");

@@ -42,6 +42,9 @@ export interface TokenResponse {
   refresh_token: string;
   token_type: string;
   expires_in: number;
+  // GitHub OAuth token (from Navigator flow when "Return GitHub OAuth tokens" is enabled)
+  github_token?: string;
+  github_token_expires_at?: number;
 }
 
 export interface TokenErrorResponse {
@@ -195,14 +198,36 @@ export const getAccessToken = async (): Promise<string> => {
 
   const tokens = await refreshAccessToken(credentials.refresh_token);
   // Use the JWT's actual exp claim, not expires_in from response
+  // Preserve existing GitHub token if still valid (refresh doesn't return a new one)
   const newCredentials: Credentials = {
     access_token: tokens.access_token,
     refresh_token: tokens.refresh_token,
     expires_at: getJwtExpiration(tokens.access_token),
+    // Keep GitHub token if it hasn't expired yet
+    ...(credentials.github_token &&
+      credentials.github_token_expires_at &&
+      credentials.github_token_expires_at > Date.now() && {
+        github_token: credentials.github_token,
+        github_token_expires_at: credentials.github_token_expires_at,
+      }),
   };
 
   saveCredentials(newCredentials);
   return newCredentials.access_token;
+};
+
+/**
+ * Check if user has a valid session (tokens exist and can be refreshed if needed)
+ * Unlike isLoggedIn() which only checks if credentials exist, this validates
+ * the session is actually usable by attempting to get a valid access token.
+ */
+export const hasValidSession = async (): Promise<boolean> => {
+  try {
+    await getAccessToken();
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 export const decodeUserInfo = (accessToken: string): UserInfo => {
@@ -222,6 +247,39 @@ export const getExpiresAt = (accessToken: string): Date | null => {
     return new Date(payload.exp * 1000);
   }
   return null;
+};
+
+/**
+ * Check if GitHub token is expired
+ * Uses a 5-minute buffer for safety, same as access token expiration check
+ */
+export const isGitHubTokenExpired = (credentials: Credentials): boolean => {
+  if (!(credentials.github_token && credentials.github_token_expires_at)) {
+    return true;
+  }
+  const bufferMs = 5 * 60 * 1000;
+  return credentials.github_token_expires_at < Date.now() + bufferMs;
+};
+
+/**
+ * Get GitHub OAuth token from credentials if available and not expired
+ * This is used for API calls that need to access GitHub on behalf of the user
+ *
+ * Returns null if:
+ * - No credentials exist
+ * - No GitHub token stored
+ * - GitHub token is expired
+ */
+export const getGitHubToken = (): string | null => {
+  const credentials = loadCredentials();
+  if (!credentials?.github_token) {
+    return null;
+  }
+  // Return null if token is expired - caller should handle re-authentication
+  if (isGitHubTokenExpired(credentials)) {
+    return null;
+  }
+  return credentials.github_token;
 };
 
 /**
@@ -263,6 +321,8 @@ export const authenticateViaNavigator = async (): Promise<TokenResponse> => {
     access_token: string;
     refresh_token: string;
     expires_at: number;
+    github_token?: string;
+    github_token_expires_at?: number;
   };
 
   return {
@@ -270,5 +330,8 @@ export const authenticateViaNavigator = async (): Promise<TokenResponse> => {
     refresh_token: tokens.refresh_token,
     token_type: "Bearer",
     expires_in: Math.floor((tokens.expires_at - Date.now()) / 1000),
+    // Pass through GitHub OAuth token if available
+    github_token: tokens.github_token,
+    github_token_expires_at: tokens.github_token_expires_at,
   };
 };

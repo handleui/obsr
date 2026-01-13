@@ -10,6 +10,8 @@ interface ApiOptions {
   method?: "GET" | "POST" | "PUT" | "DELETE";
   body?: unknown;
   accessToken: string;
+  // Additional headers (e.g., X-GitHub-Token for GitHub OAuth token)
+  headers?: Record<string, string>;
 }
 
 interface ApiError {
@@ -34,7 +36,7 @@ export const apiRequest = async <T>(
   path: string,
   options: ApiOptions
 ): Promise<T> => {
-  const { method = "GET", body, accessToken } = options;
+  const { method = "GET", body, accessToken, headers: extraHeaders } = options;
 
   let response: Response;
   try {
@@ -43,6 +45,7 @@ export const apiRequest = async <T>(
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
+        ...extraHeaders,
       },
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -263,9 +266,14 @@ export interface GitHubOrgsResponse {
 
 // GitHub Organizations API methods
 export const getGitHubOrgs = (
-  accessToken: string
+  accessToken: string,
+  githubToken?: string | null
 ): Promise<GitHubOrgsResponse> =>
-  apiRequest<GitHubOrgsResponse>("/v1/auth/github-orgs", { accessToken });
+  apiRequest<GitHubOrgsResponse>("/v1/auth/github-orgs", {
+    accessToken,
+    // Pass GitHub OAuth token if available (avoids need for WorkOS Pipes)
+    ...(githubToken && { headers: { "X-GitHub-Token": githubToken } }),
+  });
 
 // ============================================================================
 // Errors Types

@@ -1,7 +1,11 @@
 import { decodeJwt, EncryptJWT } from "jose";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { getWorkOSCookiePassword } from "@/lib/auth";
+import {
+  type GitHubOAuthTokens,
+  getGitHubOAuthTokens,
+  getWorkOSCookiePassword,
+} from "@/lib/auth";
 import { COOKIE_NAMES } from "@/lib/constants";
 import { workos } from "@/lib/workos";
 
@@ -24,7 +28,8 @@ const isSealedSessionsEnabled = () => {
  */
 const createEncryptedCode = async (
   accessToken: string,
-  refreshToken: string
+  refreshToken: string,
+  oauthTokens?: GitHubOAuthTokens | null
 ) => {
   // A256GCM requires exactly 256 bits (32 bytes) key
   // Hash the password to get consistent 32-byte key
@@ -36,6 +41,8 @@ const createEncryptedCode = async (
   const encryptedCode = await new EncryptJWT({
     accessToken,
     refreshToken,
+    // Include GitHub OAuth token if available (from "Return GitHub OAuth tokens" setting)
+    ...(oauthTokens && { oauthTokens }),
   })
     .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
     .setExpirationTime("60s")
@@ -123,11 +130,20 @@ export const GET = async (request: Request) => {
       throw new Error("Missing tokens in session");
     }
 
+    // Get GitHub OAuth tokens from separate cookie
+    // Note: oauthTokens are NOT stored in WorkOS sealed session and NOT returned from refresh.
+    // They are only returned during initial auth, so we persist them separately.
+    const oauthTokens = await getGitHubOAuthTokens();
+
     // Extract user email from access token for success page display
     const { email } = decodeJwt(accessToken) as { email?: string };
 
-    // Create encrypted one-time code
-    const encryptedCode = await createEncryptedCode(accessToken, refreshToken);
+    // Create encrypted one-time code (includes GitHub OAuth token if available)
+    const encryptedCode = await createEncryptedCode(
+      accessToken,
+      refreshToken,
+      oauthTokens
+    );
 
     // Build redirect URL to CLI's localhost server (use validated portNumber)
     const cliCallbackUrl = new URL(`http://localhost:${portNumber}/callback`);

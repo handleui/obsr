@@ -314,3 +314,70 @@ export const getAndClearReturnTo = async (): Promise<string | null> => {
     return null;
   }
 };
+
+/**
+ * GitHub OAuth tokens structure
+ * These are returned by WorkOS when "Return GitHub OAuth tokens" is enabled
+ * Note: WorkOS sealed sessions do NOT store oauthTokens, so we persist them separately
+ */
+export interface GitHubOAuthTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  scopes: string[];
+}
+
+/**
+ * Create a signed JWT to securely store GitHub OAuth tokens
+ * The JWT protects against tampering and includes automatic expiration
+ */
+export const createGitHubOAuthTokensToken = (tokens: GitHubOAuthTokens) => {
+  return new SignJWT({ tokens })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setIssuedAt()
+    .setIssuer(JWT_ISSUER)
+    .setAudience("github-oauth-tokens")
+    .setExpirationTime("24h") // Same as session duration
+    .sign(getJwtSecretKey());
+};
+
+/**
+ * Get GitHub OAuth tokens from cookie
+ * Returns null if cookie is missing, invalid, or expired
+ * Cookie value is a signed JWT to prevent tampering with sensitive tokens
+ */
+export const getGitHubOAuthTokens =
+  async (): Promise<GitHubOAuthTokens | null> => {
+    const cookieStore = await cookies();
+    const cookie = cookieStore.get(CookieNames.githubOAuthTokens)?.value;
+
+    if (!cookie) {
+      return null;
+    }
+
+    try {
+      const { payload } = await jwtVerify(cookie, getJwtSecretKey(), {
+        issuer: JWT_ISSUER,
+        audience: "github-oauth-tokens",
+      });
+
+      const tokens = payload.tokens as GitHubOAuthTokens;
+      if (!(tokens?.accessToken && tokens?.refreshToken)) {
+        return null;
+      }
+
+      return tokens;
+    } catch {
+      // Token invalid or expired - clear the cookie
+      cookieStore.delete(CookieNames.githubOAuthTokens);
+      return null;
+    }
+  };
+
+/**
+ * Clear GitHub OAuth tokens cookie on logout
+ */
+export const clearGitHubOAuthTokens = async () => {
+  const cookieStore = await cookies();
+  cookieStore.delete(CookieNames.githubOAuthTokens);
+};

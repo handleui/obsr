@@ -364,55 +364,211 @@ app.get("/me", async (c) => {
   }
 });
 
+// GitHub OAuth token format validation
+// Accepts: classic PATs (ghp_), fine-grained PATs (github_pat_), and OAuth tokens (ghu_, gho_)
+const GITHUB_TOKEN_REGEX = /^(ghp_|gho_|ghu_|github_pat_)[a-zA-Z0-9_]+$/;
+
+/**
+ * Validate GitHub token format to prevent injection and ensure basic validity
+ * Returns true if token matches known GitHub token patterns
+ */
+const isValidGitHubTokenFormat = (token: string): boolean => {
+  // Token should be reasonable length (GitHub tokens are typically 40-255 chars)
+  if (token.length < 20 || token.length > 300) {
+    return false;
+  }
+  // Must match known GitHub token prefixes
+  return GITHUB_TOKEN_REGEX.test(token);
+};
+
+/**
+ * Verify a GitHub token belongs to the expected user by checking the authenticated user's GitHub ID
+ * against the WorkOS identity. Returns the GitHub user data if verified, null otherwise.
+ */
+const verifyGitHubTokenOwnership = async (
+  githubToken: string,
+  userId: string,
+  workosApiKey: string
+): Promise<{ id: number; login: string } | null> => {
+  // Fetch GitHub user info with the provided token
+  const githubUserResponse = await fetch("https://api.github.com/user", {
+    headers: {
+      Authorization: `Bearer ${githubToken}`,
+      Accept: "application/vnd.github.v3+json",
+      "User-Agent": "Detent-API",
+    },
+  });
+
+  if (!githubUserResponse.ok) {
+    return null;
+  }
+
+  const githubUser = (await githubUserResponse.json()) as {
+    id: number;
+    login: string;
+  };
+
+  // Fetch the user's WorkOS identities to get their expected GitHub ID
+  const identitiesResponse = await fetch(
+    `https://api.workos.com/user_management/users/${userId}/identities`,
+    {
+      headers: {
+        Authorization: `Bearer ${workosApiKey}`,
+      },
+    }
+  );
+
+  if (!identitiesResponse.ok) {
+    return null;
+  }
+
+  const identities =
+    (await identitiesResponse.json()) as WorkOSIdentitiesResponse;
+  const githubIdentity = identities.data?.find(
+    (identity) => identity.provider === "GitHubOAuth"
+  );
+
+  if (!githubIdentity) {
+    return null;
+  }
+
+  // Verify the token's GitHub user ID matches the user's linked identity
+  if (String(githubUser.id) !== githubIdentity.idp_id) {
+    console.error(
+      `GitHub token ownership mismatch: token user ${githubUser.id} != linked identity ${githubIdentity.idp_id}`
+    );
+    return null;
+  }
+
+  return githubUser;
+};
+
+// Result types for token acquisition and error handling
+interface TokenErrorResult {
+  error: string;
+  code?: string;
+  status: number;
+}
+
+type TokenResult =
+  | { success: true; token: string }
+  | ({ success: false } & TokenErrorResult);
+
+/**
+ * Get a verified GitHub token from the X-GitHub-Token header
+ * Validates format and verifies token ownership against user's WorkOS identity
+ */
+const getVerifiedGitHubToken = async (
+  providedToken: string | undefined,
+  userId: string,
+  workosApiKey: string
+): Promise<TokenResult> => {
+  if (!providedToken) {
+    return {
+      success: false,
+      error:
+        "GitHub token required. Please re-authenticate with `dt auth login --force`.",
+      code: "github_token_required",
+      status: 401,
+    };
+  }
+
+  if (!isValidGitHubTokenFormat(providedToken)) {
+    return {
+      success: false,
+      error: "Invalid GitHub token format",
+      code: "invalid_token_format",
+      status: 400,
+    };
+  }
+
+  const verifiedUser = await verifyGitHubTokenOwnership(
+    providedToken,
+    userId,
+    workosApiKey
+  );
+
+  if (!verifiedUser) {
+    return {
+      success: false,
+      error:
+        "GitHub token verification failed. Please re-authenticate with `dt auth login --force`.",
+      code: "token_verification_failed",
+      status: 401,
+    };
+  }
+
+  return { success: true, token: providedToken };
+};
+
+/**
+ * Handle GitHub API response errors with appropriate user-facing messages
+ */
+const handleGitHubApiError = (response: Response): TokenErrorResult => {
+  const status = response.status;
+
+  // Rate limit exceeded (403 with x-ratelimit-remaining: 0)
+  if (status === 403 && response.headers.get("x-ratelimit-remaining") === "0") {
+    const resetTime = response.headers.get("x-ratelimit-reset");
+    const resetDate = resetTime
+      ? new Date(Number.parseInt(resetTime, 10) * 1000).toISOString()
+      : "soon";
+    console.error(`GitHub API rate limit exceeded, resets at ${resetDate}`);
+    return {
+      error: "GitHub API rate limit exceeded. Please try again later.",
+      code: "rate_limit_exceeded",
+      status: 429,
+    };
+  }
+
+  // Unauthorized - token invalid or expired
+  if (status === 401) {
+    console.error("GitHub API returned 401 - token invalid or expired");
+    return {
+      error:
+        "GitHub authentication failed. Please re-authenticate with `dt auth login --force`.",
+      code: "github_auth_failed",
+      status: 401,
+    };
+  }
+
+  // Generic error - don't expose GitHub API details to client
+  console.error(`GitHub API error: ${status} ${response.statusText}`);
+  return {
+    error: "Failed to fetch GitHub organizations",
+    status: 500,
+  };
+};
+
 /**
  * GET /github-orgs
  * List GitHub organizations where the authenticated user can install the Detent GitHub App.
  * Returns org details with installation status and user's admin capability.
+ *
+ * Requires GitHub OAuth token via X-GitHub-Token header.
+ * The token is validated for format and verified to belong to the authenticated user.
  */
 app.get("/github-orgs", async (c) => {
   const auth = c.get("auth");
 
-  // Fetch GitHub OAuth token from WorkOS Pipes API
-  const tokenResponse = await fetch(
-    "https://api.workos.com/data-integrations/github/token",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${c.env.WORKOS_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        user_id: auth.userId,
-      }),
-    }
+  // Get verified GitHub token from header
+  const tokenResult = await getVerifiedGitHubToken(
+    c.req.header("X-GitHub-Token"),
+    auth.userId,
+    c.env.WORKOS_API_KEY
   );
 
-  if (!tokenResponse.ok) {
-    console.error(
-      `Failed to fetch GitHub token from WorkOS: ${tokenResponse.status} ${tokenResponse.statusText}`
+  if (!tokenResult.success) {
+    return c.json(
+      {
+        error: tokenResult.error,
+        ...(tokenResult.code && { code: tokenResult.code }),
+      },
+      tokenResult.status as 400 | 401 | 429 | 500
     );
-    return c.json({ error: "Failed to fetch GitHub OAuth token" }, 500);
   }
 
-  const tokenData = (await tokenResponse.json()) as {
-    active: boolean;
-    access_token?: { token: string; expires_at: string };
-    error?: string;
-  };
-
-  if (!(tokenData.active && tokenData.access_token)) {
-    let errorMessage = "GitHub OAuth token not available";
-    if (tokenData.error === "not_installed") {
-      errorMessage =
-        "GitHub account not connected. Please authenticate with GitHub.";
-    } else if (tokenData.error === "needs_reauthorization") {
-      errorMessage =
-        "GitHub authorization expired. Please re-authenticate with GitHub.";
-    }
-    return c.json({ error: errorMessage, code: tokenData.error }, 401);
-  }
-
-  const githubToken = tokenData.access_token.token;
+  const githubToken = tokenResult.token;
 
   // Fetch user's GitHub organizations
   const orgsResponse = await fetch("https://api.github.com/user/orgs", {
@@ -424,10 +580,14 @@ app.get("/github-orgs", async (c) => {
   });
 
   if (!orgsResponse.ok) {
-    console.error(
-      `Failed to fetch GitHub orgs: ${orgsResponse.status} ${orgsResponse.statusText}`
+    const errorResult = handleGitHubApiError(orgsResponse);
+    return c.json(
+      {
+        error: errorResult.error,
+        ...(errorResult.code && { code: errorResult.code }),
+      },
+      errorResult.status as 401 | 429 | 500
     );
-    return c.json({ error: "Failed to fetch GitHub organizations" }, 500);
   }
 
   const githubOrgs = (await orgsResponse.json()) as GitHubOrg[];

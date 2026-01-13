@@ -2,9 +2,17 @@ import { decodeJwt, jwtDecrypt } from "jose";
 import { NextResponse } from "next/server";
 import { getWorkOSCookiePassword } from "@/lib/auth";
 
+interface OAuthTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  scopes: string[];
+}
+
 interface TokenPayload {
   accessToken: string;
   refreshToken: string;
+  oauthTokens?: OAuthTokens;
   exp: number;
 }
 
@@ -56,7 +64,7 @@ export const POST = async (request: Request) => {
     }
 
     // Extract tokens
-    const { accessToken, refreshToken } = payload;
+    const { accessToken, refreshToken, oauthTokens } = payload;
 
     if (!(accessToken && refreshToken)) {
       return NextResponse.json(
@@ -75,6 +83,12 @@ export const POST = async (request: Request) => {
       access_token: accessToken,
       refresh_token: refreshToken,
       expires_at: expiresAt,
+      // Include GitHub OAuth token if available (from "Return GitHub OAuth tokens" setting)
+      // Note: expiresAt from WorkOS is in Unix seconds, convert to milliseconds for CLI
+      ...(oauthTokens && {
+        github_token: oauthTokens.accessToken,
+        github_token_expires_at: oauthTokens.expiresAt * 1000,
+      }),
     });
   } catch (err) {
     console.error("[api/cli/token] Error:", err);

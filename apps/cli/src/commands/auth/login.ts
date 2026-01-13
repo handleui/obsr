@@ -3,12 +3,13 @@ import { syncIdentity } from "../../lib/api.js";
 import {
   authenticateViaNavigator,
   getJwtExpiration,
+  hasValidSession,
   pollForTokens,
   requestDeviceAuthorization,
   type TokenResponse,
 } from "../../lib/auth.js";
 import type { Credentials } from "../../lib/credentials.js";
-import { isLoggedIn, saveCredentials } from "../../lib/credentials.js";
+import { saveCredentials } from "../../lib/credentials.js";
 import { ANSI_RESET, colors, hexToAnsi } from "../../tui/styles.js";
 
 const brand = hexToAnsi(colors.brand);
@@ -101,7 +102,7 @@ export const loginCommand = defineCommand({
     },
   },
   run: async ({ args }) => {
-    if (!args.force && isLoggedIn()) {
+    if (!args.force && (await hasValidSession())) {
       console.log("Already logged in. Use --force to re-authenticate.");
       return;
     }
@@ -114,6 +115,11 @@ export const loginCommand = defineCommand({
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       expires_at: getJwtExpiration(tokens.access_token),
+      // Store GitHub OAuth token if available (from Navigator flow)
+      ...(tokens.github_token && {
+        github_token: tokens.github_token,
+        github_token_expires_at: tokens.github_token_expires_at,
+      }),
     };
 
     saveCredentials(credentials);

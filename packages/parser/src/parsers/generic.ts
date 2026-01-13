@@ -179,6 +179,9 @@ const noisePatterns: readonly RegExp[] = [
   /(?:^(job|step|stage)\s+'\S+')/i, // CI job/step names
   /(?:^(added|removed|changed)\s+\d+\s+)/i, // Git diff summary
   /(?:^(time|duration|elapsed))/i, // Timing info
+  // CI wrapper errors - these are redundant with the actual error
+  /command\s+finished\s+with\s+error.*exited/i, // "[ERROR] command finished with error: ... exited (1)"
+  /exited\s+with\s+(?:exit\s+)?code\s+\d+/i, // Generic exit code wrapper
 
   // === LINTER/TOOL STATUS (not errors themselves) ===
   /(?:^(running|checking|analyzing|linting)\s+)/i,
@@ -301,6 +304,10 @@ const fastContains: readonly string[] = [
   // Note: "errors found" and "warnings found" are too broad (would match
   // "validation errors found in config"), so we only use the anchored regex patterns
   "lint errors found",
+  // CI wrapper errors - redundant with actual error
+  "command finished with error",
+  "exited with code",
+  "exited with exit code",
 ];
 
 /**

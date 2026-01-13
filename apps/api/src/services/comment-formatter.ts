@@ -14,6 +14,8 @@ export interface FormatCommentOptions {
   owner: string;
   repo: string;
   headSha: string;
+  /** First line of the commit message (for display in footer) */
+  headCommitMessage?: string;
   runs: WorkflowRunResult[];
   errors: ParsedError[];
   totalErrors: number;
@@ -132,57 +134,159 @@ const formatUnsupportedToolsNotice = (
   return `_Detected ${tools.join(", ")} - parsers not yet available_`;
 };
 
-// Format the main PR comment with error summary (minimal format)
+// Group errors by workflow job and step for display
+interface StepErrors {
+  step: string;
+  errorCount: number;
+}
+
+interface JobErrors {
+  job: string;
+  steps: StepErrors[];
+  totalErrors: number;
+}
+
+// Group errors by job > step for the PR comment
+const groupErrorsByJobAndStep = (errors: ParsedError[]): JobErrors[] => {
+  const jobMap = new Map<string, Map<string, number>>();
+
+  for (const error of errors) {
+    const job = error.workflowJob ?? "Unknown";
+    const step = error.workflowStep ?? "Unknown step";
+
+    if (!jobMap.has(job)) {
+      jobMap.set(job, new Map());
+    }
+    const stepMap = jobMap.get(job) as Map<string, number>;
+    stepMap.set(step, (stepMap.get(step) ?? 0) + 1);
+  }
+
+  // Convert to array and sort by total errors (descending)
+  const result: JobErrors[] = [];
+  for (const [job, stepMap] of jobMap) {
+    const steps: StepErrors[] = [];
+    let totalErrors = 0;
+    for (const [step, count] of stepMap) {
+      steps.push({ step, errorCount: count });
+      totalErrors += count;
+    }
+    // Sort steps by error count (descending)
+    steps.sort((a, b) => b.errorCount - a.errorCount);
+    result.push({ job, steps, totalErrors });
+  }
+
+  // Sort jobs by total errors (descending)
+  result.sort((a, b) => b.totalErrors - a.totalErrors);
+  return result;
+};
+
+// Format detailed job/step breakdown (when errors have job/step info)
+const formatDetailedJobErrors = (
+  lines: string[],
+  jobErrors: JobErrors[],
+  runByName: Map<string, { id: number; errorCount: number }>,
+  owner: string,
+  repo: string
+): void => {
+  for (const jobGroup of jobErrors) {
+    const runInfo = runByName.get(jobGroup.job);
+    const link = runInfo
+      ? `https://github.com/${owner}/${repo}/actions/runs/${runInfo.id}`
+      : null;
+
+    const safeJob = escapeHtml(jobGroup.job);
+    lines.push(link ? `**${safeJob}** · [view](${link})` : `**${safeJob}**`);
+
+    for (const stepGroup of jobGroup.steps) {
+      const safeStep = escapeHtml(stepGroup.step);
+      const errorText =
+        stepGroup.errorCount === 1
+          ? "1 error"
+          : `${stepGroup.errorCount} errors`;
+      lines.push(`- **${safeStep}** · ${errorText}`);
+    }
+
+    lines.push("");
+  }
+};
+
+// Format fallback run-level errors (when errors lack job/step info)
+const formatFallbackRunErrors = (
+  lines: string[],
+  failedRuns: WorkflowRunResult[],
+  owner: string,
+  repo: string
+): void => {
+  for (const run of failedRuns) {
+    const link = `https://github.com/${owner}/${repo}/actions/runs/${run.id}`;
+    const safeJob = escapeHtml(run.name);
+    const errorText =
+      run.errorCount === 1 ? "1 error" : `${run.errorCount} errors`;
+    lines.push(`**${safeJob}** · ${errorText} · [view](${link})`);
+  }
+  lines.push("");
+};
+
+// Truncate commit message to first line and max length
+const truncateCommitMessage = (message: string, maxLen = 50): string => {
+  const firstLine = message.split("\n")[0] ?? message;
+  if (firstLine.length <= maxLen) {
+    return firstLine;
+  }
+  return `${firstLine.slice(0, maxLen - 1)}…`;
+};
+
+// Format the main PR comment with error summary (list format with job + step)
 // Returns null if there are no failed workflows (caller should not post comment)
 export const formatResultsComment = (
   options: FormatCommentOptions
 ): string | null => {
-  const { owner, repo, headSha, runs } = options;
+  const { owner, repo, headSha, headCommitMessage, runs, errors } = options;
 
-  // Separate runs by conclusion
   const failedRuns = runs.filter((r) => r.conclusion === "failure");
   const passedCount = runs.filter((r) => r.conclusion === "success").length;
   const otherCount = runs.filter(
     (r) => r.conclusion !== "failure" && r.conclusion !== "success"
   ).length;
 
-  // No failed workflows = no comment needed
-  // Caller should handle this by not posting/updating the comment
   if (failedRuns.length === 0) {
     return null;
   }
 
   const lines: string[] = [];
+  const jobErrors = groupErrorsByJobAndStep(errors);
 
-  // Table header
-  lines.push("| Workflow | Status | Errors |");
-  lines.push("|----------|--------|--------|");
-
-  // Only show failed runs in the table
+  const runByName = new Map<string, { id: number; errorCount: number }>();
   for (const run of failedRuns) {
-    const safeName = escapeTableCell(run.name);
-    const link = `https://github.com/${owner}/${repo}/actions/runs/${run.id}`;
-    lines.push(`| [${safeName}](${link}) | Failed | ${run.errorCount} |`);
+    runByName.set(run.name, { id: run.id, errorCount: run.errorCount });
   }
 
-  lines.push("");
+  if (jobErrors.length > 0) {
+    formatDetailedJobErrors(lines, jobErrors, runByName, owner, repo);
+  } else {
+    formatFallbackRunErrors(lines, failedRuns, owner, repo);
+  }
 
-  // Footer: passed count · skipped count · timestamp · CLI command
   const footerParts: string[] = [];
-
   if (passedCount > 0) {
     footerParts.push(`${passedCount} passed`);
   }
   if (otherCount > 0) {
     footerParts.push(`${otherCount} skipped`);
   }
+  footerParts.push(`${formatTimestamp(new Date())} UTC`);
 
-  footerParts.push(`Updated ${formatTimestamp(new Date())} UTC`);
-  footerParts.push(`\`dt errors --commit ${headSha.slice(0, 7)}\``);
+  // Show commit SHA with message if available
+  const shortSha = headSha.slice(0, 7);
+  if (headCommitMessage) {
+    const truncatedMsg = truncateCommitMessage(headCommitMessage);
+    footerParts.push(`\`${shortSha}\` ${truncatedMsg}`);
+  } else {
+    footerParts.push(`\`${shortSha}\``);
+  }
 
   lines.push(footerParts.join(" · "));
 
-  // Add unsupported tools notice if any detected
   const unsupportedNotice = formatUnsupportedToolsNotice(
     options.detectedUnsupportedTools
   );
@@ -706,7 +810,7 @@ const generateAnnotationTitle = (error: DeduplicatedError): string => {
 };
 
 // Generate raw_details content: additional context for the annotation
-// Includes: stack trace, hint, multiple messages, workflow context
+// Includes: stack trace, hint, multiple messages
 const generateRawDetails = (error: DeduplicatedError): string | undefined => {
   const sections: string[] = [];
 
@@ -737,21 +841,6 @@ const generateRawDetails = (error: DeduplicatedError): string | undefined => {
       );
     } else {
       sections.push(error.stackTrace);
-    }
-  }
-
-  // Workflow context
-  if (error.workflowJob || error.workflowStep) {
-    sections.push("");
-    sections.push("=== Workflow Context ===");
-    if (error.workflowJob) {
-      sections.push(`Job: ${error.workflowJob}`);
-    }
-    if (error.workflowStep) {
-      sections.push(`Step: ${error.workflowStep}`);
-    }
-    if (error.workflowAction) {
-      sections.push(`Action: ${error.workflowAction}`);
     }
   }
 

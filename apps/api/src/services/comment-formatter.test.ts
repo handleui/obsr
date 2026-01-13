@@ -7,7 +7,7 @@ import {
 } from "./comment-formatter";
 
 // Top-level regex for performance (lint rule: useTopLevelRegex)
-const TIMESTAMP_PATTERN = /Updated \w+ \d+, \d{2}:\d{2} UTC/;
+const TIMESTAMP_PATTERN = /\w+ \d+, \d{2}:\d{2} UTC/;
 
 // Factory for creating test options
 const createOptions = (
@@ -71,8 +71,8 @@ describe("formatResultsComment", () => {
     });
   });
 
-  describe("minimal format", () => {
-    it("shows only failed workflows in the table", () => {
+  describe("list format", () => {
+    it("shows only failed workflows in the list", () => {
       const result = formatResultsComment(
         createOptions({
           runs: [
@@ -83,13 +83,12 @@ describe("formatResultsComment", () => {
         })
       );
 
-      // Failed workflows should be in table
-      expect(result).toContain("| [Build]");
-      expect(result).toContain("| [Lint]");
-      expect(result).toContain("| Failed |");
+      // Failed workflows should be shown
+      expect(result).toContain("**Build**");
+      expect(result).toContain("**Lint**");
 
-      // Passed workflows should NOT be in table (only in footer count)
-      expect(result).not.toContain("| [Test]");
+      // Passed workflows should NOT be shown (only in footer count)
+      expect(result).not.toContain("**Test**");
     });
 
     it("includes workflow links to GitHub Actions", () => {
@@ -108,7 +107,7 @@ describe("formatResultsComment", () => {
       );
     });
 
-    it("shows error count per workflow", () => {
+    it("shows error count per workflow in fallback mode", () => {
       const result = formatResultsComment(
         createOptions({
           runs: [
@@ -117,7 +116,26 @@ describe("formatResultsComment", () => {
         })
       );
 
-      expect(result).toContain("| 5 |");
+      expect(result).toContain("5 errors");
+    });
+
+    it("shows step-level errors when job/step info is available", () => {
+      const result = formatResultsComment(
+        createOptions({
+          runs: [{ name: "CI", id: 123, conclusion: "failure", errorCount: 5 }],
+          errors: [
+            { message: "Error 1", workflowJob: "CI", workflowStep: "test" },
+            { message: "Error 2", workflowJob: "CI", workflowStep: "test" },
+            { message: "Error 3", workflowJob: "CI", workflowStep: "lint" },
+          ],
+        })
+      );
+
+      // Should show job header
+      expect(result).toContain("**CI**");
+      // Should show steps as bullet points (bold, not backticks, to avoid formatting issues)
+      expect(result).toContain("- **test** · 2 errors");
+      expect(result).toContain("- **lint** · 1 error");
     });
   });
 
@@ -157,13 +175,12 @@ describe("formatResultsComment", () => {
         })
       );
 
-      expect(result).toContain("Updated");
       expect(result).toContain("UTC");
       // Should use 24h format (e.g., "Jan 12, 15:30")
       expect(result).toMatch(TIMESTAMP_PATTERN);
     });
 
-    it("includes CLI command with short SHA", () => {
+    it("includes short SHA in footer", () => {
       const result = formatResultsComment(
         createOptions({
           headSha: "abc1234567890def",
@@ -173,7 +190,38 @@ describe("formatResultsComment", () => {
         })
       );
 
-      expect(result).toContain("`dt errors --commit abc1234`");
+      expect(result).toContain("`abc1234`");
+    });
+
+    it("includes commit message when provided", () => {
+      const result = formatResultsComment(
+        createOptions({
+          headSha: "abc1234567890def",
+          headCommitMessage: "fix: improve error handling",
+          runs: [
+            { name: "Build", id: 123, conclusion: "failure", errorCount: 1 },
+          ],
+        })
+      );
+
+      expect(result).toContain("`abc1234` fix: improve error handling");
+    });
+
+    it("truncates long commit messages", () => {
+      const result = formatResultsComment(
+        createOptions({
+          headSha: "abc1234567890def",
+          headCommitMessage:
+            "feat: this is a very long commit message that should be truncated to keep the footer readable",
+          runs: [
+            { name: "Build", id: 123, conclusion: "failure", errorCount: 1 },
+          ],
+        })
+      );
+
+      // Should be truncated with ellipsis
+      expect(result).toContain("…");
+      expect(result).not.toContain("readable");
     });
 
     it("uses middle dot separator between footer elements", () => {
@@ -190,28 +238,13 @@ describe("formatResultsComment", () => {
     });
   });
 
-  describe("table structure", () => {
-    it("has correct table headers", () => {
-      const result = formatResultsComment(
-        createOptions({
-          runs: [
-            { name: "Build", id: 123, conclusion: "failure", errorCount: 3 },
-          ],
-        })
-      );
-
-      expect(result).toContain("| Workflow | Status | Errors |");
-      expect(result).toContain("|----------|--------|--------|");
-    });
-  });
-
-  describe("markdown escaping", () => {
-    it("escapes pipe characters in workflow names", () => {
+  describe("html escaping", () => {
+    it("escapes HTML in workflow names", () => {
       const result = formatResultsComment(
         createOptions({
           runs: [
             {
-              name: "Build | Test | Deploy",
+              name: "<script>alert('xss')</script>",
               id: 123,
               conclusion: "failure",
               errorCount: 1,
@@ -220,8 +253,9 @@ describe("formatResultsComment", () => {
         })
       );
 
-      // Workflow name pipes should be escaped
-      expect(result).toContain("Build \\| Test \\| Deploy");
+      // HTML should be escaped
+      expect(result).not.toContain("<script>");
+      expect(result).toContain("&lt;script&gt;");
     });
   });
 });
@@ -738,12 +772,12 @@ describe("XSS prevention", () => {
     expect(result.text).toContain("&lt;script&gt;");
   });
 
-  it("escapes markdown injection in workflow names", () => {
+  it("escapes HTML in workflow names to prevent XSS", () => {
     const result = formatResultsComment(
       createOptions({
         runs: [
           {
-            name: "[malicious](http://evil.com)",
+            name: "<img src=x onerror=alert(1)>",
             id: 123,
             conclusion: "failure",
             errorCount: 1,
@@ -752,9 +786,9 @@ describe("XSS prevention", () => {
       })
     );
 
-    // Brackets should be escaped to prevent markdown link injection
-    expect(result).not.toContain("[malicious]");
-    expect(result).toContain("\\[malicious\\]");
+    // HTML should be escaped
+    expect(result).not.toContain("<img");
+    expect(result).toContain("&lt;img");
   });
 
   it("escapes ampersands correctly without double-escaping", () => {

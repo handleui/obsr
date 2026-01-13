@@ -305,6 +305,8 @@ interface WorkflowRunsResponse {
     head_branch: string;
     run_attempt: number;
     run_started_at: string | null;
+    // Event that triggered the run (e.g., "pull_request", "push", "workflow_dispatch")
+    event: string;
     // Note: GitHub doesn't have run_completed_at, we use receivedAt instead
   }>;
 }
@@ -680,9 +682,33 @@ const createGitHubServiceInternal = (env: Env) => {
     return allRepos;
   };
 
+  // Events that are considered "CI-relevant" for completion checking.
+  // These are the standard CI triggers that users expect to block PRs.
+  //
+  // SKIPPED events (should NOT block completion):
+  // - workflow_dispatch: Manual triggers, Graphite reviews, external tools
+  // - schedule: Cron-based runs unrelated to the PR
+  // - repository_dispatch: External API triggers
+  // - workflow_run: Chained workflows (parent already counted)
+  // - workflow_call: Reusable workflows (caller already counted)
+  // - check_run/check_suite: Third-party CI tools (separate API track)
+  //
+  // Edge cases handled:
+  // - Reruns: Same event, incremented run_attempt (handled by DB uniqueness)
+  // - Cancelled/timed_out runs: status="completed" so they don't block
+  // - Skipped runs (conditional): status="completed", conclusion="skipped"
+  // - Fork PRs: Same events, just limited permissions
+  // - Merge queue: Uses merge_group event with different SHA
+  const CI_RELEVANT_EVENTS = new Set([
+    "pull_request",
+    "pull_request_target",
+    "push",
+    "merge_group",
+  ]);
+
   // GET /repos/{owner}/{repo}/actions/runs?head_sha={sha}
-  // Returns all workflow runs for a commit and whether they're all completed
-  // Includes metadata for run tracking (branch, attempt, timing)
+  // Returns all workflow runs for a commit and whether CI-relevant ones are completed
+  // Includes metadata for run tracking (branch, attempt, timing, event)
   const listWorkflowRunsForCommit = async (
     token: string,
     owner: string,
@@ -698,6 +724,7 @@ const createGitHubServiceInternal = (env: Env) => {
       headBranch: string;
       runAttempt: number;
       runStartedAt: Date | null;
+      event: string;
     }>;
   }> => {
     const context = `listWorkflowRunsForCommit(${owner}/${repo}@${headSha.slice(0, 7)})`;
@@ -737,16 +764,64 @@ const createGitHubServiceInternal = (env: Env) => {
       headBranch: run.head_branch ?? "unknown",
       runAttempt: run.run_attempt ?? 1,
       runStartedAt: run.run_started_at ? new Date(run.run_started_at) : null,
+      event: run.event ?? "unknown",
     }));
 
-    // Empty runs array means no workflows configured or SHA not found
+    // Filter to only CI-relevant runs for completion checking
+    // Runs triggered by workflow_dispatch, schedule, etc. (e.g., from Graphite reviews)
+    // are NOT required to complete - they would cause our check to hang indefinitely
+    const ciRelevantRuns = runs.filter((run) =>
+      CI_RELEVANT_EVENTS.has(run.event)
+    );
+    const skippedRuns = runs.filter(
+      (run) => !CI_RELEVANT_EVENTS.has(run.event)
+    );
+
+    // Empty CI-relevant runs means no CI configured or SHA not found
     // Consider this as "all completed" since there's nothing to wait for
     const allCompleted =
-      runs.length === 0 || runs.every((run) => run.status === "completed");
+      ciRelevantRuns.length === 0 ||
+      ciRelevantRuns.every((run) => run.status === "completed");
 
-    console.log(
-      `[github] ${context}: Found ${runs.length} workflow runs, allCompleted=${allCompleted}`
+    const pendingCiRuns = ciRelevantRuns.filter(
+      (r) => r.status !== "completed"
     );
+
+    // Detect potentially stuck workflows (running > 30 minutes without completing)
+    // Common causes: unavailable runners, deprecated images, protection rules, fork approval
+    const STUCK_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+    const now = Date.now();
+    const stuckRuns = pendingCiRuns.filter(
+      (r) =>
+        r.runStartedAt && now - r.runStartedAt.getTime() > STUCK_THRESHOLD_MS
+    );
+
+    // Log with status/conclusion for debugging stuck workflows
+    console.log(
+      `[github] ${context}: Found ${runs.length} workflow runs (${ciRelevantRuns.length} CI-relevant, ${skippedRuns.length} skipped), allCompleted=${allCompleted}${
+        pendingCiRuns.length > 0
+          ? `, pending: ${pendingCiRuns.map((r) => `${r.name}[${r.status}](${r.event})`).join(", ")}`
+          : ""
+      }${
+        skippedRuns.length > 0
+          ? `, skipped events: ${skippedRuns.map((r) => `${r.name}[${r.status}/${r.conclusion}](${r.event})`).join(", ")}`
+          : ""
+      }`
+    );
+
+    // Warn about potentially stuck workflows
+    if (stuckRuns.length > 0) {
+      console.warn(
+        `[github] ${context}: WARNING - ${stuckRuns.length} workflow(s) may be stuck (running > 30min): ${stuckRuns
+          .map((r) => {
+            const ageMin = r.runStartedAt
+              ? Math.round((now - r.runStartedAt.getTime()) / 60_000)
+              : "?";
+            return `${r.name}[${r.status}, ${ageMin}min](${r.event})`;
+          })
+          .join(", ")}`
+      );
+    }
 
     return { allCompleted, runs };
   };

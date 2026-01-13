@@ -399,6 +399,62 @@ describe("VitestParser", () => {
     });
   });
 
+  describe("internal vitest frame filtering", () => {
+    it("filters out stack frames from node_modules/@vitest/runner", () => {
+      const line =
+        " ❯ /home/runner/work/project/node_modules/@vitest/runner/dist/index.js:145:11";
+      const result = parser.parse(line, ctx);
+
+      expect(result).toBeNull();
+      expect(parser.canParse(line, ctx)).toBe(0);
+    });
+
+    it("filters out stack frames from bun cached @vitest packages", () => {
+      const line =
+        "    at file://home/runner/work/detent/detent/node_modules/bun/@vitest+runner@4.0.16/node_modules/@vitest/runner/dist/index.js:915:26";
+      const result = parser.parse(line, ctx);
+
+      expect(result).toBeNull();
+      expect(parser.canParse(line, ctx)).toBe(0);
+    });
+
+    it("filters out stack frames from node_modules/vitest", () => {
+      const line = " ❯ /project/node_modules/vitest/dist/runner.js:100:15";
+      const result = parser.parse(line, ctx);
+
+      expect(result).toBeNull();
+      expect(parser.canParse(line, ctx)).toBe(0);
+    });
+
+    it("still parses user test file stack frames", () => {
+      const line = " ❯ /project/src/__tests__/math.test.ts:42:10";
+      const result = parser.parse(line, ctx) as ExtractedError;
+
+      expect(result).not.toBeNull();
+      expect(result.file).toBe("/project/src/__tests__/math.test.ts");
+      expect(result.line).toBe(42);
+    });
+
+    it("still parses user source file stack frames", () => {
+      const line = " ❯ /project/src/utils/math.ts:15:5";
+      const result = parser.parse(line, ctx) as ExtractedError;
+
+      expect(result).not.toBeNull();
+      expect(result.file).toBe("/project/src/utils/math.ts");
+      expect(result.line).toBe(15);
+    });
+
+    it("does not filter non-vitest node_modules frames", () => {
+      // Other libraries in node_modules should still be shown
+      // (they might be relevant to the user's error)
+      const line = " ❯ /project/node_modules/lodash/debounce.js:50:20";
+      const result = parser.parse(line, ctx) as ExtractedError;
+
+      expect(result).not.toBeNull();
+      expect(result.file).toBe("/project/node_modules/lodash/debounce.js");
+    });
+  });
+
   describe("edge cases", () => {
     it("handles ANSI escape codes", () => {
       const line = "\x1b[31mFAIL\x1b[0m src/math.test.ts";

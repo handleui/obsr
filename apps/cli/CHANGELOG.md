@@ -1,5 +1,12 @@
 # @detent/cli
 
+## 0.6.0
+
+### Minor Changes
+
+- aae6802: Add GitHub OAuth token storage and automatic refresh.
+  Tokens are passed to API via X-GitHub-Token header and auto-refreshed when expired.
+
 ## 0.5.1
 
 ### Patch Changes

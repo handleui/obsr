@@ -1,5 +1,11 @@
 # @detent/navigator
 
+## 0.3.0
+
+### Minor Changes
+
+- aae6802: Store and pass GitHub OAuth tokens to CLI during authentication flow
+
 ## 0.2.1
 
 ### Patch Changes

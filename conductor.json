@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "setup": "bun install && ln -s \"$CONDUCTOR_ROOT_PATH/apps/cli/.env\" apps/cli/.env && ln -s \"$CONDUCTOR_ROOT_PATH/apps/navigator/.env\" apps/navigator/.env && ln -s \"$CONDUCTOR_ROOT_PATH/packages/healing/.env\" packages/healing/.env && ln -s \"$CONDUCTOR_ROOT_PATH/apps/api/.dev.vars\" apps/api/.dev.vars && bun run build",
+    "setup": "bun install && ln -s \"$CONDUCTOR_ROOT_PATH/apps/cli/.env\" apps/cli/.env && ln -s \"$CONDUCTOR_ROOT_PATH/apps/navigator/.env\" apps/navigator/.env && ln -s \"$CONDUCTOR_ROOT_PATH/packages/healing/.env\" packages/healing/.env && ln -s \"$CONDUCTOR_ROOT_PATH/apps/api/.dev.vars\" apps/api/.dev.vars",
     "run": "bun run dev:core",
     "archive": ""
   }

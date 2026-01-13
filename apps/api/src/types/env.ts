@@ -9,6 +9,9 @@ export interface Env {
   GITHUB_CLIENT_ID: string;
   GITHUB_APP_PRIVATE_KEY: string;
   GITHUB_WEBHOOK_SECRET: string;
+  // GitHub App Client Secret (for OAuth token refresh)
+  // Required to refresh user OAuth tokens when they expire
+  GITHUB_CLIENT_SECRET?: string;
 
   // Database connection via Cloudflare Hyperdrive
   HYPERDRIVE: Hyperdrive;

@@ -13,7 +13,7 @@ if (typeof DETENT_PRODUCTION === "undefined") {
   const { fileURLToPath } = await import("node:url");
   const { config } = await import("dotenv");
   const __dirname = dirname(fileURLToPath(import.meta.url));
-  config({ path: resolve(__dirname, "..", ".env") });
+  config({ path: resolve(__dirname, "..", ".env"), quiet: true });
 }
 
 // Auto-update only runs in production builds (standalone binaries)

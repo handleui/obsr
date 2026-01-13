@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import {
+  createGitHubOAuthTokensToken,
   createPendingVerificationToken,
   createSecureCookieOptions,
   createSession,
+  type GitHubOAuthTokens,
   getAndClearReturnTo,
   getWorkOSClientId,
   getWorkOSCookiePassword,
@@ -63,6 +65,24 @@ const isEmailVerificationError = (
     err.code === "email_verification_required" ||
     rawData?.code === "email_verification_required";
   return codeMatches && !!rawData?.pending_authentication_token;
+};
+
+/**
+ * Type guard for GitHub OAuth tokens from WorkOS
+ * Validates that the object has the expected shape before casting
+ */
+const isValidGitHubOAuthTokens = (data: unknown): data is GitHubOAuthTokens => {
+  if (typeof data !== "object" || data === null) {
+    return false;
+  }
+  const obj = data as Record<string, unknown>;
+  return (
+    typeof obj.accessToken === "string" &&
+    typeof obj.refreshToken === "string" &&
+    typeof obj.expiresAt === "number" &&
+    Array.isArray(obj.scopes) &&
+    obj.scopes.every((scope) => typeof scope === "string")
+  );
 };
 
 /**
@@ -165,6 +185,26 @@ export const GET = async (request: Request) => {
           name: COOKIE_NAMES.workosSession,
           value: authResponse.sealedSession as string,
           maxAge: AUTH_DURATIONS.sessionMaxAgeSec,
+        })
+      );
+    }
+
+    // Store GitHub OAuth tokens separately if available
+    // Note: oauthTokens are only returned during initial authentication and are NOT
+    // stored in the WorkOS sealed session. We must persist them in a separate cookie
+    // for later use (e.g., CLI auth flow that needs the GitHub token).
+    if (
+      "oauthTokens" in authResponse &&
+      isValidGitHubOAuthTokens(authResponse.oauthTokens)
+    ) {
+      const oauthTokensJwt = await createGitHubOAuthTokensToken(
+        authResponse.oauthTokens
+      );
+      response.cookies.set(
+        createSecureCookieOptions({
+          name: COOKIE_NAMES.githubOAuthTokens,
+          value: oauthTokensJwt,
+          maxAge: AUTH_DURATIONS.githubOAuthTokensMaxAgeSec,
         })
       );
     }

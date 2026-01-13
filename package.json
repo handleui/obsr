@@ -12,7 +12,8 @@
     "check-types": "turbo run check-types",
     "test": "turbo run test",
     "prepare": "lefthook install",
-    "tag": "bash scripts/tag.sh"
+    "tag": "bash scripts/tag.sh",
+    "dt": "bun run apps/cli/dist/index.js"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.11",

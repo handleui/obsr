@@ -21,6 +21,13 @@ export const COOKIE_NAMES = {
   cliAuthParams: "cli_auth_params",
   /** Return URL after authentication */
   returnTo: "return_to",
+  /**
+   * GitHub OAuth tokens cookie - stores signed GitHub access/refresh tokens (HS256 JWT)
+   * Tokens are base64-encoded and integrity-protected via HMAC signing, not encrypted
+   * These are captured from initial WorkOS authentication when "Return GitHub OAuth tokens" is enabled
+   * Note: oauthTokens are NOT stored in WorkOS sealed session, so we persist them separately
+   */
+  githubOAuthTokens: "github_oauth_tokens",
 } as const;
 
 export const AUTH_DURATIONS = {
@@ -34,4 +41,6 @@ export const AUTH_DURATIONS = {
   pendingVerificationMs: 10 * 60 * 1000,
   /** CLI auth params cookie max age in seconds (10 minutes) */
   cliAuthParamsMaxAgeSec: 60 * 10,
+  /** GitHub OAuth tokens cookie max age in seconds (same as session - 24 hours) */
+  githubOAuthTokensMaxAgeSec: 60 * 60 * 24,
 } as const;

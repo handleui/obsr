@@ -364,55 +364,321 @@ app.get("/me", async (c) => {
   }
 });
 
+// GitHub OAuth token format validation
+// Accepts: classic PATs (ghp_), fine-grained PATs (github_pat_), and OAuth tokens (ghu_, gho_)
+const GITHUB_TOKEN_REGEX = /^(ghp_|gho_|ghu_|github_pat_)[a-zA-Z0-9_]+$/;
+
+// GitHub refresh token format validation (ghr_ prefix for GitHub App refresh tokens)
+const GITHUB_REFRESH_TOKEN_REGEX = /^ghr_[a-zA-Z0-9_]+$/;
+
+/**
+ * Validate GitHub token format to prevent injection and ensure basic validity
+ * Returns true if token matches known GitHub token patterns
+ */
+const isValidGitHubTokenFormat = (token: string): boolean => {
+  // Token should be reasonable length
+  // Classic PATs (ghp_) are 40 chars, fine-grained (github_pat_) are ~93 chars
+  // OAuth tokens (ghu_, gho_) are similar to classic PATs
+  if (token.length < 40 || token.length > 300) {
+    return false;
+  }
+  // Must match known GitHub token prefixes
+  return GITHUB_TOKEN_REGEX.test(token);
+};
+
+// Required GitHub OAuth scopes for organization operations
+const REQUIRED_SCOPES = ["read:org"] as const;
+
+// Result type for token verification with rate limit info and scope validation
+interface VerifyTokenSuccessResult {
+  success: true;
+  user: { id: number; login: string };
+  scopes: string[];
+}
+
+interface VerifyTokenFailureResult {
+  success: false;
+  rateLimited?: boolean;
+  missingScopes?: string[];
+}
+
+type VerifyTokenResult = VerifyTokenSuccessResult | VerifyTokenFailureResult;
+
+const parseOAuthScopes = (scopeHeader: string | null): string[] => {
+  if (!scopeHeader) {
+    return [];
+  }
+  return scopeHeader
+    .split(",")
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+};
+
+const findMissingScopes = (
+  actualScopes: string[],
+  requiredScopes: readonly string[]
+): string[] => {
+  return requiredScopes.filter((required) => !actualScopes.includes(required));
+};
+
+/**
+ * Verify a GitHub token belongs to the expected user by checking the authenticated user's GitHub ID
+ * against the WorkOS identity. Also validates that the token has required scopes.
+ * Returns the GitHub user data and scopes if verified, or failure info otherwise.
+ */
+const verifyGitHubTokenOwnership = async (
+  githubToken: string,
+  userId: string,
+  workosApiKey: string
+): Promise<VerifyTokenResult> => {
+  const githubUserResponse = await fetch("https://api.github.com/user", {
+    headers: {
+      Authorization: `Bearer ${githubToken}`,
+      Accept: "application/vnd.github.v3+json",
+      "User-Agent": "Detent-API",
+    },
+  });
+
+  if (
+    githubUserResponse.status === 403 &&
+    githubUserResponse.headers.get("x-ratelimit-remaining") === "0"
+  ) {
+    const resetTime = githubUserResponse.headers.get("x-ratelimit-reset");
+    const resetDate = resetTime
+      ? new Date(Number.parseInt(resetTime, 10) * 1000).toISOString()
+      : "soon";
+    console.error(
+      `GitHub API rate limit exceeded during token verification, resets at ${resetDate}`
+    );
+    return { success: false, rateLimited: true };
+  }
+
+  if (!githubUserResponse.ok) {
+    return { success: false };
+  }
+
+  const scopes = parseOAuthScopes(
+    githubUserResponse.headers.get("x-oauth-scopes")
+  );
+
+  const missingScopes = findMissingScopes(scopes, REQUIRED_SCOPES);
+  if (missingScopes.length > 0) {
+    console.error(
+      `GitHub token missing required scopes: ${missingScopes.join(", ")}`
+    );
+    return { success: false, missingScopes };
+  }
+
+  let githubUser: { id: number; login: string };
+  try {
+    githubUser = (await githubUserResponse.json()) as {
+      id: number;
+      login: string;
+    };
+  } catch (error) {
+    console.error(
+      "Failed to parse GitHub user response as JSON",
+      error instanceof Error ? error.message : error
+    );
+    return { success: false };
+  }
+
+  const identitiesResponse = await fetch(
+    `https://api.workos.com/user_management/users/${userId}/identities`,
+    {
+      headers: {
+        Authorization: `Bearer ${workosApiKey}`,
+      },
+    }
+  );
+
+  if (!identitiesResponse.ok) {
+    return { success: false };
+  }
+
+  let identities: WorkOSIdentitiesResponse;
+  try {
+    identities = (await identitiesResponse.json()) as WorkOSIdentitiesResponse;
+  } catch (error) {
+    console.error(
+      "Failed to parse WorkOS identities response as JSON",
+      error instanceof Error ? error.message : error
+    );
+    return { success: false };
+  }
+
+  const githubIdentity = identities.data?.find(
+    (identity) => identity.provider === "GitHubOAuth"
+  );
+
+  if (!githubIdentity) {
+    return { success: false };
+  }
+
+  if (String(githubUser.id) !== githubIdentity.idp_id) {
+    console.error("GitHub token ownership verification failed for user");
+    return { success: false };
+  }
+
+  return { success: true, user: githubUser, scopes };
+};
+
+// Valid HTTP status codes for token and API error responses
+type TokenErrorStatus = 400 | 401 | 403 | 429 | 500;
+
+// Result types for token acquisition and error handling
+interface TokenErrorResult {
+  error: string;
+  code?: string;
+  status: TokenErrorStatus;
+}
+
+type TokenResult =
+  | { success: true; token: string }
+  | ({ success: false } & TokenErrorResult);
+
+/**
+ * Get a verified GitHub token from the X-GitHub-Token header
+ * Validates format, verifies token ownership, and checks required scopes
+ */
+const getVerifiedGitHubToken = async (
+  providedToken: string | undefined,
+  userId: string,
+  workosApiKey: string
+): Promise<TokenResult> => {
+  if (!providedToken) {
+    return {
+      success: false,
+      error:
+        "GitHub token required. Please re-authenticate with `dt auth login --force`.",
+      code: "github_token_required",
+      status: 401,
+    };
+  }
+
+  if (!isValidGitHubTokenFormat(providedToken)) {
+    return {
+      success: false,
+      error: "Invalid GitHub token format",
+      code: "invalid_token_format",
+      status: 400,
+    };
+  }
+
+  const verifyResult = await verifyGitHubTokenOwnership(
+    providedToken,
+    userId,
+    workosApiKey
+  );
+
+  if (!verifyResult.success) {
+    if (verifyResult.rateLimited) {
+      return {
+        success: false,
+        error: "GitHub API rate limit exceeded. Please try again later.",
+        code: "rate_limit_exceeded",
+        status: 429,
+      };
+    }
+    if (verifyResult.missingScopes && verifyResult.missingScopes.length > 0) {
+      return {
+        success: false,
+        error: `GitHub token is missing required scopes: ${verifyResult.missingScopes.join(", ")}. Please re-authenticate with \`dt auth login --force\` to grant the necessary permissions.`,
+        code: "missing_scopes",
+        status: 401,
+      };
+    }
+    return {
+      success: false,
+      error:
+        "GitHub token verification failed. Please re-authenticate with `dt auth login --force`.",
+      code: "token_verification_failed",
+      status: 401,
+    };
+  }
+
+  return { success: true, token: providedToken };
+};
+
+/**
+ * Handle GitHub API response errors with appropriate user-facing messages
+ */
+const handleGitHubApiError = (response: Response): TokenErrorResult => {
+  const status = response.status;
+
+  // Rate limit exceeded (403 with x-ratelimit-remaining: 0)
+  if (status === 403 && response.headers.get("x-ratelimit-remaining") === "0") {
+    const resetTime = response.headers.get("x-ratelimit-reset");
+    const resetDate = resetTime
+      ? new Date(Number.parseInt(resetTime, 10) * 1000).toISOString()
+      : "soon";
+    console.error(`GitHub API rate limit exceeded, resets at ${resetDate}`);
+    return {
+      error: "GitHub API rate limit exceeded. Please try again later.",
+      code: "rate_limit_exceeded",
+      status: 429,
+    };
+  }
+
+  // Permission denied (403 without rate limit indicator)
+  if (status === 403) {
+    console.error("GitHub API returned 403 - insufficient permissions");
+    return {
+      error:
+        "GitHub access denied - insufficient permissions. Please re-authenticate with `dt auth login --force`.",
+      code: "github_permission_denied",
+      status: 403,
+    };
+  }
+
+  // Unauthorized - token invalid or expired
+  if (status === 401) {
+    console.error("GitHub API returned 401 - token invalid or expired");
+    return {
+      error:
+        "GitHub authentication failed. Please re-authenticate with `dt auth login --force`.",
+      code: "github_auth_failed",
+      status: 401,
+    };
+  }
+
+  // Generic error - don't expose GitHub API details to client
+  console.error(`GitHub API error: ${status} ${response.statusText}`);
+  return {
+    error: "Failed to fetch GitHub organizations",
+    status: 500,
+  };
+};
+
 /**
  * GET /github-orgs
  * List GitHub organizations where the authenticated user can install the Detent GitHub App.
  * Returns org details with installation status and user's admin capability.
+ *
+ * Requires GitHub OAuth token via X-GitHub-Token header.
+ * The token is validated for format and verified to belong to the authenticated user.
  */
 app.get("/github-orgs", async (c) => {
   const auth = c.get("auth");
 
-  // Fetch GitHub OAuth token from WorkOS Pipes API
-  const tokenResponse = await fetch(
-    "https://api.workos.com/data-integrations/github/token",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${c.env.WORKOS_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        user_id: auth.userId,
-      }),
-    }
+  // Get verified GitHub token from header
+  const tokenResult = await getVerifiedGitHubToken(
+    c.req.header("X-GitHub-Token"),
+    auth.userId,
+    c.env.WORKOS_API_KEY
   );
 
-  if (!tokenResponse.ok) {
-    console.error(
-      `Failed to fetch GitHub token from WorkOS: ${tokenResponse.status} ${tokenResponse.statusText}`
+  if (!tokenResult.success) {
+    return c.json(
+      {
+        error: tokenResult.error,
+        ...(tokenResult.code && { code: tokenResult.code }),
+      },
+      tokenResult.status
     );
-    return c.json({ error: "Failed to fetch GitHub OAuth token" }, 500);
   }
 
-  const tokenData = (await tokenResponse.json()) as {
-    active: boolean;
-    access_token?: { token: string; expires_at: string };
-    error?: string;
-  };
-
-  if (!(tokenData.active && tokenData.access_token)) {
-    let errorMessage = "GitHub OAuth token not available";
-    if (tokenData.error === "not_installed") {
-      errorMessage =
-        "GitHub account not connected. Please authenticate with GitHub.";
-    } else if (tokenData.error === "needs_reauthorization") {
-      errorMessage =
-        "GitHub authorization expired. Please re-authenticate with GitHub.";
-    }
-    return c.json({ error: errorMessage, code: tokenData.error }, 401);
-  }
-
-  const githubToken = tokenData.access_token.token;
+  const githubToken = tokenResult.token;
 
   // Fetch user's GitHub organizations
   const orgsResponse = await fetch("https://api.github.com/user/orgs", {
@@ -424,10 +690,14 @@ app.get("/github-orgs", async (c) => {
   });
 
   if (!orgsResponse.ok) {
-    console.error(
-      `Failed to fetch GitHub orgs: ${orgsResponse.status} ${orgsResponse.statusText}`
+    const errorResult = handleGitHubApiError(orgsResponse);
+    return c.json(
+      {
+        error: errorResult.error,
+        ...(errorResult.code && { code: errorResult.code }),
+      },
+      errorResult.status
     );
-    return c.json({ error: "Failed to fetch GitHub organizations" }, 500);
   }
 
   const githubOrgs = (await orgsResponse.json()) as GitHubOrg[];
@@ -493,6 +763,179 @@ app.get("/github-orgs", async (c) => {
   } finally {
     await client.end();
   }
+});
+
+// GitHub token refresh response
+interface GitHubTokenRefreshResponse {
+  access_token: string;
+  expires_in: number;
+  refresh_token: string;
+  refresh_token_expires_in: number;
+  scope: string;
+  token_type: string;
+}
+
+// GitHub token refresh error response
+interface GitHubTokenRefreshError {
+  error: string;
+  error_description?: string;
+}
+
+/**
+ * POST /github-token/refresh
+ * Refresh a GitHub OAuth token using the refresh token.
+ * This endpoint keeps the GitHub App client secret server-side.
+ *
+ * GitHub user access tokens expire after 8 hours, refresh tokens after 6 months.
+ * When the access token expires, the CLI calls this endpoint to get a new one.
+ */
+app.post("/github-token/refresh", async (c) => {
+  const auth = c.get("auth");
+
+  // Validate GITHUB_CLIENT_SECRET is configured
+  if (!c.env.GITHUB_CLIENT_SECRET) {
+    console.error(
+      "GITHUB_CLIENT_SECRET not configured - GitHub token refresh unavailable"
+    );
+    return c.json(
+      {
+        error: "GitHub token refresh not configured on server",
+        code: "refresh_not_configured",
+      },
+      501
+    );
+  }
+
+  // Parse request body
+  let body: { refresh_token?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body", code: "invalid_request" }, 400);
+  }
+
+  const { refresh_token: refreshToken } = body;
+
+  if (!refreshToken) {
+    return c.json(
+      { error: "refresh_token is required", code: "missing_refresh_token" },
+      400
+    );
+  }
+
+  // Validate refresh token format including character set (consistent with access token validation)
+  if (
+    !GITHUB_REFRESH_TOKEN_REGEX.test(refreshToken) ||
+    refreshToken.length < 20 ||
+    refreshToken.length > 300
+  ) {
+    return c.json(
+      { error: "Invalid refresh token format", code: "invalid_token_format" },
+      400
+    );
+  }
+
+  // Call GitHub's token endpoint to refresh
+  const githubResponse = await fetch(
+    "https://github.com/login/oauth/access_token",
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        client_id: c.env.GITHUB_CLIENT_ID,
+        client_secret: c.env.GITHUB_CLIENT_SECRET,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      }),
+    }
+  );
+
+  if (!githubResponse.ok) {
+    console.error(
+      `GitHub token refresh failed: ${githubResponse.status} ${githubResponse.statusText}`
+    );
+    return c.json(
+      {
+        error: "Failed to refresh GitHub token",
+        code: "github_refresh_failed",
+      },
+      502
+    );
+  }
+
+  let tokenData: GitHubTokenRefreshResponse | GitHubTokenRefreshError;
+  try {
+    tokenData = await githubResponse.json();
+  } catch {
+    console.error("Failed to parse GitHub token refresh response");
+    return c.json(
+      { error: "Invalid response from GitHub", code: "invalid_response" },
+      502
+    );
+  }
+
+  // Check for error response from GitHub
+  if ("error" in tokenData) {
+    const errorData = tokenData as GitHubTokenRefreshError;
+    console.error(
+      `GitHub token refresh error: ${errorData.error} - ${errorData.error_description}`
+    );
+
+    // Map common GitHub errors to user-friendly messages
+    if (errorData.error === "bad_refresh_token") {
+      return c.json(
+        {
+          error:
+            "GitHub refresh token is invalid or expired. Please re-authenticate with `dt auth login --force`.",
+          code: "refresh_token_expired",
+        },
+        401
+      );
+    }
+
+    return c.json(
+      {
+        error: "GitHub token refresh failed. Please re-authenticate.",
+        code: "github_refresh_failed",
+      },
+      401
+    );
+  }
+
+  const successData = tokenData as GitHubTokenRefreshResponse;
+
+  // Verify the new token belongs to the authenticated user
+  const verifyResult = await verifyGitHubTokenOwnership(
+    successData.access_token,
+    auth.userId,
+    c.env.WORKOS_API_KEY
+  );
+
+  if (!verifyResult.success) {
+    console.error("Refreshed GitHub token ownership verification failed");
+    return c.json(
+      {
+        error: "Token ownership verification failed",
+        code: "ownership_verification_failed",
+      },
+      401
+    );
+  }
+
+  // Log successful token refresh for security auditing
+  console.log(`[audit] GitHub token refreshed for user ${auth.userId}`);
+
+  // Return new tokens with expiry timestamps
+  const now = Date.now();
+  return c.json({
+    access_token: successData.access_token,
+    access_token_expires_at: now + successData.expires_in * 1000,
+    refresh_token: successData.refresh_token,
+    refresh_token_expires_at: now + successData.refresh_token_expires_in * 1000,
+  });
 });
 
 /**

@@ -2,9 +2,17 @@ import { decodeJwt, jwtDecrypt } from "jose";
 import { NextResponse } from "next/server";
 import { getWorkOSCookiePassword } from "@/lib/auth";
 
+interface OAuthTokens {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  scopes: string[];
+}
+
 interface TokenPayload {
   accessToken: string;
   refreshToken: string;
+  oauthTokens?: OAuthTokens;
   exp: number;
 }
 
@@ -56,7 +64,7 @@ export const POST = async (request: Request) => {
     }
 
     // Extract tokens
-    const { accessToken, refreshToken } = payload;
+    const { accessToken, refreshToken, oauthTokens } = payload;
 
     if (!(accessToken && refreshToken)) {
       return NextResponse.json(
@@ -71,10 +79,23 @@ export const POST = async (request: Request) => {
       ? new Date(exp * 1000).toISOString()
       : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
+    // GitHub refresh tokens expire after 6 months (15897600 seconds)
+    const GITHUB_REFRESH_TOKEN_LIFETIME_MS = 15_897_600 * 1000;
+
     return NextResponse.json({
       access_token: accessToken,
       refresh_token: refreshToken,
       expires_at: expiresAt,
+      // Include GitHub OAuth tokens if available (from "Return GitHub OAuth tokens" setting)
+      // Note: expiresAt from WorkOS is in Unix seconds, convert to milliseconds for CLI
+      ...(oauthTokens && {
+        github_token: oauthTokens.accessToken,
+        github_token_expires_at: oauthTokens.expiresAt * 1000,
+        // Include refresh token for automatic token refresh (6-month lifetime)
+        github_refresh_token: oauthTokens.refreshToken,
+        github_refresh_token_expires_at:
+          Date.now() + GITHUB_REFRESH_TOKEN_LIFETIME_MS,
+      }),
     });
   } catch (err) {
     console.error("[api/cli/token] Error:", err);

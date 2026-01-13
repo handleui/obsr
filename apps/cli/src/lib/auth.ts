@@ -42,6 +42,12 @@ export interface TokenResponse {
   refresh_token: string;
   token_type: string;
   expires_in: number;
+  // GitHub OAuth tokens (from Navigator flow when "Return GitHub OAuth tokens" is enabled)
+  // Access token expires in ~8 hours, refresh token expires in ~6 months
+  github_token?: string;
+  github_token_expires_at?: number;
+  github_refresh_token?: string;
+  github_refresh_token_expires_at?: number;
 }
 
 export interface TokenErrorResponse {
@@ -195,14 +201,44 @@ export const getAccessToken = async (): Promise<string> => {
 
   const tokens = await refreshAccessToken(credentials.refresh_token);
   // Use the JWT's actual exp claim, not expires_in from response
+  // Preserve existing GitHub tokens if still valid (WorkOS refresh doesn't return new GitHub tokens)
   const newCredentials: Credentials = {
     access_token: tokens.access_token,
     refresh_token: tokens.refresh_token,
     expires_at: getJwtExpiration(tokens.access_token),
+    // Keep GitHub access token if it hasn't expired yet
+    ...(credentials.github_token &&
+      credentials.github_token_expires_at &&
+      credentials.github_token_expires_at > Date.now() && {
+        github_token: credentials.github_token,
+        github_token_expires_at: credentials.github_token_expires_at,
+      }),
+    // Keep GitHub refresh token if it hasn't expired yet (6-month lifetime)
+    ...(credentials.github_refresh_token &&
+      credentials.github_refresh_token_expires_at &&
+      credentials.github_refresh_token_expires_at > Date.now() && {
+        github_refresh_token: credentials.github_refresh_token,
+        github_refresh_token_expires_at:
+          credentials.github_refresh_token_expires_at,
+      }),
   };
 
   saveCredentials(newCredentials);
   return newCredentials.access_token;
+};
+
+/**
+ * Check if user has a valid session (tokens exist and can be refreshed if needed)
+ * Unlike isLoggedIn() which only checks if credentials exist, this validates
+ * the session is actually usable by attempting to get a valid access token.
+ */
+export const hasValidSession = async (): Promise<boolean> => {
+  try {
+    await getAccessToken();
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 export const decodeUserInfo = (accessToken: string): UserInfo => {
@@ -222,6 +258,168 @@ export const getExpiresAt = (accessToken: string): Date | null => {
     return new Date(payload.exp * 1000);
   }
   return null;
+};
+
+/**
+ * Check if GitHub access token is expired
+ * Uses a 5-minute buffer for safety, same as WorkOS access token expiration check
+ */
+export const isGitHubTokenExpired = (credentials: Credentials): boolean => {
+  if (!(credentials.github_token && credentials.github_token_expires_at)) {
+    return true;
+  }
+  const bufferMs = 5 * 60 * 1000;
+  return credentials.github_token_expires_at < Date.now() + bufferMs;
+};
+
+/**
+ * Check if GitHub refresh token is expired
+ * Uses a 1-hour buffer since refresh tokens have a 6-month lifetime
+ */
+export const isGitHubRefreshTokenExpired = (
+  credentials: Credentials
+): boolean => {
+  if (
+    !(
+      credentials.github_refresh_token &&
+      credentials.github_refresh_token_expires_at
+    )
+  ) {
+    return true;
+  }
+  const bufferMs = 60 * 60 * 1000; // 1 hour buffer
+  return credentials.github_refresh_token_expires_at < Date.now() + bufferMs;
+};
+
+/**
+ * Refresh the GitHub OAuth token using the refresh token
+ * Calls the API endpoint which handles the GitHub token exchange server-side
+ */
+const refreshGitHubTokenInternal = async (
+  accessToken: string,
+  credentials: Credentials
+): Promise<Credentials | null> => {
+  if (
+    !(
+      credentials.github_refresh_token &&
+      !isGitHubRefreshTokenExpired(credentials)
+    )
+  ) {
+    return null;
+  }
+
+  try {
+    const { refreshGitHubToken } = await import("./api.js");
+    const response = await refreshGitHubToken(
+      accessToken,
+      credentials.github_refresh_token
+    );
+
+    // Update credentials with new GitHub tokens
+    const newCredentials: Credentials = {
+      ...credentials,
+      github_token: response.access_token,
+      github_token_expires_at: response.access_token_expires_at,
+      github_refresh_token: response.refresh_token,
+      github_refresh_token_expires_at: response.refresh_token_expires_at,
+    };
+
+    saveCredentials(newCredentials);
+    return newCredentials;
+  } catch {
+    // Return null silently - caller decides how to handle missing token
+    // This avoids displaying error messages when CLI gracefully falls back
+    return null;
+  }
+};
+
+/**
+ * Get GitHub OAuth token from credentials if available
+ * Automatically refreshes the token if expired but refresh token is still valid
+ *
+ * Returns null if:
+ * - No credentials exist
+ * - No GitHub token stored
+ * - GitHub token is expired AND refresh failed or not available
+ */
+export const getGitHubToken = async (): Promise<string | null> => {
+  const credentials = loadCredentials();
+  if (!credentials?.github_token) {
+    return null;
+  }
+
+  // Return token if not expired
+  if (!isGitHubTokenExpired(credentials)) {
+    return credentials.github_token;
+  }
+
+  // Token is expired - try to refresh if we have a refresh token
+  if (
+    credentials.github_refresh_token &&
+    !isGitHubRefreshTokenExpired(credentials)
+  ) {
+    try {
+      // Get a valid WorkOS access token first (may need refresh itself)
+      const accessToken = await getAccessToken();
+      const newCredentials = await refreshGitHubTokenInternal(
+        accessToken,
+        credentials
+      );
+      if (newCredentials?.github_token) {
+        return newCredentials.github_token;
+      }
+    } catch {
+      // Failed to refresh - return null
+    }
+  }
+
+  // Token expired and couldn't refresh
+  return null;
+};
+
+export interface TokenHealthStatus {
+  workos: "valid" | "expired" | "refresh_needed" | "missing";
+  github:
+    | "valid"
+    | "expired"
+    | "refresh_needed"
+    | "refresh_available"
+    | "missing";
+}
+
+/**
+ * Check health of stored tokens without throwing
+ * Returns status object for caller to handle (e.g., show warnings on CLI startup)
+ * Synchronous - only checks local token expiration, no API calls
+ */
+export const checkTokenHealth = (): TokenHealthStatus => {
+  const credentials = loadCredentials();
+
+  if (!credentials) {
+    return { workos: "missing", github: "missing" };
+  }
+
+  // Check WorkOS token
+  const workosStatus: TokenHealthStatus["workos"] = isTokenExpired(credentials)
+    ? "refresh_needed"
+    : "valid";
+
+  // Check GitHub token
+  let githubStatus: TokenHealthStatus["github"] = "missing";
+  if (credentials.github_token) {
+    if (!isGitHubTokenExpired(credentials)) {
+      githubStatus = "valid";
+    } else if (
+      credentials.github_refresh_token &&
+      !isGitHubRefreshTokenExpired(credentials)
+    ) {
+      githubStatus = "refresh_available";
+    } else {
+      githubStatus = "expired";
+    }
+  }
+
+  return { workos: workosStatus, github: githubStatus };
 };
 
 /**
@@ -263,6 +461,10 @@ export const authenticateViaNavigator = async (): Promise<TokenResponse> => {
     access_token: string;
     refresh_token: string;
     expires_at: number;
+    github_token?: string;
+    github_token_expires_at?: number;
+    github_refresh_token?: string;
+    github_refresh_token_expires_at?: number;
   };
 
   return {
@@ -270,5 +472,10 @@ export const authenticateViaNavigator = async (): Promise<TokenResponse> => {
     refresh_token: tokens.refresh_token,
     token_type: "Bearer",
     expires_in: Math.floor((tokens.expires_at - Date.now()) / 1000),
+    // Pass through GitHub OAuth tokens if available
+    github_token: tokens.github_token,
+    github_token_expires_at: tokens.github_token_expires_at,
+    github_refresh_token: tokens.github_refresh_token,
+    github_refresh_token_expires_at: tokens.github_refresh_token_expires_at,
   };
 };

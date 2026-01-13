@@ -1,5 +1,7 @@
 # Detent
 
+[![Better Stack Badge](https://uptime.betterstack.com/status-badges/v3/monitor/2cpdx.svg)](https://uptime.betterstack.com/?utm_source=status_badge)
+
 Self-healing CI/CD that runs on PR's, it is very much NOT ready, please, avoid installing while I fix my mess
 
 ## Install

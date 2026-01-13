@@ -178,6 +178,9 @@ interface CheckSuitePayload {
     id: number;
     head_sha: string;
     head_branch: string;
+    head_commit?: {
+      message: string;
+    };
     pull_requests: Array<{ number: number; head: { sha: string } }>;
   };
   repository: {
@@ -3038,7 +3041,7 @@ interface PostWaitingCommentContext {
   repository: string;
   prNumber: number;
   headSha: string;
-  /** Optional commit message (not available in check_suite payload) */
+  /** First line of the commit message from check_suite.head_commit.message */
   headCommitMessage?: string;
 }
 
@@ -3194,6 +3197,7 @@ const handleCheckSuiteRequested = async (
           repository: repository.full_name,
           prNumber,
           headSha,
+          headCommitMessage: check_suite.head_commit?.message,
         }),
         // Check org owner status and post claim comment if needed
         checkOrgOwnerAndPostComment(

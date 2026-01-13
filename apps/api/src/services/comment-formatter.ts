@@ -464,6 +464,77 @@ const mapSeverityToAnnotationLevel = (
   }
 };
 
+// Priority scoring for errors - higher = more actionable, should appear first
+// Returns numeric score (higher = more important)
+const calculateErrorPriority = (error: ParsedError): number => {
+  let score = 0;
+
+  // Has file path - more actionable (+100)
+  if (error.filePath) {
+    score += 100;
+  }
+
+  // Has line number - even more actionable (+50)
+  if (error.line) {
+    score += 50;
+  }
+
+  // Has column - most precise (+20)
+  if (error.column) {
+    score += 20;
+  }
+
+  // Severity weight
+  switch (error.severity?.toLowerCase()) {
+    case "error":
+    case "fatal":
+    case "critical":
+      score += 30;
+      break;
+    case "warning":
+    case "warn":
+      score += 20;
+      break;
+    default:
+      score += 10;
+  }
+
+  // Has rule ID - can be looked up (+15)
+  if (error.ruleId) {
+    score += 15;
+  }
+
+  // Has hint/suggestion - actionable (+10)
+  if (error.hint) {
+    score += 10;
+  }
+
+  // Penalize unknown patterns and test output noise
+  // Use moderate penalty (-20) for unknownPattern since they're real errors
+  // that just didn't match a known parser - still actionable
+  if (error.unknownPattern) {
+    score -= 20;
+  }
+  if (error.possiblyTestOutput) {
+    score -= 50;
+  }
+
+  // Source-based priority (well-known tools get boost)
+  const knownSources = [
+    "typescript",
+    "eslint",
+    "biome",
+    "rust",
+    "go",
+    "python",
+  ];
+  if (error.source && knownSources.includes(error.source.toLowerCase())) {
+    score += 10;
+  }
+
+  return score;
+};
+
 // Create a unique key for error deduplication (file:line)
 // Uses sentinel values that won't collide with real paths/lines:
 // - "__no_path__" instead of "unknown" (real files could be named "unknown")
@@ -838,23 +909,23 @@ export const formatCheckRunOutput = (
   }
 
   // === ANNOTATIONS: Inline file annotations ===
+  // Sort errors by priority (most actionable first) for annotations
+  const sortedErrors = [...errors].sort(
+    (a, b) => calculateErrorPriority(b) - calculateErrorPriority(a)
+  );
+
   // Filter to errors with file path and line number (required for annotations)
   // Also filter out test output noise (vitest/jest progress, etc.)
-  const errorsWithPath = errors.filter(
+  const errorsWithPath = sortedErrors.filter(
     (e) => e.filePath && e.line && !e.possiblyTestOutput
   );
 
-  // Sort by file path then line number for consistent ordering
-  const sortedErrors = [...errorsWithPath].sort((a, b) => {
-    const pathCompare = (a.filePath ?? "").localeCompare(b.filePath ?? "");
-    if (pathCompare !== 0) {
-      return pathCompare;
-    }
-    return (a.line ?? 0) - (b.line ?? 0);
-  });
-
   // Deduplicate errors at same file:line to reduce annotation noise
-  const deduplicatedErrors = deduplicateErrors(sortedErrors);
+  // Note: Order is preserved because:
+  // 1. Input is already sorted by priority (highest first)
+  // 2. Map preserves insertion order
+  // 3. First error at each file:line has highest priority for that location
+  const deduplicatedErrors = deduplicateErrors(errorsWithPath);
 
   // Create annotations using helper (max 50 per request)
   // Helper handles: severity-based levels, rich titles, raw_details, column info

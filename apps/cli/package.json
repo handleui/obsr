@@ -21,6 +21,7 @@
     "@detent/healing": "*",
     "@detent/parser": "*",
     "@handleui/shimmer": "^0.1.0",
+    "@sentry/node": "^9.0.0",
     "@inkjs/ui": "^2.0.0",
     "citty": "^0.1.6",
     "dotenv": "^17.2.3",

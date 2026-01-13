@@ -54,4 +54,11 @@ export interface Env {
 
   // Sentry error monitoring
   SENTRY_DSN?: string;
+
+  // Cloudflare version metadata for Sentry release tracking
+  CF_VERSION_METADATA?: {
+    id: string;
+    tag: string;
+    timestamp: string;
+  };
 }

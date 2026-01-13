@@ -15,6 +15,7 @@ import {
   runs,
 } from "../db/schema";
 import { CACHE_TTL, cacheKey, getFromCache, setInCache } from "../lib/cache";
+import { captureWebhookError, type ParserContext } from "../lib/sentry";
 import { webhookSignatureMiddleware } from "../middleware/webhook-signature";
 import {
   formatCheckRunOutput,
@@ -754,7 +755,7 @@ const sanitizeErrorMessage = (error: unknown): string => {
 // ============================================================================
 // Each error code identifies a specific failure category for easier diagnosis.
 // Format: WEBHOOK_<EVENT>_<CATEGORY> (e.g., WEBHOOK_WORKFLOW_TOKEN_FAILED)
-const ERROR_CODES = {
+export const ERROR_CODES = {
   // Token/auth errors
   TOKEN_FAILED: "WEBHOOK_TOKEN_FAILED",
 
@@ -774,7 +775,7 @@ const ERROR_CODES = {
   UNKNOWN: "WEBHOOK_UNKNOWN_ERROR",
 } as const;
 
-type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
+export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 
 interface ClassifiedError {
   code: ErrorCode;
@@ -954,6 +955,7 @@ const processAndStoreAllRuns = async (
 ): Promise<{
   errors: ParsedError[];
   detectedUnsupportedTools: string[];
+  parserContext?: ParserContext;
 }> => {
   // Limit concurrent fetches to avoid memory pressure from multiple ZIP files
   // Each workflow log can be up to 30MB compressed, so we keep this conservative
@@ -965,6 +967,12 @@ const processAndStoreAllRuns = async (
 
   // Map to store errors by run ID
   const errorsByRunId = new Map<number, ParsedError[]>();
+
+  // Track aggregated parser context for Sentry error reporting
+  let aggregatedLogBytes = 0;
+  let aggregatedJobCount = 0;
+  let aggregatedErrorCount = 0;
+  let parsersAvailable: string[] = [];
 
   // Process a single failed run: fetch logs, parse, and return errors
   const processFailedRun = async (run: WorkflowRunMeta): Promise<void> => {
@@ -996,6 +1004,14 @@ const processAndStoreAllRuns = async (
       // Collect unsupported tools
       for (const tool of parseResult.detectedUnsupportedTools) {
         allUnsupportedTools.add(tool);
+      }
+
+      // Aggregate parser context for Sentry error reporting
+      aggregatedLogBytes += parseResult.parserContext.logBytes;
+      aggregatedJobCount += parseResult.parserContext.jobCount;
+      aggregatedErrorCount += parseResult.parserContext.errorCount;
+      if (parsersAvailable.length === 0) {
+        parsersAvailable = parseResult.parserContext.parsersAvailable;
       }
 
       console.log(
@@ -1056,9 +1072,22 @@ const processAndStoreAllRuns = async (
   // Bulk store all runs in a single transaction for efficiency
   await bulkStoreRunsAndErrors(env, preparedRuns);
 
+  // Build aggregated parser context if any runs were successfully parsed
+  const parserContext: ParserContext | undefined =
+    aggregatedLogBytes > 0
+      ? {
+          logBytes: aggregatedLogBytes,
+          jobCount: aggregatedJobCount,
+          errorCount: aggregatedErrorCount,
+          parsersAvailable,
+          detectedUnsupportedTools: [...allUnsupportedTools].sort(),
+        }
+      : undefined;
+
   return {
     errors: allErrors,
     detectedUnsupportedTools: [...allUnsupportedTools].sort(),
+    parserContext,
   };
 };
 
@@ -1787,6 +1816,14 @@ const handleWorkflowRunInProgress = async (
     );
     // Non-fatal - we'll create the check run on completed if this fails
     const classified = classifyError(error);
+    captureWebhookError(error, classified.code, {
+      eventType: "workflow_run.in_progress",
+      deliveryId,
+      repository: repository.full_name,
+      installationId: installation.id,
+      workflowName: workflow_run.name,
+      runId: workflow_run.id,
+    });
     return c.json({
       message: "failed to create check run",
       errorCode: classified.code,
@@ -1847,6 +1884,7 @@ const handleWorkflowRunCompleted = async (
   const github = createGitHubService(c.env);
   let checkRunId: number | undefined;
   let token: string | undefined;
+  let parserContext: ParserContext | undefined;
 
   // IMPORTANT: Retrieve stored check run ID early for error recovery
   // This ensures we can clean up the check run if errors occur before we
@@ -2005,15 +2043,19 @@ const handleWorkflowRunCompleted = async (
 
     // Process only NEW runs: fetch logs for failures, store with metadata
     // Re-runs (same runId, different runAttempt) will be in runsToProcess
-    const { errors: allErrors, detectedUnsupportedTools } =
-      await processAndStoreAllRuns(c.env, github, token, runsToProcess, {
-        owner,
-        repo,
-        prNumber,
-        headSha,
-        repository: repository.full_name,
-        checkRunId: finalCheckRunId,
-      });
+    const {
+      errors: allErrors,
+      detectedUnsupportedTools,
+      parserContext: processedParserContext,
+    } = await processAndStoreAllRuns(c.env, github, token, runsToProcess, {
+      owner,
+      repo,
+      prNumber,
+      headSha,
+      repository: repository.full_name,
+      checkRunId: finalCheckRunId,
+    });
+    parserContext = processedParserContext;
 
     // Finalize: update check run and post PR comment (if failures)
     const { totalErrors } = await finalizeAndPostResults(
@@ -2086,6 +2128,19 @@ const handleWorkflowRunCompleted = async (
     );
 
     const classified = classifyError(error);
+    captureWebhookError(
+      error,
+      classified.code,
+      {
+        eventType: "workflow_run",
+        deliveryId,
+        repository: repository.full_name,
+        installationId: installation.id,
+        workflowName: workflow_run.name,
+        runId: workflow_run.id,
+      },
+      parserContext
+    );
     return c.json(
       {
         message: "workflow_run error",
@@ -2487,6 +2542,11 @@ const handleInstallationEvent = async (
       error
     );
     const classified = classifyError(error);
+    captureWebhookError(error, classified.code, {
+      eventType: "installation",
+      deliveryId,
+      installationId: installation.id,
+    });
     return c.json(
       {
         message: "installation error",
@@ -2582,6 +2642,11 @@ const handleInstallationRepositoriesEvent = async (
       error
     );
     const classified = classifyError(error);
+    captureWebhookError(error, classified.code, {
+      eventType: "installation_repositories",
+      deliveryId,
+      installationId: installation.id,
+    });
     return c.json(
       {
         message: "installation_repositories error",
@@ -2719,6 +2784,12 @@ const handleRepositoryEvent = async (
       error
     );
     const classified = classifyError(error);
+    captureWebhookError(error, classified.code, {
+      eventType: "repository",
+      deliveryId,
+      repository: repository.full_name,
+      installationId: installation?.id,
+    });
     return c.json(
       {
         message: "repository error",
@@ -2840,6 +2911,11 @@ const handleOrganizationEvent = async (
       error
     );
     const classified = classifyError(error);
+    captureWebhookError(error, classified.code, {
+      eventType: "organization",
+      deliveryId,
+      installationId: installation?.id,
+    });
     return c.json(
       {
         message: "organization error",
@@ -3045,6 +3121,12 @@ const handleCheckSuiteRequested = async (
     // Return 500 to be consistent with other error handlers in this file
     // The check run will be created when workflow_run.in_progress fires as fallback
     const classified = classifyError(error);
+    captureWebhookError(error, classified.code, {
+      eventType: "check_suite",
+      deliveryId,
+      repository: repository.full_name,
+      installationId: installation.id,
+    });
     return c.json(
       {
         message: "failed to create check run",
@@ -3146,6 +3228,13 @@ const handleIssueCommentEvent = async (
       error
     );
     const classified = classifyError(error);
+    captureWebhookError(error, classified.code, {
+      eventType: "issue_comment",
+      deliveryId,
+      repository: repository.full_name,
+      installationId: installation.id,
+      prNumber: issue.number,
+    });
     return c.json(
       {
         message: "issue_comment error",

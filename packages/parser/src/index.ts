@@ -123,7 +123,9 @@ export {
   firstTool,
   firstToolID,
   formatUnsupportedToolsWarning,
+  getUnsupportedToolDisplayName,
   hasTools,
+  isUnsupportedToolID,
   ParserRegistry,
   unsupportedTools,
 } from "./registry.js";
@@ -248,10 +250,30 @@ import { createExtractor, type Extractor } from "./extractor.js";
 import type { ExtractedError } from "./types.js";
 
 /**
+ * Singleton registry with all default parsers.
+ * Created lazily on first use.
+ */
+let defaultRegistry: ParserRegistry | undefined;
+
+/**
  * Singleton extractor with default registry.
  * Created lazily on first use.
  */
 let defaultExtractor: Extractor | undefined;
+
+/**
+ * Get the default registry (creates it on first call).
+ * Uses all parsers and noise checker initialized.
+ *
+ * Use this for tool detection when you don't need full extraction.
+ * The registry is cached to avoid repeated instantiation overhead.
+ */
+export const getDefaultRegistry = (): ParserRegistry => {
+  if (!defaultRegistry) {
+    defaultRegistry = createDefaultRegistry();
+  }
+  return defaultRegistry;
+};
 
 /**
  * Get the default extractor (creates it on first call).
@@ -259,7 +281,7 @@ let defaultExtractor: Extractor | undefined;
  */
 export const getDefaultExtractor = (): Extractor => {
   if (!defaultExtractor) {
-    defaultExtractor = createExtractor(createDefaultRegistry());
+    defaultExtractor = createExtractor(getDefaultRegistry());
   }
   return defaultExtractor;
 };

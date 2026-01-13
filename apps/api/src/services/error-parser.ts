@@ -2,6 +2,9 @@
 
 import {
   type ExtractedError,
+  getDefaultRegistry,
+  getUnsupportedToolDisplayName,
+  isUnsupportedToolID,
   parseGitHubLogs,
   resetDefaultExtractor,
 } from "@detent/parser";
@@ -36,6 +39,8 @@ export interface ParseMetadata {
 export interface WorkflowParseResult {
   errors: ParsedError[];
   metadata: ParseMetadata;
+  /** Unique unsupported tool display names detected from step commands */
+  detectedUnsupportedTools: string[];
 }
 
 // Available parsers in the default registry
@@ -94,6 +99,42 @@ const formatBytes = (bytes: number): string => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+// Detect unsupported tools from workflow step commands.
+// Note: Detection requires `workflowStep` to be populated on parsed errors.
+// Tools that fail without producing parseable errors won't be detected.
+const detectUnsupportedToolsFromSteps = (errors: ParsedError[]): string[] => {
+  // Collect unique step commands
+  const stepCommands = new Set<string>();
+  for (const error of errors) {
+    if (error.workflowStep) {
+      stepCommands.add(error.workflowStep);
+    }
+  }
+
+  if (stepCommands.size === 0) {
+    return [];
+  }
+
+  // Run detection on all step commands using cached registry
+  // getDefaultRegistry() returns a singleton, avoiding repeated instantiation
+  const registry = getDefaultRegistry();
+  const unsupportedSet = new Set<string>();
+
+  for (const step of stepCommands) {
+    const result = registry.detectTools(step, { checkSupport: true });
+    for (const tool of result.tools) {
+      if (isUnsupportedToolID(tool.id)) {
+        const displayName = getUnsupportedToolDisplayName(tool.id);
+        if (displayName) {
+          unsupportedSet.add(displayName);
+        }
+      }
+    }
+  }
+
+  return [...unsupportedSet].sort();
+};
+
 // Parse workflow logs and extract errors
 export const parseWorkflowLogs = (
   logs: string,
@@ -108,6 +149,9 @@ export const parseWorkflowLogs = (
   // Map to ParsedError format
   const errors = extractedErrors.map(mapToParsedError);
 
+  // Detect unsupported tools from step commands
+  const detectedUnsupportedTools = detectUnsupportedToolsFromSteps(errors);
+
   return {
     errors,
     metadata: {
@@ -115,6 +159,7 @@ export const parseWorkflowLogs = (
       jobCount: metadata.jobCount,
       parsersAvailable: AVAILABLE_PARSERS,
     },
+    detectedUnsupportedTools,
   };
 };
 

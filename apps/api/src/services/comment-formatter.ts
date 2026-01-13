@@ -17,6 +17,8 @@ export interface FormatCommentOptions {
   runs: WorkflowRunResult[];
   errors: ParsedError[];
   totalErrors: number;
+  /** Unsupported tools detected from step commands */
+  detectedUnsupportedTools?: string[];
 }
 
 // Top-level regex for performance (avoid creating in loops)
@@ -75,6 +77,16 @@ const escapeTableCell = (text: string): string => {
     .replace(BRACKET_CLOSE_PATTERN, "\\]");
 };
 
+// Helper: escape text for markdown link text [text](url)
+// Combines HTML entity escaping (XSS prevention) with bracket escaping (link syntax)
+// e.g., "src/test[1].ts" becomes "src/test\[1\].ts"
+// e.g., "<script>" becomes "&lt;script&gt;"
+const escapeMarkdownLinkText = (text: string): string => {
+  return escapeHtml(text)
+    .replace(BRACKET_OPEN_PATTERN, "\\[")
+    .replace(BRACKET_CLOSE_PATTERN, "\\]");
+};
+
 // Format UTC timestamp in ISO-like format (internationally unambiguous)
 // Format: "Jan 12, 15:30" - uses short month name + 24h time
 const formatTimestamp = (date: Date): string => {
@@ -97,6 +109,27 @@ const formatTimestamp = (date: Date): string => {
   const hours = date.getUTCHours().toString().padStart(2, "0");
   const minutes = date.getUTCMinutes().toString().padStart(2, "0");
   return `${month} ${day}, ${hours}:${minutes}`;
+};
+
+// Maximum number of unsupported tools to display before truncating
+const MAX_UNSUPPORTED_TOOLS_TO_DISPLAY = 10;
+
+// Format unsupported tools notice for display in comments
+const formatUnsupportedToolsNotice = (
+  tools: string[] | undefined
+): string | undefined => {
+  if (!tools || tools.length === 0) {
+    return undefined;
+  }
+
+  // Truncate long lists to avoid excessively long notices
+  if (tools.length > MAX_UNSUPPORTED_TOOLS_TO_DISPLAY) {
+    const displayed = tools.slice(0, MAX_UNSUPPORTED_TOOLS_TO_DISPLAY);
+    const remaining = tools.length - MAX_UNSUPPORTED_TOOLS_TO_DISPLAY;
+    return `_Detected ${displayed.join(", ")} (+${remaining} more) - parsers not yet available_`;
+  }
+
+  return `_Detected ${tools.join(", ")} - parsers not yet available_`;
 };
 
 // Format the main PR comment with error summary (minimal format)
@@ -148,6 +181,15 @@ export const formatResultsComment = (
   footerParts.push(`\`dt errors --commit ${headSha.slice(0, 7)}\``);
 
   lines.push(footerParts.join(" · "));
+
+  // Add unsupported tools notice if any detected
+  const unsupportedNotice = formatUnsupportedToolsNotice(
+    options.detectedUnsupportedTools
+  );
+  if (unsupportedNotice) {
+    lines.push("");
+    lines.push(unsupportedNotice);
+  }
 
   return lines.join("\n");
 };
@@ -235,6 +277,8 @@ export interface FormatCheckRunOptions {
   runs: WorkflowRunResult[];
   errors: ParsedError[];
   totalErrors: number;
+  /** Unsupported tools detected from step commands */
+  detectedUnsupportedTools?: string[];
 }
 
 // Whitespace pattern for message truncation
@@ -463,58 +507,49 @@ const capitalizeSource = (source: string): string => {
   return knownSources[source.toLowerCase()] ?? source;
 };
 
-// === GROUPING HELPERS ===
+// Get short source badge for inline display (e.g., "TS", "Biome")
+const getSourceBadge = (source?: string): string => {
+  if (!source) {
+    return "";
+  }
+  const badges: Record<string, string> = {
+    typescript: "TS",
+    eslint: "ESLint",
+    biome: "Biome",
+    "go-test": "Go",
+    go: "Go",
+    rust: "Rust",
+    python: "Py",
+    docker: "Docker",
+    nodejs: "Node",
+  };
+  return badges[source.toLowerCase()] ?? source;
+};
 
-interface ErrorsBySource {
-  source: string;
-  displayName: string;
-  errors: ParsedError[];
-}
+// Generate GitHub blob URL for a file (URL-encodes the path)
+const generateFileUrl = (
+  owner: string,
+  repo: string,
+  sha: string,
+  filePath: string
+): string => {
+  // URL-encode the file path to handle special characters
+  const encodedPath = filePath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `https://github.com/${owner}/${repo}/blob/${sha}/${encodedPath}`;
+};
+
+// === GROUPING HELPERS ===
 
 interface ErrorsByFile {
   filePath: string;
   errors: ParsedError[];
 }
 
-// Group errors by their source tool (typescript, biome, eslint, etc.)
-const groupErrorsBySource = (errors: ParsedError[]): ErrorsBySource[] => {
-  const grouped = new Map<string, ParsedError[]>();
-
-  for (const error of errors) {
-    const source = error.source ?? "unknown";
-    const existing = grouped.get(source) ?? [];
-    existing.push(error);
-    grouped.set(source, existing);
-  }
-
-  // Sort sources alphabetically, but put "unknown" last
-  return Array.from(grouped.entries())
-    .sort(([a], [b]) => {
-      if (a === "unknown") {
-        return 1;
-      }
-      if (b === "unknown") {
-        return -1;
-      }
-      return a.localeCompare(b);
-    })
-    .map(([source, errs]) => ({
-      source,
-      displayName: capitalizeSource(source),
-      errors: errs.sort((a, b) => {
-        // Sort by file, then line
-        const fileCompare = (a.filePath ?? "").localeCompare(b.filePath ?? "");
-        if (fileCompare !== 0) {
-          return fileCompare;
-        }
-        return (a.line ?? 0) - (b.line ?? 0);
-      }),
-    }));
-};
-
-// Group errors by file path within a source
-// Note: Assumes errors are already sorted by file then line (from groupErrorsBySource)
-// so we only need to sort file paths, not errors within each file
+// Group errors by file path
+// Sorts file paths alphabetically, errors within each file by line number
 const groupErrorsByFile = (errors: ParsedError[]): ErrorsByFile[] => {
   const grouped = new Map<string, ParsedError[]>();
 
@@ -525,18 +560,29 @@ const groupErrorsByFile = (errors: ParsedError[]): ErrorsByFile[] => {
     grouped.set(filePath, existing);
   }
 
-  // Sort file paths alphabetically
-  // Errors within each file are already sorted by line from groupErrorsBySource
+  // Sort file paths alphabetically, errors within each file by line number
   return Array.from(grouped.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([filePath, errs]) => ({
       filePath,
-      errors: errs,
+      errors: errs.sort((a, b) => (a.line ?? 0) - (b.line ?? 0)),
     }));
 };
 
-// Format the text section with errors grouped by source and file
-const formatTextSection = (errors: ParsedError[]): string[] => {
+// Options for formatting the text section
+interface FormatTextSectionOptions {
+  owner: string;
+  repo: string;
+  headSha: string;
+  errors: ParsedError[];
+}
+
+// Maximum files to show inline before collapsing
+const MAX_INLINE_FILES = 10;
+
+// Format the text section with errors grouped by file (flat list, no dropdowns)
+const formatTextSection = (options: FormatTextSectionOptions): string[] => {
+  const { owner, repo, headSha, errors } = options;
   const lines: string[] = [];
 
   // Annotation note at top
@@ -552,49 +598,68 @@ const formatTextSection = (errors: ParsedError[]): string[] => {
     lines.push("");
   }
 
-  // Group by source, then by file
-  const bySource = groupErrorsBySource(errors);
+  // Group all errors by file (no source grouping)
+  const byFile = groupErrorsByFile(errors);
 
-  for (const sourceGroup of bySource) {
-    const errorCount = sourceGroup.errors.length;
-    // Escape source name to prevent markdown injection via error.source
-    const safeName = escapeTableCell(sourceGroup.displayName);
-    lines.push(
-      `### ${safeName} (${errorCount} error${errorCount === 1 ? "" : "s"})`
-    );
+  // Split into visible files and overflow files
+  const visibleFiles = byFile.slice(0, MAX_INLINE_FILES);
+  const overflowFiles = byFile.slice(MAX_INLINE_FILES);
+
+  // Format visible files
+  for (const fileGroup of visibleFiles) {
+    formatFileGroup(lines, fileGroup, owner, repo, headSha);
+  }
+
+  // Format overflow files in a single collapsible section
+  if (overflowFiles.length > 0) {
+    lines.push("<details>");
+    lines.push(`<summary>View ${overflowFiles.length} more files</summary>`);
     lines.push("");
 
-    const byFile = groupErrorsByFile(sourceGroup.errors);
-
-    for (const fileGroup of byFile) {
-      const fileErrorCount = fileGroup.errors.length;
-      // Escape HTML in file path to prevent XSS via malicious file names
-      const displayPath = escapeHtml(truncatePath(fileGroup.filePath, 80));
-
-      lines.push("<details>");
-      lines.push(
-        `<summary>${displayPath} (${fileErrorCount} error${fileErrorCount === 1 ? "" : "s"})</summary>`
-      );
-      lines.push("");
-      lines.push("| Line | Message |");
-      lines.push("|------|---------|");
-
-      for (const error of fileGroup.errors) {
-        const line = error.line ?? "-";
-        const message = truncateMessage(error.message);
-        lines.push(`| ${line} | ${message} |`);
-      }
-
-      lines.push("");
-      lines.push("</details>");
-      lines.push("");
+    for (const fileGroup of overflowFiles) {
+      formatFileGroup(lines, fileGroup, owner, repo, headSha);
     }
 
-    lines.push("---");
+    lines.push("</details>");
     lines.push("");
   }
 
+  lines.push("---");
+  lines.push("");
+
   return lines;
+};
+
+// Format a single file group as a flat bullet list
+const formatFileGroup = (
+  lines: string[],
+  fileGroup: ErrorsByFile,
+  owner: string,
+  repo: string,
+  headSha: string
+): void => {
+  const filePath = fileGroup.filePath;
+  const isUnknownPath = filePath === "__no_path__";
+
+  // File header with link (unless it's an unknown path)
+  if (isUnknownPath) {
+    lines.push("**Unknown location**");
+  } else {
+    const fileUrl = generateFileUrl(owner, repo, headSha, filePath);
+    const displayPath = escapeMarkdownLinkText(truncatePath(filePath, 80));
+    lines.push(`**[${displayPath}](${fileUrl})**`);
+  }
+
+  // Error bullet list
+  for (const error of fileGroup.errors) {
+    const lineNum = error.line ?? "-";
+    const badge = getSourceBadge(error.source);
+    const badgeText = badge ? `[${badge}] ` : "";
+    const message = truncateMessage(error.message, 300);
+    lines.push(`- \`${lineNum}\` ${badgeText}${message}`);
+  }
+
+  lines.push("");
 };
 
 // Generate annotation title: concise, scannable header
@@ -764,7 +829,7 @@ const createAnnotation = (error: DeduplicatedError): CheckRunAnnotation => {
 export const formatCheckRunOutput = (
   options: FormatCheckRunOptions
 ): CheckRunOutput => {
-  const { headSha, runs, errors, totalErrors } = options;
+  const { owner, repo, headSha, runs, errors, totalErrors } = options;
   const failedRuns = runs.filter((r) => r.conclusion === "failure");
   const passedCount = runs.filter((r) => r.conclusion === "success").length;
 
@@ -792,6 +857,15 @@ export const formatCheckRunOutput = (
     }
   }
 
+  // Add unsupported tools notice to summary if any detected
+  const unsupportedNotice = formatUnsupportedToolsNotice(
+    options.detectedUnsupportedTools
+  );
+  if (unsupportedNotice) {
+    summaryLines.push("");
+    summaryLines.push(unsupportedNotice);
+  }
+
   // If no errors, return just the summary
   if (totalErrors === 0) {
     return { summary: summaryLines.join("\n") };
@@ -801,7 +875,12 @@ export const formatCheckRunOutput = (
   // Cap at 200 errors for reasonable output size
   const maxDisplayErrors = 200;
   const displayErrors = errors.slice(0, maxDisplayErrors);
-  const textLines = formatTextSection(displayErrors);
+  const textLines = formatTextSection({
+    owner,
+    repo,
+    headSha,
+    errors: displayErrors,
+  });
 
   // Show truncation note if errors were capped
   if (errors.length > maxDisplayErrors) {

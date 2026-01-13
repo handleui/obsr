@@ -24,7 +24,9 @@ import {
   firstTool,
   firstToolID,
   formatUnsupportedToolsWarning,
+  getUnsupportedToolDisplayName,
   hasTools,
+  isUnsupportedToolID,
   ParserRegistry,
   unsupportedTools,
 } from "../registry.js";
@@ -436,6 +438,107 @@ golangci-lint run`;
       const result = registry.detectTools("go test && cargo build");
 
       expect(result.tools.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe("Unsupported tool detection", () => {
+    it("detects Jest as unsupported with various package managers", () => {
+      expect(detectToolFromRun("jest --coverage")).toBe("unsupported:jest");
+      expect(detectToolFromRun("npx jest")).toBe("unsupported:jest");
+      expect(detectToolFromRun("bunx jest")).toBe("unsupported:jest");
+      expect(detectToolFromRun("pnpm run jest")).toBe("unsupported:jest");
+      expect(detectToolFromRun("yarn jest --watch")).toBe("unsupported:jest");
+    });
+
+    it("detects Mocha as unsupported", () => {
+      expect(detectToolFromRun("mocha tests/")).toBe("unsupported:mocha");
+    });
+
+    it("detects Prettier as unsupported with various package managers", () => {
+      expect(detectToolFromRun("prettier --check .")).toBe(
+        "unsupported:prettier"
+      );
+      expect(detectToolFromRun("npx prettier --write src/")).toBe(
+        "unsupported:prettier"
+      );
+      expect(detectToolFromRun("bunx prettier --check .")).toBe(
+        "unsupported:prettier"
+      );
+      expect(detectToolFromRun("pnpm prettier --write")).toBe(
+        "unsupported:prettier"
+      );
+      expect(detectToolFromRun("yarn prettier --check src/")).toBe(
+        "unsupported:prettier"
+      );
+    });
+
+    it("detects bundlers as unsupported", () => {
+      expect(detectToolFromRun("webpack build")).toBe("unsupported:webpack");
+      expect(detectToolFromRun("vite build")).toBe("unsupported:vite");
+      expect(detectToolFromRun("esbuild src/index.ts")).toBe(
+        "unsupported:esbuild"
+      );
+      expect(detectToolFromRun("rollup -c")).toBe("unsupported:rollup");
+      expect(detectToolFromRun("turbo run build")).toBe("unsupported:turbo");
+    });
+
+    it("detects E2E test tools as unsupported", () => {
+      expect(detectToolFromRun("playwright test")).toBe(
+        "unsupported:playwright"
+      );
+      expect(detectToolFromRun("npx playwright test")).toBe(
+        "unsupported:playwright"
+      );
+      expect(detectToolFromRun("cypress run")).toBe("unsupported:cypress");
+      expect(detectToolFromRun("npx cypress run")).toBe("unsupported:cypress");
+    });
+
+    it("detects multiple unsupported tools in compound commands", () => {
+      const tools = detectAllToolsFromRun("jest && prettier --check .");
+      const ids = tools.map((t) => t.id);
+      expect(ids).toContain("unsupported:jest");
+      expect(ids).toContain("unsupported:prettier");
+    });
+
+    it("hasDedicatedParser returns false for unsupported tools", () => {
+      const registry = createTestRegistry();
+      expect(registry.hasDedicatedParser("unsupported:jest")).toBe(false);
+      expect(registry.hasDedicatedParser("unsupported:prettier")).toBe(false);
+    });
+  });
+});
+
+describe("Unsupported tool helper functions", () => {
+  describe("isUnsupportedToolID", () => {
+    it("returns true for unsupported tool IDs", () => {
+      expect(isUnsupportedToolID("unsupported:jest")).toBe(true);
+      expect(isUnsupportedToolID("unsupported:prettier")).toBe(true);
+    });
+
+    it("returns false for supported tool IDs", () => {
+      expect(isUnsupportedToolID("go")).toBe(false);
+      expect(isUnsupportedToolID("typescript")).toBe(false);
+    });
+  });
+
+  describe("getUnsupportedToolDisplayName", () => {
+    it("returns display name for unsupported tool IDs", () => {
+      expect(getUnsupportedToolDisplayName("unsupported:jest")).toBe("Jest");
+      expect(getUnsupportedToolDisplayName("unsupported:prettier")).toBe(
+        "Prettier"
+      );
+      expect(getUnsupportedToolDisplayName("unsupported:mocha")).toBe("Mocha");
+    });
+
+    it("returns undefined for supported tool IDs", () => {
+      expect(getUnsupportedToolDisplayName("go")).toBeUndefined();
+      expect(getUnsupportedToolDisplayName("typescript")).toBeUndefined();
+    });
+
+    it("returns undefined for unknown unsupported tool IDs", () => {
+      expect(
+        getUnsupportedToolDisplayName("unsupported:nonexistent")
+      ).toBeUndefined();
     });
   });
 });

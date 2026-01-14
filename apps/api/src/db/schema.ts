@@ -215,22 +215,24 @@ export const organizationMembers = pgTable(
 );
 
 // ============================================================================
-// User GitHub Identities (WorkOS user ↔ GitHub identity snapshot)
+// User Identities (WorkOS user ↔ Git provider identity snapshot)
 // ============================================================================
 
-export const userGithubIdentities = pgTable(
-  "user_github_identities",
+export const userIdentities = pgTable(
+  "user_identities",
   {
     id: varchar("id", { length: 36 }).primaryKey(),
     workosUserId: varchar("workos_user_id", { length: 255 }).notNull(),
-    githubUserId: varchar("github_user_id", { length: 255 }).notNull(),
-    githubUsername: varchar("github_username", { length: 255 }).notNull(),
+    provider: providerEnum("provider").notNull(),
+    providerUserId: varchar("provider_user_id", { length: 255 }).notNull(),
+    providerUsername: varchar("provider_username", { length: 255 }).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("user_github_identities_workos_user_id_idx").on(
-      table.workosUserId
+    uniqueIndex("user_identities_workos_provider_idx").on(
+      table.workosUserId,
+      table.provider
     ),
   ]
 );
@@ -536,8 +538,8 @@ export type NewOrganization = typeof organizations.$inferInsert;
 export type OrganizationMember = typeof organizationMembers.$inferSelect;
 export type NewOrganizationMember = typeof organizationMembers.$inferInsert;
 
-export type UserGithubIdentity = typeof userGithubIdentities.$inferSelect;
-export type NewUserGithubIdentity = typeof userGithubIdentities.$inferInsert;
+export type UserIdentity = typeof userIdentities.$inferSelect;
+export type NewUserIdentity = typeof userIdentities.$inferInsert;
 
 export type Invitation = typeof invitations.$inferSelect;
 export type NewInvitation = typeof invitations.$inferInsert;

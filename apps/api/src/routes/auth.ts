@@ -11,7 +11,7 @@ import { createDb, type Database } from "../db/client";
 import {
   organizationMembers,
   organizations,
-  userGithubIdentities,
+  userIdentities,
 } from "../db/schema";
 import type { Env } from "../types/env";
 
@@ -116,29 +116,33 @@ const fetchGitHubUsername = async (
   }
 };
 
-interface GithubIdentityInput {
+type ProviderIdentityProvider = "github" | "gitlab";
+
+interface ProviderIdentityInput {
   workosUserId: string;
-  githubUserId: string;
-  githubUsername: string;
+  provider: ProviderIdentityProvider;
+  providerUserId: string;
+  providerUsername: string;
 }
 
-const upsertGithubIdentity = async (
+const upsertProviderIdentity = async (
   db: Database,
-  identity: GithubIdentityInput
+  identity: ProviderIdentityInput
 ): Promise<void> => {
   await db
-    .insert(userGithubIdentities)
+    .insert(userIdentities)
     .values({
       id: crypto.randomUUID(),
       workosUserId: identity.workosUserId,
-      githubUserId: identity.githubUserId,
-      githubUsername: identity.githubUsername,
+      provider: identity.provider,
+      providerUserId: identity.providerUserId,
+      providerUsername: identity.providerUsername,
     })
     .onConflictDoUpdate({
-      target: userGithubIdentities.workosUserId,
+      target: [userIdentities.workosUserId, userIdentities.provider],
       set: {
-        githubUserId: identity.githubUserId,
-        githubUsername: identity.githubUsername,
+        providerUserId: identity.providerUserId,
+        providerUsername: identity.providerUsername,
         updatedAt: new Date(),
       },
     });
@@ -158,7 +162,8 @@ interface GitHubIdentity {
  * Get GitHub identity from a provided OAuth token
  */
 const getGitHubIdentityFromToken = async (
-  token: string
+  token: string,
+  context = "github-identity"
 ): Promise<GitHubIdentity | null> => {
   const response = await fetch("https://api.github.com/user", {
     headers: {
@@ -170,15 +175,35 @@ const getGitHubIdentityFromToken = async (
 
   if (!response.ok) {
     console.warn(
-      `[sync-identity] GitHub token provided but API call failed: ${response.status}`
+      `[${context}] GitHub token provided but API call failed: ${response.status}`
     );
     return null;
   }
 
-  const githubUser = (await response.json()) as { id: number; login: string };
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    console.warn(`[${context}] Failed to parse GitHub user response`);
+    return null;
+  }
+
+  if (!isRecord(data)) {
+    console.warn(`[${context}] Invalid GitHub user response`);
+    return null;
+  }
+
+  const githubUserId = typeof data.id === "number" ? String(data.id) : null;
+  const githubUsername = typeof data.login === "string" ? data.login : null;
+
+  if (!githubUserId) {
+    console.warn(`[${context}] GitHub user response missing id`);
+    return null;
+  }
+
   return {
-    userId: String(githubUser.id),
-    username: githubUser.login,
+    userId: githubUserId,
+    username: githubUsername,
   };
 };
 
@@ -225,37 +250,50 @@ const getGitHubIdentityFromWorkOS = async (
 app.post("/store-github-identity", async (c) => {
   const auth = c.get("auth");
 
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: "Invalid JSON body" }, 400);
+  const headerToken = c.req.header("X-GitHub-Token");
+  let bodyToken: string | null = null;
+
+  if (!headerToken) {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      body = null;
+    }
+
+    if (isRecord(body)) {
+      bodyToken = isNonEmptyString(body.github_token)
+        ? body.github_token.trim()
+        : null;
+    }
   }
 
-  if (!isRecord(body)) {
-    return c.json({ error: "Invalid request body" }, 400);
+  const githubToken = headerToken ?? bodyToken;
+
+  if (!githubToken) {
+    return c.json({ error: "GitHub token required" }, 400);
   }
 
-  const githubUserId = isNonEmptyString(body.github_user_id)
-    ? body.github_user_id.trim()
-    : null;
-  const githubUsername = isNonEmptyString(body.github_username)
-    ? body.github_username.trim()
-    : null;
+  if (!isValidGitHubTokenFormat(githubToken)) {
+    return c.json({ error: "Invalid GitHub token format" }, 400);
+  }
 
-  if (!(githubUserId && githubUsername)) {
-    return c.json(
-      { error: "github_user_id and github_username are required" },
-      400
-    );
+  const identity = await getGitHubIdentityFromToken(
+    githubToken,
+    "store-github-identity"
+  );
+
+  if (!(identity?.userId && identity.username)) {
+    return c.json({ error: "Failed to fetch GitHub identity" }, 502);
   }
 
   const { db, client } = await createDb(c.env);
   try {
-    await upsertGithubIdentity(db, {
+    await upsertProviderIdentity(db, {
       workosUserId: auth.userId,
-      githubUserId,
-      githubUsername,
+      provider: "github",
+      providerUserId: identity.userId,
+      providerUsername: identity.username,
     });
   } catch (error) {
     console.error("Failed to store GitHub identity", error);
@@ -280,23 +318,29 @@ const resolveGitHubIdentity = async (
   providedToken: string | undefined
 ): Promise<GitHubIdentity | null> => {
   // Method 1: Check database for cached identity
-  const storedIdentity = await db.query.userGithubIdentities.findFirst({
-    where: eq(userGithubIdentities.workosUserId, userId),
+  const storedIdentity = await db.query.userIdentities.findFirst({
+    where: and(
+      eq(userIdentities.workosUserId, userId),
+      eq(userIdentities.provider, "github")
+    ),
   });
 
   if (storedIdentity) {
     console.log(
-      `[sync-identity] Got GitHub identity from DB: ${storedIdentity.githubUsername} (${storedIdentity.githubUserId})`
+      `[sync-identity] Got GitHub identity from DB: ${storedIdentity.providerUsername} (${storedIdentity.providerUserId})`
     );
     return {
-      userId: storedIdentity.githubUserId,
-      username: storedIdentity.githubUsername,
+      userId: storedIdentity.providerUserId,
+      username: storedIdentity.providerUsername,
     };
   }
 
   // Method 2: Use provided GitHub OAuth token
   if (providedToken) {
-    const identity = await getGitHubIdentityFromToken(providedToken);
+    const identity = await getGitHubIdentityFromToken(
+      providedToken,
+      "sync-identity"
+    );
     if (identity) {
       console.log(
         `[sync-identity] Got GitHub identity from token: ${identity.username} (${identity.userId})`
@@ -426,10 +470,11 @@ app.post("/sync-identity", async (c) => {
     // Persist identity if obtained from token or WorkOS
     if (identity.username) {
       try {
-        await upsertGithubIdentity(db, {
+        await upsertProviderIdentity(db, {
           workosUserId: auth.userId,
-          githubUserId: identity.userId,
-          githubUsername: identity.username,
+          provider: "github",
+          providerUserId: identity.userId,
+          providerUsername: identity.username,
         });
       } catch (error) {
         console.warn("Failed to store GitHub identity", error);

@@ -1,5 +1,5 @@
 {
-  "id": "b664147a-8a44-4db9-95dc-2fe9a40ed9dc",
+  "id": "47fd0099-672a-429f-983b-4086de769b52",
   "prevId": "2ec29c08-c28f-4172-b42d-63e1c86035a4",
   "version": "7",
   "dialect": "postgresql",
@@ -1423,8 +1423,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.user_github_identities": {
-      "name": "user_github_identities",
+    "public.user_identities": {
+      "name": "user_identities",
       "schema": "",
       "columns": {
         "id": {
@@ -1439,14 +1439,21 @@
           "primaryKey": false,
           "notNull": true
         },
-        "github_user_id": {
-          "name": "github_user_id",
+        "provider": {
+          "name": "provider",
+          "type": "provider",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_user_id": {
+          "name": "provider_user_id",
           "type": "varchar(255)",
           "primaryKey": false,
           "notNull": true
         },
-        "github_username": {
-          "name": "github_username",
+        "provider_username": {
+          "name": "provider_username",
           "type": "varchar(255)",
           "primaryKey": false,
           "notNull": true
@@ -1467,11 +1474,17 @@
         }
       },
       "indexes": {
-        "user_github_identities_workos_user_id_idx": {
-          "name": "user_github_identities_workos_user_id_idx",
+        "user_identities_workos_provider_idx": {
+          "name": "user_identities_workos_provider_idx",
           "columns": [
             {
               "expression": "workos_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

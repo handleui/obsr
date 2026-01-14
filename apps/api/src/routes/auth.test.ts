@@ -5,7 +5,7 @@ import type { Env } from "../types/env";
 // Mock the database client
 const mockFindFirst = vi.fn();
 const mockFindMany = vi.fn();
-const mockFindFirstUserGithubIdentity = vi.fn();
+const mockFindFirstUserIdentity = vi.fn();
 const mockUpdate = vi.fn();
 const mockInsert = vi.fn();
 const mockSet = vi.fn();
@@ -20,8 +20,8 @@ const mockDb = {
       findFirst: mockFindFirst,
       findMany: mockFindMany,
     },
-    userGithubIdentities: {
-      findFirst: mockFindFirstUserGithubIdentity,
+    userIdentities: {
+      findFirst: mockFindFirstUserIdentity,
     },
     organizations: {
       findMany: mockFindMany,
@@ -55,7 +55,8 @@ const MOCK_ENV = {
 const makeRequest = async (
   method: "GET" | "POST",
   path: string,
-  body?: unknown
+  body?: unknown,
+  headers?: Record<string, string>
 ): Promise<Response> => {
   // Import the routes fresh each time
   const authRoutes = (await import("./auth")).default;
@@ -75,6 +76,7 @@ const makeRequest = async (
     headers: {
       Authorization: "Bearer test-token",
       "Content-Type": "application/json",
+      ...headers,
     },
   };
 
@@ -131,7 +133,7 @@ describe("auth routes", () => {
 
     // Setup mock for findMany (organizations and organizationMembers)
     mockFindMany.mockResolvedValue([]);
-    mockFindFirstUserGithubIdentity.mockResolvedValue(undefined);
+    mockFindFirstUserIdentity.mockResolvedValue(undefined);
 
     // Replace global fetch with mock
     global.fetch = mockFetch;
@@ -144,11 +146,12 @@ describe("auth routes", () => {
         json: () => Promise.resolve(createWorkOSUser()),
       });
 
-      mockFindFirstUserGithubIdentity.mockResolvedValue({
+      mockFindFirstUserIdentity.mockResolvedValue({
         id: "identity-1",
         workosUserId: "user-123",
-        githubUserId: "98765",
-        githubUsername: "dbuser",
+        provider: "github",
+        providerUserId: "98765",
+        providerUsername: "dbuser",
       });
 
       mockReturning.mockResolvedValue([
@@ -415,10 +418,18 @@ describe("auth routes", () => {
 
   describe("POST /auth/store-github-identity", () => {
     it("stores GitHub identity for authenticated user", async () => {
-      const res = await makeRequest("POST", "/auth/store-github-identity", {
-        github_user_id: "12345",
-        github_username: "octocat",
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ id: 12_345, login: "octocat" }),
       });
+
+      const token = `gho_${"a".repeat(40)}`;
+      const res = await makeRequest(
+        "POST",
+        "/auth/store-github-identity",
+        undefined,
+        { "X-GitHub-Token": token }
+      );
 
       const json = await res.json();
 
@@ -428,16 +439,14 @@ describe("auth routes", () => {
       expect(mockOnConflictDoUpdate).toHaveBeenCalled();
     });
 
-    it("returns 400 when request body is invalid", async () => {
-      const res = await makeRequest("POST", "/auth/store-github-identity", {
-        github_user_id: "12345",
-      });
+    it("returns 400 when token is missing", async () => {
+      const res = await makeRequest("POST", "/auth/store-github-identity");
 
       const json = await res.json();
 
       expect(res.status).toBe(400);
       expect(json).toEqual({
-        error: "github_user_id and github_username are required",
+        error: "GitHub token required",
       });
     });
   });

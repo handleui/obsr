@@ -88,44 +88,6 @@ const isValidGitHubOAuthTokens = (data: unknown): data is GitHubOAuthTokens => {
   );
 };
 
-interface GitHubUser {
-  id: number;
-  login: string;
-}
-
-/**
- * Fetch GitHub user from access token
- */
-const fetchGitHubUser = async (
-  accessToken: string
-): Promise<GitHubUser | null> => {
-  const response = await fetch("https://api.github.com/user", {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/vnd.github.v3+json",
-      "User-Agent": "Detent-Web",
-    },
-  });
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const data = await response.json();
-  if (!isRecord(data)) {
-    return null;
-  }
-
-  const id = typeof data.id === "number" ? data.id : null;
-  const login = typeof data.login === "string" ? data.login : null;
-
-  if (!(id && login)) {
-    return null;
-  }
-
-  return { id, login };
-};
-
 /**
  * Store GitHub identity in API (fire-and-forget)
  */
@@ -135,24 +97,14 @@ const storeGitHubIdentityAsync = (
   log: BetterStackRequest["log"]
 ): void => {
   const doStore = async () => {
-    const githubUser = await fetchGitHubUser(githubTokens.accessToken);
-    if (!githubUser) {
-      log.warn("Failed to fetch GitHub user for identity storage");
-      return;
-    }
-
     const storeResponse = await fetch(
       `${API_BASE_URL}/v1/auth/store-github-identity`,
       {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
+          "X-GitHub-Token": githubTokens.accessToken,
         },
-        body: JSON.stringify({
-          github_user_id: String(githubUser.id),
-          github_username: githubUser.login,
-        }),
       }
     );
 

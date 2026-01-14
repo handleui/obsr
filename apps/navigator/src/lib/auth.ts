@@ -322,8 +322,10 @@ export const getAndClearReturnTo = async (): Promise<string | null> => {
  */
 export interface GitHubOAuthTokens {
   accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
+  /** Optional - only present when GitHub OAuth App has "token expiration" enabled */
+  refreshToken?: string;
+  /** Optional - 0 or undefined for non-expiring tokens */
+  expiresAt?: number;
   scopes: string[];
 }
 
@@ -332,10 +334,6 @@ export interface GitHubOAuthTokens {
  * The JWT protects against tampering and includes automatic expiration
  */
 export const createGitHubOAuthTokensToken = (tokens: GitHubOAuthTokens) => {
-  console.log(
-    "[createGitHubOAuthTokensToken] Creating JWT with tokens:",
-    Object.keys(tokens)
-  );
   return new SignJWT({ tokens })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setIssuedAt()
@@ -356,13 +354,8 @@ export const getGitHubOAuthTokens =
     const cookie = cookieStore.get(CookieNames.githubOAuthTokens)?.value;
 
     if (!cookie) {
-      console.log("[getGitHubOAuthTokens] Cookie not found");
       return null;
     }
-
-    console.log(
-      `[getGitHubOAuthTokens] Cookie found, length: ${cookie.length}`
-    );
 
     try {
       const { payload } = await jwtVerify(cookie, getJwtSecretKey(), {
@@ -371,33 +364,13 @@ export const getGitHubOAuthTokens =
       });
 
       const tokens = payload.tokens as GitHubOAuthTokens;
-      console.log(
-        "[getGitHubOAuthTokens] JWT payload keys:",
-        Object.keys(payload)
-      );
-      console.log("[getGitHubOAuthTokens] tokens object:", {
-        keys: tokens ? Object.keys(tokens) : "undefined",
-        accessTokenLength: tokens?.accessToken?.length ?? "empty/undefined",
-        refreshTokenLength: tokens?.refreshToken?.length ?? "empty/undefined",
-        expiresAt: tokens?.expiresAt,
-      });
-      if (!(tokens?.accessToken && tokens?.refreshToken)) {
-        console.log(
-          "[getGitHubOAuthTokens] JWT valid but tokens missing - accessToken truthy:",
-          Boolean(tokens?.accessToken),
-          "refreshToken truthy:",
-          Boolean(tokens?.refreshToken)
-        );
+      // Only accessToken is required (refreshToken is optional for non-expiring tokens)
+      if (!tokens?.accessToken) {
         return null;
       }
-
-      console.log("[getGitHubOAuthTokens] Tokens successfully retrieved");
       return tokens;
-    } catch (error) {
+    } catch {
       // Token invalid or expired - clear the cookie
-      console.log(
-        `[getGitHubOAuthTokens] JWT verification failed: ${error instanceof Error ? error.message : String(error)}`
-      );
       cookieStore.delete(CookieNames.githubOAuthTokens);
       return null;
     }

@@ -9,6 +9,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { createDb, type Database } from "../db/client";
 import { organizationMembers, organizations } from "../db/schema";
+import { verifyGitHubMembership } from "../lib/github-membership";
 import type { Env } from "../types/env";
 
 // GitHub API types
@@ -127,12 +128,6 @@ const getGitHubIdentityFromToken = async (
   token: string,
   context = "github-identity"
 ): Promise<GitHubIdentity | null> => {
-  // Log token prefix for debugging (safe - doesn't expose full token)
-  const tokenPrefix = token.slice(0, 10);
-  console.log(
-    `[${context}] Attempting GitHub API call with token: ${tokenPrefix}...`
-  );
-
   const response = await fetch("https://api.github.com/user", {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -200,10 +195,6 @@ const getGitHubIdentityFromWorkOS = async (
   }
 
   const identities = (await response.json()) as WorkOSIdentitiesResponse;
-  console.log(
-    `[workos-identity] Found ${identities.data?.length ?? 0} identities: ${identities.data?.map((i) => i.provider).join(", ") ?? "none"}`
-  );
-
   const githubIdentity = identities.data?.find(
     (identity) => identity.provider === "GitHubOAuth"
   );
@@ -229,10 +220,6 @@ const resolveGitHubIdentity = async (
   workosApiKey: string,
   providedToken: string | undefined
 ): Promise<GitHubIdentity | null> => {
-  console.log(
-    `[sync-identity] Resolving identity for user ${userId}, token provided: ${Boolean(providedToken)}`
-  );
-
   // Method 1: Use provided GitHub OAuth token (preferred)
   if (providedToken) {
     const identity = await getGitHubIdentityFromToken(
@@ -240,41 +227,30 @@ const resolveGitHubIdentity = async (
       "sync-identity"
     );
     if (identity) {
-      console.log(
-        `[sync-identity] Got GitHub identity from token: ${identity.username} (${identity.userId})`
-      );
       return identity;
     }
-    console.log("[sync-identity] Token provided but failed to get identity");
   }
 
   // Method 2: Fall back to WorkOS identities
-  console.log("[sync-identity] Falling back to WorkOS identities API");
-  const workosIdentity = await getGitHubIdentityFromWorkOS(
-    userId,
-    workosApiKey
-  );
-  if (workosIdentity) {
-    console.log(
-      `[sync-identity] Got GitHub identity from WorkOS: ${workosIdentity.username ?? "unknown"} (${workosIdentity.userId})`
-    );
-  } else {
-    console.log(
-      "[sync-identity] WorkOS identities API returned no GitHub identity"
-    );
-  }
-  return workosIdentity;
+  return getGitHubIdentityFromWorkOS(userId, workosApiKey);
 };
 
 /**
  * Link user to organizations where they are the installer
+ * Verifies current GitHub org membership before granting owner access
  */
 const linkInstallerOrganizations = async (
   db: Database,
   userId: string,
   githubUserId: string,
-  githubUsername: string | null
+  githubUsername: string | null,
+  env: Env
 ): Promise<number> => {
+  // Cannot verify membership without username
+  if (!githubUsername) {
+    return 0;
+  }
+
   const installerOrgs = await db.query.organizations.findMany({
     where: and(
       eq(organizations.installerGithubId, githubUserId),
@@ -299,9 +275,35 @@ const linkInstallerOrganizations = async (
   );
   const orgsToLink = installerOrgs.filter((org) => !existingOrgIds.has(org.id));
 
-  if (orgsToLink.length > 0) {
+  // Verify current GitHub membership before granting owner access
+  // This prevents users who have left the org from claiming access
+  const verifiedOrgs: typeof orgsToLink = [];
+  for (const org of orgsToLink) {
+    if (!(org.providerInstallationId && org.providerAccountLogin)) {
+      continue;
+    }
+    try {
+      const membership = await verifyGitHubMembership(
+        githubUsername,
+        org.providerAccountLogin,
+        org.providerInstallationId,
+        env
+      );
+      if (membership.isMember) {
+        verifiedOrgs.push(org);
+      }
+    } catch (error) {
+      // Log but continue - don't fail entire operation if one org check fails
+      console.warn(
+        `[sync-identity] Failed to verify membership for ${githubUsername} in ${org.providerAccountLogin}:`,
+        error instanceof Error ? error.message : error
+      );
+    }
+  }
+
+  if (verifiedOrgs.length > 0) {
     await db.insert(organizationMembers).values(
-      orgsToLink.map((org) => ({
+      verifiedOrgs.map((org) => ({
         id: crypto.randomUUID(),
         organizationId: org.id,
         userId,
@@ -311,13 +313,9 @@ const linkInstallerOrganizations = async (
         providerLinkedAt: new Date(),
       }))
     );
-
-    console.log(
-      `[sync-identity] Linked user ${userId} as owner to ${orgsToLink.length} org(s): ${orgsToLink.map((o) => o.slug).join(", ")}`
-    );
   }
 
-  return orgsToLink.length;
+  return verifiedOrgs.length;
 };
 
 /**
@@ -331,10 +329,6 @@ const linkInstallerOrganizations = async (
 app.post("/sync-identity", async (c) => {
   const auth = c.get("auth");
   const providedGitHubToken = c.req.header("X-GitHub-Token");
-
-  console.log(
-    `[sync-identity] Request for user ${auth.userId}, X-GitHub-Token header: ${providedGitHubToken ? "present" : "missing"}`
-  );
 
   const userResponse = await fetch(
     `https://api.workos.com/user_management/users/${auth.userId}`,
@@ -360,9 +354,6 @@ app.post("/sync-identity", async (c) => {
   );
 
   if (!identity) {
-    console.log(
-      `[sync-identity] No GitHub identity found for user ${auth.userId}`
-    );
     return c.json({
       user_id: auth.userId,
       email: user.email,
@@ -388,12 +379,13 @@ app.post("/sync-identity", async (c) => {
       .where(eq(organizationMembers.userId, auth.userId))
       .returning({ organizationId: organizationMembers.organizationId });
 
-    // Auto-link installer organizations
+    // Auto-link installer organizations (with membership verification)
     const autoLinkedCount = await linkInstallerOrganizations(
       db,
       auth.userId,
       identity.userId,
-      identity.username
+      identity.username,
+      c.env
     );
 
     return c.json({

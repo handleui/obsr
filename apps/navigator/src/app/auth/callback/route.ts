@@ -79,22 +79,15 @@ const isValidGitHubOAuthTokens = (data: unknown): data is GitHubOAuthTokens => {
   if (!isRecord(data)) {
     return false;
   }
-  // Check for non-empty strings (empty string is still a string but useless)
+  // Only accessToken is required - refreshToken/expiresAt are optional
+  // (GitHub classic OAuth tokens don't expire and don't have refresh tokens)
   const hasValidAccessToken =
     typeof data.accessToken === "string" && data.accessToken.length > 0;
-  const hasValidRefreshToken =
-    typeof data.refreshToken === "string" && data.refreshToken.length > 0;
-  const hasValidExpiry = typeof data.expiresAt === "number";
   const hasValidScopes =
     Array.isArray(data.scopes) &&
     data.scopes.every((scope) => typeof scope === "string");
 
-  return (
-    hasValidAccessToken &&
-    hasValidRefreshToken &&
-    hasValidExpiry &&
-    hasValidScopes
-  );
+  return hasValidAccessToken && hasValidScopes;
 };
 
 /**
@@ -140,37 +133,20 @@ const buildAuthOptions = (code: string, shouldSealSession: boolean) => {
 };
 
 /**
- * Debug log OAuth tokens from WorkOS response
- */
-const logOAuthTokensDebug = (rawOauthTokens: unknown) => {
-  if (!rawOauthTokens) {
-    console.log("[auth/callback] WorkOS authResponse.oauthTokens:", "null");
-    return;
-  }
-
-  const tokens = rawOauthTokens as Record<string, unknown>;
-  console.log("[auth/callback] WorkOS authResponse.oauthTokens:", {
-    hasAccessToken: Boolean(tokens.accessToken),
-    accessTokenLength:
-      typeof tokens.accessToken === "string"
-        ? tokens.accessToken.length
-        : "N/A",
-    hasRefreshToken: Boolean(tokens.refreshToken),
-    refreshTokenLength:
-      typeof tokens.refreshToken === "string"
-        ? tokens.refreshToken.length
-        : "N/A",
-    expiresAt: tokens.expiresAt,
-    scopes: tokens.scopes,
-  });
-};
-
-/**
  * Set session cookies on the response
  */
 const setSessionCookies = async (
   response: NextResponse,
-  authResponse: { user: { id: string }; sealedSession?: string },
+  authResponse: {
+    user: {
+      id: string;
+      email: string;
+      firstName: string | null;
+      lastName: string | null;
+      profilePictureUrl: string | null;
+    };
+    sealedSession?: string;
+  },
   shouldSealSession: boolean
 ) => {
   const token = await createSession(authResponse.user);
@@ -198,28 +174,14 @@ const setSessionCookies = async (
  */
 const processGitHubTokens = async (
   response: NextResponse,
-  rawOauthTokens: unknown,
-  log: BetterStackRequest["log"]
+  rawOauthTokens: unknown
 ) => {
-  logOAuthTokensDebug(rawOauthTokens);
-
   const githubTokens = isValidGitHubOAuthTokens(rawOauthTokens)
     ? rawOauthTokens
     : null;
 
-  if (!githubTokens && rawOauthTokens) {
-    console.log(
-      "[auth/callback] GitHub tokens validation FAILED - rawOauthTokens exists but is invalid"
-    );
-    return false;
-  }
-
   if (githubTokens) {
     const oauthTokensJwt = await createGitHubOAuthTokensToken(githubTokens);
-    log.info("Setting github_oauth_tokens cookie", {
-      cookieName: COOKIE_NAMES.githubOAuthTokens,
-      jwtLength: oauthTokensJwt.length,
-    });
     response.cookies.set(
       createSecureCookieOptions({
         name: COOKIE_NAMES.githubOAuthTokens,
@@ -294,11 +256,7 @@ const handler = async (request: BetterStackRequest) => {
     const rawOauthTokens =
       "oauthTokens" in authResponse ? authResponse.oauthTokens : null;
 
-    const hasGitHubTokens = await processGitHubTokens(
-      response,
-      rawOauthTokens,
-      log
-    );
+    const hasGitHubTokens = await processGitHubTokens(response, rawOauthTokens);
 
     log.info("User authenticated successfully", {
       userId: user.id,

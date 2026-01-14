@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { API_BASE_URL } from "@/lib/constants";
 
 // Health check endpoint for uptime monitoring (Better Stack, OpenStatus, etc.)
-// Verifies actual service connectivity, not just config presence
+// Verifies Navigator's direct dependencies, not cross-service connectivity.
+// API health is monitored separately via api.detent.sh/health to avoid
+// cascading cold start failures in serverless environments.
 
 // Timeout constants
 const CHECK_TIMEOUT_MS = 5000; // 5s per check
@@ -12,7 +13,6 @@ type CheckStatus = "operational" | "degraded" | "down";
 
 interface HealthChecks {
   workos: CheckStatus;
-  api: CheckStatus;
   sentry: CheckStatus;
 }
 
@@ -64,32 +64,6 @@ const checkWorkOS = async (): Promise<CheckStatus> => {
 };
 
 /**
- * Check Detent API connectivity
- * Calls the API health endpoint to verify backend is reachable
- */
-const checkDetentAPI = async (): Promise<CheckStatus> => {
-  try {
-    const response = await withTimeout(
-      fetch(`${API_BASE_URL}/health`, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-      }),
-      CHECK_TIMEOUT_MS,
-      "API check timeout"
-    );
-
-    if (!response.ok) {
-      return "down";
-    }
-
-    const data = (await response.json()) as { status?: string };
-    return data.status === "operational" ? "operational" : "degraded";
-  } catch {
-    return "down";
-  }
-};
-
-/**
  * Check Sentry configuration
  * Config-only check - Sentry doesn't have a public health endpoint
  */
@@ -98,21 +72,15 @@ const checkSentry = (): CheckStatus =>
 
 /**
  * Determine overall status from individual checks
- * Note: Only WorkOS is critical (blocking for auth). API connectivity is
- * reported but non-critical to avoid cascading failures during API outages.
+ * WorkOS is critical (blocking for auth). Sentry is informational.
  */
 const computeOverallStatus = (checks: HealthChecks): CheckStatus => {
-  // Only WorkOS is critical - Navigator can't authenticate without it
+  // WorkOS is critical - Navigator can't authenticate without it
   if (checks.workos === "down") {
     return "down";
   }
 
-  // API down = degraded (reported, but Navigator still serves traffic)
-  if (checks.api === "down") {
-    return "degraded";
-  }
-
-  // Any other degraded service
+  // Any degraded service (e.g., missing Sentry DSN)
   if (Object.values(checks).some((status) => status === "degraded")) {
     return "degraded";
   }
@@ -124,27 +92,22 @@ export const GET = async () => {
   const startTime = Date.now();
 
   // Run checks in parallel with overall timeout
-  const checksPromise = Promise.all([
-    checkWorkOS(),
-    checkDetentAPI(),
-    checkSentry(),
-  ]);
+  const checksPromise = Promise.all([checkWorkOS(), checkSentry()]);
 
   let checks: HealthChecks;
 
   try {
-    const [workos, api, sentry] = await withTimeout(
+    const [workos, sentry] = await withTimeout(
       checksPromise,
       REQUEST_TIMEOUT_MS,
       "Health check timeout"
     );
 
-    checks = { workos, api, sentry };
+    checks = { workos, sentry };
   } catch {
     // Overall timeout - mark connectivity checks as down
     checks = {
       workos: "down",
-      api: "down",
       sentry: checkSentry(),
     };
   }

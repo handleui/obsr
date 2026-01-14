@@ -142,13 +142,6 @@ export const ensureRepoDetentDir = (repoRoot: string): void => {
   }
 };
 
-/**
- * Checks if a repository has been initialized (has config file)
- */
-export const isRepoInitialized = (repoRoot: string): boolean => {
-  return existsSync(getRepoConfigPath(repoRoot));
-};
-
 // ============================================================================
 // Config Loading
 // ============================================================================

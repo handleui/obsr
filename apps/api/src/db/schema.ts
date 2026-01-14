@@ -215,6 +215,27 @@ export const organizationMembers = pgTable(
 );
 
 // ============================================================================
+// User GitHub Identities (WorkOS user ↔ GitHub identity snapshot)
+// ============================================================================
+
+export const userGithubIdentities = pgTable(
+  "user_github_identities",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    workosUserId: varchar("workos_user_id", { length: 255 }).notNull(),
+    githubUserId: varchar("github_user_id", { length: 255 }).notNull(),
+    githubUsername: varchar("github_username", { length: 255 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("user_github_identities_workos_user_id_idx").on(
+      table.workosUserId
+    ),
+  ]
+);
+
+// ============================================================================
 // Invitations (Email-based organization invitations)
 // ============================================================================
 
@@ -514,6 +535,9 @@ export type NewOrganization = typeof organizations.$inferInsert;
 
 export type OrganizationMember = typeof organizationMembers.$inferSelect;
 export type NewOrganizationMember = typeof organizationMembers.$inferInsert;
+
+export type UserGithubIdentity = typeof userGithubIdentities.$inferSelect;
+export type NewUserGithubIdentity = typeof userGithubIdentities.$inferInsert;
 
 export type Invitation = typeof invitations.$inferSelect;
 export type NewInvitation = typeof invitations.$inferInsert;

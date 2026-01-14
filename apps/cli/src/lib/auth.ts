@@ -227,20 +227,6 @@ export const getAccessToken = async (): Promise<string> => {
   return newCredentials.access_token;
 };
 
-/**
- * Check if user has a valid session (tokens exist and can be refreshed if needed)
- * Unlike isLoggedIn() which only checks if credentials exist, this validates
- * the session is actually usable by attempting to get a valid access token.
- */
-export const hasValidSession = async (): Promise<boolean> => {
-  try {
-    await getAccessToken();
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 export const decodeUserInfo = (accessToken: string): UserInfo => {
   const payload = decodeJwt(accessToken);
   return {

@@ -72,18 +72,102 @@ const isEmailVerificationError = (
  * Type guard for GitHub OAuth tokens from WorkOS
  * Validates that the object has the expected shape before casting
  */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
 const isValidGitHubOAuthTokens = (data: unknown): data is GitHubOAuthTokens => {
-  if (typeof data !== "object" || data === null) {
+  if (!isRecord(data)) {
     return false;
   }
-  const obj = data as Record<string, unknown>;
   return (
-    typeof obj.accessToken === "string" &&
-    typeof obj.refreshToken === "string" &&
-    typeof obj.expiresAt === "number" &&
-    Array.isArray(obj.scopes) &&
-    obj.scopes.every((scope) => typeof scope === "string")
+    typeof data.accessToken === "string" &&
+    typeof data.refreshToken === "string" &&
+    typeof data.expiresAt === "number" &&
+    Array.isArray(data.scopes) &&
+    data.scopes.every((scope) => typeof scope === "string")
   );
+};
+
+interface GitHubUser {
+  id: number;
+  login: string;
+}
+
+/**
+ * Fetch GitHub user from access token
+ */
+const fetchGitHubUser = async (
+  accessToken: string
+): Promise<GitHubUser | null> => {
+  const response = await fetch("https://api.github.com/user", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/vnd.github.v3+json",
+      "User-Agent": "Detent-Web",
+    },
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const data = await response.json();
+  if (!isRecord(data)) {
+    return null;
+  }
+
+  const id = typeof data.id === "number" ? data.id : null;
+  const login = typeof data.login === "string" ? data.login : null;
+
+  if (!(id && login)) {
+    return null;
+  }
+
+  return { id, login };
+};
+
+/**
+ * Store GitHub identity in API (fire-and-forget)
+ */
+const storeGitHubIdentityAsync = (
+  githubTokens: GitHubOAuthTokens,
+  accessToken: string,
+  log: BetterStackRequest["log"]
+): void => {
+  const doStore = async () => {
+    const githubUser = await fetchGitHubUser(githubTokens.accessToken);
+    if (!githubUser) {
+      log.warn("Failed to fetch GitHub user for identity storage");
+      return;
+    }
+
+    const storeResponse = await fetch(
+      `${API_BASE_URL}/v1/auth/store-github-identity`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          github_user_id: String(githubUser.id),
+          github_username: githubUser.login,
+        }),
+      }
+    );
+
+    if (!storeResponse.ok) {
+      log.warn("Failed to store GitHub identity", {
+        status: storeResponse.status,
+      });
+    }
+  };
+
+  doStore().catch((error) => {
+    log.warn("Failed to store GitHub identity", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
 };
 
 /**
@@ -208,14 +292,14 @@ const handler = async (request: BetterStackRequest) => {
     // Note: oauthTokens are only returned during initial authentication and are NOT
     // stored in the WorkOS sealed session. We must persist them in a separate cookie
     // for later use (e.g., CLI auth flow that needs the GitHub token).
-    const hasGitHubTokens =
+    const githubTokens =
       "oauthTokens" in authResponse &&
-      isValidGitHubOAuthTokens(authResponse.oauthTokens);
+      isValidGitHubOAuthTokens(authResponse.oauthTokens)
+        ? authResponse.oauthTokens
+        : null;
 
-    if (hasGitHubTokens) {
-      const oauthTokensJwt = await createGitHubOAuthTokensToken(
-        authResponse.oauthTokens as GitHubOAuthTokens
-      );
+    if (githubTokens) {
+      const oauthTokensJwt = await createGitHubOAuthTokensToken(githubTokens);
       response.cookies.set(
         createSecureCookieOptions({
           name: COOKIE_NAMES.githubOAuthTokens,
@@ -223,6 +307,8 @@ const handler = async (request: BetterStackRequest) => {
           maxAge: AUTH_DURATIONS.githubOAuthTokensMaxAgeSec,
         })
       );
+
+      storeGitHubIdentityAsync(githubTokens, authResponse.accessToken, log);
     }
 
     // Sync identity to auto-claim organizations (mirrors CLI flow)
@@ -237,7 +323,7 @@ const handler = async (request: BetterStackRequest) => {
 
     log.info("User authenticated successfully", {
       userId: user.id,
-      hasGitHubTokens,
+      hasGitHubTokens: Boolean(githubTokens),
       sealedSession: shouldSealSession,
     });
 

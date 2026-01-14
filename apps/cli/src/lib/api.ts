@@ -119,11 +119,14 @@ export interface MeResponse {
 
 // Auth API methods
 export const syncIdentity = (
-  accessToken: string
+  accessToken: string,
+  githubToken?: string | null
 ): Promise<SyncIdentityResponse> =>
   apiRequest<SyncIdentityResponse>("/v1/auth/sync-identity", {
     accessToken,
     method: "POST",
+    // Pass GitHub OAuth token if available (used to get user's GitHub ID for installer linking)
+    ...(githubToken && { headers: { "X-GitHub-Token": githubToken } }),
   });
 
 export const getMe = (accessToken: string): Promise<MeResponse> =>

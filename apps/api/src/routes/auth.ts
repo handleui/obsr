@@ -7,9 +7,12 @@
 
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
-import { createDb } from "../db/client";
-import { organizationMembers, organizations } from "../db/schema";
-import { verifyGitHubMembership } from "../lib/github-membership";
+import { createDb, type Database } from "../db/client";
+import {
+  organizationMembers,
+  organizations,
+  userGithubIdentities,
+} from "../db/schema";
 import type { Env } from "../types/env";
 
 // GitHub API types
@@ -113,31 +116,280 @@ const fetchGitHubUsername = async (
   }
 };
 
+interface GithubIdentityInput {
+  workosUserId: string;
+  githubUserId: string;
+  githubUsername: string;
+}
+
+const upsertGithubIdentity = async (
+  db: Database,
+  identity: GithubIdentityInput
+): Promise<void> => {
+  await db
+    .insert(userGithubIdentities)
+    .values({
+      id: crypto.randomUUID(),
+      workosUserId: identity.workosUserId,
+      githubUserId: identity.githubUserId,
+      githubUsername: identity.githubUsername,
+    })
+    .onConflictDoUpdate({
+      target: userGithubIdentities.workosUserId,
+      set: {
+        githubUserId: identity.githubUserId,
+        githubUsername: identity.githubUsername,
+        updatedAt: new Date(),
+      },
+    });
+};
+
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === "string" && value.trim().length > 0;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+interface GitHubIdentity {
+  userId: string;
+  username: string | null;
+}
+
+/**
+ * Get GitHub identity from a provided OAuth token
+ */
+const getGitHubIdentityFromToken = async (
+  token: string
+): Promise<GitHubIdentity | null> => {
+  const response = await fetch("https://api.github.com/user", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github.v3+json",
+      "User-Agent": "Detent-API",
+    },
+  });
+
+  if (!response.ok) {
+    console.warn(
+      `[sync-identity] GitHub token provided but API call failed: ${response.status}`
+    );
+    return null;
+  }
+
+  const githubUser = (await response.json()) as { id: number; login: string };
+  return {
+    userId: String(githubUser.id),
+    username: githubUser.login,
+  };
+};
+
+/**
+ * Get GitHub identity from WorkOS identities endpoint
+ */
+const getGitHubIdentityFromWorkOS = async (
+  userId: string,
+  workosApiKey: string
+): Promise<GitHubIdentity | null> => {
+  const response = await fetch(
+    `https://api.workos.com/user_management/users/${userId}/identities`,
+    {
+      headers: {
+        Authorization: `Bearer ${workosApiKey}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const identities = (await response.json()) as WorkOSIdentitiesResponse;
+  const githubIdentity = identities.data?.find(
+    (identity) => identity.provider === "GitHubOAuth"
+  );
+
+  if (!githubIdentity) {
+    return null;
+  }
+
+  const username = await fetchGitHubUsername(userId, workosApiKey);
+  return {
+    userId: githubIdentity.idp_id,
+    username,
+  };
+};
+
+/**
+ * POST /store-github-identity
+ * Persist GitHub identity data for the authenticated WorkOS user
+ */
+app.post("/store-github-identity", async (c) => {
+  const auth = c.get("auth");
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  if (!isRecord(body)) {
+    return c.json({ error: "Invalid request body" }, 400);
+  }
+
+  const githubUserId = isNonEmptyString(body.github_user_id)
+    ? body.github_user_id.trim()
+    : null;
+  const githubUsername = isNonEmptyString(body.github_username)
+    ? body.github_username.trim()
+    : null;
+
+  if (!(githubUserId && githubUsername)) {
+    return c.json(
+      { error: "github_user_id and github_username are required" },
+      400
+    );
+  }
+
+  const { db, client } = await createDb(c.env);
+  try {
+    await upsertGithubIdentity(db, {
+      workosUserId: auth.userId,
+      githubUserId,
+      githubUsername,
+    });
+  } catch (error) {
+    console.error("Failed to store GitHub identity", error);
+    return c.json({ error: "Failed to store GitHub identity" }, 500);
+  } finally {
+    await client.end();
+  }
+
+  return c.json({ stored: true });
+});
+
+/**
+ * Resolve GitHub identity using multiple methods in priority order:
+ * 1. Database (cached from previous auth)
+ * 2. Provided GitHub OAuth token
+ * 3. WorkOS identities endpoint
+ */
+const resolveGitHubIdentity = async (
+  db: Database,
+  userId: string,
+  workosApiKey: string,
+  providedToken: string | undefined
+): Promise<GitHubIdentity | null> => {
+  // Method 1: Check database for cached identity
+  const storedIdentity = await db.query.userGithubIdentities.findFirst({
+    where: eq(userGithubIdentities.workosUserId, userId),
+  });
+
+  if (storedIdentity) {
+    console.log(
+      `[sync-identity] Got GitHub identity from DB: ${storedIdentity.githubUsername} (${storedIdentity.githubUserId})`
+    );
+    return {
+      userId: storedIdentity.githubUserId,
+      username: storedIdentity.githubUsername,
+    };
+  }
+
+  // Method 2: Use provided GitHub OAuth token
+  if (providedToken) {
+    const identity = await getGitHubIdentityFromToken(providedToken);
+    if (identity) {
+      console.log(
+        `[sync-identity] Got GitHub identity from token: ${identity.username} (${identity.userId})`
+      );
+      return identity;
+    }
+  }
+
+  // Method 3: Fall back to WorkOS identities
+  const workosIdentity = await getGitHubIdentityFromWorkOS(
+    userId,
+    workosApiKey
+  );
+  if (workosIdentity) {
+    console.log(
+      `[sync-identity] Got GitHub identity from WorkOS: ${workosIdentity.username ?? "unknown"} (${workosIdentity.userId})`
+    );
+  }
+  return workosIdentity;
+};
+
+/**
+ * Link user to organizations where they are the installer
+ */
+const linkInstallerOrganizations = async (
+  db: Database,
+  userId: string,
+  githubUserId: string,
+  githubUsername: string | null
+): Promise<number> => {
+  const installerOrgs = await db.query.organizations.findMany({
+    where: and(
+      eq(organizations.installerGithubId, githubUserId),
+      isNull(organizations.deletedAt)
+    ),
+  });
+
+  if (installerOrgs.length === 0) {
+    return 0;
+  }
+
+  const orgIds = installerOrgs.map((org) => org.id);
+  const existingMemberships = await db.query.organizationMembers.findMany({
+    where: and(
+      eq(organizationMembers.userId, userId),
+      inArray(organizationMembers.organizationId, orgIds)
+    ),
+  });
+
+  const existingOrgIds = new Set(
+    existingMemberships.map((m) => m.organizationId)
+  );
+  const orgsToLink = installerOrgs.filter((org) => !existingOrgIds.has(org.id));
+
+  if (orgsToLink.length > 0) {
+    await db.insert(organizationMembers).values(
+      orgsToLink.map((org) => ({
+        id: crypto.randomUUID(),
+        organizationId: org.id,
+        userId,
+        role: "owner" as const,
+        providerUserId: githubUserId,
+        providerUsername: githubUsername,
+        providerLinkedAt: new Date(),
+      }))
+    );
+
+    console.log(
+      `[sync-identity] Linked user ${userId} as owner to ${orgsToLink.length} org(s): ${orgsToLink.map((o) => o.slug).join(", ")}`
+    );
+  }
+
+  return orgsToLink.length;
+};
+
 /**
  * POST /sync-identity
- * Sync GitHub identity from WorkOS to all organization memberships for the authenticated user.
- * This is called after successful device code authentication to capture GitHub identity
- * if the user authenticated via GitHub OAuth through WorkOS.
+ * Sync GitHub identity and link user to organizations where they are the installer.
+ *
+ * Accepts optional X-GitHub-Token header with the user's GitHub OAuth token.
+ * If provided, uses the token directly to get the user's GitHub ID (preferred).
+ * Falls back to WorkOS identities if no token provided.
  */
 app.post("/sync-identity", async (c) => {
   const auth = c.get("auth");
+  const providedGitHubToken = c.req.header("X-GitHub-Token");
 
-  // Fetch user details and identities from WorkOS in parallel
-  const [userResponse, identitiesResponse] = await Promise.all([
-    fetch(`https://api.workos.com/user_management/users/${auth.userId}`, {
-      headers: {
-        Authorization: `Bearer ${c.env.WORKOS_API_KEY}`,
-      },
-    }),
-    fetch(
-      `https://api.workos.com/user_management/users/${auth.userId}/identities`,
-      {
-        headers: {
-          Authorization: `Bearer ${c.env.WORKOS_API_KEY}`,
-        },
-      }
-    ),
-  ]);
+  const userResponse = await fetch(
+    `https://api.workos.com/user_management/users/${auth.userId}`,
+    {
+      headers: { Authorization: `Bearer ${c.env.WORKOS_API_KEY}` },
+    }
+  );
 
   if (!userResponse.ok) {
     console.error(
@@ -147,130 +399,62 @@ app.post("/sync-identity", async (c) => {
   }
 
   const user = (await userResponse.json()) as WorkOSUser;
-
-  if (!identitiesResponse.ok) {
-    console.error(
-      `Failed to fetch identities from WorkOS: ${identitiesResponse.status} ${identitiesResponse.statusText}`
-    );
-    // Return user info without GitHub identity - this is not a fatal error
-    return c.json({
-      user_id: auth.userId,
-      email: user.email,
-      first_name: user.first_name,
-      last_name: user.last_name,
-      github_synced: false,
-      github_username: null,
-    });
-  }
-
-  const identities =
-    (await identitiesResponse.json()) as WorkOSIdentitiesResponse;
-
-  // Find GitHub OAuth identity (with null check for malformed responses)
-  const githubIdentity = identities.data?.find(
-    (identity) => identity.provider === "GitHubOAuth"
-  );
-
-  if (!githubIdentity) {
-    // No GitHub identity linked - return user info without GitHub
-    return c.json({
-      user_id: auth.userId,
-      email: user.email,
-      first_name: user.first_name,
-      last_name: user.last_name,
-      github_synced: false,
-      github_username: null,
-    });
-  }
-
-  // We have the GitHub idp_id (numeric GitHub user ID)
-  const githubUserId = githubIdentity.idp_id;
-  const githubUsername = await fetchGitHubUsername(
-    auth.userId,
-    c.env.WORKOS_API_KEY
-  );
-
-  // Update all organization memberships for this user with GitHub identity
   const { db, client } = await createDb(c.env);
+
   try {
+    const identity = await resolveGitHubIdentity(
+      db,
+      auth.userId,
+      c.env.WORKOS_API_KEY,
+      providedGitHubToken
+    );
+
+    if (!identity) {
+      console.log(
+        `[sync-identity] No GitHub identity found for user ${auth.userId}`
+      );
+      return c.json({
+        user_id: auth.userId,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        github_synced: false,
+        github_username: null,
+      });
+    }
+
+    // Persist identity if obtained from token or WorkOS
+    if (identity.username) {
+      try {
+        await upsertGithubIdentity(db, {
+          workosUserId: auth.userId,
+          githubUserId: identity.userId,
+          githubUsername: identity.username,
+        });
+      } catch (error) {
+        console.warn("Failed to store GitHub identity", error);
+      }
+    }
+
+    // Update all organization memberships with GitHub identity
     const updatedMembers = await db
       .update(organizationMembers)
       .set({
-        providerUserId: githubUserId,
-        providerUsername: githubUsername,
+        providerUserId: identity.userId,
+        providerUsername: identity.username,
         providerLinkedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(eq(organizationMembers.userId, auth.userId))
-      .returning({
-        organizationId: organizationMembers.organizationId,
-        providerUsername: organizationMembers.providerUsername,
-      });
+      .returning({ organizationId: organizationMembers.organizationId });
 
-    // Auto-link organizations where this user is the installer but has no membership
-    const installerOrgs = await db.query.organizations.findMany({
-      where: and(
-        eq(organizations.installerGithubId, githubUserId),
-        isNull(organizations.deletedAt)
-      ),
-    });
-
-    // Batch fetch existing memberships for all installer orgs
-    const orgIds = installerOrgs.map((org) => org.id);
-    const existingMemberships =
-      orgIds.length > 0
-        ? await db.query.organizationMembers.findMany({
-            where: and(
-              eq(organizationMembers.userId, auth.userId),
-              inArray(organizationMembers.organizationId, orgIds)
-            ),
-          })
-        : [];
-
-    const existingOrgIds = new Set(
-      existingMemberships.map((m) => m.organizationId)
+    // Auto-link installer organizations
+    const autoLinkedCount = await linkInstallerOrganizations(
+      db,
+      auth.userId,
+      identity.userId,
+      identity.username
     );
-
-    // Filter to orgs that need new memberships
-    const orgsToLink = installerOrgs.filter(
-      (org) => !existingOrgIds.has(org.id)
-    );
-
-    // Verify current GitHub membership before granting owner access
-    const verifiedOrgs: typeof orgsToLink = [];
-    if (githubUsername) {
-      for (const org of orgsToLink) {
-        if (!(org.providerInstallationId && org.providerAccountLogin)) {
-          continue;
-        }
-        const membership = await verifyGitHubMembership(
-          githubUsername,
-          org.providerAccountLogin,
-          org.providerInstallationId,
-          c.env
-        );
-        if (membership.isMember) {
-          verifiedOrgs.push(org);
-        }
-      }
-    }
-
-    // Batch insert (if any)
-    if (verifiedOrgs.length > 0) {
-      await db.insert(organizationMembers).values(
-        verifiedOrgs.map((org) => ({
-          id: crypto.randomUUID(),
-          organizationId: org.id,
-          userId: auth.userId,
-          role: "owner" as const,
-          providerUserId: githubUserId,
-          providerUsername: githubUsername,
-          providerLinkedAt: new Date(),
-        }))
-      );
-    }
-
-    const autoLinkedCount = verifiedOrgs.length;
 
     return c.json({
       user_id: auth.userId,
@@ -278,8 +462,8 @@ app.post("/sync-identity", async (c) => {
       first_name: user.first_name,
       last_name: user.last_name,
       github_synced: true,
-      github_user_id: githubUserId,
-      github_username: githubUsername,
+      github_user_id: identity.userId,
+      github_username: identity.username,
       organizations_updated: updatedMembers.length,
       installer_orgs_linked: autoLinkedCount,
     });

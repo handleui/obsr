@@ -8,7 +8,6 @@ export const main = defineCommand({
     description: "Run GitHub Actions locally with enhanced error reporting",
   },
   subCommands: {
-    init: () => import("./init.js").then((m) => m.initCommand),
     version: () => import("./version.js").then((m) => m.versionCommand),
     config: () => import("./config/index.js").then((m) => m.configCommand),
     auth: () => import("./auth/index.js").then((m) => m.authCommand),
@@ -16,8 +15,6 @@ export const main = defineCommand({
     org: () => import("./org/index.js").then((m) => m.orgCommand),
     link: () => import("./link/index.js").then((m) => m.linkCommand),
     errors: () => import("./errors.js").then((m) => m.errorsCommand),
-    mock: () => import("./mock/index.js").then((m) => m.mockCommand),
-    jobs: () => import("./mock/jobs.js").then((m) => m.jobsCommand),
     update: () => import("./update.js").then((m) => m.updateCommand),
   },
 });

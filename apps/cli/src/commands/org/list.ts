@@ -13,6 +13,7 @@ import {
   listProjects,
   type Organization,
   type Project,
+  syncIdentity,
 } from "../../lib/api.js";
 import { getAccessToken, getGitHubToken } from "../../lib/auth.js";
 import { handleGitHubOrgError } from "../../lib/errors.js";
@@ -76,7 +77,7 @@ const getActionText = (org: GitHubOrgWithStatus): string => {
     return "dt org list (default)";
   }
   if (org.can_install) {
-    return "dt org install";
+    return "dt org link";
   }
   return "Ask org admin";
 };
@@ -107,7 +108,7 @@ const displayAvailableOrgs = (orgs: GitHubOrgWithStatus[]): void => {
     );
   }
 
-  console.log("\nUse 'dt org install' to install Detent on an organization.");
+  console.log("\nUse 'dt org link' to link a GitHub organization to Detent.");
 };
 
 const listAvailableOrgs = async (accessToken: string): Promise<void> => {
@@ -137,10 +138,7 @@ const listMemberOrgs = async (
   const response = await getOrganizations(accessToken);
 
   if (response.organizations.length === 0) {
-    console.log("You are not a member of any organizations.\n");
-    console.log(
-      "To install Detent on a GitHub organization, run: dt org install"
-    );
+    console.log("No linked organizations. Run 'dt org link' to connect one.");
     return;
   }
 
@@ -209,6 +207,14 @@ export const listCommand = defineCommand({
       console.error("Not logged in. Run `dt auth login` first.");
       process.exit(1);
     }
+
+    // Get GitHub token for installer linking
+    const githubToken = await getGitHubToken();
+
+    // Sync identity to link any new org installations before listing
+    await syncIdentity(accessToken, githubToken).catch(() => {
+      // Silently ignore sync errors - will still try to list existing orgs
+    });
 
     // Handle --available flag: show all GitHub orgs
     if (args.available) {

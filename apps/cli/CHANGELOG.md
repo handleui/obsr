@@ -1,5 +1,12 @@
 # @detent/cli
 
+## 0.7.1
+
+### Patch Changes
+
+- d0cb1b8: Fix unhandled rejection handler to properly await Sentry flush.
+  Prevents telemetry loss when the process exits after an unhandled promise rejection.
+
 ## 0.7.0
 
 ### Minor Changes

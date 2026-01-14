@@ -5,23 +5,18 @@ import type { Env } from "../types/env";
 // Mock the database client
 const mockFindFirst = vi.fn();
 const mockFindMany = vi.fn();
-const mockFindFirstUserIdentity = vi.fn();
 const mockUpdate = vi.fn();
 const mockInsert = vi.fn();
 const mockSet = vi.fn();
 const mockWhere = vi.fn();
 const mockReturning = vi.fn();
 const mockValues = vi.fn();
-const mockOnConflictDoUpdate = vi.fn();
 
 const mockDb = {
   query: {
     organizationMembers: {
       findFirst: mockFindFirst,
       findMany: mockFindMany,
-    },
-    userIdentities: {
-      findFirst: mockFindFirstUserIdentity,
     },
     organizations: {
       findMany: mockFindMany,
@@ -128,50 +123,16 @@ describe("auth routes", () => {
 
     // Setup mock chain for insert
     mockInsert.mockReturnValue({ values: mockValues });
-    mockValues.mockReturnValue({ onConflictDoUpdate: mockOnConflictDoUpdate });
-    mockOnConflictDoUpdate.mockResolvedValue([]);
+    mockValues.mockResolvedValue([]);
 
     // Setup mock for findMany (organizations and organizationMembers)
     mockFindMany.mockResolvedValue([]);
-    mockFindFirstUserIdentity.mockResolvedValue(undefined);
 
     // Replace global fetch with mock
     global.fetch = mockFetch;
   });
 
   describe("POST /auth/sync-identity", () => {
-    it("uses stored GitHub identity from database", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(createWorkOSUser()),
-      });
-
-      mockFindFirstUserIdentity.mockResolvedValue({
-        id: "identity-1",
-        workosUserId: "user-123",
-        provider: "github",
-        providerUserId: "98765",
-        providerUsername: "dbuser",
-      });
-
-      mockReturning.mockResolvedValue([
-        { organizationId: "organization-1", providerUsername: "dbuser" },
-      ]);
-
-      const res = await makeRequest("POST", "/auth/sync-identity");
-      const json = await res.json();
-
-      expect(res.status).toBe(200);
-      expect(json).toMatchObject({
-        github_synced: true,
-        github_user_id: "98765",
-        github_username: "dbuser",
-        organizations_updated: 1,
-      });
-
-      expect(mockFetch).toHaveBeenCalledTimes(1);
-    });
-
     it("syncs identity with GitHub linked", async () => {
       // Mock WorkOS user fetch
       mockFetch
@@ -413,41 +374,6 @@ describe("auth routes", () => {
       expect(res.status).toBe(200);
       expect(json.github_synced).toBe(false);
       expect(json.github_username).toBeNull();
-    });
-  });
-
-  describe("POST /auth/store-github-identity", () => {
-    it("stores GitHub identity for authenticated user", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ id: 12_345, login: "octocat" }),
-      });
-
-      const token = `gho_${"a".repeat(40)}`;
-      const res = await makeRequest(
-        "POST",
-        "/auth/store-github-identity",
-        undefined,
-        { "X-GitHub-Token": token }
-      );
-
-      const json = await res.json();
-
-      expect(res.status).toBe(200);
-      expect(json).toEqual({ stored: true });
-      expect(mockInsert).toHaveBeenCalled();
-      expect(mockOnConflictDoUpdate).toHaveBeenCalled();
-    });
-
-    it("returns 400 when token is missing", async () => {
-      const res = await makeRequest("POST", "/auth/store-github-identity");
-
-      const json = await res.json();
-
-      expect(res.status).toBe(400);
-      expect(json).toEqual({
-        error: "GitHub token required",
-      });
     });
   });
 

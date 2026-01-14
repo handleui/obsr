@@ -71,6 +71,12 @@ const showLoginSuccess = async (
   accessToken: string,
   githubToken?: string
 ): Promise<void> => {
+  // Debug: log whether GitHub token was received from Navigator
+  if (process.env.DEBUG) {
+    console.log(
+      `[login] GitHub token from Navigator: ${githubToken ? "yes" : "no"}`
+    );
+  }
   try {
     const identity = await syncIdentity(accessToken, githubToken);
     const email = `${brand}${identity.email}${ANSI_RESET}`;

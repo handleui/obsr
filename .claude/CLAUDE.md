@@ -5,9 +5,12 @@ Always use Context7 for library/API documentation, code generation, or configura
 
 ## Commands (Critical)
 - **Build**: `bun run build` (Turborepo)
-- **Run CLI**: `detent <command>` (alias - NEVER use `./dist/dt`). AI runs verbose (no TUI). Use `--force` to skip cache.
+- **Run CLI (local testing)**: `bun run dt <command>` - uses local build, for development/testing
+- **Run CLI (production)**: `dt <command>` or `detent <command>` - uses globally installed version
 - **Lint/Fix**: `bun run lint` / `bun run fix`
 - **Types**: `bun run check-types`
+
+Note: AI runs verbose (no TUI). Use `--force` to skip cache. NEVER use `./dist/dt` directly.
 
 ## Database (Critical)
 

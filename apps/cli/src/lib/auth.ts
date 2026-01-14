@@ -453,6 +453,15 @@ export const authenticateViaNavigator = async (): Promise<TokenResponse> => {
     github_refresh_token_expires_at?: number;
   };
 
+  // Debug: log what Navigator returned
+  if (process.env.DEBUG) {
+    console.log(
+      "[auth] Navigator token exchange response:",
+      `access_token: ${tokens.access_token ? "present" : "missing"},`,
+      `github_token: ${tokens.github_token ? "present" : "missing"}`
+    );
+  }
+
   return {
     access_token: tokens.access_token,
     refresh_token: tokens.refresh_token,

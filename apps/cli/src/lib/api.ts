@@ -121,13 +121,20 @@ export interface MeResponse {
 export const syncIdentity = (
   accessToken: string,
   githubToken?: string | null
-): Promise<SyncIdentityResponse> =>
-  apiRequest<SyncIdentityResponse>("/v1/auth/sync-identity", {
+): Promise<SyncIdentityResponse> => {
+  // Debug: log whether GitHub token is being sent
+  if (process.env.DEBUG) {
+    console.log(
+      `[sync-identity] Sending request with GitHub token: ${githubToken ? "yes" : "no"}`
+    );
+  }
+  return apiRequest<SyncIdentityResponse>("/v1/auth/sync-identity", {
     accessToken,
     method: "POST",
     // Pass GitHub OAuth token if available (used to get user's GitHub ID for installer linking)
     ...(githubToken && { headers: { "X-GitHub-Token": githubToken } }),
   });
+};
 
 export const getMe = (accessToken: string): Promise<MeResponse> =>
   apiRequest<MeResponse>("/v1/auth/me", { accessToken });

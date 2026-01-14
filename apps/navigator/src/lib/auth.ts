@@ -332,6 +332,10 @@ export interface GitHubOAuthTokens {
  * The JWT protects against tampering and includes automatic expiration
  */
 export const createGitHubOAuthTokensToken = (tokens: GitHubOAuthTokens) => {
+  console.log(
+    "[createGitHubOAuthTokensToken] Creating JWT with tokens:",
+    Object.keys(tokens)
+  );
   return new SignJWT({ tokens })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setIssuedAt()
@@ -352,8 +356,13 @@ export const getGitHubOAuthTokens =
     const cookie = cookieStore.get(CookieNames.githubOAuthTokens)?.value;
 
     if (!cookie) {
+      console.log("[getGitHubOAuthTokens] Cookie not found");
       return null;
     }
+
+    console.log(
+      `[getGitHubOAuthTokens] Cookie found, length: ${cookie.length}`
+    );
 
     try {
       const { payload } = await jwtVerify(cookie, getJwtSecretKey(), {
@@ -362,13 +371,33 @@ export const getGitHubOAuthTokens =
       });
 
       const tokens = payload.tokens as GitHubOAuthTokens;
+      console.log(
+        "[getGitHubOAuthTokens] JWT payload keys:",
+        Object.keys(payload)
+      );
+      console.log("[getGitHubOAuthTokens] tokens object:", {
+        keys: tokens ? Object.keys(tokens) : "undefined",
+        accessTokenLength: tokens?.accessToken?.length ?? "empty/undefined",
+        refreshTokenLength: tokens?.refreshToken?.length ?? "empty/undefined",
+        expiresAt: tokens?.expiresAt,
+      });
       if (!(tokens?.accessToken && tokens?.refreshToken)) {
+        console.log(
+          "[getGitHubOAuthTokens] JWT valid but tokens missing - accessToken truthy:",
+          Boolean(tokens?.accessToken),
+          "refreshToken truthy:",
+          Boolean(tokens?.refreshToken)
+        );
         return null;
       }
 
+      console.log("[getGitHubOAuthTokens] Tokens successfully retrieved");
       return tokens;
-    } catch {
+    } catch (error) {
       // Token invalid or expired - clear the cookie
+      console.log(
+        `[getGitHubOAuthTokens] JWT verification failed: ${error instanceof Error ? error.message : String(error)}`
+      );
       cookieStore.delete(CookieNames.githubOAuthTokens);
       return null;
     }

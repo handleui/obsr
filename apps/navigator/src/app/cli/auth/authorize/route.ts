@@ -130,7 +130,17 @@ export const GET = async (request: Request) => {
     // Note: oauthTokens are NOT stored in WorkOS sealed session and NOT returned from refresh.
     // They are only returned during initial auth, so we persist them separately.
     const { getGitHubOAuthTokens } = await import("@/lib/auth");
+
+    // Debug: check if the raw cookie exists
+    const rawGithubCookie = cookieStore.get("github_oauth_tokens")?.value;
+    console.log(
+      `[cli/auth/authorize] github_oauth_tokens cookie: ${rawGithubCookie ? `present (${rawGithubCookie.length} chars)` : "MISSING"}`
+    );
+
     const oauthTokens = await getGitHubOAuthTokens();
+    console.log(
+      `[cli/auth/authorize] getGitHubOAuthTokens result: ${oauthTokens ? "tokens found" : "null"}`
+    );
 
     // Create encrypted one-time code (includes GitHub OAuth token if available)
     const encryptedCode = await createEncryptedCode(

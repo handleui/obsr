@@ -11,7 +11,7 @@ import {
   sanitizeReturnUrl,
   verifyAndClearOAuthState,
 } from "@/lib/auth";
-import { AUTH_DURATIONS, COOKIE_NAMES } from "@/lib/constants";
+import { API_BASE_URL, AUTH_DURATIONS, COOKIE_NAMES } from "@/lib/constants";
 import { type BetterStackRequest, withLogging } from "@/lib/logger";
 import { workos } from "@/lib/workos";
 
@@ -84,6 +84,17 @@ const isValidGitHubOAuthTokens = (data: unknown): data is GitHubOAuthTokens => {
     Array.isArray(obj.scopes) &&
     obj.scopes.every((scope) => typeof scope === "string")
   );
+};
+
+/**
+ * Sync identity with API to auto-claim organizations (mirrors CLI flow)
+ * Non-blocking - errors are logged but don't fail the auth flow
+ */
+const syncIdentity = async (accessToken: string): Promise<void> => {
+  await fetch(`${API_BASE_URL}/v1/auth/sync-identity`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 };
 
 /**
@@ -212,6 +223,16 @@ const handler = async (request: BetterStackRequest) => {
           maxAge: AUTH_DURATIONS.githubOAuthTokensMaxAgeSec,
         })
       );
+    }
+
+    // Sync identity to auto-claim organizations (mirrors CLI flow)
+    if ("accessToken" in authResponse) {
+      syncIdentity(authResponse.accessToken as string).catch((syncError) => {
+        log.warn("Failed to sync identity", {
+          error:
+            syncError instanceof Error ? syncError.message : String(syncError),
+        });
+      });
     }
 
     log.info("User authenticated successfully", {

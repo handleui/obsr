@@ -3009,8 +3009,7 @@ const checkOrgOwnerAndPostComment = async (
       owner,
       repo,
       prNumber,
-      "**Detent** is watching this repository! To unlock the full dashboard and team features, " +
-        "[sign in to claim your team](https://detent.dev)."
+      "Organization admins can [claim this team](https://navigator.detent.sh) to access the dashboard and manage settings. [Learn more](https://detent.dev/docs/quickstart)"
     );
 
     // Mark as posted (TTL: 30 days - re-notify if they still haven't claimed)

@@ -53,6 +53,13 @@ vi.mock("../db/client", () => ({
   ),
 }));
 
+// Mock GitHub membership verification for autoLinkInstaller admin check
+const mockVerifyGitHubMembership = vi.fn();
+vi.mock("../lib/github-membership", () => ({
+  verifyGitHubMembership: (...args: unknown[]) =>
+    mockVerifyGitHubMembership(...args),
+}));
+
 // Mock crypto.randomUUID for deterministic organization IDs
 const mockUUID = "test-uuid-1234-5678-9abc-def012345678";
 vi.spyOn(crypto, "randomUUID").mockImplementation(() => mockUUID);
@@ -158,6 +165,7 @@ interface InstallationRepositoriesResponse {
 describe("webhooks - installation events", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockVerifyGitHubMembership.mockReset();
 
     // Setup mock chain for select queries
     // Queries can either:
@@ -266,6 +274,156 @@ describe("webhooks - installation events", () => {
       expect(mockValues).toHaveBeenCalledWith(
         expect.objectContaining({
           providerAvatarUrl: null,
+        })
+      );
+    });
+  });
+
+  describe("autoLinkInstaller - admin verification", () => {
+    // Security: autoLinkInstaller should verify installer is a GitHub admin
+    // before granting owner role (for organizations, not personal accounts)
+
+    it("auto-links installer as owner when they are a GitHub admin", async () => {
+      // Mock: installer already has a Detent account (found by providerUserId)
+      let queryCount = 0;
+      mockWhere.mockImplementation(() => {
+        queryCount++;
+        if (queryCount === 3) {
+          // Query 3: slug lookup (returns empty - no collision)
+          return Promise.resolve([]);
+        }
+        return { limit: mockLimit };
+      });
+
+      // Query 1: no existing org by account
+      mockLimit.mockResolvedValueOnce([]);
+      // Query 2: no existing org by installation
+      mockLimit.mockResolvedValueOnce([]);
+      // Query 4: autoLinkInstaller - find existing user by providerUserId
+      mockLimit.mockResolvedValueOnce([{ userId: "existing-detent-user" }]);
+      // Query 5: autoLinkInstaller - check if already member of this org
+      mockLimit.mockResolvedValueOnce([]);
+
+      // Mock: installer is a GitHub admin
+      mockVerifyGitHubMembership.mockResolvedValueOnce({
+        isMember: true,
+        role: "admin",
+      });
+
+      const payload = createInstallationPayload("created", {
+        accountType: "Organization",
+        senderLogin: "admin-installer",
+      });
+
+      const res = await makeWebhookRequest("installation", payload);
+
+      expect(res.status).toBe(200);
+
+      // Verify verifyGitHubMembership was called for the organization
+      expect(mockVerifyGitHubMembership).toHaveBeenCalledWith(
+        "admin-installer", // username
+        "test-org", // org login
+        "12345678", // installation id
+        expect.any(Object) // env
+      );
+
+      // Verify owner membership was created (insert called with role: owner)
+      // The org insert is first, then the member insert
+      expect(mockValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "existing-detent-user",
+          role: "owner",
+          providerUsername: "admin-installer",
+        })
+      );
+    });
+
+    it("does NOT auto-link installer when they are only a GitHub member (not admin)", async () => {
+      let queryCount = 0;
+      mockWhere.mockImplementation(() => {
+        queryCount++;
+        if (queryCount === 3) {
+          return Promise.resolve([]);
+        }
+        return { limit: mockLimit };
+      });
+
+      // Query 1: no existing org by account
+      mockLimit.mockResolvedValueOnce([]);
+      // Query 2: no existing org by installation
+      mockLimit.mockResolvedValueOnce([]);
+      // Query 4: autoLinkInstaller - find existing user by providerUserId
+      mockLimit.mockResolvedValueOnce([{ userId: "existing-detent-user" }]);
+      // Query 5: autoLinkInstaller - check if already member of this org
+      mockLimit.mockResolvedValueOnce([]);
+
+      // Mock: installer is only a GitHub member (not admin)
+      mockVerifyGitHubMembership.mockResolvedValueOnce({
+        isMember: true,
+        role: "member", // Not admin!
+      });
+
+      const payload = createInstallationPayload("created", {
+        accountType: "Organization",
+        senderLogin: "member-installer",
+      });
+
+      const res = await makeWebhookRequest("installation", payload);
+
+      expect(res.status).toBe(200);
+
+      // Verify verifyGitHubMembership was called
+      expect(mockVerifyGitHubMembership).toHaveBeenCalled();
+
+      // Verify NO owner membership was created for the installer
+      // Only the org insert should have happened, NOT a member insert
+      const insertCalls = mockValues.mock.calls;
+      const memberInsert = insertCalls.find(
+        (call) =>
+          (call[0] as Record<string, unknown>)?.userId ===
+          "existing-detent-user"
+      );
+      expect(memberInsert).toBeUndefined();
+    });
+
+    it("auto-links installer for personal accounts WITHOUT admin verification", async () => {
+      // Personal accounts don't have membership - installer is owner by definition
+      let queryCount = 0;
+      mockWhere.mockImplementation(() => {
+        queryCount++;
+        if (queryCount === 3) {
+          return Promise.resolve([]);
+        }
+        return { limit: mockLimit };
+      });
+
+      // Query 1: no existing org by account
+      mockLimit.mockResolvedValueOnce([]);
+      // Query 2: no existing org by installation
+      mockLimit.mockResolvedValueOnce([]);
+      // Query 4: autoLinkInstaller - find existing user by providerUserId
+      mockLimit.mockResolvedValueOnce([{ userId: "existing-detent-user" }]);
+      // Query 5: autoLinkInstaller - check if already member of this org
+      mockLimit.mockResolvedValueOnce([]);
+
+      const payload = createInstallationPayload("created", {
+        accountType: "User", // Personal account
+        accountLogin: "my-personal-account",
+        senderLogin: "my-personal-account",
+      });
+
+      const res = await makeWebhookRequest("installation", payload);
+
+      expect(res.status).toBe(200);
+
+      // Verify verifyGitHubMembership was NOT called (personal accounts skip verification)
+      expect(mockVerifyGitHubMembership).not.toHaveBeenCalled();
+
+      // Verify owner membership WAS created (no admin check needed for personal accounts)
+      expect(mockValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "existing-detent-user",
+          role: "owner",
         })
       );
     });

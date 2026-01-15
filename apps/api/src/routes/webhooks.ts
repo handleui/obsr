@@ -15,6 +15,7 @@ import {
   runs,
 } from "../db/schema";
 import { CACHE_TTL, cacheKey, getFromCache, setInCache } from "../lib/cache";
+import { verifyGitHubMembership } from "../lib/github-membership";
 import { captureWebhookError, type ParserContext } from "../lib/sentry";
 import { webhookSignatureMiddleware } from "../middleware/webhook-signature";
 import {
@@ -187,6 +188,7 @@ interface CheckSuitePayload {
     full_name: string;
     owner: { login: string };
     name: string;
+    private?: boolean;
   };
   installation: { id: number };
 }
@@ -213,7 +215,8 @@ type WebhookContext = Context<{ Bindings: Env; Variables: WebhookVariables }>;
 const app = new Hono<{ Bindings: Env; Variables: WebhookVariables }>();
 
 // GitHub webhook endpoint
-// Receives: workflow_run, issue_comment events
+// Receives: workflow_run, issue_comment, check_suite events
+// Note: workflow_run.in_progress posts the "waiting" comment early when CI starts
 app.post("/github", webhookSignatureMiddleware, (c: WebhookContext) => {
   const event = c.req.header("X-GitHub-Event");
   const deliveryId = c.req.header("X-GitHub-Delivery");
@@ -1754,18 +1757,6 @@ const handleWorkflowRunInProgress = async (
   const headSha = workflow_run.head_sha;
   const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
 
-  // Skip if no PR associated (e.g., push to main branch)
-  if (workflow_run.pull_requests.length === 0) {
-    console.log(
-      `[workflow_run] No PR associated with ${workflow_run.name}, skipping [delivery: ${deliveryId}]`
-    );
-    return c.json({
-      message: "skipped",
-      reason: "no_pr",
-      branch: workflow_run.head_branch,
-    });
-  }
-
   console.log(
     `[workflow_run] In progress: ${repository.full_name} / ${workflow_run.name} [delivery: ${deliveryId}]`
   );
@@ -1792,6 +1783,27 @@ const handleWorkflowRunInProgress = async (
   try {
     const token = await github.getInstallationToken(installation.id);
 
+    // Get PR number from payload, or try commits API for fork PRs
+    let prNumber = workflow_run.pull_requests[0]?.number;
+    if (!prNumber) {
+      // For fork PRs, workflow_run.pull_requests is empty but commits API works
+      prNumber =
+        (await github.getPullRequestForCommit(token, owner, repo, headSha)) ??
+        undefined;
+    }
+
+    // Skip if no PR associated (e.g., push to main branch)
+    if (!prNumber) {
+      console.log(
+        `[workflow_run] No PR associated with ${workflow_run.name}, skipping [delivery: ${deliveryId}]`
+      );
+      return c.json({
+        message: "skipped",
+        reason: "no_pr",
+        branch: workflow_run.head_branch,
+      });
+    }
+
     // Create a "queued" check run so users know we're watching
     const checkRun = await github.createCheckRun(token, {
       owner,
@@ -1815,6 +1827,21 @@ const handleWorkflowRunInProgress = async (
 
     console.log(
       `[workflow_run] Created queued check run ${checkRun.id} for ${headSha.slice(0, 7)}`
+    );
+
+    // Post waiting comment in background (non-blocking for faster webhook response)
+    // The postWaitingComment function handles idempotency - won't post if comment exists
+    c.executionCtx.waitUntil(
+      postWaitingComment({
+        env: c.env,
+        token,
+        owner,
+        repo,
+        repository: repository.full_name,
+        prNumber,
+        headSha,
+        headCommitMessage: workflow_run.head_commit?.message,
+      })
     );
 
     return c.json({
@@ -1917,10 +1944,11 @@ const handleWorkflowRunCompleted = async (
     token = await github.getInstallationToken(installation.id);
 
     // Get PR number (skip if no PR associated)
+    // For fork PRs, workflow_run.pull_requests is empty but commits API works
     const prFromPayload = workflow_run.pull_requests[0]?.number;
     const prNumber =
       prFromPayload ??
-      (await github.getPullRequestForRun(token, owner, repo, workflow_run.id));
+      (await github.getPullRequestForCommit(token, owner, repo, headSha));
 
     if (!prNumber) {
       return c.json(
@@ -2169,11 +2197,17 @@ const handleWorkflowRunCompleted = async (
 };
 
 // Auto-link installer to organization if they have an existing Detent account
+// For organizations: verifies installer is still a GitHub admin before granting owner
+// For personal accounts: installer is owner by definition (no verification needed)
 const autoLinkInstaller = async (
   db: DbClient,
   organizationId: string,
   installerGithubId: string,
-  installerUsername: string
+  installerUsername: string,
+  orgLogin: string,
+  installationId: string,
+  accountType: "organization" | "user",
+  env: Env
 ): Promise<boolean> => {
   // Check if installer already has a Detent account (via any org membership with matching GitHub ID)
   const existingMember = await db
@@ -2208,6 +2242,26 @@ const autoLinkInstaller = async (
     );
     return false;
   }
+
+  // For organizations: verify installer is currently a GitHub admin
+  // Security: Only GitHub admins should auto-claim as Detent owner
+  // This mirrors the check in sync-identity endpoint for consistency
+  if (accountType === "organization") {
+    const membership = await verifyGitHubMembership(
+      installerUsername,
+      orgLogin,
+      installationId,
+      env
+    );
+
+    if (!(membership.isMember && membership.role === "admin")) {
+      console.log(
+        `[webhook] Installer ${installerUsername} is not a GitHub admin of ${orgLogin}, skipping owner auto-link`
+      );
+      return false;
+    }
+  }
+  // For personal accounts: installer is the account owner by definition, no verification needed
 
   // Create owner membership for the installer
   await db.insert(organizationMembers).values({
@@ -2265,7 +2319,8 @@ const handleInstallationCreated = async (
   db: DbClient,
   installation: InstallationPayload["installation"],
   repositories: InstallationPayload["repositories"],
-  sender: InstallationPayload["sender"]
+  sender: InstallationPayload["sender"],
+  env: Env
 ): Promise<
   | { organizationId: string; slug: string }
   | { existing: true; id: string; slug: string; reactivated?: boolean }
@@ -2339,7 +2394,16 @@ const handleInstallationCreated = async (
       }
 
       // Try to auto-link the installer if they have an existing Detent account
-      await autoLinkInstaller(db, existing.id, String(sender.id), sender.login);
+      await autoLinkInstaller(
+        db,
+        existing.id,
+        String(sender.id),
+        sender.login,
+        account.login,
+        String(installation.id),
+        account.type === "Organization" ? "organization" : "user",
+        env
+      );
 
       return {
         existing: true,
@@ -2429,7 +2493,16 @@ const handleInstallationCreated = async (
   }
 
   // Try to auto-link the installer if they have an existing Detent account
-  await autoLinkInstaller(db, organizationId, String(sender.id), sender.login);
+  await autoLinkInstaller(
+    db,
+    organizationId,
+    String(sender.id),
+    sender.login,
+    account.login,
+    String(installation.id),
+    account.type === "Organization" ? "organization" : "user",
+    env
+  );
 
   return { organizationId, slug };
 };
@@ -2456,7 +2529,8 @@ const handleInstallationEvent = async (
           db,
           installation,
           repositories,
-          payload.sender
+          payload.sender,
+          c.env
         );
 
         if ("existing" in result) {
@@ -2946,13 +3020,20 @@ const handleOrganizationEvent = async (
 };
 
 // Check if org has an owner and post claim comment if not (fire-and-forget)
+// Only posts on private repos to avoid spam on public/OSS repos
 const checkOrgOwnerAndPostComment = async (
   env: Env,
   installationId: number,
   repository: string,
   prNumber: number,
-  token: string
+  token: string,
+  isPrivate: boolean
 ): Promise<void> => {
+  // Skip claim comments on public repos - could be seen as spam on OSS repos
+  if (!isPrivate) {
+    return;
+  }
+
   const kv = env["detent-idempotency"];
 
   // Check if we already posted this comment (once per repo, not per PR)
@@ -3009,7 +3090,7 @@ const checkOrgOwnerAndPostComment = async (
       owner,
       repo,
       prNumber,
-      "Organization admins can [claim this team](https://navigator.detent.sh) to access the dashboard and manage settings. [Learn more](https://detent.dev/docs/quickstart)"
+      "Organization admins can [claim this team](https://navigator.detent.sh) to access the dashboard and manage settings. [Learn more](https://detent.sh/docs/quickstart)"
     );
 
     // Mark as posted (TTL: 30 days - re-notify if they still haven't claimed)
@@ -3059,23 +3140,44 @@ const postWaitingComment = async (
   } = ctx;
   const kv = env["detent-idempotency"];
 
+  // Acquire lock to prevent race conditions when multiple workflows trigger simultaneously
+  const lock = await acquirePrCommentLock(kv, repository, prNumber);
+  if (!lock.acquired) {
+    console.log(
+      `[webhook] PR comment lock not acquired for ${repository}#${prNumber}, skipping waiting comment`
+    );
+    return;
+  }
+
   try {
-    // Check if a comment already exists (e.g., from a previous push to the same PR)
+    const waitingBody = formatWaitingComment({ headSha, headCommitMessage });
+    const github = createGitHubService(env);
+    const shortSha = headSha.slice(0, 7);
+
+    // Check if comment exists after acquiring lock (handles race condition)
     const existingCommentId = await getStoredCommentId(
       kv,
       repository,
       prNumber
     );
     if (existingCommentId) {
+      // Update existing comment to show "waiting" for the new commit
+      // This handles the case where a previous commit had results (pass/fail)
+      // and a new commit is pushed - we want to show we're waiting on the new commit
+      await github.updateComment(
+        token,
+        owner,
+        repo,
+        existingCommentId,
+        waitingBody
+      );
       console.log(
-        `[check_suite] Comment ${existingCommentId} already exists for PR #${prNumber}, skipping waiting comment`
+        `[webhook] Updated comment ${existingCommentId} to waiting state for ${shortSha} on ${repository}#${prNumber}`
       );
       return;
     }
 
-    // Format and post the waiting comment
-    const waitingBody = formatWaitingComment({ headSha, headCommitMessage });
-    const github = createGitHubService(env);
+    // Post new waiting comment if none exists
 
     const { id: commentId } = await github.postCommentWithId(
       token,
@@ -3088,7 +3190,7 @@ const postWaitingComment = async (
     // Store comment ID in KV for later updates
     await storeCommentId(kv, repository, prNumber, commentId);
 
-    // Store in DB for persistence (fire-and-forget, non-blocking)
+    // Store in DB for persistence
     const { db, client } = await createDb(env);
     try {
       await upsertCommentIdInDb(db, repository, prNumber, String(commentId));
@@ -3097,11 +3199,13 @@ const postWaitingComment = async (
     }
 
     console.log(
-      `[check_suite] Posted waiting comment ${commentId} on ${repository}#${prNumber}`
+      `[webhook] Posted waiting comment ${commentId} on ${repository}#${prNumber}`
     );
   } catch (error) {
     // Non-fatal - the comment will be created when workflow completes if this fails
-    console.error("[check_suite] Error posting waiting comment:", error);
+    console.error("[webhook] Error posting waiting comment:", error);
+  } finally {
+    await releasePrCommentLock(kv, repository, prNumber);
   }
 };
 
@@ -3198,13 +3302,14 @@ const handleCheckSuiteRequested = async (
           headSha,
           headCommitMessage: check_suite.head_commit?.message,
         }),
-        // Check org owner status and post claim comment if needed
+        // Check org owner status and post claim comment if needed (private repos only)
         checkOrgOwnerAndPostComment(
           c.env,
           installation.id,
           repository.full_name,
           prNumber,
-          token
+          token,
+          repository.private ?? false
         ),
       ])
     );

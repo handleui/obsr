@@ -83,7 +83,7 @@ describe("formatResultsComment", () => {
       );
 
       expect(result).toContain("Detent found some issues in your CI");
-      expect(result).toContain("Read the docs](https://detent.dev/docs)");
+      expect(result).toContain("Read the docs](https://detent.sh/docs)");
     });
 
     it("shows only failed workflows in the list", () => {
@@ -709,7 +709,7 @@ describe("formatPassingComment", () => {
     );
 
     expect(result).toContain("All clear! Nothing to fix here");
-    expect(result).toContain("Read the docs](https://detent.dev/docs)");
+    expect(result).toContain("Read the docs](https://detent.sh/docs)");
   });
 
   it("shows success message", () => {
@@ -1114,7 +1114,7 @@ describe("formatWaitingComment", () => {
     const result = formatWaitingComment({ headSha: "abc1234567890def" });
 
     expect(result).toContain("Detent is watching this PR");
-    expect(result).toContain("Read the docs](https://detent.dev/docs)");
+    expect(result).toContain("Read the docs](https://detent.sh/docs)");
   });
 
   it("explains errors will be summarized", () => {

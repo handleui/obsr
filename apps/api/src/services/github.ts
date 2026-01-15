@@ -1,4 +1,6 @@
 import type { Env } from "../types/env";
+import type { WorkflowRunSummary } from "./github/workflow-runs";
+import { evaluateWorkflowRuns } from "./github/workflow-runs";
 import {
   blobToArrayBuffer,
   extractLogsFromZip,
@@ -25,6 +27,8 @@ const GITHUB_NAME_PATTERN = /^[a-zA-Z0-9][-a-zA-Z0-9._]*$/;
 const GITHUB_BRANCH_PATTERN = /^[a-zA-Z0-9][-a-zA-Z0-9._/]*$/;
 // Git SHA: 40-character hexadecimal (full SHA) or 7+ character short SHA
 const GIT_SHA_PATTERN = /^[a-fA-F0-9]{7,40}$/;
+// Full SHA only (exactly 40 characters) - required for commits API
+const GIT_FULL_SHA_PATTERN = /^[a-fA-F0-9]{40}$/;
 
 const isValidGitHubName = (name: string): boolean => {
   return (
@@ -607,6 +611,56 @@ const createGitHubServiceInternal = (env: Env) => {
     return firstPR?.number ?? null;
   };
 
+  /**
+   * Find PR number for a commit SHA using the commits API.
+   * This works for fork PRs where workflow_run.pull_requests is empty.
+   * Returns the first open PR associated with the commit, or null if none found.
+   */
+  const getPullRequestForCommit = async (
+    token: string,
+    owner: string,
+    repo: string,
+    sha: string
+  ): Promise<number | null> => {
+    // Validate inputs to prevent URL manipulation
+    if (!(isValidGitHubName(owner) && isValidGitHubName(repo))) {
+      throw new Error("Invalid owner or repo name");
+    }
+
+    if (!GIT_FULL_SHA_PATTERN.test(sha)) {
+      throw new Error("Invalid SHA format");
+    }
+
+    const response = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/commits/${sha}/pulls`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "Detent-App",
+        },
+      }
+    );
+
+    if (!response.ok) {
+      // 409 means empty repo or commit not found - not an error, just no PR
+      if (response.status === 409) {
+        return null;
+      }
+      throw new Error(`Failed to get PRs for commit: ${response.status}`);
+    }
+
+    const prs = (await response.json()) as Array<{
+      number: number;
+      state: string;
+    }>;
+
+    // Prefer open PRs, but fall back to any PR
+    const openPr = prs.find((pr) => pr.state === "open");
+    return openPr?.number ?? prs[0]?.number ?? null;
+  };
+
   const getInstallationInfo = async (
     installationId: number
   ): Promise<InstallationInfo | null> => {
@@ -682,30 +736,6 @@ const createGitHubServiceInternal = (env: Env) => {
     return allRepos;
   };
 
-  // Events that are considered "CI-relevant" for completion checking.
-  // These are the standard CI triggers that users expect to block PRs.
-  //
-  // SKIPPED events (should NOT block completion):
-  // - workflow_dispatch: Manual triggers, Graphite reviews, external tools
-  // - schedule: Cron-based runs unrelated to the PR
-  // - repository_dispatch: External API triggers
-  // - workflow_run: Chained workflows (parent already counted)
-  // - workflow_call: Reusable workflows (caller already counted)
-  // - check_run/check_suite: Third-party CI tools (separate API track)
-  //
-  // Edge cases handled:
-  // - Reruns: Same event, incremented run_attempt (handled by DB uniqueness)
-  // - Cancelled/timed_out runs: status="completed" so they don't block
-  // - Skipped runs (conditional): status="completed", conclusion="skipped"
-  // - Fork PRs: Same events, just limited permissions
-  // - Merge queue: Uses merge_group event with different SHA
-  const CI_RELEVANT_EVENTS = new Set([
-    "pull_request",
-    "pull_request_target",
-    "push",
-    "merge_group",
-  ]);
-
   // GET /repos/{owner}/{repo}/actions/runs?head_sha={sha}
   // Returns all workflow runs for a commit and whether CI-relevant ones are completed
   // Includes metadata for run tracking (branch, attempt, timing, event)
@@ -716,16 +746,7 @@ const createGitHubServiceInternal = (env: Env) => {
     headSha: string
   ): Promise<{
     allCompleted: boolean;
-    runs: Array<{
-      id: number;
-      name: string;
-      status: string;
-      conclusion: string | null;
-      headBranch: string;
-      runAttempt: number;
-      runStartedAt: Date | null;
-      event: string;
-    }>;
+    runs: WorkflowRunSummary[];
   }> => {
     const context = `listWorkflowRunsForCommit(${owner}/${repo}@${headSha.slice(0, 7)})`;
 
@@ -756,7 +777,7 @@ const createGitHubServiceInternal = (env: Env) => {
 
     // Handle empty or missing workflow_runs array
     const workflowRuns = data.workflow_runs ?? [];
-    const runs = workflowRuns.map((run) => ({
+    const runs: WorkflowRunSummary[] = workflowRuns.map((run) => ({
       id: run.id,
       name: run.name ?? "Unknown",
       status: run.status ?? "unknown",
@@ -767,38 +788,24 @@ const createGitHubServiceInternal = (env: Env) => {
       event: run.event ?? "unknown",
     }));
 
-    // Filter to only CI-relevant runs for completion checking
-    // Runs triggered by workflow_dispatch, schedule, etc. (e.g., from Graphite reviews)
-    // are NOT required to complete - they would cause our check to hang indefinitely
-    const ciRelevantRuns = runs.filter((run) =>
-      CI_RELEVANT_EVENTS.has(run.event)
-    );
-    const skippedRuns = runs.filter(
-      (run) => !CI_RELEVANT_EVENTS.has(run.event)
-    );
-
-    // Empty CI-relevant runs means no CI configured or SHA not found
-    // Consider this as "all completed" since there's nothing to wait for
-    const allCompleted =
-      ciRelevantRuns.length === 0 ||
-      ciRelevantRuns.every((run) => run.status === "completed");
-
-    const pendingCiRuns = ciRelevantRuns.filter(
-      (r) => r.status !== "completed"
-    );
-
-    // Detect potentially stuck workflows (running > 30 minutes without completing)
-    // Common causes: unavailable runners, deprecated images, protection rules, fork approval
-    const STUCK_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
     const now = Date.now();
-    const stuckRuns = pendingCiRuns.filter(
-      (r) =>
-        r.runStartedAt && now - r.runStartedAt.getTime() > STUCK_THRESHOLD_MS
-    );
+    const {
+      allCompleted,
+      blacklistedRuns,
+      ciRelevantRuns,
+      nonBlacklistedRuns,
+      pendingCiRuns,
+      skippedRuns,
+      stuckRuns,
+    } = evaluateWorkflowRuns(runs, now);
 
     // Log with status/conclusion for debugging stuck workflows
     console.log(
-      `[github] ${context}: Found ${runs.length} workflow runs (${ciRelevantRuns.length} CI-relevant, ${skippedRuns.length} skipped), allCompleted=${allCompleted}${
+      `[github] ${context}: Found ${runs.length} workflow runs (${blacklistedRuns.length} blacklisted, ${ciRelevantRuns.length} CI-relevant, ${skippedRuns.length} skipped), allCompleted=${allCompleted}${
+        blacklistedRuns.length > 0
+          ? `, blacklisted: ${blacklistedRuns.map((r) => r.name).join(", ")}`
+          : ""
+      }${
         pendingCiRuns.length > 0
           ? `, pending: ${pendingCiRuns.map((r) => `${r.name}[${r.status}](${r.event})`).join(", ")}`
           : ""
@@ -823,7 +830,7 @@ const createGitHubServiceInternal = (env: Env) => {
       );
     }
 
-    return { allCompleted, runs };
+    return { allCompleted, runs: nonBlacklistedRuns };
   };
 
   // POST /repos/{owner}/{repo}/check-runs
@@ -1126,6 +1133,7 @@ const createGitHubServiceInternal = (env: Env) => {
     postComment,
     pushCommit,
     getPullRequestForRun,
+    getPullRequestForCommit,
     listWorkflowRunsForCommit,
     createCheckRun,
     updateCheckRun,

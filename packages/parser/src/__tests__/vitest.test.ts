@@ -493,4 +493,108 @@ describe("VitestParser", () => {
       expect(result.file).toBe("./src/utils.ts");
     });
   });
+
+  describe("test output context tracking", () => {
+    it("marks assertion errors as possiblyTestOutput when after stdout marker with test file", () => {
+      // Observe the test output marker first
+      parser.observeLine?.(
+        "stdout | src/routes/webhooks.test.ts > webhooks > error handling"
+      );
+
+      // Parse an error in this context
+      parser.parse("Error: Database error", ctx);
+      const result = parser.finishMultiLine(ctx) as ExtractedError;
+
+      expect(result).not.toBeNull();
+      expect(result.possiblyTestOutput).toBe(true);
+    });
+
+    it("marks assertion errors as possiblyTestOutput when after stderr marker with test file", () => {
+      // Observe the test output marker first
+      parser.observeLine?.(
+        "stderr | src/routes/organizations.test.ts > edge cases > closes database connection on error"
+      );
+
+      // Parse an error in this context
+      parser.parse("Error: Database error", ctx);
+      const result = parser.finishMultiLine(ctx) as ExtractedError;
+
+      expect(result).not.toBeNull();
+      expect(result.possiblyTestOutput).toBe(true);
+    });
+
+    it("does NOT mark assertion errors as possiblyTestOutput when NOT in test output context", () => {
+      // No observeLine call with test marker, just parse directly
+      parser.parse("Error: Some error", ctx);
+      const result = parser.finishMultiLine(ctx) as ExtractedError;
+
+      expect(result).not.toBeNull();
+      expect(result.possiblyTestOutput).toBeUndefined();
+    });
+
+    it("resets test context when stdout marker without test file appears", () => {
+      // First, set test output context
+      parser.observeLine?.("stderr | src/routes/test.test.ts > some test");
+
+      // Then see a non-test marker, which should reset context
+      parser.observeLine?.("stdout | some-other-file.ts");
+
+      // Parse an error - should NOT have possiblyTestOutput
+      parser.parse("Error: Some error", ctx);
+      const result = parser.finishMultiLine(ctx) as ExtractedError;
+
+      expect(result).not.toBeNull();
+      expect(result.possiblyTestOutput).toBeUndefined();
+    });
+
+    it("marks stack frames as possiblyTestOutput when in test output context", () => {
+      // Observe the test output marker
+      parser.observeLine?.("stdout | src/routes/test.test.ts > some test case");
+
+      // Parse a standalone stack frame
+      const result = parser.parse(
+        " ❯ /project/src/test.ts:10:5",
+        ctx
+      ) as ExtractedError;
+
+      expect(result).not.toBeNull();
+      expect(result.possiblyTestOutput).toBe(true);
+    });
+
+    it("supports various test file extensions for test output markers", () => {
+      const extensions = [
+        "test.ts",
+        "test.tsx",
+        "spec.js",
+        "spec.jsx",
+        "test.mts",
+        "spec.cjs",
+      ];
+
+      for (const ext of extensions) {
+        parser.reset();
+        parser.observeLine?.(`stderr | src/routes/file.${ext} > test name`);
+        parser.parse("Error: Test error", ctx);
+        const result = parser.finishMultiLine(ctx) as ExtractedError;
+
+        expect(result).not.toBeNull();
+        expect(result.possiblyTestOutput).toBe(true);
+      }
+    });
+
+    it("clears test context on reset", () => {
+      // Set test context
+      parser.observeLine?.("stderr | src/routes/test.test.ts > test");
+
+      // Reset should clear the context
+      parser.reset();
+
+      // Parse an error - should NOT have possiblyTestOutput
+      parser.parse("Error: Some error", ctx);
+      const result = parser.finishMultiLine(ctx) as ExtractedError;
+
+      expect(result).not.toBeNull();
+      expect(result.possiblyTestOutput).toBeUndefined();
+    });
+  });
 });

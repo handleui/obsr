@@ -126,6 +126,20 @@ const errorBlockSeparator = /^[⎯─]{3,}/;
 const testFileHeaderPattern =
   /^\s*[❯>✓√✔×✕]\s+\S+\.(?:test|spec)\.(?:ts|tsx|js|jsx|mts|cts|mjs|cjs)/;
 
+/**
+ * Pattern to detect vitest/jest test output markers.
+ * Matches lines like "stdout | path/to/file.test.ts" or "stderr | file.spec.js > test name"
+ *
+ * Supports extensions:
+ * - .ts, .js, .tsx, .jsx (standard)
+ * - .mts, .mjs (ESM TypeScript/JavaScript)
+ * - .cts, .cjs (CommonJS TypeScript/JavaScript)
+ *
+ * Also supports underscore convention: _test.ts, _spec.ts
+ */
+const testOutputMarkerPattern =
+  /(?:stdout|stderr)\s*\|\s*\S+[._](test|spec)\.[cm]?[tj]sx?/i;
+
 /** Code context line pattern (indented) */
 const codeContextPattern = /^\s{2,}\S/;
 
@@ -319,6 +333,13 @@ export class VitestParser
   private lastStripped = "";
   private lastFormat: DetectedFormat | null = null;
   private lastMatch: RegExpExecArray | null = null;
+
+  /**
+   * Track whether we're in a test output context (after stderr/stdout | test.ts marker).
+   * Set to true when we see a vitest/jest stdout/stderr marker with a test file pattern.
+   * Reset when we see a new marker without a test file, or a completely different context.
+   */
+  private inTestOutputContext = false;
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Parser method requires multiple pattern checks with fast-path optimizations for performance
   canParse(line: string, _ctx: ParseContext): number {
@@ -570,6 +591,32 @@ export class VitestParser
     this.lastStripped = "";
     this.lastFormat = null;
     this.lastMatch = null;
+    this.inTestOutputContext = false;
+  }
+
+  /**
+   * Observe a line for context tracking without parsing.
+   * This is called on ALL lines (including noise) before noise filtering,
+   * allowing us to track test output context even when marker lines are filtered.
+   *
+   * Tracks vitest/jest stdout/stderr markers with test file patterns to detect
+   * when subsequent errors are likely from test output (console.log, mocks, etc.)
+   * rather than actual test failures.
+   */
+  observeLine(line: string): void {
+    const stripped = stripAnsi(line);
+    const trimmed = stripped.trim();
+
+    // Check if this line is a vitest/jest output marker with a test file
+    if (testOutputMarkerPattern.test(trimmed)) {
+      this.inTestOutputContext = true;
+    } else if (
+      trimmed.toLowerCase().includes("stdout |") ||
+      trimmed.toLowerCase().includes("stderr |")
+    ) {
+      // A stdout/stderr marker WITHOUT a test file pattern - reset context
+      this.inTestOutputContext = false;
+    }
   }
 
   noisePatterns(): NoisePatterns {
@@ -765,6 +812,13 @@ export class VitestParser
       messageTruncated,
     };
 
+    // Mark as possibly test output if we're in a test output context
+    // (after stderr/stdout | test.ts marker). This prevents false positive
+    // annotations from console.log, mock errors, and other test output noise.
+    if (this.inTestOutputContext) {
+      err.possiblyTestOutput = true;
+    }
+
     applyWorkflowContext(err, ctx);
     this.reset();
     return err;
@@ -872,6 +926,11 @@ export class VitestParser
       lineKnown: lineNum > 0,
       columnKnown: col > 0,
     };
+
+    // Mark as possibly test output if we're in a test output context
+    if (this.inTestOutputContext) {
+      err.possiblyTestOutput = true;
+    }
 
     applyWorkflowContext(err, ctx);
     return err;

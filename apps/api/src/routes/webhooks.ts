@@ -1,4 +1,4 @@
-import type { KVNamespace } from "@cloudflare/workers-types";
+import type { ExecutionContext, KVNamespace } from "@cloudflare/workers-types";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -18,6 +18,7 @@ import { CACHE_TTL, cacheKey, getFromCache, setInCache } from "../lib/cache";
 import { verifyGitHubMembership } from "../lib/github-membership";
 import { captureWebhookError, type ParserContext } from "../lib/sentry";
 import { webhookSignatureMiddleware } from "../middleware/webhook-signature";
+import { deduplicatePrComments } from "../services/comment-dedup";
 import {
   formatCheckRunOutput,
   formatPassingComment,
@@ -1363,11 +1364,13 @@ interface PostCommentContext {
   token: string;
   kv: KVNamespace;
   db: DbClient;
+  executionCtx?: ExecutionContext;
   owner: string;
   repo: string;
   repository: string;
   prNumber: number;
   commentBody: string;
+  appId: number;
 }
 
 const postOrUpdateComment = async (ctx: PostCommentContext): Promise<void> => {
@@ -1439,11 +1442,13 @@ const createNewComment = async (ctx: PostCommentContext): Promise<void> => {
     token,
     kv,
     db,
+    executionCtx,
     owner,
     repo,
     repository,
     prNumber,
     commentBody,
+    appId,
   } = ctx;
 
   const { id: newCommentId } = await github.postCommentWithId(
@@ -1459,6 +1464,22 @@ const createNewComment = async (ctx: PostCommentContext): Promise<void> => {
   console.log(
     `[workflow_run] Posted new comment ${newCommentId} on PR #${prNumber}`
   );
+  if (Number.isInteger(appId) && appId > 0) {
+    const dedupTask = deduplicatePrComments({
+      token,
+      owner,
+      repo,
+      prNumber,
+      storedCommentId: newCommentId,
+      appId,
+    }).catch((error) => {
+      console.error("[dedup] Failed:", error);
+    });
+
+    if (executionCtx) {
+      executionCtx.waitUntil(dedupTask);
+    }
+  }
 };
 
 // ============================================================================
@@ -1571,6 +1592,7 @@ const finalizeAndPostResults = async (
     owner: string;
     repo: string;
     repository: string;
+    executionCtx: ExecutionContext;
     headSha: string;
     headCommitMessage?: string;
     prNumber: number;
@@ -1595,6 +1617,7 @@ const finalizeAndPostResults = async (
     owner,
     repo,
     repository,
+    executionCtx,
     headSha,
     headCommitMessage,
     prNumber,
@@ -1725,16 +1748,19 @@ const finalizeAndPostResults = async (
       return { runResults, totalErrors };
     }
 
+    const appId = Number.parseInt(env.GITHUB_APP_ID, 10);
     await postOrUpdateComment({
       github,
       token,
       kv,
       db,
+      executionCtx,
       owner,
       repo,
       repository,
       prNumber,
       commentBody,
+      appId,
     });
   } finally {
     await client.end();
@@ -1787,12 +1813,9 @@ const handleWorkflowRunInProgress = async (
     let prNumber = workflow_run.pull_requests[0]?.number;
     if (!prNumber) {
       // For fork PRs, workflow_run.pull_requests is empty but commits API works
-      prNumber = await github.getPullRequestForCommit(
-        token,
-        owner,
-        repo,
-        headSha
-      );
+      prNumber =
+        (await github.getPullRequestForCommit(token, owner, repo, headSha)) ??
+        undefined;
     }
 
     // Skip if no PR associated (e.g., push to main branch)
@@ -2111,6 +2134,7 @@ const handleWorkflowRunCompleted = async (
         owner,
         repo,
         repository: repository.full_name,
+        executionCtx: c.executionCtx,
         headSha,
         headCommitMessage,
         prNumber,
@@ -3022,94 +3046,6 @@ const handleOrganizationEvent = async (
   }
 };
 
-// Check if org has an owner and post claim comment if not (fire-and-forget)
-// Only posts on private repos to avoid spam on public/OSS repos
-const checkOrgOwnerAndPostComment = async (
-  env: Env,
-  installationId: number,
-  repository: string,
-  prNumber: number,
-  token: string,
-  isPrivate: boolean
-): Promise<void> => {
-  // Skip claim comments on public repos - could be seen as spam on OSS repos
-  if (!isPrivate) {
-    return;
-  }
-
-  const kv = env["detent-idempotency"];
-
-  // Check if we already posted this comment (once per repo, not per PR)
-  // Use cacheTtl for edge caching - reduces latency from ~50ms to ~5ms for hot keys
-  const claimCommentKey = `detent:claim-comment:${repository}`;
-  const alreadyPosted = await kv.get(claimCommentKey, { cacheTtl: 60 });
-  if (alreadyPosted) {
-    return;
-  }
-
-  const { db, client } = await createDb(env);
-
-  try {
-    // Single query with LEFT JOIN to check org existence and owner status
-    // This reduces from 2 DB round trips to 1
-    const result = await db
-      .select({
-        orgId: organizations.id,
-        ownerId: organizationMembers.id,
-      })
-      .from(organizations)
-      .leftJoin(
-        organizationMembers,
-        and(
-          eq(organizationMembers.organizationId, organizations.id),
-          eq(organizationMembers.role, "owner")
-        )
-      )
-      .where(eq(organizations.providerInstallationId, String(installationId)))
-      .limit(1);
-
-    const row = result[0];
-    if (!row) {
-      return; // Org not found - shouldn't happen but be safe
-    }
-
-    if (row.ownerId) {
-      return; // Has owner, nothing to do
-    }
-
-    // No owner - post claim comment
-    const github = createGitHubService(env);
-    const parts = repository.split("/");
-    const owner = parts[0];
-    const repo = parts[1];
-
-    if (!(owner && repo)) {
-      console.error(`[check_suite] Invalid repository format: ${repository}`);
-      return;
-    }
-
-    await github.postCommentWithId(
-      token,
-      owner,
-      repo,
-      prNumber,
-      "Organization admins can [claim this team](https://navigator.detent.sh) to access the dashboard and manage settings. [Learn more](https://detent.sh/docs/quickstart)"
-    );
-
-    // Mark as posted (TTL: 30 days - re-notify if they still haven't claimed)
-    await kv.put(claimCommentKey, "true", { expirationTtl: 60 * 60 * 24 * 30 });
-
-    console.log(
-      `[check_suite] Posted claim comment on ${repository}#${prNumber}`
-    );
-  } catch (error) {
-    // Non-fatal - just log and continue
-    console.error("[check_suite] Error posting claim comment:", error);
-  } finally {
-    await client.end();
-  }
-};
-
 // ============================================================================
 // Helper: Post "waiting" comment immediately when PR is created
 // ============================================================================
@@ -3305,15 +3241,6 @@ const handleCheckSuiteRequested = async (
           headSha,
           headCommitMessage: check_suite.head_commit?.message,
         }),
-        // Check org owner status and post claim comment if needed (private repos only)
-        checkOrgOwnerAndPostComment(
-          c.env,
-          installation.id,
-          repository.full_name,
-          prNumber,
-          token,
-          repository.private ?? false
-        ),
       ])
     );
 

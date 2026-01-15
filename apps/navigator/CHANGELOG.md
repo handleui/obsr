@@ -1,5 +1,12 @@
 # @detent/navigator
 
+## 0.4.2
+
+### Patch Changes
+
+- 4a35490: Support GitHub classic OAuth tokens which don't have refresh tokens or expiration.
+  Refactor auth callback to extract helper functions for better maintainability.
+
 ## 0.4.1
 
 ### Patch Changes

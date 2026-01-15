@@ -16,6 +16,7 @@ import {
   findOrganizationByIdOrSlug,
   selectOrganization,
 } from "../../lib/ui.js";
+import { printHeader } from "../../tui/components/index.js";
 
 const confirm = async (message: string): Promise<boolean> => {
   const rl = createInterface({
@@ -73,6 +74,9 @@ export const leaveCommand = defineCommand({
       process.exit(1);
     }
 
+    printHeader();
+    console.log();
+
     const organizationsResponse = await getOrganizations(accessToken).catch(
       (error: unknown) => {
         console.error(
@@ -112,19 +116,14 @@ export const leaveCommand = defineCommand({
 
     // Confirm unless --force
     if (!args.force) {
-      console.log(
-        `\nYou are about to leave "${selectedOrganization.organization_name}"`
-      );
-      console.log("You will lose access to all projects in this organization.");
-
+      console.log(`Leave "${selectedOrganization.organization_name}"?`);
       if (selectedOrganization.role === "owner") {
-        console.log("\n⚠️  Warning: You are an owner of this organization.");
         console.log(
-          "If you are the only owner, you will not be able to leave."
+          "You are an owner. If you are the only owner, you cannot leave."
         );
       }
 
-      const confirmed = await confirm("\nAre you sure you want to leave?");
+      const confirmed = await confirm("Confirm leave");
       if (!confirmed) {
         console.log("Cancelled.");
         process.exit(0);

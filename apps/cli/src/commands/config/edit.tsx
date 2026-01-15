@@ -512,7 +512,7 @@ export const ConfigEditor = ({ repoRoot }: ConfigEditorProps): JSX.Element => {
 
     return (
       <Box flexDirection="column">
-        <Header command="config" />
+        <Header />
         <Text color={colors.text}>
           {exitIcon} {exitMessage}
         </Text>
@@ -523,7 +523,7 @@ export const ConfigEditor = ({ repoRoot }: ConfigEditorProps): JSX.Element => {
 
   return (
     <Box flexDirection="column">
-      <Header command="config" />
+      <Header />
       <Box marginTop={1} />
 
       <Box flexDirection="column" marginBottom={1}>

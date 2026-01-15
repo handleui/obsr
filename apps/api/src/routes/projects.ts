@@ -93,7 +93,7 @@ app.post("/", async (c) => {
     }
 
     // Verify user has access via on-demand GitHub membership check
-    const access = await verifyOrgAccess(auth.userId, org, c.env);
+    const access = await verifyOrgAccess(db, auth.userId, org, c.env);
     if (!access.allowed) {
       return c.json({ error: access.error }, 403);
     }
@@ -188,7 +188,7 @@ app.get("/", async (c) => {
     }
 
     // Verify user has access via on-demand GitHub membership check
-    const access = await verifyOrgAccess(auth.userId, org, c.env);
+    const access = await verifyOrgAccess(db, auth.userId, org, c.env);
     if (!access.allowed) {
       return c.json({ error: access.error }, 403);
     }
@@ -249,6 +249,7 @@ app.get("/lookup", async (c) => {
 
     // Verify user has access via on-demand GitHub membership check
     const access = await verifyOrgAccess(
+      db,
       auth.userId,
       project.organization,
       c.env
@@ -318,7 +319,7 @@ app.get("/by-handle", async (c) => {
     }
 
     // Verify user has access via on-demand GitHub membership check
-    const access = await verifyOrgAccess(auth.userId, org, c.env);
+    const access = await verifyOrgAccess(db, auth.userId, org, c.env);
     if (!access.allowed) {
       return c.json({ error: access.error }, 403);
     }
@@ -382,6 +383,7 @@ app.get("/:projectId", async (c) => {
 
     // Verify user has access via on-demand GitHub membership check
     const access = await verifyOrgAccess(
+      db,
       auth.userId,
       project.organization,
       c.env
@@ -436,6 +438,7 @@ app.delete("/:projectId", async (c) => {
 
     // Verify user has access via on-demand GitHub membership check
     const access = await verifyOrgAccess(
+      db,
       auth.userId,
       project.organization,
       c.env

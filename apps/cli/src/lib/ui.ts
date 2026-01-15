@@ -5,17 +5,29 @@
 import type { Organization } from "./api.js";
 
 /**
- * Find an organization by ID or slug
+ * Find an organization by ID, slug, name, or GitHub org
+ *
+ * Matches against:
+ * - organization_id (exact match)
+ * - organization_slug (exact match)
+ * - github_org (case-insensitive)
+ * - organization_name (case-insensitive)
  *
  * Returns the matching organization or undefined if not found.
  */
 export const findOrganizationByIdOrSlug = (
   organizations: Organization[],
   idOrSlug: string
-): Organization | undefined =>
-  organizations.find(
-    (o) => o.organization_id === idOrSlug || o.organization_slug === idOrSlug
+): Organization | undefined => {
+  const lower = idOrSlug.toLowerCase();
+  return organizations.find(
+    (o) =>
+      o.organization_id === idOrSlug ||
+      o.organization_slug === idOrSlug ||
+      o.github_org.toLowerCase() === lower ||
+      o.organization_name.toLowerCase() === lower
   );
+};
 
 /**
  * Prompt user to select an organization from a list

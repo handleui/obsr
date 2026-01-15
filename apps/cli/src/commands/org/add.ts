@@ -1,7 +1,7 @@
 /**
- * Organization link command
+ * Organization add command
  *
- * Opens the GitHub App installation page to link a GitHub organization to Detent.
+ * Opens the GitHub App installation page to add a GitHub organization to Detent.
  * Polls the API to detect when the installation completes and confirms success.
  */
 
@@ -9,6 +9,7 @@ import { defineCommand } from "citty";
 import { getOrganizations, listProjects, syncIdentity } from "../../lib/api.js";
 import { getAccessToken, getGitHubToken } from "../../lib/auth.js";
 import { openBrowser } from "../../lib/browser.js";
+import { printHeader } from "../../tui/components/index.js";
 
 const GITHUB_APP_INSTALL_URL =
   "https://github.com/apps/detentsh/installations/select_target";
@@ -20,10 +21,10 @@ const POLL_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-export const linkCommand = defineCommand({
+export const addCommand = defineCommand({
   meta: {
-    name: "link",
-    description: "Link a GitHub organization to Detent",
+    name: "add",
+    description: "Add a GitHub organization to Detent",
   },
   run: async () => {
     // Require authentication to poll for new orgs
@@ -34,6 +35,8 @@ export const linkCommand = defineCommand({
       console.error("Not logged in. Run `dt auth login` first.");
       process.exit(1);
     }
+
+    printHeader();
 
     // Get GitHub token for installer linking (uses OAuth token directly)
     const githubToken = await getGitHubToken();
@@ -58,7 +61,7 @@ export const linkCommand = defineCommand({
     }
 
     // Open browser to GitHub App install page
-    console.log("Opening GitHub to link an organization to Detent...\n");
+    console.log("Opening GitHub to add an organization to Detent...\n");
 
     try {
       await openBrowser(GITHUB_APP_INSTALL_URL);
@@ -112,7 +115,7 @@ export const linkCommand = defineCommand({
         const projectText =
           projectCount === 1 ? "1 repository" : `${projectCount} repositories`;
 
-        console.log(`✓ Linked: ${org.organization_name} (${projectText})`);
+        console.log(`✓ Added: ${org.organization_name} (${projectText})`);
         return;
       }
     }

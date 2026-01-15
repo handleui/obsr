@@ -3,19 +3,12 @@ import { getVersion } from "../../utils/version.js";
 import { ANSI_RESET, colors, hexToAnsi } from "../styles.js";
 
 interface HeaderProps {
-  command: string;
   updateAvailable?: string | null;
 }
 
-export const Header = ({
-  command,
-  updateAvailable,
-}: HeaderProps): JSX.Element => (
+export const Header = ({ updateAvailable }: HeaderProps): JSX.Element => (
   <Box flexDirection="column" marginTop={1}>
-    <Text>
-      <Text color={colors.brand}>Detent v{getVersion()}</Text>{" "}
-      <Text color={colors.text}>{command}</Text>
-    </Text>
+    <Text color={colors.muted}>Detent CLI {getVersion()}</Text>
     {updateAvailable ? (
       <>
         <Text color={colors.info}>
@@ -27,10 +20,10 @@ export const Header = ({
   </Box>
 );
 
-export const printHeader = (command: string): void => {
-  const brandAnsi = hexToAnsi(colors.brand);
+export const printHeader = (): void => {
+  const mutedAnsi = hexToAnsi(colors.muted);
   console.log();
-  console.log(`${brandAnsi}Detent v${getVersion()}${ANSI_RESET} ${command}`);
+  console.log(`${mutedAnsi}Detent CLI ${getVersion()}${ANSI_RESET}`);
 };
 
 /**
@@ -40,6 +33,6 @@ export const printHeader = (command: string): void => {
  * NOTE: Update banner temporarily disabled to reduce latency.
  * The update logic in utils/update.ts remains intact for `dt update`.
  */
-export const printHeaderWithUpdateCheck = (command: string): void => {
-  printHeader(command);
+export const printHeaderWithUpdateCheck = (): void => {
+  printHeader();
 };

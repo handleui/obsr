@@ -60,22 +60,30 @@ const isValidCredentials = (data: unknown): data is Credentials => {
     return false;
   }
 
-  // If github_token exists, github_token_expires_at must also exist and be a number
-  if (
-    obj.github_token !== undefined &&
-    (typeof obj.github_token !== "string" ||
-      typeof obj.github_token_expires_at !== "number")
-  ) {
-    return false;
+  // If github_token exists, expires_at is optional (classic OAuth tokens can be non-expiring)
+  if (obj.github_token !== undefined) {
+    if (typeof obj.github_token !== "string") {
+      return false;
+    }
+    if (
+      obj.github_token_expires_at !== undefined &&
+      typeof obj.github_token_expires_at !== "number"
+    ) {
+      return false;
+    }
   }
 
-  // If github_refresh_token exists, github_refresh_token_expires_at must also exist
-  if (
-    obj.github_refresh_token !== undefined &&
-    (typeof obj.github_refresh_token !== "string" ||
-      typeof obj.github_refresh_token_expires_at !== "number")
-  ) {
-    return false;
+  // If github_refresh_token exists, expires_at is optional
+  if (obj.github_refresh_token !== undefined) {
+    if (typeof obj.github_refresh_token !== "string") {
+      return false;
+    }
+    if (
+      obj.github_refresh_token_expires_at !== undefined &&
+      typeof obj.github_refresh_token_expires_at !== "number"
+    ) {
+      return false;
+    }
   }
 
   return true;

@@ -322,8 +322,10 @@ export const getAndClearReturnTo = async (): Promise<string | null> => {
  */
 export interface GitHubOAuthTokens {
   accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
+  /** Optional - only present when GitHub OAuth App has "token expiration" enabled */
+  refreshToken?: string;
+  /** Optional - 0 or undefined for non-expiring tokens */
+  expiresAt?: number;
   scopes: string[];
 }
 
@@ -362,10 +364,10 @@ export const getGitHubOAuthTokens =
       });
 
       const tokens = payload.tokens as GitHubOAuthTokens;
-      if (!(tokens?.accessToken && tokens?.refreshToken)) {
+      // Only accessToken is required (refreshToken is optional for non-expiring tokens)
+      if (!tokens?.accessToken) {
         return null;
       }
-
       return tokens;
     } catch {
       // Token invalid or expired - clear the cookie

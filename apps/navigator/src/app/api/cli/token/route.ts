@@ -5,8 +5,8 @@ import { type BetterStackRequest, withLogging } from "@/lib/logger";
 
 interface OAuthTokens {
   accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
+  refreshToken?: string;
+  expiresAt?: number;
   scopes: string[];
 }
 
@@ -91,23 +91,31 @@ const handler = async (request: BetterStackRequest) => {
 
     log.info("Token exchange successful", {
       hasGitHubTokens: !!oauthTokens,
+      hasGitHubRefreshToken: !!oauthTokens?.refreshToken,
     });
 
-    return NextResponse.json({
+    // Build response with GitHub tokens if available
+    const response: Record<string, unknown> = {
       access_token: accessToken,
       refresh_token: refreshToken,
       expires_at: expiresAt,
-      // Include GitHub OAuth tokens if available (from "Return GitHub OAuth tokens" setting)
-      // Note: expiresAt from WorkOS is in Unix seconds, convert to milliseconds for CLI
-      ...(oauthTokens && {
-        github_token: oauthTokens.accessToken,
-        github_token_expires_at: oauthTokens.expiresAt * 1000,
-        // Include refresh token for automatic token refresh (6-month lifetime)
-        github_refresh_token: oauthTokens.refreshToken,
-        github_refresh_token_expires_at:
-          Date.now() + GITHUB_REFRESH_TOKEN_LIFETIME_MS,
-      }),
-    });
+    };
+
+    if (oauthTokens?.accessToken) {
+      response.github_token = oauthTokens.accessToken;
+      // Only include expires_at if token actually expires (non-zero)
+      if (oauthTokens.expiresAt) {
+        response.github_token_expires_at = oauthTokens.expiresAt * 1000;
+      }
+      // Only include refresh token if present (GitHub classic OAuth doesn't have one)
+      if (oauthTokens.refreshToken) {
+        response.github_refresh_token = oauthTokens.refreshToken;
+        response.github_refresh_token_expires_at =
+          Date.now() + GITHUB_REFRESH_TOKEN_LIFETIME_MS;
+      }
+    }
+
+    return NextResponse.json(response);
   } catch (err) {
     log.error("Token exchange error", {
       error: err instanceof Error ? err.message : String(err),

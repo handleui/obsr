@@ -42,7 +42,6 @@
         "pages": [
           "cli/installation",
           "cli/concepts",
-          "cli/check",
           "cli/heal",
           {
             "group": "Healing",

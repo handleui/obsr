@@ -10,37 +10,10 @@ import { defineCommand } from "citty";
 import type { ErrorInfo, ErrorsResponse } from "../lib/api.js";
 import { getErrors } from "../lib/api.js";
 import { getAccessToken } from "../lib/auth.js";
-
-// Remote URL patterns
-const SSH_REMOTE_PATTERN = /^git@[^:]+:([^/]+\/[^/]+?)(?:\.git)?$/;
-const HTTPS_REMOTE_PATTERN = /^https?:\/\/[^/]+\/([^/]+\/[^/]+?)(?:\.git)?$/;
+import { parseRemoteUrl } from "../lib/git-utils.js";
 
 // Display constants
 const MAX_MESSAGE_LENGTH = 80;
-
-/**
- * Parse a git remote URL to extract owner/repo
- * Supports both HTTPS and SSH formats:
- * - https://github.com/owner/repo.git
- * - https://github.com/owner/repo
- * - git@github.com:owner/repo.git
- * - git@github.com:owner/repo
- */
-const parseRemoteUrl = (url: string): string | null => {
-  // SSH format: git@github.com:owner/repo.git
-  const sshMatch = url.match(SSH_REMOTE_PATTERN);
-  if (sshMatch?.[1]) {
-    return sshMatch[1];
-  }
-
-  // HTTPS format: https://github.com/owner/repo.git
-  const httpsMatch = url.match(HTTPS_REMOTE_PATTERN);
-  if (httpsMatch?.[1]) {
-    return httpsMatch[1];
-  }
-
-  return null;
-};
 
 interface GroupedErrors {
   [filePath: string]: {

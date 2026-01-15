@@ -1,11 +1,7 @@
-import { decodeJwt, EncryptJWT } from "jose";
+import { EncryptJWT } from "jose";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import {
-  type GitHubOAuthTokens,
-  getGitHubOAuthTokens,
-  getWorkOSCookiePassword,
-} from "@/lib/auth";
+import { type GitHubOAuthTokens, getWorkOSCookiePassword } from "@/lib/auth";
 import { COOKIE_NAMES } from "@/lib/constants";
 import { workos } from "@/lib/workos";
 
@@ -130,13 +126,11 @@ export const GET = async (request: Request) => {
       throw new Error("Missing tokens in session");
     }
 
-    // Get GitHub OAuth tokens from separate cookie
+    // Get GitHub OAuth tokens from separate cookie (may be null if not available)
     // Note: oauthTokens are NOT stored in WorkOS sealed session and NOT returned from refresh.
     // They are only returned during initial auth, so we persist them separately.
+    const { getGitHubOAuthTokens } = await import("@/lib/auth");
     const oauthTokens = await getGitHubOAuthTokens();
-
-    // Extract user email from access token for success page display
-    const { email } = decodeJwt(accessToken) as { email?: string };
 
     // Create encrypted one-time code (includes GitHub OAuth token if available)
     const encryptedCode = await createEncryptedCode(
@@ -149,9 +143,6 @@ export const GET = async (request: Request) => {
     const cliCallbackUrl = new URL(`http://localhost:${portNumber}/callback`);
     cliCallbackUrl.searchParams.set("code", encryptedCode);
     cliCallbackUrl.searchParams.set("state", state);
-    if (email) {
-      cliCallbackUrl.searchParams.set("email", email);
-    }
 
     // Redirect directly to CLI callback (success page shown by CLI)
     return NextResponse.redirect(cliCallbackUrl.toString());

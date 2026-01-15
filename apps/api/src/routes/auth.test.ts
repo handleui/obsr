@@ -50,7 +50,8 @@ const MOCK_ENV = {
 const makeRequest = async (
   method: "GET" | "POST",
   path: string,
-  body?: unknown
+  body?: unknown,
+  headers?: Record<string, string>
 ): Promise<Response> => {
   // Import the routes fresh each time
   const authRoutes = (await import("./auth")).default;
@@ -70,6 +71,7 @@ const makeRequest = async (
     headers: {
       Authorization: "Bearer test-token",
       "Content-Type": "application/json",
+      ...headers,
     },
   };
 

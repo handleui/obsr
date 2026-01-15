@@ -75,6 +75,30 @@ describe("credentials", () => {
       expect(result).toEqual(creds);
     });
 
+    it("returns credentials when github_token has no expires_at", () => {
+      const creds = createValidCredentials({
+        github_token: "gh-token",
+      });
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify(creds));
+
+      const result = loadCredentials();
+
+      expect(result).toEqual(creds);
+    });
+
+    it("returns credentials when github_refresh_token has no expires_at", () => {
+      const creds = createValidCredentials({
+        github_refresh_token: "gh-refresh-token",
+      });
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify(creds));
+
+      const result = loadCredentials();
+
+      expect(result).toEqual(creds);
+    });
+
     it("returns null for empty file", () => {
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(readFileSync).mockReturnValue("");
@@ -166,6 +190,40 @@ describe("credentials", () => {
           access_token: "token",
           refresh_token: "token",
           expires_at: "not a number",
+        })
+      );
+
+      const result = loadCredentials();
+
+      expect(result).toBeNull();
+    });
+
+    it("returns null for non-number github_token_expires_at", () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue(
+        JSON.stringify({
+          access_token: "token",
+          refresh_token: "token",
+          expires_at: Date.now(),
+          github_token: "gh-token",
+          github_token_expires_at: "not a number",
+        })
+      );
+
+      const result = loadCredentials();
+
+      expect(result).toBeNull();
+    });
+
+    it("returns null for non-number github_refresh_token_expires_at", () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue(
+        JSON.stringify({
+          access_token: "token",
+          refresh_token: "token",
+          expires_at: Date.now(),
+          github_refresh_token: "gh-refresh-token",
+          github_refresh_token_expires_at: "not a number",
         })
       );
 

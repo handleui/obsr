@@ -20,9 +20,13 @@ BYOK for convenience, more providers on the way
 ## Usage
 
 ```bash
-dt mock        # run workflows locally with act, it's a BETA, act is very choppy and needs a lot more attention
+dt auth        # authenticate with GitHub
+dt link        # link this repo to a Detent organization
 dt config      # manage settings
-dt init        # gets your api key for AI healing, probably about to be deprecated since we're moving to the cloud
+dt whoami      # show current user info
+dt org         # manage organizations
+dt errors      # view CI errors
+dt update      # update the CLI
 ```
 
 ## Platforms

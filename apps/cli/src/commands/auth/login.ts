@@ -3,13 +3,12 @@ import { syncIdentity } from "../../lib/api.js";
 import {
   authenticateViaNavigator,
   getJwtExpiration,
-  hasValidSession,
   pollForTokens,
   requestDeviceAuthorization,
   type TokenResponse,
 } from "../../lib/auth.js";
 import type { Credentials } from "../../lib/credentials.js";
-import { saveCredentials } from "../../lib/credentials.js";
+import { isLoggedIn, saveCredentials } from "../../lib/credentials.js";
 import { ANSI_RESET, colors, hexToAnsi } from "../../tui/styles.js";
 
 const brand = hexToAnsi(colors.brand);
@@ -68,9 +67,18 @@ const runNavigatorFlow = async (): Promise<TokenResponse> => {
   }
 };
 
-const showLoginSuccess = async (accessToken: string): Promise<void> => {
+const showLoginSuccess = async (
+  accessToken: string,
+  githubToken?: string
+): Promise<void> => {
+  // Debug: log whether GitHub token was received from Navigator
+  if (process.env.DEBUG) {
+    console.log(
+      `[login] GitHub token from Navigator: ${githubToken ? "yes" : "no"}`
+    );
+  }
   try {
-    const identity = await syncIdentity(accessToken);
+    const identity = await syncIdentity(accessToken, githubToken);
     const email = `${brand}${identity.email}${ANSI_RESET}`;
 
     if (identity.github_username) {
@@ -102,7 +110,7 @@ export const loginCommand = defineCommand({
     },
   },
   run: async ({ args }) => {
-    if (!args.force && (await hasValidSession())) {
+    if (!args.force && isLoggedIn()) {
       console.log("Already logged in. Use --force to re-authenticate.");
       return;
     }
@@ -128,6 +136,6 @@ export const loginCommand = defineCommand({
     };
 
     saveCredentials(credentials);
-    await showLoginSuccess(tokens.access_token);
+    await showLoginSuccess(tokens.access_token, tokens.github_token);
   },
 });

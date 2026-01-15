@@ -5,16 +5,105 @@
  * to an organization for Detent operations.
  */
 
-import { findGitRoot } from "@detent/git";
+import { findGitRoot, getRemoteUrl } from "@detent/git";
 import { defineCommand } from "citty";
 import type { Organization } from "../../lib/api.js";
-import { getOrganizations } from "../../lib/api.js";
+import { getOrganizations, lookupProject } from "../../lib/api.js";
 import { getAccessToken } from "../../lib/auth.js";
 import { getProjectConfig, saveProjectConfig } from "../../lib/config.js";
+import { parseRemoteUrl } from "../../lib/git-utils.js";
 import {
   findOrganizationByIdOrSlug,
   selectOrganization,
 } from "../../lib/ui.js";
+
+interface AutoDetectResult {
+  success: true;
+  organizationId: string;
+  organizationSlug: string;
+  organizationName: string;
+  repoFullName: string;
+}
+
+/**
+ * Attempt to auto-detect organization from git remote URL
+ */
+const attemptAutoDetect = async (
+  repoRoot: string,
+  accessToken: string
+): Promise<AutoDetectResult | null> => {
+  const remoteUrl = await getRemoteUrl(repoRoot);
+  if (!remoteUrl) {
+    return null;
+  }
+
+  const repoFullName = parseRemoteUrl(remoteUrl);
+  if (!repoFullName) {
+    return null;
+  }
+
+  try {
+    const project = await lookupProject(accessToken, repoFullName);
+    return {
+      success: true,
+      organizationId: project.organization_id,
+      organizationSlug: project.organization_slug,
+      organizationName: project.organization_name ?? project.organization_slug,
+      repoFullName,
+    };
+  } catch {
+    // Project not found in any organization - expected for unlinked repos
+    return null;
+  }
+};
+
+/**
+ * Get organization from user selection or CLI argument
+ */
+const resolveOrganization = async (
+  accessToken: string,
+  orgArg: string | undefined,
+  autoDetectFailed: boolean
+): Promise<Organization | null> => {
+  console.log(
+    autoDetectFailed
+      ? "Could not auto-detect project. Fetching your organizations..."
+      : "Fetching your organizations..."
+  );
+
+  const response = await getOrganizations(accessToken).catch((error) => {
+    console.error(
+      "Failed to fetch organizations:",
+      error instanceof Error ? error.message : error
+    );
+    process.exit(1);
+  });
+
+  if (response.organizations.length === 0) {
+    console.error("You are not a member of any organizations.");
+    console.error(
+      "You must be a member of the GitHub organization where Detent is installed."
+    );
+    process.exit(1);
+  }
+
+  if (orgArg) {
+    const found = findOrganizationByIdOrSlug(response.organizations, orgArg);
+    if (!found) {
+      console.error(`Organization not found: ${orgArg}`);
+      console.error("\nAvailable organizations:");
+      for (const organization of response.organizations) {
+        console.error(
+          `  - ${organization.organization_slug} (${organization.organization_name})`
+        );
+      }
+      process.exit(1);
+    }
+    return found;
+  }
+
+  return selectOrganization(response.organizations);
+};
 
 export const linkCommand = defineCommand({
   meta: {
@@ -53,7 +142,6 @@ export const linkCommand = defineCommand({
       process.exit(1);
     }
 
-    // Check if already linked
     const existingConfig = getProjectConfig(repoRoot);
     if (existingConfig && !args.force) {
       console.log(
@@ -64,56 +152,33 @@ export const linkCommand = defineCommand({
       return;
     }
 
-    // Get user's organizations
-    console.log("Fetching your organizations...");
-    const organizationsResponse = await getOrganizations(accessToken).catch(
-      (error) => {
-        console.error(
-          "Failed to fetch organizations:",
-          error instanceof Error ? error.message : error
+    const shouldAttemptAutoDetect = !args.organization;
+    if (shouldAttemptAutoDetect) {
+      const autoDetected = await attemptAutoDetect(repoRoot, accessToken);
+      if (autoDetected) {
+        saveProjectConfig(repoRoot, {
+          organizationId: autoDetected.organizationId,
+          organizationSlug: autoDetected.organizationSlug,
+        });
+        console.log(
+          `\nLinked to organization: ${autoDetected.organizationName} (${autoDetected.organizationSlug})`
         );
-        process.exit(1);
+        console.log(`Auto-detected from ${autoDetected.repoFullName}.`);
+        console.log("\nRun `dt link status` to see details.");
+        return;
       }
+    }
+
+    const selectedOrganization = await resolveOrganization(
+      accessToken,
+      args.organization,
+      shouldAttemptAutoDetect
     );
 
-    if (organizationsResponse.organizations.length === 0) {
-      console.error("You are not a member of any organizations.");
-      console.error(
-        "You must be a member of the GitHub organization where Detent is installed."
-      );
+    if (!selectedOrganization) {
       process.exit(1);
     }
 
-    // Select organization
-    let selectedOrganization: Organization;
-
-    if (args.organization) {
-      const found = findOrganizationByIdOrSlug(
-        organizationsResponse.organizations,
-        args.organization
-      );
-      if (!found) {
-        console.error(`Organization not found: ${args.organization}`);
-        console.error("\nAvailable organizations:");
-        for (const organization of organizationsResponse.organizations) {
-          console.error(
-            `  - ${organization.organization_slug} (${organization.organization_name})`
-          );
-        }
-        process.exit(1);
-      }
-      selectedOrganization = found;
-    } else {
-      const selected = await selectOrganization(
-        organizationsResponse.organizations
-      );
-      if (!selected) {
-        process.exit(1);
-      }
-      selectedOrganization = selected;
-    }
-
-    // Save project config
     saveProjectConfig(repoRoot, {
       organizationId: selectedOrganization.organization_id,
       organizationSlug: selectedOrganization.organization_slug,

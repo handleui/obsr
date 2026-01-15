@@ -7,7 +7,7 @@
 
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
-import { createDb } from "../db/client";
+import { createDb, type Database } from "../db/client";
 import { organizationMembers, organizations } from "../db/schema";
 import { verifyGitHubMembership } from "../lib/github-membership";
 import type { Env } from "../types/env";
@@ -113,31 +113,233 @@ const fetchGitHubUsername = async (
   }
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+interface GitHubIdentity {
+  userId: string;
+  username: string | null;
+}
+
+/**
+ * Get GitHub identity from a provided OAuth token
+ */
+const getGitHubIdentityFromToken = async (
+  token: string,
+  context = "github-identity"
+): Promise<GitHubIdentity | null> => {
+  const response = await fetch("https://api.github.com/user", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github.v3+json",
+      "User-Agent": "Detent-API",
+    },
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => "");
+    console.warn(
+      `[${context}] GitHub token provided but API call failed: ${response.status} - ${errorBody}`
+    );
+    return null;
+  }
+
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    console.warn(`[${context}] Failed to parse GitHub user response`);
+    return null;
+  }
+
+  if (!isRecord(data)) {
+    console.warn(`[${context}] Invalid GitHub user response`);
+    return null;
+  }
+
+  const githubUserId = typeof data.id === "number" ? String(data.id) : null;
+  const githubUsername = typeof data.login === "string" ? data.login : null;
+
+  if (!githubUserId) {
+    console.warn(`[${context}] GitHub user response missing id`);
+    return null;
+  }
+
+  return {
+    userId: githubUserId,
+    username: githubUsername,
+  };
+};
+
+/**
+ * Get GitHub identity from WorkOS identities endpoint
+ */
+const getGitHubIdentityFromWorkOS = async (
+  userId: string,
+  workosApiKey: string
+): Promise<GitHubIdentity | null> => {
+  const response = await fetch(
+    `https://api.workos.com/user_management/users/${userId}/identities`,
+    {
+      headers: {
+        Authorization: `Bearer ${workosApiKey}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    console.warn(
+      `[workos-identity] Failed to fetch identities: ${response.status}`
+    );
+    return null;
+  }
+
+  const identities = (await response.json()) as WorkOSIdentitiesResponse;
+  const githubIdentity = identities.data?.find(
+    (identity) => identity.provider === "GitHubOAuth"
+  );
+
+  if (!githubIdentity) {
+    return null;
+  }
+
+  const username = await fetchGitHubUsername(userId, workosApiKey);
+  return {
+    userId: githubIdentity.idp_id,
+    username,
+  };
+};
+
+/**
+ * Resolve GitHub identity using multiple methods in priority order:
+ * 1. Provided GitHub OAuth token (preferred - most reliable)
+ * 2. WorkOS identities endpoint (fallback)
+ */
+const resolveGitHubIdentity = async (
+  userId: string,
+  workosApiKey: string,
+  providedToken: string | undefined
+): Promise<GitHubIdentity | null> => {
+  // Method 1: Use provided GitHub OAuth token (preferred)
+  if (providedToken) {
+    const identity = await getGitHubIdentityFromToken(
+      providedToken,
+      "sync-identity"
+    );
+    if (identity) {
+      return identity;
+    }
+  }
+
+  // Method 2: Fall back to WorkOS identities
+  return getGitHubIdentityFromWorkOS(userId, workosApiKey);
+};
+
+/**
+ * Link user to organizations where they are the installer
+ * Verifies current GitHub org membership before granting owner access
+ */
+const linkInstallerOrganizations = async (
+  db: Database,
+  userId: string,
+  githubUserId: string,
+  githubUsername: string | null,
+  env: Env
+): Promise<number> => {
+  // Cannot verify membership without username
+  if (!githubUsername) {
+    return 0;
+  }
+
+  const installerOrgs = await db.query.organizations.findMany({
+    where: and(
+      eq(organizations.installerGithubId, githubUserId),
+      isNull(organizations.deletedAt)
+    ),
+  });
+
+  if (installerOrgs.length === 0) {
+    return 0;
+  }
+
+  const orgIds = installerOrgs.map((org) => org.id);
+  const existingMemberships = await db.query.organizationMembers.findMany({
+    where: and(
+      eq(organizationMembers.userId, userId),
+      inArray(organizationMembers.organizationId, orgIds)
+    ),
+  });
+
+  const existingOrgIds = new Set(
+    existingMemberships.map((m) => m.organizationId)
+  );
+  const orgsToLink = installerOrgs.filter((org) => !existingOrgIds.has(org.id));
+
+  // Verify current GitHub membership before granting owner access
+  // This prevents users who have left the org from claiming access
+  const verificationPromises = orgsToLink.map(async (org) => {
+    if (!(org.providerInstallationId && org.providerAccountLogin)) {
+      return null;
+    }
+    try {
+      const membership = await verifyGitHubMembership(
+        githubUsername,
+        org.providerAccountLogin,
+        org.providerInstallationId,
+        env
+      );
+      return membership.isMember ? org : null;
+    } catch (error) {
+      // Log but continue - don't fail entire operation if one org check fails
+      console.warn(
+        `[sync-identity] Failed to verify membership for ${githubUsername} in ${org.providerAccountLogin}:`,
+        error instanceof Error ? error.message : error
+      );
+      return null;
+    }
+  });
+
+  const verificationResults = await Promise.all(verificationPromises);
+  const isVerifiedOrg = (
+    org: (typeof orgsToLink)[number] | null
+  ): org is (typeof orgsToLink)[number] => org !== null;
+  const verifiedOrgs = verificationResults.filter(isVerifiedOrg);
+
+  if (verifiedOrgs.length > 0) {
+    await db.insert(organizationMembers).values(
+      verifiedOrgs.map((org) => ({
+        id: crypto.randomUUID(),
+        organizationId: org.id,
+        userId,
+        role: "owner" as const,
+        providerUserId: githubUserId,
+        providerUsername: githubUsername,
+        providerLinkedAt: new Date(),
+      }))
+    );
+  }
+
+  return verifiedOrgs.length;
+};
+
 /**
  * POST /sync-identity
- * Sync GitHub identity from WorkOS to all organization memberships for the authenticated user.
- * This is called after successful device code authentication to capture GitHub identity
- * if the user authenticated via GitHub OAuth through WorkOS.
+ * Sync GitHub identity and link user to organizations where they are the installer.
+ *
+ * Accepts optional X-GitHub-Token header with the user's GitHub OAuth token.
+ * If provided, uses the token directly to get the user's GitHub ID (preferred).
+ * Falls back to WorkOS identities if no token provided.
  */
 app.post("/sync-identity", async (c) => {
   const auth = c.get("auth");
+  const providedGitHubToken = c.req.header("X-GitHub-Token");
 
-  // Fetch user details and identities from WorkOS in parallel
-  const [userResponse, identitiesResponse] = await Promise.all([
-    fetch(`https://api.workos.com/user_management/users/${auth.userId}`, {
-      headers: {
-        Authorization: `Bearer ${c.env.WORKOS_API_KEY}`,
-      },
-    }),
-    fetch(
-      `https://api.workos.com/user_management/users/${auth.userId}/identities`,
-      {
-        headers: {
-          Authorization: `Bearer ${c.env.WORKOS_API_KEY}`,
-        },
-      }
-    ),
-  ]);
+  const userResponse = await fetch(
+    `https://api.workos.com/user_management/users/${auth.userId}`,
+    {
+      headers: { Authorization: `Bearer ${c.env.WORKOS_API_KEY}` },
+    }
+  );
 
   if (!userResponse.ok) {
     console.error(
@@ -148,129 +350,47 @@ app.post("/sync-identity", async (c) => {
 
   const user = (await userResponse.json()) as WorkOSUser;
 
-  if (!identitiesResponse.ok) {
-    console.error(
-      `Failed to fetch identities from WorkOS: ${identitiesResponse.status} ${identitiesResponse.statusText}`
-    );
-    // Return user info without GitHub identity - this is not a fatal error
-    return c.json({
-      user_id: auth.userId,
-      email: user.email,
-      first_name: user.first_name,
-      last_name: user.last_name,
-      github_synced: false,
-      github_username: null,
-    });
-  }
-
-  const identities =
-    (await identitiesResponse.json()) as WorkOSIdentitiesResponse;
-
-  // Find GitHub OAuth identity (with null check for malformed responses)
-  const githubIdentity = identities.data?.find(
-    (identity) => identity.provider === "GitHubOAuth"
-  );
-
-  if (!githubIdentity) {
-    // No GitHub identity linked - return user info without GitHub
-    return c.json({
-      user_id: auth.userId,
-      email: user.email,
-      first_name: user.first_name,
-      last_name: user.last_name,
-      github_synced: false,
-      github_username: null,
-    });
-  }
-
-  // We have the GitHub idp_id (numeric GitHub user ID)
-  const githubUserId = githubIdentity.idp_id;
-  const githubUsername = await fetchGitHubUsername(
+  // Resolve GitHub identity from token or WorkOS (no DB cache)
+  const identity = await resolveGitHubIdentity(
     auth.userId,
-    c.env.WORKOS_API_KEY
+    c.env.WORKOS_API_KEY,
+    providedGitHubToken
   );
 
-  // Update all organization memberships for this user with GitHub identity
+  if (!identity) {
+    return c.json({
+      user_id: auth.userId,
+      email: user.email,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      github_synced: false,
+      github_username: null,
+    });
+  }
+
   const { db, client } = await createDb(c.env);
+
   try {
+    // Update all organization memberships with GitHub identity
     const updatedMembers = await db
       .update(organizationMembers)
       .set({
-        providerUserId: githubUserId,
-        providerUsername: githubUsername,
+        providerUserId: identity.userId,
+        providerUsername: identity.username,
         providerLinkedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(eq(organizationMembers.userId, auth.userId))
-      .returning({
-        organizationId: organizationMembers.organizationId,
-        providerUsername: organizationMembers.providerUsername,
-      });
+      .returning({ organizationId: organizationMembers.organizationId });
 
-    // Auto-link organizations where this user is the installer but has no membership
-    const installerOrgs = await db.query.organizations.findMany({
-      where: and(
-        eq(organizations.installerGithubId, githubUserId),
-        isNull(organizations.deletedAt)
-      ),
-    });
-
-    // Batch fetch existing memberships for all installer orgs
-    const orgIds = installerOrgs.map((org) => org.id);
-    const existingMemberships =
-      orgIds.length > 0
-        ? await db.query.organizationMembers.findMany({
-            where: and(
-              eq(organizationMembers.userId, auth.userId),
-              inArray(organizationMembers.organizationId, orgIds)
-            ),
-          })
-        : [];
-
-    const existingOrgIds = new Set(
-      existingMemberships.map((m) => m.organizationId)
+    // Auto-link installer organizations (with membership verification)
+    const autoLinkedCount = await linkInstallerOrganizations(
+      db,
+      auth.userId,
+      identity.userId,
+      identity.username,
+      c.env
     );
-
-    // Filter to orgs that need new memberships
-    const orgsToLink = installerOrgs.filter(
-      (org) => !existingOrgIds.has(org.id)
-    );
-
-    // Verify current GitHub membership before granting owner access
-    const verifiedOrgs: typeof orgsToLink = [];
-    if (githubUsername) {
-      for (const org of orgsToLink) {
-        if (!(org.providerInstallationId && org.providerAccountLogin)) {
-          continue;
-        }
-        const membership = await verifyGitHubMembership(
-          githubUsername,
-          org.providerAccountLogin,
-          org.providerInstallationId,
-          c.env
-        );
-        if (membership.isMember) {
-          verifiedOrgs.push(org);
-        }
-      }
-    }
-
-    // Batch insert (if any)
-    if (verifiedOrgs.length > 0) {
-      await db.insert(organizationMembers).values(
-        verifiedOrgs.map((org) => ({
-          id: crypto.randomUUID(),
-          organizationId: org.id,
-          userId: auth.userId,
-          role: "owner" as const,
-          providerUserId: githubUserId,
-          providerUsername: githubUsername,
-          providerLinkedAt: new Date(),
-        }))
-      );
-    }
-
-    const autoLinkedCount = verifiedOrgs.length;
 
     return c.json({
       user_id: auth.userId,
@@ -278,8 +398,8 @@ app.post("/sync-identity", async (c) => {
       first_name: user.first_name,
       last_name: user.last_name,
       github_synced: true,
-      github_user_id: githubUserId,
-      github_username: githubUsername,
+      github_user_id: identity.userId,
+      github_username: identity.username,
       organizations_updated: updatedMembers.length,
       installer_orgs_linked: autoLinkedCount,
     });

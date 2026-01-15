@@ -18,20 +18,9 @@ interface CallbackServer {
 }
 
 /**
- * Escape HTML special characters to prevent XSS
- */
-const escapeHtml = (text: string): string =>
-  text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-
-/**
  * Generate HTML success page shown in browser after CLI authorization
  */
-const generateSuccessPage = (email: string) => `<!DOCTYPE html>
+const generateSuccessPage = () => `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -64,14 +53,9 @@ const generateSuccessPage = (email: string) => `<!DOCTYPE html>
       color: #171717;
       margin-bottom: 0.5rem;
     }
-    .email {
-      color: #171717;
-      font-weight: 500;
-    }
     p {
       font-size: 0.875rem;
       color: #737373;
-      margin: 0.5rem 0;
     }
   </style>
 </head>
@@ -81,7 +65,6 @@ const generateSuccessPage = (email: string) => `<!DOCTYPE html>
       <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
     </svg>
     <h1>Authorized Successfully</h1>
-    <p>Signed in as <span class="email">${escapeHtml(email)}</span></p>
     <p>You can close this tab and return to the terminal.</p>
   </div>
 </body>
@@ -112,11 +95,10 @@ export const startCallbackServer = (
       if (url.pathname === "/callback") {
         const code = url.searchParams.get("code");
         const state = url.searchParams.get("state");
-        const email = url.searchParams.get("email") ?? "your account";
 
-        // Show success page with user email and close instructions
+        // Show success page with close instructions
         res.writeHead(200, { "Content-Type": "text/html" });
-        res.end(generateSuccessPage(email));
+        res.end(generateSuccessPage());
 
         // Verify state
         if (state !== expectedState) {

@@ -11,7 +11,7 @@ import {
   sanitizeReturnUrl,
   verifyAndClearOAuthState,
 } from "@/lib/auth";
-import { API_BASE_URL, AUTH_DURATIONS, COOKIE_NAMES } from "@/lib/constants";
+import { AUTH_DURATIONS, COOKIE_NAMES } from "@/lib/constants";
 import { type BetterStackRequest, withLogging } from "@/lib/logger";
 import { workos } from "@/lib/workos";
 
@@ -72,29 +72,22 @@ const isEmailVerificationError = (
  * Type guard for GitHub OAuth tokens from WorkOS
  * Validates that the object has the expected shape before casting
  */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
 const isValidGitHubOAuthTokens = (data: unknown): data is GitHubOAuthTokens => {
-  if (typeof data !== "object" || data === null) {
+  if (!isRecord(data)) {
     return false;
   }
-  const obj = data as Record<string, unknown>;
-  return (
-    typeof obj.accessToken === "string" &&
-    typeof obj.refreshToken === "string" &&
-    typeof obj.expiresAt === "number" &&
-    Array.isArray(obj.scopes) &&
-    obj.scopes.every((scope) => typeof scope === "string")
-  );
-};
+  // Only accessToken is required - refreshToken/expiresAt are optional
+  // (GitHub classic OAuth tokens don't expire and don't have refresh tokens)
+  const hasValidAccessToken =
+    typeof data.accessToken === "string" && data.accessToken.length > 0;
+  const hasValidScopes =
+    Array.isArray(data.scopes) &&
+    data.scopes.every((scope) => typeof scope === "string");
 
-/**
- * Sync identity with API to auto-claim organizations (mirrors CLI flow)
- * Non-blocking - errors are logged but don't fail the auth flow
- */
-const syncIdentity = async (accessToken: string): Promise<void> => {
-  await fetch(`${API_BASE_URL}/v1/auth/sync-identity`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  return hasValidAccessToken && hasValidScopes;
 };
 
 /**
@@ -117,6 +110,89 @@ const setPendingVerificationCookie = async (
       maxAge: AUTH_DURATIONS.pendingVerificationMaxAgeSec,
     })
   );
+};
+
+/**
+ * Build auth options based on whether sealed sessions are enabled
+ */
+const buildAuthOptions = (code: string, shouldSealSession: boolean) => {
+  if (shouldSealSession) {
+    return {
+      clientId: getWorkOSClientId(),
+      code,
+      session: {
+        sealSession: true,
+        cookiePassword: getWorkOSCookiePassword(),
+      },
+    };
+  }
+  return {
+    clientId: getWorkOSClientId(),
+    code,
+  };
+};
+
+/**
+ * Set session cookies on the response
+ */
+const setSessionCookies = async (
+  response: NextResponse,
+  authResponse: {
+    user: {
+      id: string;
+      email: string;
+      firstName: string | null;
+      lastName: string | null;
+      profilePictureUrl: string | null;
+    };
+    sealedSession?: string;
+  },
+  shouldSealSession: boolean
+) => {
+  const token = await createSession(authResponse.user);
+  response.cookies.set(
+    createSecureCookieOptions({
+      name: COOKIE_NAMES.session,
+      value: token,
+      maxAge: AUTH_DURATIONS.sessionMaxAgeSec,
+    })
+  );
+
+  if (shouldSealSession && "sealedSession" in authResponse) {
+    response.cookies.set(
+      createSecureCookieOptions({
+        name: COOKIE_NAMES.workosSession,
+        value: authResponse.sealedSession as string,
+        maxAge: AUTH_DURATIONS.sessionMaxAgeSec,
+      })
+    );
+  }
+};
+
+/**
+ * Process and store GitHub OAuth tokens if available
+ */
+const processGitHubTokens = async (
+  response: NextResponse,
+  rawOauthTokens: unknown
+) => {
+  const githubTokens = isValidGitHubOAuthTokens(rawOauthTokens)
+    ? rawOauthTokens
+    : null;
+
+  if (githubTokens) {
+    const oauthTokensJwt = await createGitHubOAuthTokensToken(githubTokens);
+    response.cookies.set(
+      createSecureCookieOptions({
+        name: COOKIE_NAMES.githubOAuthTokens,
+        value: oauthTokensJwt,
+        maxAge: AUTH_DURATIONS.githubOAuthTokensMaxAgeSec,
+      })
+    );
+    return true;
+  }
+
+  return false;
 };
 
 const handler = async (request: BetterStackRequest) => {
@@ -155,19 +231,7 @@ const handler = async (request: BetterStackRequest) => {
 
   try {
     const shouldSealSession = isSealedSessionsEnabled();
-    const authOptions = shouldSealSession
-      ? {
-          clientId: getWorkOSClientId(),
-          code,
-          session: {
-            sealSession: true,
-            cookiePassword: getWorkOSCookiePassword(),
-          },
-        }
-      : {
-          clientId: getWorkOSClientId(),
-          code,
-        };
+    const authOptions = buildAuthOptions(code, shouldSealSession);
 
     const authResponse = await workos.userManagement.authenticateWithCode(
       authOptions as Parameters<
@@ -182,58 +246,17 @@ const handler = async (request: BetterStackRequest) => {
 
     const response = NextResponse.redirect(new URL(redirectUrl, request.url));
 
-    // Store the custom session token for user data access
-    const token = await createSession(user);
-    response.cookies.set(
-      createSecureCookieOptions({
-        name: COOKIE_NAMES.session,
-        value: token,
-        maxAge: AUTH_DURATIONS.sessionMaxAgeSec,
-      })
-    );
-
-    // If using sealed sessions, also store the WorkOS sealed session
-    // This contains the encrypted refresh token for token refresh capability
-    if (shouldSealSession && "sealedSession" in authResponse) {
-      response.cookies.set(
-        createSecureCookieOptions({
-          name: COOKIE_NAMES.workosSession,
-          value: authResponse.sealedSession as string,
-          maxAge: AUTH_DURATIONS.sessionMaxAgeSec,
-        })
-      );
-    }
+    // Set session cookies
+    await setSessionCookies(response, authResponse, shouldSealSession);
 
     // Store GitHub OAuth tokens separately if available
     // Note: oauthTokens are only returned during initial authentication and are NOT
     // stored in the WorkOS sealed session. We must persist them in a separate cookie
     // for later use (e.g., CLI auth flow that needs the GitHub token).
-    const hasGitHubTokens =
-      "oauthTokens" in authResponse &&
-      isValidGitHubOAuthTokens(authResponse.oauthTokens);
+    const rawOauthTokens =
+      "oauthTokens" in authResponse ? authResponse.oauthTokens : null;
 
-    if (hasGitHubTokens) {
-      const oauthTokensJwt = await createGitHubOAuthTokensToken(
-        authResponse.oauthTokens as GitHubOAuthTokens
-      );
-      response.cookies.set(
-        createSecureCookieOptions({
-          name: COOKIE_NAMES.githubOAuthTokens,
-          value: oauthTokensJwt,
-          maxAge: AUTH_DURATIONS.githubOAuthTokensMaxAgeSec,
-        })
-      );
-    }
-
-    // Sync identity to auto-claim organizations (mirrors CLI flow)
-    if ("accessToken" in authResponse) {
-      syncIdentity(authResponse.accessToken as string).catch((syncError) => {
-        log.warn("Failed to sync identity", {
-          error:
-            syncError instanceof Error ? syncError.message : String(syncError),
-        });
-      });
-    }
+    const hasGitHubTokens = await processGitHubTokens(response, rawOauthTokens);
 
     log.info("User authenticated successfully", {
       userId: user.id,

@@ -18,7 +18,7 @@ This separation ensures local development doesn't interfere with production inst
 Set `DETENT_HOME` to use a custom directory:
 
 ```bash
-DETENT_HOME=/path/to/custom/dir detent mock
+DETENT_HOME=/path/to/custom/dir detent <command>
 ```
 
 ## Development

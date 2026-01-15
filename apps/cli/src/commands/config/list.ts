@@ -29,7 +29,7 @@ export const configListCommand = defineCommand({
     const configPath = getRepoConfigPath(repoRoot);
     const hasEnvApiKey = Boolean(process.env.ANTHROPIC_API_KEY);
 
-    printHeader("config list");
+    printHeader();
 
     // Per-repo config
     console.log(`Config file: ${configPath}`);

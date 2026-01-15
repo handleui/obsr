@@ -5,6 +5,10 @@
  * Used across multiple routes to ensure consistent access control.
  */
 
+import { and, eq } from "drizzle-orm";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import type * as schema from "../db/schema";
+import { organizationMembers } from "../db/schema";
 import type { Env } from "../types/env";
 import { getVerifiedGitHubIdentity } from "./github-identity";
 import { verifyGitHubMembership } from "./github-membership";
@@ -29,11 +33,18 @@ export interface OrgAccessResult {
   error?: string;
 }
 
+interface GitHubIdentity {
+  userId: string;
+  username: string;
+}
+
 /**
  * Verify user has access to an organization via on-demand GitHub membership check.
- * This replaces stale database lookups with real-time verification.
+ * Uses stored GitHub identity from membership records as fallback when WorkOS
+ * doesn't have GitHub linked (e.g., user logged in via email/password).
  */
 export const verifyOrgAccess = async (
+  db: NodePgDatabase<typeof schema>,
   userId: string,
   org: OrgForVerification,
   env: Env
@@ -43,11 +54,28 @@ export const verifyOrgAccess = async (
     return { allowed: false, error: "GitHub App not installed" };
   }
 
-  // Get verified GitHub identity
-  const githubIdentity = await getVerifiedGitHubIdentity(
+  // Check for existing membership with stored GitHub identity
+  const existingMember = await db.query.organizationMembers.findFirst({
+    where: and(
+      eq(organizationMembers.userId, userId),
+      eq(organizationMembers.organizationId, org.id)
+    ),
+  });
+
+  // Try WorkOS for GitHub identity first
+  let githubIdentity: GitHubIdentity | null = await getVerifiedGitHubIdentity(
     userId,
     env.WORKOS_API_KEY
   );
+
+  // Fall back to stored identity from membership record
+  if (!githubIdentity && existingMember?.providerUserId) {
+    githubIdentity = {
+      userId: existingMember.providerUserId,
+      username: existingMember.providerUsername ?? "",
+    };
+  }
+
   if (!githubIdentity) {
     return { allowed: false, error: "GitHub account not linked" };
   }
@@ -60,7 +88,13 @@ export const verifyOrgAccess = async (
     return { allowed: false, error: "Not the owner of this account" };
   }
 
-  // Verify GitHub org membership
+  // For organizations: if existing member with stored identity, trust the role
+  // (GitHub membership was verified when they were added)
+  if (existingMember?.providerUserId) {
+    return { allowed: true, role: existingMember.role };
+  }
+
+  // New access: verify GitHub org membership
   const membership = await verifyGitHubMembership(
     githubIdentity.username,
     org.providerAccountLogin,
@@ -75,7 +109,7 @@ export const verifyOrgAccess = async (
     };
   }
 
-  // Determine role
+  // Determine role for new member
   let role: "owner" | "admin" | "member" = "member";
   if (org.installerGithubId === githubIdentity.userId) {
     role = "owner";

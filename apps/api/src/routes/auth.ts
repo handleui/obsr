@@ -281,6 +281,13 @@ const linkInstallerOrganizations = async (
     if (!(org.providerInstallationId && org.providerAccountLogin)) {
       return null;
     }
+
+    // Personal accounts: verify by matching GitHub user ID (no membership API)
+    if (org.providerAccountType === "user") {
+      return githubUserId === org.providerAccountId ? org : null;
+    }
+
+    // Organizations: verify via GitHub membership API
     try {
       const membership = await verifyGitHubMembership(
         githubUsername,

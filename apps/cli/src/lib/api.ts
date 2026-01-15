@@ -139,29 +139,6 @@ export const syncIdentity = (
 export const getMe = (accessToken: string): Promise<MeResponse> =>
   apiRequest<MeResponse>("/v1/auth/me", { accessToken });
 
-// Organization status types
-export interface OrgStatusResponse {
-  organization_id: string;
-  organization_name: string;
-  organization_slug: string;
-  provider: "github" | "gitlab";
-  provider_account_login: string;
-  provider_account_type: "organization" | "user";
-  app_installed: boolean;
-  suspended_at: string | null;
-  project_count: number;
-  created_at: string;
-}
-
-export const getOrgStatus = (
-  accessToken: string,
-  organizationId: string
-): Promise<OrgStatusResponse> =>
-  apiRequest<OrgStatusResponse>(
-    `/v1/organizations/${encodeURIComponent(organizationId)}/status`,
-    { accessToken }
-  );
-
 // ============================================================================
 // Project Types
 // ============================================================================
@@ -229,8 +206,18 @@ export interface OrganizationMember {
   joined_at: string;
 }
 
+export interface CurrentUserAccess {
+  user_id: string;
+  github_user_id: string;
+  github_username: string;
+  role: "owner" | "admin" | "member";
+  is_installer: boolean;
+}
+
 export interface OrganizationMembersResponse {
-  members: OrganizationMember[];
+  current_user: CurrentUserAccess;
+  detent_members: OrganizationMember[];
+  note: string;
 }
 
 export interface LeaveOrganizationResponse {
@@ -243,7 +230,7 @@ export const listOrganizationMembers = (
   organizationId: string
 ): Promise<OrganizationMembersResponse> =>
   apiRequest<OrganizationMembersResponse>(
-    `/v1/organization-members?organization_id=${encodeURIComponent(organizationId)}`,
+    `/v1/organization-members/${encodeURIComponent(organizationId)}/members`,
     { accessToken }
   );
 

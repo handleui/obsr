@@ -14,7 +14,7 @@ export const updateCommand = defineCommand({
     description: "Update dt to the latest version",
   },
   run: async () => {
-    printHeader("update");
+    printHeader();
 
     const currentVersion = getVersion();
 

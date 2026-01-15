@@ -74,6 +74,7 @@ app.get("/", async (c) => {
 
     // Verify user has access to the organization
     const access = await verifyOrgAccess(
+      db,
       auth.userId,
       project.organization,
       c.env

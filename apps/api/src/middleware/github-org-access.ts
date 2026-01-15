@@ -266,11 +266,27 @@ export const githubOrgAccessMiddleware = async (
       );
     }
 
-    // Get user's verified GitHub identity from WorkOS
-    const githubIdentity = await getVerifiedGitHubIdentity(
+    // Check for existing membership with stored GitHub identity
+    const existingMember = await db.query.organizationMembers.findFirst({
+      where: and(
+        eq(organizationMembers.userId, auth.userId),
+        eq(organizationMembers.organizationId, org.id)
+      ),
+    });
+
+    // Try WorkOS for GitHub identity first
+    let githubIdentity = await getVerifiedGitHubIdentity(
       auth.userId,
       c.env.WORKOS_API_KEY
     );
+
+    // Fall back to stored identity from membership record
+    if (!githubIdentity && existingMember?.providerUserId) {
+      githubIdentity = {
+        userId: existingMember.providerUserId,
+        username: existingMember.providerUsername ?? "",
+      };
+    }
 
     if (!githubIdentity) {
       return c.json(

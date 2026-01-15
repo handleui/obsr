@@ -1,5 +1,12 @@
 # @detent/cli
 
+## 0.8.1
+
+### Patch Changes
+
+- d226844: Rename `org link` command to `org add` and remove `org members` command.
+  Simplify `org list` output to show only organization slugs.
+
 ## 0.8.0
 
 ### Minor Changes

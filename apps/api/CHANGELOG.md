@@ -1,5 +1,12 @@
 # @detent/api
 
+## 0.12.1
+
+### Patch Changes
+
+- d226844: Use stored GitHub identity from membership records as fallback when WorkOS doesn't have GitHub linked.
+  Require both providerUserId and providerUsername to avoid empty username in API calls.
+
 ## 0.12.0
 
 ### Minor Changes

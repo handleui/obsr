@@ -1,5 +1,18 @@
 # @detent/api
 
+## 0.12.0
+
+### Minor Changes
+
+- d91ffbd: Improve check suite comments with fork PR support and race protection.
+  Add workflow blacklist to exclude third-party CI tools from completion checks.
+  Installer auto-link now requires GitHub admin role for organization accounts.
+
+### Patch Changes
+
+- Updated dependencies [d91ffbd]
+  - @detent/parser@0.5.2
+
 ## 0.11.0
 
 ### Minor Changes

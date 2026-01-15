@@ -116,7 +116,7 @@ const formatTimestamp = (date: Date): string => {
 };
 
 // Detent documentation URL for comment headers
-const DOCS_URL = "https://detent.dev/docs";
+const DOCS_URL = "https://detent.sh/docs";
 
 // Format friendly header with context-specific message
 // Each comment type gets a different first line, but all share the docs link

@@ -56,16 +56,11 @@ declare module "hono" {
 const seedRoleFromGitHub = async (
   db: NodePgDatabase<typeof schema>,
   org: Organization,
-  githubIdentity: GitHubIdentity,
   githubRole: "admin" | "member"
 ): Promise<OrgAccessRole> => {
-  // If user is the installer, they get "owner" regardless of GitHub role
-  if (org.installerGithubId === githubIdentity.userId) {
-    return "owner";
-  }
-
   // For GitHub admins: check if org has any existing owners
   // First admin on an ownerless org becomes owner (first come, first serve)
+  // Installer who is also a GitHub admin gets priority as owner
   // NOTE: Race condition between check and insert is mitigated by:
   // 1. The unique constraint on (organizationId, userId) prevents duplicates
   // 2. If multiple admins race, only one can win the owner slot due to
@@ -81,12 +76,15 @@ const seedRoleFromGitHub = async (
         )
       );
 
+    // If no owner exists, this admin becomes owner
+    // Security: Only GitHub admins can become owners (not regular members who installed)
     if (ownerCountResult[0]?.count === 0) {
       return "owner";
     }
     return "admin";
   }
 
+  // Regular GitHub members get member role (even if they installed the app)
   return "member";
 };
 
@@ -159,7 +157,6 @@ const resolveGitHubOrgRole = async (
   const intendedRole = await seedRoleFromGitHub(
     db,
     org,
-    githubIdentity,
     membership.role ?? "member"
   );
 

@@ -118,7 +118,9 @@ describe("github-org-access middleware", () => {
     // We test the role seeding logic by verifying what role gets inserted
     // when a new member is created
 
-    it("installer gets owner role even if GitHub says member", async () => {
+    it("installer with GitHub member role gets member role (no special privileges)", async () => {
+      // Security: installer is tracked but does NOT get automatic owner privileges
+      // Only GitHub admins can become owners/admins
       const org = createOrg({ installerGithubId: "installer-999" });
 
       mockOrgFindFirst.mockResolvedValue(org);
@@ -152,12 +154,12 @@ describe("github-org-access middleware", () => {
       const json = (await res.json()) as { role: string };
 
       expect(res.status).toBe(200);
-      expect(json.role).toBe("owner");
+      expect(json.role).toBe("member"); // No installer privilege bypass
 
-      // Verify role was seeded as "owner" in the insert
+      // Verify role was seeded as "member" in the insert
       expect(mockInsert).toHaveBeenCalled();
       const insertCall = mockValues.mock.calls[0]?.[0] as { role: string };
-      expect(insertCall.role).toBe("owner");
+      expect(insertCall.role).toBe("member");
     });
 
     it("GitHub admin gets admin role when not installer", async () => {

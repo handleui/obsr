@@ -277,10 +277,9 @@ const linkInstallerOrganizations = async (
 
   // Verify current GitHub membership before granting owner access
   // This prevents users who have left the org from claiming access
-  const verifiedOrgs: typeof orgsToLink = [];
-  for (const org of orgsToLink) {
+  const verificationPromises = orgsToLink.map(async (org) => {
     if (!(org.providerInstallationId && org.providerAccountLogin)) {
-      continue;
+      return null;
     }
     try {
       const membership = await verifyGitHubMembership(
@@ -289,17 +288,22 @@ const linkInstallerOrganizations = async (
         org.providerInstallationId,
         env
       );
-      if (membership.isMember) {
-        verifiedOrgs.push(org);
-      }
+      return membership.isMember ? org : null;
     } catch (error) {
       // Log but continue - don't fail entire operation if one org check fails
       console.warn(
         `[sync-identity] Failed to verify membership for ${githubUsername} in ${org.providerAccountLogin}:`,
         error instanceof Error ? error.message : error
       );
+      return null;
     }
-  }
+  });
+
+  const verificationResults = await Promise.all(verificationPromises);
+  const isVerifiedOrg = (
+    org: (typeof orgsToLink)[number] | null
+  ): org is (typeof orgsToLink)[number] => org !== null;
+  const verifiedOrgs = verificationResults.filter(isVerifiedOrg);
 
   if (verifiedOrgs.length > 0) {
     await db.insert(organizationMembers).values(

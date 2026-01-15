@@ -1787,9 +1787,12 @@ const handleWorkflowRunInProgress = async (
     let prNumber = workflow_run.pull_requests[0]?.number;
     if (!prNumber) {
       // For fork PRs, workflow_run.pull_requests is empty but commits API works
-      prNumber =
-        (await github.getPullRequestForCommit(token, owner, repo, headSha)) ??
-        undefined;
+      prNumber = await github.getPullRequestForCommit(
+        token,
+        owner,
+        repo,
+        headSha
+      );
     }
 
     // Skip if no PR associated (e.g., push to main branch)

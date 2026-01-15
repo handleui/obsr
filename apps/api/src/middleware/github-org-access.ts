@@ -281,10 +281,15 @@ export const githubOrgAccessMiddleware = async (
     );
 
     // Fall back to stored identity from membership record
-    if (!githubIdentity && existingMember?.providerUserId) {
+    // Require both providerUserId and providerUsername to avoid empty username in API calls
+    if (
+      !githubIdentity &&
+      existingMember?.providerUserId &&
+      existingMember.providerUsername
+    ) {
       githubIdentity = {
         userId: existingMember.providerUserId,
-        username: existingMember.providerUsername ?? "",
+        username: existingMember.providerUsername,
       };
     }
 

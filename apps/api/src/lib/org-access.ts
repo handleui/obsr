@@ -69,10 +69,15 @@ export const verifyOrgAccess = async (
   );
 
   // Fall back to stored identity from membership record
-  if (!githubIdentity && existingMember?.providerUserId) {
+  // Require both providerUserId and providerUsername to avoid empty username in API calls
+  if (
+    !githubIdentity &&
+    existingMember?.providerUserId &&
+    existingMember.providerUsername
+  ) {
     githubIdentity = {
       userId: existingMember.providerUserId,
-      username: existingMember.providerUsername ?? "",
+      username: existingMember.providerUsername,
     };
   }
 
@@ -90,6 +95,10 @@ export const verifyOrgAccess = async (
 
   // For organizations: if existing member with stored identity, trust the role
   // (GitHub membership was verified when they were added)
+  // NOTE: This skips re-verification for performance. Users removed from GitHub
+  // org retain Detent access until their membership record is removed (via org
+  // admin or periodic cleanup). The middleware version (github-org-access.ts)
+  // does re-verify on every request for stricter security.
   if (existingMember?.providerUserId) {
     return { allowed: true, role: existingMember.role };
   }

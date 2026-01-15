@@ -6,9 +6,8 @@ export const orgCommand = defineCommand({
     description: "Manage organizations",
   },
   subCommands: {
-    link: () => import("./link.js").then((m) => m.linkCommand),
+    add: () => import("./add.js").then((m) => m.addCommand),
     list: () => import("./list.js").then((m) => m.listCommand),
-    members: () => import("./members.js").then((m) => m.membersCommand),
     leave: () => import("./leave.js").then((m) => m.leaveCommand),
   },
 });

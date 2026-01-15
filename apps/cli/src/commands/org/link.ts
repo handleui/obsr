@@ -14,6 +14,7 @@ const GITHUB_APP_INSTALL_URL =
   "https://github.com/apps/detentsh/installations/select_target";
 
 const POLL_INTERVAL_MS = 2000;
+const SYNC_INTERVAL_MS = 10_000;
 const POLL_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
 const sleep = (ms: number): Promise<void> =>
@@ -41,10 +42,20 @@ export const linkCommand = defineCommand({
     await syncIdentity(accessToken, githubToken).catch(() => {
       // Ignore sync errors
     });
-    const before = await getOrganizations(accessToken);
-    const existingOrgIds = new Set(
-      before.organizations.map((o) => o.organization_id)
-    );
+    let existingOrgIds = new Set<string>();
+    try {
+      const before = await getOrganizations(accessToken);
+      existingOrgIds = new Set(
+        before.organizations.map((o) => o.organization_id)
+      );
+    } catch (error) {
+      console.error(
+        "Failed to fetch organizations:",
+        error instanceof Error ? error.message : String(error)
+      );
+      console.error("Please try again or run `dt auth login --force`.");
+      process.exit(1);
+    }
 
     // Open browser to GitHub App install page
     console.log("Opening GitHub to link an organization to Detent...\n");
@@ -65,13 +76,18 @@ export const linkCommand = defineCommand({
 
     const startTime = Date.now();
 
+    let lastSyncAt = Date.now();
+
     while (Date.now() - startTime < POLL_TIMEOUT_MS) {
       await sleep(POLL_INTERVAL_MS);
 
       // Sync identity to link installer to new orgs (passes GitHub token for ID lookup)
-      await syncIdentity(accessToken, githubToken).catch(() => {
-        // Ignore sync errors
-      });
+      if (Date.now() - lastSyncAt >= SYNC_INTERVAL_MS) {
+        await syncIdentity(accessToken, githubToken).catch(() => {
+          // Ignore sync errors
+        });
+        lastSyncAt = Date.now();
+      }
 
       // Check for new organizations
       const after = await getOrganizations(accessToken).catch(() => ({

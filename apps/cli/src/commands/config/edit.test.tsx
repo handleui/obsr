@@ -99,14 +99,13 @@ describe("ConfigEditor", () => {
   });
 
   describe("UI rendering", () => {
-    it("should render header with version and command name", () => {
+    it("should render header with version", () => {
       setupMockFS({});
 
       const { lastFrame } = render(<ConfigEditor repoRoot={MOCK_REPO_ROOT} />);
       const output = lastFrame() ?? "";
 
-      expect(output).toContain("Detent v0.0.1");
-      expect(output).toContain("config");
+      expect(output).toContain("Detent CLI 0.0.1");
     });
 
     it("should render all config field labels", () => {

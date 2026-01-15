@@ -1,5 +1,13 @@
 # @detent/cli
 
+## 0.8.0
+
+### Minor Changes
+
+- 4a35490: Refactor auth flow to use Navigator browser flow and replace install command with link.
+  Add new `org link` command to link GitHub App installations to the current repository.
+  Support GitHub classic OAuth tokens that don't expire or require refresh tokens.
+
 ## 0.7.1
 
 ### Patch Changes

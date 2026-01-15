@@ -1,5 +1,13 @@
 # @detent/api
 
+## 0.11.0
+
+### Minor Changes
+
+- 4a35490: Add GitHub membership verification before granting organization access.
+  Users must still be members of a GitHub organization to auto-link as owners.
+  Refactor identity resolution to prefer direct GitHub token over WorkOS identities.
+
 ## 0.10.0
 
 ### Minor Changes

@@ -1,5 +1,15 @@
 # @detent/api
 
+## 0.12.2
+
+### Patch Changes
+
+- 7c5c1d3: Reorganize webhooks and GitHub services into modular directory structures.
+  Extracts webhook handlers into individual files under `routes/webhooks/handlers/` and splits GitHub API utilities into focused modules under `services/github/`.
+- Updated dependencies [18b9db1]
+- Updated dependencies [2c9889d]
+  - @detent/healing@0.4.0
+
 ## 0.12.1
 
 ### Patch Changes

@@ -1,5 +1,19 @@
 # @detent/healing
 
+## 0.4.0
+
+### Minor Changes
+
+- 2c9889d: Integrate error hints from @detent/lore into healing prompts.
+  Adds `formatErrorsWithHints` function that enriches error output with contextual guidance for the AI.
+
+### Patch Changes
+
+- 18b9db1: Add cache control to prompts for improved token efficiency and increase max retries.
+  Expand eval dataset with 10 negative test cases for unfixable errors (missing files, network issues, env vars, memory limits, flaky tests, etc).
+- Updated dependencies [2c9889d]
+  - @detent/lore@0.1.0
+
 ## 0.3.0
 
 ### Minor Changes

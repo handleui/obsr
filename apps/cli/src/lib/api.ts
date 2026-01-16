@@ -148,6 +148,7 @@ export interface Project {
   organization_id: string;
   organization_name?: string;
   organization_slug?: string;
+  handle: string;
   provider_repo_id: string;
   provider_repo_name: string;
   provider_repo_full_name: string;

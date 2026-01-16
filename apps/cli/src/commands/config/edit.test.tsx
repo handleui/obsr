@@ -11,6 +11,12 @@ vi.mock("../../utils/version.js", () => ({
   getVersion: () => "0.0.1",
 }));
 
+// Mock env.js to simulate production mode (uses .detent instead of .detent-dev)
+vi.mock("../../lib/env.js", () => ({
+  isProduction: () => true,
+  getDetentHome: () => "/home/user/.detent",
+}));
+
 const MOCK_REPO_ROOT = "/mock-repo";
 const MOCK_DETENT_DIR = join(MOCK_REPO_ROOT, ".detent");
 const MOCK_CONFIG_PATH = join(MOCK_DETENT_DIR, "config.json");

@@ -5,6 +5,8 @@
 import { findGitRoot } from "@detent/git";
 import { defineCommand } from "citty";
 import { getProjectConfig, removeProjectConfig } from "../../lib/config.js";
+import { printHeader } from "../../tui/components/index.js";
+import { printOrgProjectTable } from "../../tui/styles.js";
 
 const confirm = async (message: string): Promise<boolean> => {
   const readline = await import("node:readline");
@@ -41,17 +43,24 @@ export const unlinkCommand = defineCommand({
       process.exit(1);
     }
 
+    printHeader();
+    console.log();
+
     // Check if repository is linked
     const projectConfig = getProjectConfig(repoRoot);
     if (!projectConfig) {
-      console.log("\nThis repository is not linked to any organization.");
+      console.log("This repository is not linked.");
       return;
     }
 
-    console.log(`\nLinked to organization: ${projectConfig.organizationSlug}`);
+    printOrgProjectTable(
+      projectConfig.organizationSlug,
+      projectConfig.projectHandle
+    );
+    console.log();
 
     if (!args.force) {
-      const confirmed = await confirm("\nAre you sure you want to unlink?");
+      const confirmed = await confirm("Are you sure you want to unlink?");
       if (!confirmed) {
         console.log("Cancelled.");
         return;
@@ -59,6 +68,6 @@ export const unlinkCommand = defineCommand({
     }
 
     await removeProjectConfig(repoRoot);
-    console.log("\nSuccessfully unlinked repository from organization.");
+    console.log("Unlinked successfully.");
   },
 });

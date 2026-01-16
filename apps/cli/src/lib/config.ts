@@ -47,12 +47,14 @@ export interface ConfigLoadResult {
 }
 
 /**
- * Project config for linking a repo to an organization
+ * Project config for linking a repo to a Detent project
  * Stored in .detent/project.json
  */
 export interface ProjectConfig {
   organizationId: string;
   organizationSlug: string;
+  projectId: string;
+  projectHandle: string;
 }
 
 export interface ProjectConfigLoadResult {
@@ -65,6 +67,7 @@ export interface ProjectConfigLoadResult {
 // ============================================================================
 
 const DETENT_DIR_NAME = ".detent";
+const DETENT_DEV_DIR_NAME = ".detent-dev";
 const REPO_CONFIG_FILE = "config.json";
 const PROJECT_CONFIG_FILE = "project.json";
 const GLOBAL_CONFIG_FILE = "detent.json";
@@ -96,7 +99,7 @@ const ALLOWED_MODELS = [
 // ============================================================================
 
 // Import from centralized env module
-import { getDetentHome } from "./env.js";
+import { getDetentHome, isProduction } from "./env.js";
 
 /**
  * Gets the global detent directory path
@@ -111,10 +114,12 @@ export const getGlobalDetentDir = getDetentHome;
 export const getDetentDir = getDetentHome;
 
 /**
- * Gets the per-repo detent directory path (<repo>/.detent)
+ * Gets the per-repo detent directory path
+ * Uses .detent-dev in development and .detent in production
  */
 export const getRepoDetentDir = (repoRoot: string): string => {
-  return join(repoRoot, DETENT_DIR_NAME);
+  const dirName = isProduction() ? DETENT_DIR_NAME : DETENT_DEV_DIR_NAME;
+  return join(repoRoot, dirName);
 };
 
 /**
@@ -536,11 +541,18 @@ export const getProjectConfigSafe = (
     }
     const parsed = JSON.parse(data) as ProjectConfig;
 
-    if (!(parsed.organizationId && parsed.organizationSlug)) {
+    if (
+      !(
+        parsed.organizationId &&
+        parsed.organizationSlug &&
+        parsed.projectId &&
+        parsed.projectHandle
+      )
+    ) {
       return {
         config: null,
         error:
-          "invalid project config: missing organizationId or organizationSlug",
+          "invalid project config: missing required fields. Run `dt link` to relink.",
       };
     }
 

@@ -19,11 +19,19 @@ vi.mock("node:fs", () => ({
   unlinkSync: vi.fn(),
 }));
 
+// Mock env.js to simulate production mode (uses .detent instead of .detent-dev)
+vi.mock("./env.js", () => ({
+  isProduction: () => true,
+  getDetentHome: () => "/home/user/.detent",
+}));
+
 const createValidProjectConfig = (
   overrides: Partial<ProjectConfig> = {}
 ): ProjectConfig => ({
   organizationId: "org-123",
   organizationSlug: "test-org",
+  projectId: "proj-123",
+  projectHandle: "test-project",
   ...overrides,
 });
 
@@ -111,9 +119,7 @@ describe("project config", () => {
       const result = getProjectConfigSafe("/repo");
 
       expect(result.config).toBeNull();
-      expect(result.error).toContain(
-        "missing organizationId or organizationSlug"
-      );
+      expect(result.error).toContain("missing required fields");
     });
 
     it("returns error when missing organizationSlug", () => {
@@ -125,9 +131,7 @@ describe("project config", () => {
       const result = getProjectConfigSafe("/repo");
 
       expect(result.config).toBeNull();
-      expect(result.error).toContain(
-        "missing organizationId or organizationSlug"
-      );
+      expect(result.error).toContain("missing required fields");
     });
 
     it("returns error for permission denied", () => {

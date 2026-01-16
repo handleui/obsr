@@ -4,6 +4,7 @@ import type { ProjectConfig } from "../../lib/config.js";
 // Mock external dependencies
 vi.mock("@detent/git", () => ({
   findGitRoot: vi.fn(),
+  getRemoteUrl: vi.fn(),
 }));
 
 vi.mock("../../lib/auth.js", () => ({
@@ -12,6 +13,7 @@ vi.mock("../../lib/auth.js", () => ({
 
 vi.mock("../../lib/api.js", () => ({
   getOrganizations: vi.fn(),
+  lookupProject: vi.fn(),
 }));
 
 vi.mock("../../lib/config.js", () => ({
@@ -20,31 +22,25 @@ vi.mock("../../lib/config.js", () => ({
   removeProjectConfig: vi.fn(),
 }));
 
-vi.mock("../../lib/ui.js", () => ({
-  findOrganizationByIdOrSlug: vi.fn(),
-  selectOrganization: vi.fn(),
+vi.mock("../../lib/git-utils.js", () => ({
+  parseRemoteUrl: vi.fn(),
 }));
 
-interface Organization {
-  organization_id: string;
-  organization_name: string;
-  organization_slug: string;
-  github_org: string;
-  role: string;
-  github_linked: boolean;
-  github_username: string | null;
-}
+vi.mock("../../tui/styles.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    printOrgProjectTable: vi.fn(),
+  };
+});
 
-const createMockOrganization = (
-  overrides: Partial<Organization> = {}
-): Organization => ({
-  organization_id: "org-123",
-  organization_name: "Test Organization",
-  organization_slug: "test-org",
-  github_org: "test-org",
-  role: "member",
-  github_linked: false,
-  github_username: null,
+const createMockProjectConfig = (
+  overrides: Partial<ProjectConfig> = {}
+): ProjectConfig => ({
+  organizationId: "org-123",
+  organizationSlug: "test-org",
+  projectId: "proj-123",
+  projectHandle: "test-repo",
   ...overrides,
 });
 
@@ -120,10 +116,7 @@ describe("link commands", () => {
       const { getAccessToken } = await import("../../lib/auth.js");
       const { getProjectConfig } = await import("../../lib/config.js");
 
-      const existingConfig: ProjectConfig = {
-        organizationId: "org-123",
-        organizationSlug: "test-org",
-      };
+      const existingConfig = createMockProjectConfig();
 
       vi.mocked(findGitRoot).mockResolvedValue("/repo");
       vi.mocked(getAccessToken).mockResolvedValue("token-123");
@@ -133,76 +126,173 @@ describe("link commands", () => {
       await linkCommand.run?.({ args: { force: false } });
 
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        "\nThis repository is already linked to organization: test-org"
+        "Already linked. Run `dt link --force` to relink."
       );
       expect(processExitSpy).not.toHaveBeenCalled();
     });
 
-    it("allows relinking with --force flag", async () => {
-      const { findGitRoot } = await import("@detent/git");
+    it("exits if no git remote", async () => {
+      const { findGitRoot, getRemoteUrl } = await import("@detent/git");
       const { getAccessToken } = await import("../../lib/auth.js");
-      const { getOrganizations } = await import("../../lib/api.js");
+      const { getProjectConfig } = await import("../../lib/config.js");
+
+      vi.mocked(findGitRoot).mockResolvedValue("/repo");
+      vi.mocked(getProjectConfig).mockReturnValue(null);
+      vi.mocked(getAccessToken).mockResolvedValue("token-123");
+      vi.mocked(getRemoteUrl).mockResolvedValue(null);
+
+      const { linkCommand } = await import("./index.js");
+
+      await expect(
+        linkCommand.run?.({ args: { force: false } })
+      ).rejects.toThrow(ExitError);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "No git remote 'origin' found."
+      );
+      expect(processExitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it("exits if git remote URL cannot be parsed", async () => {
+      const { findGitRoot, getRemoteUrl } = await import("@detent/git");
+      const { getAccessToken } = await import("../../lib/auth.js");
+      const { getProjectConfig } = await import("../../lib/config.js");
+      const { parseRemoteUrl } = await import("../../lib/git-utils.js");
+
+      vi.mocked(findGitRoot).mockResolvedValue("/repo");
+      vi.mocked(getProjectConfig).mockReturnValue(null);
+      vi.mocked(getAccessToken).mockResolvedValue("token-123");
+      vi.mocked(getRemoteUrl).mockResolvedValue("invalid-url");
+      vi.mocked(parseRemoteUrl).mockReturnValue(null);
+
+      const { linkCommand } = await import("./index.js");
+
+      await expect(
+        linkCommand.run?.({ args: { force: false } })
+      ).rejects.toThrow(ExitError);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Could not parse git remote URL: invalid-url"
+      );
+      expect(processExitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it("links successfully when project exists", async () => {
+      const { findGitRoot, getRemoteUrl } = await import("@detent/git");
+      const { getAccessToken } = await import("../../lib/auth.js");
       const { getProjectConfig, saveProjectConfig } = await import(
         "../../lib/config.js"
       );
-      const { findOrganizationByIdOrSlug } = await import("../../lib/ui.js");
+      const { parseRemoteUrl } = await import("../../lib/git-utils.js");
+      const { lookupProject } = await import("../../lib/api.js");
 
-      const existingConfig: ProjectConfig = {
+      vi.mocked(findGitRoot).mockResolvedValue("/repo");
+      vi.mocked(getProjectConfig).mockReturnValue(null);
+      vi.mocked(getAccessToken).mockResolvedValue("token-123");
+      vi.mocked(getRemoteUrl).mockResolvedValue(
+        "git@github.com:test-org/test-repo.git"
+      );
+      vi.mocked(parseRemoteUrl).mockReturnValue("test-org/test-repo");
+      vi.mocked(lookupProject).mockResolvedValue({
+        project_id: "proj-123",
+        organization_id: "org-123",
+        organization_name: "Test Org",
+        organization_slug: "test-org",
+        handle: "test-repo",
+        provider_repo_id: "123",
+        provider_repo_name: "test-repo",
+        provider_repo_full_name: "test-org/test-repo",
+        provider_default_branch: "main",
+        is_private: false,
+        created_at: new Date().toISOString(),
+      });
+
+      const { linkCommand } = await import("./index.js");
+      await linkCommand.run?.({ args: { force: false } });
+
+      expect(saveProjectConfig).toHaveBeenCalledWith("/repo", {
+        organizationId: "org-123",
+        organizationSlug: "test-org",
+        projectId: "proj-123",
+        projectHandle: "test-repo",
+      });
+      expect(consoleLogSpy).toHaveBeenCalledWith("Linked successfully.");
+    });
+
+    it("exits when project does not exist", async () => {
+      const { findGitRoot, getRemoteUrl } = await import("@detent/git");
+      const { getAccessToken } = await import("../../lib/auth.js");
+      const { getProjectConfig } = await import("../../lib/config.js");
+      const { parseRemoteUrl } = await import("../../lib/git-utils.js");
+      const { lookupProject } = await import("../../lib/api.js");
+
+      vi.mocked(findGitRoot).mockResolvedValue("/repo");
+      vi.mocked(getProjectConfig).mockReturnValue(null);
+      vi.mocked(getAccessToken).mockResolvedValue("token-123");
+      vi.mocked(getRemoteUrl).mockResolvedValue(
+        "git@github.com:unknown-org/unknown-repo.git"
+      );
+      vi.mocked(parseRemoteUrl).mockReturnValue("unknown-org/unknown-repo");
+      vi.mocked(lookupProject).mockRejectedValue(new Error("Not found"));
+
+      const { linkCommand } = await import("./index.js");
+
+      await expect(
+        linkCommand.run?.({ args: { force: false } })
+      ).rejects.toThrow(ExitError);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "\nCould not link repository."
+      );
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "\nProject 'unknown-org/unknown-repo' is not registered in Detent."
+      );
+      expect(processExitSpy).toHaveBeenCalledWith(1);
+    });
+
+    it("allows relinking with --force flag", async () => {
+      const { findGitRoot, getRemoteUrl } = await import("@detent/git");
+      const { getAccessToken } = await import("../../lib/auth.js");
+      const { getProjectConfig, saveProjectConfig } = await import(
+        "../../lib/config.js"
+      );
+      const { parseRemoteUrl } = await import("../../lib/git-utils.js");
+      const { lookupProject } = await import("../../lib/api.js");
+
+      const existingConfig = createMockProjectConfig({
         organizationId: "org-old",
         organizationSlug: "old-org",
-      };
-
-      const newOrganization = createMockOrganization({
-        organization_id: "org-new",
-        organization_slug: "new-org",
-        organization_name: "New Organization",
+        projectId: "proj-old",
+        projectHandle: "old-repo",
       });
 
       vi.mocked(findGitRoot).mockResolvedValue("/repo");
       vi.mocked(getProjectConfig).mockReturnValue(existingConfig);
       vi.mocked(getAccessToken).mockResolvedValue("token-123");
-      vi.mocked(getOrganizations).mockResolvedValue({
-        organizations: [newOrganization],
+      vi.mocked(getRemoteUrl).mockResolvedValue(
+        "git@github.com:new-org/new-repo.git"
+      );
+      vi.mocked(parseRemoteUrl).mockReturnValue("new-org/new-repo");
+      vi.mocked(lookupProject).mockResolvedValue({
+        project_id: "proj-new",
+        organization_id: "org-new",
+        organization_name: "New Organization",
+        organization_slug: "new-org",
+        handle: "new-repo",
+        provider_repo_id: "456",
+        provider_repo_name: "new-repo",
+        provider_repo_full_name: "new-org/new-repo",
+        provider_default_branch: "main",
+        is_private: false,
+        created_at: new Date().toISOString(),
       });
-      vi.mocked(findOrganizationByIdOrSlug).mockReturnValue(newOrganization);
 
       const { linkCommand } = await import("./index.js");
-      await linkCommand.run?.({
-        args: { force: true, organization: "new-org" },
-      });
+      await linkCommand.run?.({ args: { force: true } });
 
       expect(saveProjectConfig).toHaveBeenCalledWith("/repo", {
         organizationId: "org-new",
         organizationSlug: "new-org",
+        projectId: "proj-new",
+        projectHandle: "new-repo",
       });
-    });
-
-    it("exits if organization not found when --organization provided", async () => {
-      const { findGitRoot } = await import("@detent/git");
-      const { getAccessToken } = await import("../../lib/auth.js");
-      const { getOrganizations } = await import("../../lib/api.js");
-      const { getProjectConfig } = await import("../../lib/config.js");
-      const { findOrganizationByIdOrSlug } = await import("../../lib/ui.js");
-
-      vi.mocked(findGitRoot).mockResolvedValue("/repo");
-      vi.mocked(getProjectConfig).mockReturnValue(null);
-      vi.mocked(getAccessToken).mockResolvedValue("token-123");
-      vi.mocked(getOrganizations).mockResolvedValue({
-        organizations: [createMockOrganization()],
-      });
-      vi.mocked(findOrganizationByIdOrSlug).mockReturnValue(undefined);
-
-      const { linkCommand } = await import("./index.js");
-
-      await expect(
-        linkCommand.run?.({
-          args: { organization: "nonexistent", force: false },
-        })
-      ).rejects.toThrow(ExitError);
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        "Organization not found: nonexistent"
-      );
-      expect(processExitSpy).toHaveBeenCalledWith(1);
     });
 
     it("has correct meta information", async () => {
@@ -210,7 +300,7 @@ describe("link commands", () => {
 
       expect(linkCommand.meta?.name).toBe("link");
       expect(linkCommand.meta?.description).toBe(
-        "Link this repository to a Detent organization"
+        "Link this repository to a Detent project"
       );
     });
 
@@ -254,74 +344,26 @@ describe("link commands", () => {
       await statusCommand.run?.({ args: {} });
 
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        "\nThis repository is not linked to any organization."
+        "This repository is not linked."
       );
     });
 
-    it("shows link status when repo is linked", async () => {
+    it("shows project path when repo is linked", async () => {
       const { findGitRoot } = await import("@detent/git");
-      const { getAccessToken } = await import("../../lib/auth.js");
-      const { getOrganizations } = await import("../../lib/api.js");
       const { getProjectConfig } = await import("../../lib/config.js");
+      const { printOrgProjectTable } = await import("../../tui/styles.js");
 
-      const projectConfig: ProjectConfig = {
-        organizationId: "org-123",
-        organizationSlug: "test-org",
-      };
-
-      const organization = createMockOrganization({
-        organization_id: "org-123",
-        organization_name: "Test Organization",
-        github_linked: true,
-        github_username: "testuser",
-      });
+      const projectConfig = createMockProjectConfig();
 
       vi.mocked(findGitRoot).mockResolvedValue("/repo");
       vi.mocked(getProjectConfig).mockReturnValue(projectConfig);
-      vi.mocked(getAccessToken).mockResolvedValue("token-123");
-      vi.mocked(getOrganizations).mockResolvedValue({
-        organizations: [organization],
-      });
 
       const { statusCommand } = await import("./status.js");
       await statusCommand.run?.({ args: {} });
 
-      expect(consoleLogSpy).toHaveBeenCalledWith("\nLink Status\n");
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        "Organization ID:     org-123"
-      );
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        "Organization Slug:   test-org"
-      );
-    });
-
-    it("shows warning if not member of linked organization", async () => {
-      const { findGitRoot } = await import("@detent/git");
-      const { getAccessToken } = await import("../../lib/auth.js");
-      const { getOrganizations } = await import("../../lib/api.js");
-      const { getProjectConfig } = await import("../../lib/config.js");
-
-      const projectConfig: ProjectConfig = {
-        organizationId: "org-other",
-        organizationSlug: "other-org",
-      };
-
-      const organization = createMockOrganization({
-        organization_id: "org-123",
-      });
-
-      vi.mocked(findGitRoot).mockResolvedValue("/repo");
-      vi.mocked(getProjectConfig).mockReturnValue(projectConfig);
-      vi.mocked(getAccessToken).mockResolvedValue("token-123");
-      vi.mocked(getOrganizations).mockResolvedValue({
-        organizations: [organization],
-      });
-
-      const { statusCommand } = await import("./status.js");
-      await statusCommand.run?.({ args: {} });
-
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        "\nWarning: You are not a member of the linked organization."
+      expect(printOrgProjectTable).toHaveBeenCalledWith(
+        "test-org",
+        "test-repo"
       );
     });
   });
@@ -351,7 +393,7 @@ describe("link commands", () => {
       await unlinkCommand.run?.({ args: { force: false } });
 
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        "\nThis repository is not linked to any organization."
+        "This repository is not linked."
       );
     });
 
@@ -361,10 +403,7 @@ describe("link commands", () => {
         "../../lib/config.js"
       );
 
-      const projectConfig: ProjectConfig = {
-        organizationId: "org-123",
-        organizationSlug: "test-org",
-      };
+      const projectConfig = createMockProjectConfig();
 
       vi.mocked(findGitRoot).mockResolvedValue("/repo");
       vi.mocked(getProjectConfig).mockReturnValue(projectConfig);
@@ -373,9 +412,7 @@ describe("link commands", () => {
       await unlinkCommand.run?.({ args: { force: true } });
 
       expect(removeProjectConfig).toHaveBeenCalledWith("/repo");
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        "\nSuccessfully unlinked repository from organization."
-      );
+      expect(consoleLogSpy).toHaveBeenCalledWith("Unlinked successfully.");
     });
   });
 });

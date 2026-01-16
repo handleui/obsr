@@ -32,3 +32,16 @@ export const hexToAnsi = (hex: string): string => {
 };
 
 export const ANSI_RESET = "\x1b[0m";
+
+/**
+ * Prints a two-column org/project table with dynamic padding.
+ * Aligns the arrow and project column based on org slug length.
+ */
+export const printOrgProjectTable = (org: string, project: string): void => {
+  const mutedAnsi = hexToAnsi(colors.muted);
+  const minPadding = 4;
+  const colWidth = Math.max(org.length, "org".length) + minPadding;
+
+  console.log(`${mutedAnsi}${"org".padEnd(colWidth)}project${ANSI_RESET}`);
+  console.log(`${org.padEnd(colWidth)}→   ${project}`);
+};

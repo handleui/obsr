@@ -1,125 +1,109 @@
 /**
- * Link command - links a repository to a Detent organization
+ * Link command - links a repository to a Detent project
  *
- * Similar to Vercel's project linking, this binds the current repo
- * to an organization for Detent operations.
+ * Detent mirrors GitHub's repository structure. Linking only succeeds when
+ * the project is registered in Detent (via GitHub App installation).
  */
 
 import { findGitRoot, getRemoteUrl } from "@detent/git";
 import { defineCommand } from "citty";
-import type { Organization } from "../../lib/api.js";
-import { getOrganizations, lookupProject } from "../../lib/api.js";
+import { lookupProject } from "../../lib/api.js";
 import { getAccessToken } from "../../lib/auth.js";
 import { getProjectConfig, saveProjectConfig } from "../../lib/config.js";
 import { parseRemoteUrl } from "../../lib/git-utils.js";
-import {
-  findOrganizationByIdOrSlug,
-  selectOrganization,
-} from "../../lib/ui.js";
+import { printHeader } from "../../tui/components/index.js";
+import { printOrgProjectTable } from "../../tui/styles.js";
 
-interface AutoDetectResult {
-  success: true;
+interface LinkResult {
   organizationId: string;
   organizationSlug: string;
   organizationName: string;
+  projectId: string;
+  projectHandle: string;
   repoFullName: string;
 }
 
 /**
- * Attempt to auto-detect organization from git remote URL
+ * Parse owner from repo full name (e.g., "detentsh" from "detentsh/detent")
  */
-const attemptAutoDetect = async (
+const parseOwner = (repoFullName: string): string | null => {
+  const parts = repoFullName.split("/");
+  return parts[0] || null;
+};
+
+/**
+ * Link repository to a Detent project.
+ *
+ * Strategy:
+ * 1. Get git remote URL and parse to owner/repo format
+ * 2. Lookup project in Detent via API
+ * 3. If project exists, return its details
+ * 4. If not, fail with clear error
+ */
+const attemptLink = async (
   repoRoot: string,
   accessToken: string
-): Promise<AutoDetectResult | null> => {
+): Promise<LinkResult> => {
+  // Step 1: Get and parse git remote
   const remoteUrl = await getRemoteUrl(repoRoot);
   if (!remoteUrl) {
-    return null;
+    console.error("No git remote 'origin' found.");
+    console.error("Add a remote with: git remote add origin <url>");
+    process.exit(1);
   }
 
   const repoFullName = parseRemoteUrl(remoteUrl);
   if (!repoFullName) {
-    return null;
+    console.error(`Could not parse git remote URL: ${remoteUrl}`);
+    console.error(
+      "Expected format: git@github.com:owner/repo.git or https://github.com/owner/repo.git"
+    );
+    process.exit(1);
   }
 
+  const owner = parseOwner(repoFullName);
+  if (!owner) {
+    console.error(`Could not parse owner from: ${repoFullName}`);
+    process.exit(1);
+  }
+
+  // Step 2: Lookup project in Detent
   try {
     const project = await lookupProject(accessToken, repoFullName);
     return {
-      success: true,
       organizationId: project.organization_id,
       organizationSlug: project.organization_slug,
       organizationName: project.organization_name ?? project.organization_slug,
+      projectId: project.project_id,
+      projectHandle: project.handle,
       repoFullName,
     };
   } catch {
-    // Project not found in any organization - expected for unlinked repos
-    return null;
-  }
-};
-
-/**
- * Get organization from user selection or CLI argument
- */
-const resolveOrganization = async (
-  accessToken: string,
-  orgArg: string | undefined,
-  autoDetectFailed: boolean
-): Promise<Organization | null> => {
-  console.log(
-    autoDetectFailed
-      ? "Could not auto-detect project. Fetching your organizations..."
-      : "Fetching your organizations..."
-  );
-
-  const response = await getOrganizations(accessToken).catch((error) => {
+    // Project not found - fail with helpful error
+    console.error("\nCould not link repository.");
+    console.error(`\nProject '${repoFullName}' is not registered in Detent.`);
+    console.error("\nThis can happen if:");
     console.error(
-      "Failed to fetch organizations:",
-      error instanceof Error ? error.message : error
+      `  1. The Detent GitHub App is not installed on '${owner}', or`
     );
-    process.exit(1);
-  });
-
-  if (response.organizations.length === 0) {
-    console.error("You are not a member of any organizations.");
+    console.error("  2. This repository was added after the app was installed");
     console.error(
-      "You must be a member of the GitHub organization where Detent is installed."
+      "\nTo fix: Add this repository to the Detent GitHub App installation."
     );
     process.exit(1);
   }
-
-  if (orgArg) {
-    const found = findOrganizationByIdOrSlug(response.organizations, orgArg);
-    if (!found) {
-      console.error(`Organization not found: ${orgArg}`);
-      console.error("\nAvailable organizations:");
-      for (const organization of response.organizations) {
-        console.error(
-          `  - ${organization.organization_slug} (${organization.organization_name})`
-        );
-      }
-      process.exit(1);
-    }
-    return found;
-  }
-
-  return selectOrganization(response.organizations);
 };
 
 export const linkCommand = defineCommand({
   meta: {
     name: "link",
-    description: "Link this repository to a Detent organization",
+    description: "Link this repository to a Detent project",
   },
   subCommands: {
     status: () => import("./status.js").then((m) => m.statusCommand),
     unlink: () => import("./unlink.js").then((m) => m.unlinkCommand),
   },
   args: {
-    organization: {
-      type: "string",
-      description: "Organization ID or slug to link to",
-      alias: "o",
-    },
     force: {
       type: "boolean",
       description: "Overwrite existing link without prompting",
@@ -127,12 +111,22 @@ export const linkCommand = defineCommand({
       default: false,
     },
   },
-  run: async ({ args }) => {
+  run: async ({ args, rawArgs }) => {
+    // Skip if a subcommand is being invoked (check only first positional arg)
+    const subcommands = ["status", "unlink"];
+    const firstPositionalArg = rawArgs?.find((arg) => !arg.startsWith("-"));
+    if (firstPositionalArg && subcommands.includes(firstPositionalArg)) {
+      return;
+    }
+
     const repoRoot = await findGitRoot(process.cwd());
     if (!repoRoot) {
       console.error("Not in a git repository.");
       process.exit(1);
     }
+
+    printHeader();
+    console.log();
 
     let accessToken: string;
     try {
@@ -144,49 +138,26 @@ export const linkCommand = defineCommand({
 
     const existingConfig = getProjectConfig(repoRoot);
     if (existingConfig && !args.force) {
-      console.log(
-        `\nThis repository is already linked to organization: ${existingConfig.organizationSlug}`
+      printOrgProjectTable(
+        existingConfig.organizationSlug,
+        existingConfig.projectHandle
       );
-      console.log("Run `dt link --force` to link to a different organization.");
-      console.log("Run `dt link status` to see details.");
+      console.log();
+      console.log("Already linked. Run `dt link --force` to relink.");
       return;
     }
 
-    const shouldAttemptAutoDetect = !args.organization;
-    if (shouldAttemptAutoDetect) {
-      const autoDetected = await attemptAutoDetect(repoRoot, accessToken);
-      if (autoDetected) {
-        saveProjectConfig(repoRoot, {
-          organizationId: autoDetected.organizationId,
-          organizationSlug: autoDetected.organizationSlug,
-        });
-        console.log(
-          `\nLinked to organization: ${autoDetected.organizationName} (${autoDetected.organizationSlug})`
-        );
-        console.log(`Auto-detected from ${autoDetected.repoFullName}.`);
-        console.log("\nRun `dt link status` to see details.");
-        return;
-      }
-    }
-
-    const selectedOrganization = await resolveOrganization(
-      accessToken,
-      args.organization,
-      shouldAttemptAutoDetect
-    );
-
-    if (!selectedOrganization) {
-      process.exit(1);
-    }
+    const result = await attemptLink(repoRoot, accessToken);
 
     saveProjectConfig(repoRoot, {
-      organizationId: selectedOrganization.organization_id,
-      organizationSlug: selectedOrganization.organization_slug,
+      organizationId: result.organizationId,
+      organizationSlug: result.organizationSlug,
+      projectId: result.projectId,
+      projectHandle: result.projectHandle,
     });
 
-    console.log(
-      `\nLinked to organization: ${selectedOrganization.organization_name} (${selectedOrganization.organization_slug})`
-    );
-    console.log("\nRun `dt link status` to see details.");
+    printOrgProjectTable(result.organizationSlug, result.projectHandle);
+    console.log();
+    console.log("Linked successfully.");
   },
 });

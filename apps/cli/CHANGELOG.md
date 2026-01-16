@@ -1,5 +1,14 @@
 # @detent/cli
 
+## 0.8.2
+
+### Patch Changes
+
+- 7c5c1d3: Update default API URL from api.detent.sh to backend.detent.sh across all references.
+- Updated dependencies [18b9db1]
+- Updated dependencies [2c9889d]
+  - @detent/healing@0.4.0
+
 ## 0.8.1
 
 ### Patch Changes

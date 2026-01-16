@@ -26,6 +26,14 @@ vi.mock("../../lib/git-utils.js", () => ({
   parseRemoteUrl: vi.fn(),
 }));
 
+vi.mock("../../tui/styles.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    printOrgProjectTable: vi.fn(),
+  };
+});
+
 const createMockProjectConfig = (
   overrides: Partial<ProjectConfig> = {}
 ): ProjectConfig => ({
@@ -343,6 +351,7 @@ describe("link commands", () => {
     it("shows project path when repo is linked", async () => {
       const { findGitRoot } = await import("@detent/git");
       const { getProjectConfig } = await import("../../lib/config.js");
+      const { printOrgProjectTable } = await import("../../tui/styles.js");
 
       const projectConfig = createMockProjectConfig();
 
@@ -352,7 +361,10 @@ describe("link commands", () => {
       const { statusCommand } = await import("./status.js");
       await statusCommand.run?.({ args: {} });
 
-      expect(consoleLogSpy).toHaveBeenCalledWith("test-org    →    test-repo");
+      expect(printOrgProjectTable).toHaveBeenCalledWith(
+        "test-org",
+        "test-repo"
+      );
     });
   });
 

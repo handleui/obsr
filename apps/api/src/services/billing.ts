@@ -467,7 +467,7 @@ export const retryFailedPolarIngestions = async (
       orgEvents.push({
         id: event.id,
         eventName: event.eventName,
-        metadata: event.metadata as Record<string, unknown>,
+        metadata: (event.metadata as Record<string, unknown>) ?? {},
       });
       eventsByOrg.set(event.organizationId, orgEvents);
     }

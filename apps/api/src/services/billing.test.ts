@@ -73,6 +73,9 @@ const setupMockChains = () => {
 // Helper to get billing functions with fresh imports
 const getBilling = async () => import("./billing");
 
+// Flush promise queue to allow fire-and-forget async operations to complete
+const flushPromises = () => new Promise((resolve) => setImmediate(resolve));
+
 describe("billing service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -186,7 +189,7 @@ describe("billing service", () => {
       );
 
       // Check the metadata passed to insert
-      const insertCall = mockValues.mock.calls[0][0];
+      const insertCall = mockValues.mock.calls[0]?.[0];
       expect(insertCall.eventName).toBe("ai");
       expect(insertCall.metadata).toMatchObject({
         runId: "run-456",
@@ -215,7 +218,7 @@ describe("billing service", () => {
         false
       );
 
-      const insertCall = mockValues.mock.calls[0][0];
+      const insertCall = mockValues.mock.calls[0]?.[0];
       expect(insertCall.eventName).toBe("sandbox");
       expect(insertCall.metadata).toMatchObject({
         runId: "run-456",
@@ -244,8 +247,8 @@ describe("billing service", () => {
         false
       );
 
-      // Wait for fire-and-forget Polar ingestion to execute
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Flush promises to allow fire-and-forget Polar ingestion to complete
+      await flushPromises();
 
       expect(mockIngestUsageEvents).toHaveBeenCalledWith(
         expect.anything(),
@@ -280,8 +283,8 @@ describe("billing service", () => {
         false
       );
 
-      // Wait for fire-and-forget Polar ingestion to execute
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Flush promises to allow fire-and-forget Polar ingestion to complete
+      await flushPromises();
 
       expect(mockIngestUsageEvents).toHaveBeenCalledWith(
         expect.anything(),

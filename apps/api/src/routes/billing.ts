@@ -248,6 +248,8 @@ app.post(
   }
 );
 
+// GET /billing/:orgId/portal - Get Polar customer portal URL
+// SECURITY: Requires owner/admin role to access billing portal
 app.get(
   "/:orgId/portal",
   githubOrgAccessMiddleware,

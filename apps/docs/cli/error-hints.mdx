@@ -1,0 +1,71 @@
+---
+title: Error Hints
+description: How Detent provides context-aware guidance to the AI
+---
+
+When healing errors, Detent enriches the AI prompt with hints - actionable guidance based on known error patterns. This helps Claude fix issues faster and more accurately.
+
+## How It Works
+
+Detent maintains an internal database of common error patterns and their fixes. When an error is encountered:
+
+1. The error is matched against known patterns by **source** (TypeScript, Go, etc.) and **rule ID**
+2. Matching hints are injected into the AI prompt
+3. Claude uses these hints as guidance while investigating the actual code
+
+```
+Error: TS2322 Type 'string' is not assignable to type 'number'
+  HINTS: Type mismatch. Check type assertion, generic parameter, or use compatible type.
+```
+
+## Supported Sources
+
+Detent includes hints for common errors across multiple languages and tools:
+
+| Source | Coverage |
+|--------|----------|
+| TypeScript | Type errors (TS2322, TS2339, TS2345, etc.) |
+| Biome | Lint rules (noVar, useConst, noUnusedVariables) |
+| Go | Compiler errors, unused variables/imports |
+| Go Test | Test failures, assertions, panics, timeouts |
+| Vitest | Assertion failures, null access |
+| Rust | Scope errors, type mismatches |
+| Python | NameError, TypeError, ImportError |
+| ESLint | Common lint rules |
+| Docker | Build failures, missing files, platform issues |
+| Node.js | Module resolution, syntax errors |
+| Infrastructure | Timeouts, connection issues, permissions |
+
+## Example Hints
+
+<Accordion title="TypeScript">
+| Rule | Hint |
+|------|------|
+| TS2322 | Type mismatch. Check type assertion, generic parameter, or use compatible type. |
+| TS2339 | Property doesn't exist on type. Check spelling, add to interface, or use optional chaining. |
+| TS2532 | Object possibly undefined. Add null check, optional chaining (?.), or non-null assertion (!). |
+</Accordion>
+
+<Accordion title="Go">
+| Pattern | Hint |
+|---------|------|
+| `undefined: X` | Undefined identifier. Check imports, spelling, or if exported (capitalized). |
+| `declared but not used` | Unused variable. Remove or use blank identifier (_). |
+| `imported and not used` | Unused import. Remove or use blank import. |
+</Accordion>
+
+<Accordion title="Biome">
+| Rule | Hint |
+|------|------|
+| lint/style/noVar | Replace 'var' with 'const' or 'let'. |
+| lint/style/useConst | Variable is never reassigned. Use 'const' instead of 'let'. |
+| lint/correctness/noUnusedVariables | Remove unused variable or prefix with underscore. |
+</Accordion>
+
+## Roadmap
+
+Hints are the first phase of Detent's error knowledge system:
+
+- **Now**: Static hints matched by error patterns
+- **Coming**: Outcome tracking to learn which fixes work
+- **Future**: Cached fixes for instant repairs of known errors

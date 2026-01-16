@@ -148,6 +148,7 @@
       "name": "@detent/healing",
       "version": "0.3.0",
       "dependencies": {
+        "@detent/lore": "workspace:*",
         "ai": "^5.0.0",
         "fast-glob": "^3.3.3",
         "zod": "^3.25.34",
@@ -158,6 +159,19 @@
         "autoevals": "^0.0.131",
         "braintrust": "^2.0.0",
         "typescript": "5.9.2",
+      },
+    },
+    "packages/lore": {
+      "name": "@detent/lore",
+      "version": "0.0.1",
+      "dependencies": {
+        "@detent/parser": "workspace:*",
+      },
+      "devDependencies": {
+        "@detent/typescript-config": "*",
+        "@types/node": "^25.0.3",
+        "typescript": "5.9.2",
+        "vitest": "^4.0.16",
       },
     },
     "packages/parser": {
@@ -342,6 +356,8 @@
     "@detent/git": ["@detent/git@workspace:packages/git"],
 
     "@detent/healing": ["@detent/healing@workspace:packages/healing"],
+
+    "@detent/lore": ["@detent/lore@workspace:packages/lore"],
 
     "@detent/navigator": ["@detent/navigator@workspace:apps/navigator"],
 

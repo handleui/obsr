@@ -46,7 +46,12 @@
           "cli/heal",
           {
             "group": "Healing",
-            "pages": ["cli/how-healing-works", "cli/budget", "cli/tools"]
+            "pages": [
+              "cli/how-healing-works",
+              "cli/error-hints",
+              "cli/budget",
+              "cli/tools"
+            ]
           },
           {
             "group": "Configuration",

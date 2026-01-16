@@ -291,3 +291,29 @@ export const countByCategory = (
 
   return counts;
 };
+
+/**
+ * Formats multiple errors with hints from lore, sorted by priority.
+ */
+export const formatErrorsWithHints = async (
+  errors: ExtractedError[]
+): Promise<string> => {
+  if (errors.length === 0) {
+    return "(no errors)";
+  }
+
+  const { matchHints } = await import("@detent/lore");
+  const sorted = prioritizeErrors(errors);
+  const matches = matchHints(sorted);
+  const parts: string[] = [];
+
+  for (const { error, hints } of matches) {
+    let formatted = formatError(error);
+    if (hints.length > 0) {
+      formatted += `\n  HINTS: ${hints.join(" | ")}`;
+    }
+    parts.push(formatted);
+  }
+
+  return parts.join("\n\n");
+};

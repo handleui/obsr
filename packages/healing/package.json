@@ -21,6 +21,7 @@
     "eval:live": "EVAL_MODE=live bun run src/eval/run.ts"
   },
   "dependencies": {
+    "@detent/lore": "workspace:*",
     "ai": "^5.0.0",
     "fast-glob": "^3.3.3",
     "zod": "^3.25.34"

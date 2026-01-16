@@ -22,7 +22,6 @@ export const Header = ({ updateAvailable }: HeaderProps): JSX.Element => (
 
 export const printHeader = (): void => {
   const mutedAnsi = hexToAnsi(colors.muted);
-  console.log();
   console.log(`${mutedAnsi}Detent CLI ${getVersion()}${ANSI_RESET}`);
 };
 

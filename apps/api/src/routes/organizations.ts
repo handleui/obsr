@@ -497,4 +497,63 @@ app.patch(
   }
 );
 
+/**
+ * DELETE /:organizationId
+ * Delete an organization (soft-delete)
+ * Only owners can delete organizations
+ */
+app.delete(
+  "/:organizationId",
+  githubOrgAccessMiddleware,
+  requireRole("owner"),
+  async (c) => {
+    const orgAccess = c.get("orgAccess") as OrgAccessContext;
+    const { organization } = orgAccess;
+
+    const { db, client } = await createDb(c.env);
+    try {
+      // Re-check org exists and isn't already deleted (prevents race condition)
+      const fresh = await db.query.organizations.findFirst({
+        where: and(
+          eq(organizations.id, organization.id),
+          isNull(organizations.deletedAt)
+        ),
+      });
+
+      if (!fresh) {
+        return c.json(
+          { error: "Organization not found or already deleted" },
+          404
+        );
+      }
+
+      // Soft-delete the organization
+      // HACK: organization_members intentionally left intact for potential recovery.
+      // Hard-delete should cascade to members via DB constraint or explicit cleanup.
+      await db
+        .update(organizations)
+        .set({
+          deletedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(organizations.id, organization.id));
+
+      // Invalidate cache if applicable
+      if (organization.providerInstallationId) {
+        deleteFromCache(
+          cacheKey.orgSettings(organization.providerInstallationId)
+        );
+      }
+
+      return c.json({
+        success: true,
+        provider_account_login: organization.providerAccountLogin,
+        provider_account_type: organization.providerAccountType,
+      });
+    } finally {
+      await client.end();
+    }
+  }
+);
+
 export default app;

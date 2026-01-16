@@ -80,6 +80,7 @@ export interface Organization {
   organization_name: string;
   organization_slug: string;
   github_org: string;
+  provider_account_type: "organization" | "user";
   role: string;
   github_linked: boolean;
   github_username: string | null;
@@ -243,6 +244,21 @@ export const leaveOrganization = (
     method: "POST",
     body: { organization_id: organizationId },
   });
+
+export interface DeleteOrganizationResponse {
+  success: boolean;
+  provider_account_login: string;
+  provider_account_type: "organization" | "user";
+}
+
+export const deleteOrganization = (
+  accessToken: string,
+  organizationId: string
+): Promise<DeleteOrganizationResponse> =>
+  apiRequest<DeleteOrganizationResponse>(
+    `/v1/organizations/${encodeURIComponent(organizationId)}`,
+    { accessToken, method: "DELETE" }
+  );
 
 // ============================================================================
 // GitHub Organization Types (for --available flag)

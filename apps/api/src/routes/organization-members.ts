@@ -48,56 +48,78 @@ app.post("/leave", async (c) => {
 
   const { db, client } = await createDb(c.env);
   try {
-    // Find the membership record (if exists)
-    const member = await db.query.organizationMembers.findFirst({
-      where: and(
-        eq(organizationMembers.userId, auth.userId),
-        eq(organizationMembers.organizationId, organizationId)
-      ),
-    });
-
-    if (!member) {
-      // No Detent record exists, that's fine
-      return c.json({
-        success: true,
-        message: "No membership record to remove",
+    // Use transaction to prevent TOCTOU race conditions
+    // All checks and the delete happen atomically
+    const result = await db.transaction(async (tx) => {
+      // Find the membership record (if exists)
+      const member = await tx.query.organizationMembers.findFirst({
+        where: and(
+          eq(organizationMembers.userId, auth.userId),
+          eq(organizationMembers.organizationId, organizationId)
+        ),
       });
-    }
 
-    // If user is a Detent owner or admin, check if they're the only elevated member
-    if (member.role === "owner" || member.role === "admin") {
-      const elevatedCountResult = await db
+      if (!member) {
+        return { success: true, message: "No membership record to remove" };
+      }
+
+      // Check if user is the sole member - must use delete instead
+      const memberCountResult = await tx
         .select({ count: count() })
         .from(organizationMembers)
+        .where(eq(organizationMembers.organizationId, organizationId));
+
+      if (memberCountResult[0]?.count === 1) {
+        return {
+          error:
+            "Cannot leave as the only member. Use `dt org delete` to remove the organization.",
+          code: "sole_member",
+          status: 400,
+        };
+      }
+
+      // If user is a Detent owner or admin, check if they're the only elevated member
+      if (member.role === "owner" || member.role === "admin") {
+        const elevatedCountResult = await tx
+          .select({ count: count() })
+          .from(organizationMembers)
+          .where(
+            and(
+              eq(organizationMembers.organizationId, organizationId),
+              inArray(organizationMembers.role, ["owner", "admin"])
+            )
+          );
+
+        if (elevatedCountResult[0]?.count === 1) {
+          return {
+            error: `Cannot leave ${organizationId} as the only owner/admin. Transfer ownership first.`,
+            status: 400,
+          };
+        }
+      }
+
+      // Remove the Detent membership record
+      await tx
+        .delete(organizationMembers)
         .where(
           and(
-            eq(organizationMembers.organizationId, organizationId),
-            inArray(organizationMembers.role, ["owner", "admin"])
+            eq(organizationMembers.userId, auth.userId),
+            eq(organizationMembers.organizationId, organizationId)
           )
         );
 
-      if (elevatedCountResult[0]?.count === 1) {
-        return c.json(
-          {
-            error:
-              "Cannot leave as the only owner/admin. Transfer ownership first.",
-          },
-          400
-        );
-      }
+      return { success: true };
+    });
+
+    // Handle transaction result
+    if ("error" in result) {
+      return c.json(
+        { error: result.error, ...(result.code && { code: result.code }) },
+        result.status as 400
+      );
     }
 
-    // Remove the Detent membership record
-    await db
-      .delete(organizationMembers)
-      .where(
-        and(
-          eq(organizationMembers.userId, auth.userId),
-          eq(organizationMembers.organizationId, organizationId)
-        )
-      );
-
-    return c.json({ success: true });
+    return c.json(result);
   } finally {
     await client.end();
   }

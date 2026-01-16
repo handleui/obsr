@@ -3,6 +3,7 @@ import { signOut } from "@/lib/auth-actions";
 
 const DashboardPage = async () => {
   const { user } = await getUser();
+  const productId = process.env.NEXT_PUBLIC_POLAR_PRODUCT_ID;
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-8 p-8">
@@ -13,14 +14,24 @@ const DashboardPage = async () => {
       <pre className="max-w-lg overflow-auto rounded-lg bg-zinc-100 p-4 text-sm dark:bg-zinc-900">
         {JSON.stringify(user, null, 2)}
       </pre>
-      <form action={signOut}>
-        <button
-          className="rounded-lg border border-zinc-300 px-6 py-3 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-          type="submit"
-        >
-          Sign out
-        </button>
-      </form>
+      <div className="flex gap-4">
+        {productId && (
+          <a
+            className="rounded-lg bg-zinc-900 px-6 py-3 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200"
+            href={`/api/checkout?products=${productId}`}
+          >
+            Add Credits
+          </a>
+        )}
+        <form action={signOut}>
+          <button
+            className="rounded-lg border border-zinc-300 px-6 py-3 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+            type="submit"
+          >
+            Sign out
+          </button>
+        </form>
+      </div>
     </main>
   );
 };

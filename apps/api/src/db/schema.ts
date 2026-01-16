@@ -151,6 +151,9 @@ export const organizations = pgTable(
       .default({})
       .notNull(),
 
+    // Polar billing
+    polarCustomerId: varchar("polar_customer_id", { length: 255 }),
+
     // Timestamps
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -417,6 +420,32 @@ export const runErrors = pgTable(
 );
 
 // ============================================================================
+// Usage Events (Local event log for Polar billing resilience)
+// ============================================================================
+
+export const usageEvents = pgTable(
+  "usage_events",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    organizationId: varchar("organization_id", { length: 36 })
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    eventName: varchar("event_name", { length: 64 }).notNull(),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    polarIngested: boolean("polar_ingested").default(false).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("usage_events_org_id_idx").on(table.organizationId),
+    // Composite index for retry queries: WHERE polar_ingested = false ORDER BY created_at
+    index("usage_events_polar_ingested_created_at_idx").on(
+      table.polarIngested,
+      table.createdAt
+    ),
+  ]
+);
+
+// ============================================================================
 // PR Comments (Tracking GitHub comment IDs for deduplication)
 // ============================================================================
 // Persistent storage for PR comment IDs to prevent duplicate comments.
@@ -460,6 +489,7 @@ export const organizationsRelations = relations(
     members: many(organizationMembers),
     invitations: many(invitations),
     projects: many(projects),
+    usageEvents: many(usageEvents),
   })
 );
 
@@ -502,6 +532,13 @@ export const runErrorsRelations = relations(runErrors, ({ one }) => ({
   }),
 }));
 
+export const usageEventsRelations = relations(usageEvents, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [usageEvents.organizationId],
+    references: [organizations.id],
+  }),
+}));
+
 // ============================================================================
 // Type Exports
 // ============================================================================
@@ -529,3 +566,6 @@ export type NewRunError = typeof runErrors.$inferInsert;
 
 export type PrComment = typeof prComments.$inferSelect;
 export type NewPrComment = typeof prComments.$inferInsert;
+
+export type UsageEvent = typeof usageEvents.$inferSelect;
+export type NewUsageEvent = typeof usageEvents.$inferInsert;

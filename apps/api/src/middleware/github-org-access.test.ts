@@ -65,6 +65,7 @@ const createOrg = (overrides: Partial<Organization> = {}): Organization => ({
   deletedAt: null,
   lastSyncedAt: null,
   settings: {},
+  polarCustomerId: null,
   createdAt: new Date(),
   updatedAt: new Date(),
   ...overrides,

@@ -23,11 +23,12 @@
   "dependencies": {
     "@detent/healing": "*",
     "@detent/parser": "*",
+    "@polar-sh/sdk": "^0.42.2",
     "@sentry/cloudflare": "^10.32.1",
     "@upstash/ratelimit": "^2.0.7",
     "@upstash/redis": "^1.36.0",
-    "fflate": "^0.8.2",
     "drizzle-orm": "^0.45.1",
+    "fflate": "^0.8.2",
     "hono": "^4.11.3",
     "jose": "^6.0.10",
     "pg": "^8.16.3",

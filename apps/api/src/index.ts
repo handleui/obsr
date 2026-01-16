@@ -14,6 +14,7 @@ import { authMiddleware } from "./middleware/auth";
 import { rateLimitMiddleware } from "./middleware/rate-limit";
 import { sentryContextMiddleware } from "./middleware/sentry-context";
 import authRoutes from "./routes/auth";
+import billingRoutes from "./routes/billing";
 import errorsRoutes from "./routes/errors";
 import healRoutes from "./routes/heal";
 import healthRoutes from "./routes/health";
@@ -23,6 +24,7 @@ import organizationsRoutes from "./routes/organizations";
 import parseRoutes from "./routes/parse";
 import projectsRoutes from "./routes/projects";
 import webhookRoutes from "./routes/webhooks";
+import polarWebhookRoutes from "./routes/webhooks/polar";
 import type { Env } from "./types/env";
 
 // Lightweight regex for scrubbing tokens from error messages
@@ -173,6 +175,7 @@ app.route("/health", healthRoutes);
 
 // Webhook routes (verified by signature, not API key)
 app.route("/webhooks", webhookRoutes);
+app.route("/webhooks/polar", polarWebhookRoutes);
 
 // Protected routes (require JWT auth + rate limiting)
 const api = new Hono<{ Bindings: Env }>();
@@ -187,6 +190,7 @@ api.route("/organization-members", organizationMembersRoutes);
 api.route("/organizations", organizationsRoutes);
 api.route("/invitations", invitationRoutes);
 api.route("/orgs/:orgId/invitations", orgInvitationsRoutes);
+api.route("/billing", billingRoutes);
 
 app.route("/v1", api);
 

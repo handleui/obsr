@@ -61,4 +61,9 @@ export interface Env {
     tag: string;
     timestamp: string;
   };
+
+  // Polar billing
+  POLAR_ACCESS_TOKEN?: string;
+  POLAR_ORGANIZATION_ID?: string;
+  POLAR_WEBHOOK_SECRET?: string;
 }

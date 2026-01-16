@@ -11,6 +11,7 @@
   "dependencies": {
     "@detent/ui": "*",
     "@logtail/next": "^0.3.1",
+    "@polar-sh/nextjs": "^0.9.3",
     "@sentry/nextjs": "^10.33.0",
     "@workos-inc/node": "^7.81.0",
     "jose": "^6.1.3",

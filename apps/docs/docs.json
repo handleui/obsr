@@ -1,10 +1,10 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "maple",
+  "theme": "palm",
   "name": "Detent Docs",
   "colors": {
-    "primary": "#F58514",
-    "light": "#F58514"
+    "primary": "#000000",
+    "light": "#ffffff"
   },
   "appearance": {
     "default": "light"
@@ -89,7 +89,7 @@
   },
   "background": {
     "color": {
-      "light": "#ffffff",
+      "light": "#F6F6F6",
       "dark": "#000000"
     }
   },

@@ -182,10 +182,25 @@ export const bulkStoreRunsAndErrors = async (
         ruleId: string | null;
         source: string | null;
         stackTrace: string | null;
+        suggestions: string[] | null;
         hint: string | null;
+        codeSnippet: {
+          lines: string[];
+          startLine: number;
+          errorLine: number;
+          language: string;
+        } | null;
         workflowJob: string | null;
         workflowStep: string | null;
         workflowAction: string | null;
+        unknownPattern: boolean | null;
+        lineKnown: boolean | null;
+        columnKnown: boolean | null;
+        messageTruncated: boolean | null;
+        stackTraceTruncated: boolean | null;
+        exitCode: number | null;
+        isInfrastructure: boolean | null;
+        possiblyTestOutput: boolean | null;
       }> = [];
 
       for (const data of preparedRuns) {
@@ -207,7 +222,9 @@ export const bulkStoreRunsAndErrors = async (
               error.stackTrace,
               MAX_STACK_TRACE_LENGTH
             ),
+            suggestions: error.suggestions ?? null,
             hint: truncateString(error.hint, MAX_ERROR_MESSAGE_LENGTH),
+            codeSnippet: error.codeSnippet ?? null,
             workflowJob:
               truncateString(error.workflowJob, MAX_WORKFLOW_NAME_LENGTH) ??
               data.runName,
@@ -219,6 +236,14 @@ export const bulkStoreRunsAndErrors = async (
               error.workflowAction,
               MAX_WORKFLOW_NAME_LENGTH
             ),
+            unknownPattern: error.unknownPattern ?? null,
+            lineKnown: error.lineKnown ?? null,
+            columnKnown: error.columnKnown ?? null,
+            messageTruncated: error.messageTruncated ?? null,
+            stackTraceTruncated: error.stackTraceTruncated ?? null,
+            exitCode: error.exitCode ?? null,
+            isInfrastructure: error.isInfrastructure ?? null,
+            possiblyTestOutput: error.possiblyTestOutput ?? null,
           });
         }
       }

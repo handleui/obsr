@@ -5,13 +5,12 @@ export { Client } from "./client.js";
 
 // Healing loop
 export { createConfig, HealLoop } from "./loop.js";
-
+// Preflight module
+export * from "./preflight/index.js";
 // Pricing
 export { calculateCost } from "./pricing.js";
-
 // Prompt module
 export * from "./prompt/index.js";
-
 // Tools module
 export * from "./tools/index.js";
 

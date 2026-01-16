@@ -18,7 +18,7 @@ export type { ParserContext } from "../lib/sentry";
 // Import for local use
 import type { ParserContext } from "../lib/sentry";
 
-// Interface expected by webhooks.ts (matches the existing definition there)
+// Interface expected by webhooks.ts - mirrors ExtractedError from @detent/parser
 export interface ParsedError {
   filePath?: string;
   line?: number;
@@ -37,6 +37,23 @@ export interface ParsedError {
   unknownPattern?: boolean;
   /** True if error may be test output noise (vitest/jest progress, etc.) */
   possiblyTestOutput?: boolean;
+  /** Full suggestions array from parser */
+  suggestions?: string[];
+  /** Code snippet with surrounding context */
+  codeSnippet?: {
+    lines: string[];
+    startLine: number;
+    errorLine: number;
+    language: string;
+  };
+  /** Confidence flags */
+  lineKnown?: boolean;
+  columnKnown?: boolean;
+  messageTruncated?: boolean;
+  stackTraceTruncated?: boolean;
+  /** Infrastructure error context */
+  exitCode?: number;
+  isInfrastructure?: boolean;
 }
 
 export interface ParseMetadata {
@@ -89,12 +106,27 @@ const mapToParsedError = (error: ExtractedError): ParsedError => ({
   ruleId: error.ruleId,
   source: error.source,
   stackTrace: error.stackTrace,
-  hint: error.suggestions?.[0], // Use first suggestion as hint
+  hint: error.suggestions?.[0],
+  suggestions: error.suggestions ? [...error.suggestions] : undefined,
+  codeSnippet: error.codeSnippet
+    ? {
+        lines: [...error.codeSnippet.lines],
+        startLine: error.codeSnippet.startLine,
+        errorLine: error.codeSnippet.errorLine,
+        language: error.codeSnippet.language,
+      }
+    : undefined,
   workflowJob: error.workflowJob ?? error.workflowContext?.job,
   workflowStep: error.workflowContext?.step,
   workflowAction: error.workflowContext?.action,
   unknownPattern: error.unknownPattern,
   possiblyTestOutput: error.possiblyTestOutput,
+  lineKnown: error.lineKnown,
+  columnKnown: error.columnKnown,
+  messageTruncated: error.messageTruncated,
+  stackTraceTruncated: error.stackTraceTruncated,
+  exitCode: error.exitCode,
+  isInfrastructure: error.isInfrastructure,
 });
 
 // Generate a technical fallback error when parsing finds nothing

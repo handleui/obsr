@@ -154,7 +154,15 @@ app.get("/", async (c) => {
               source: runErrors.source,
               ruleId: runErrors.ruleId,
               hint: runErrors.hint,
+              suggestions: runErrors.suggestions,
+              stackTrace: runErrors.stackTrace,
+              codeSnippet: runErrors.codeSnippet,
               workflowJob: runErrors.workflowJob,
+              lineKnown: runErrors.lineKnown,
+              columnKnown: runErrors.columnKnown,
+              unknownPattern: runErrors.unknownPattern,
+              isInfrastructure: runErrors.isInfrastructure,
+              exitCode: runErrors.exitCode,
             })
             .from(runErrors)
             .where(inArray(runErrors.runId, runIds))
@@ -184,7 +192,15 @@ app.get("/", async (c) => {
         source: e.source,
         ruleId: e.ruleId,
         hint: e.hint,
+        suggestions: e.suggestions,
+        stackTrace: e.stackTrace,
+        codeSnippet: e.codeSnippet,
         workflowJob: e.workflowJob,
+        lineKnown: e.lineKnown,
+        columnKnown: e.columnKnown,
+        unknownPattern: e.unknownPattern,
+        isInfrastructure: e.isInfrastructure,
+        exitCode: e.exitCode,
       })),
     });
   } finally {

@@ -34,6 +34,10 @@ TOOLS:
 - run_check: Verify fixes by category (go-lint, go-test, ts-lint, etc.)
 - run_command: Run specific whitelisted commands
 
+HINTS:
+When errors include HINTS, use them as guidance but verify they apply to the specific context.
+Hints provide common fix patterns - adapt them to the actual code structure.
+
 CRITICAL RULES:
 - ALWAYS read a file before editing it
 - ALWAYS verify after editing

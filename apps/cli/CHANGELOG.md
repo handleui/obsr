@@ -1,5 +1,14 @@
 # @detent/cli
 
+## 0.9.0
+
+### Minor Changes
+
+- 03bd513: Redesign `dt link` command to mirror GitHub's repository structure.
+  Linking now verifies the project exists in Detent via the GitHub App installation
+  and stores project-level details (projectId, projectHandle) alongside org info.
+  Simplified status and unlink commands with cleaner output formatting.
+
 ## 0.8.2
 
 ### Patch Changes

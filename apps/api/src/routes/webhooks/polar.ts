@@ -44,6 +44,12 @@ interface WebhookHeaders {
 // ============================================================================
 // Signature Verification (Standard Webhooks Spec)
 // ============================================================================
+//
+// NOTE: We implement signature verification manually instead of using the SDK's
+// `validateEvent` from `@polar-sh/sdk/webhooks` because the SDK uses Node.js
+// `Buffer` API which is not available in Cloudflare Workers. This implementation
+// uses Web Crypto API (`crypto.subtle`) which is Worker-compatible.
+// See: https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md
 
 // Extract the raw secret from whsec_ prefixed secret
 const extractSecret = (secret: string): string => {

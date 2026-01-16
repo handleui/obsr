@@ -1,5 +1,6 @@
 import type { Polar } from "@polar-sh/sdk";
 import { Polar as PolarClient } from "@polar-sh/sdk";
+import { ResourceNotFound } from "@polar-sh/sdk/models/errors/resourcenotfound.js";
 import type { Env } from "../types/env.js";
 
 // ============================================================================
@@ -103,6 +104,42 @@ export const ingestUsageEvents = async (
 };
 
 // ============================================================================
+// Subscription Management
+// ============================================================================
+
+// Cancel all active subscriptions for a customer (at period end)
+export const cancelCustomerSubscriptions = async (
+  polar: Polar,
+  polarOrgId: string,
+  customerId: string
+): Promise<number> => {
+  // List active subscriptions for this customer
+  const subscriptions = await polar.subscriptions.list({
+    organizationId: polarOrgId,
+    customerId,
+    active: true,
+  });
+
+  let canceledCount = 0;
+  for (const sub of subscriptions.result.items) {
+    try {
+      await polar.subscriptions.update({
+        id: sub.id,
+        subscriptionUpdate: {
+          cancelAtPeriodEnd: true,
+        },
+      });
+      canceledCount++;
+    } catch (error) {
+      // Log but continue - subscription may already be canceled
+      console.warn(`[polar] Failed to cancel subscription ${sub.id}:`, error);
+    }
+  }
+
+  return canceledCount;
+};
+
+// ============================================================================
 // Customer Portal
 // ============================================================================
 
@@ -112,4 +149,53 @@ export const createCustomerPortalSession = async (
 ): Promise<string> => {
   const session = await polar.customerSessions.create({ customerId });
   return session.customerPortalUrl;
+};
+
+// ============================================================================
+// Customer State (for billing/entitlement checks)
+// ============================================================================
+
+interface CustomerStateMeter {
+  meterId: string;
+  consumedUnits: number;
+  creditedUnits: number;
+  balance: number;
+}
+
+interface CustomerStateSubscription {
+  id: string;
+  status: string;
+}
+
+export interface CustomerState {
+  activeSubscriptions: CustomerStateSubscription[];
+  activeMeters: CustomerStateMeter[];
+}
+
+// Get customer state by external ID (detent org ID) - includes subscriptions and meter balances
+export const getCustomerStateByExternalId = async (
+  polar: Polar,
+  externalId: string
+): Promise<CustomerState | null> => {
+  try {
+    const state = await polar.customers.getStateExternal({ externalId });
+    return {
+      activeSubscriptions: (state.activeSubscriptions ?? []).map((s) => ({
+        id: s.id,
+        status: s.status,
+      })),
+      activeMeters: (state.activeMeters ?? []).map((m) => ({
+        meterId: m.meterId,
+        consumedUnits: m.consumedUnits,
+        creditedUnits: m.creditedUnits,
+        balance: m.balance,
+      })),
+    };
+  } catch (error) {
+    // Customer not found in Polar - use SDK typed error for reliable detection
+    if (error instanceof ResourceNotFound) {
+      return null;
+    }
+    throw error;
+  }
 };

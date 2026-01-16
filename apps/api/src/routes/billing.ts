@@ -7,7 +7,7 @@ import {
   type OrgAccessContext,
   requireRole,
 } from "../middleware/github-org-access";
-import { getUsageSummary } from "../services/billing";
+import { getCreditUsageSummary, getUsageSummary } from "../services/billing";
 import {
   createCustomerPortalSession,
   createPolarClient,
@@ -142,7 +142,7 @@ app.post(
   }
 );
 
-// GET /billing/:orgId/usage - Get usage summary
+// GET /billing/:orgId/usage - Get usage summary (run stats)
 // SECURITY: Any org member can view usage
 app.get("/:orgId/usage", githubOrgAccessMiddleware, async (c) => {
   const orgAccess = c.get("orgAccess") as OrgAccessContext;
@@ -154,6 +154,21 @@ app.get("/:orgId/usage", githubOrgAccessMiddleware, async (c) => {
   } catch (error) {
     console.error(`${LOG_PREFIX} Failed to get usage summary:`, error);
     return c.json({ error: "Failed to get usage" }, 500);
+  }
+});
+
+// GET /billing/:orgId/credits - Get credit usage breakdown (AI vs sandbox)
+// SECURITY: Any org member can view credits
+app.get("/:orgId/credits", githubOrgAccessMiddleware, async (c) => {
+  const orgAccess = c.get("orgAccess") as OrgAccessContext;
+  const { organization } = orgAccess;
+
+  try {
+    const summary = await getCreditUsageSummary(c.env, organization.id);
+    return c.json(summary);
+  } catch (error) {
+    console.error(`${LOG_PREFIX} Failed to get credit usage:`, error);
+    return c.json({ error: "Failed to get credits" }, 500);
   }
 });
 

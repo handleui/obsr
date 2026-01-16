@@ -369,6 +369,46 @@ export const handleInstallationEvent = async (
       }
 
       case "deleted": {
+        // Get org with polarCustomerId before soft-deleting
+        const orgToDelete = await db
+          .select({
+            id: organizations.id,
+            polarCustomerId: organizations.polarCustomerId,
+          })
+          .from(organizations)
+          .where(
+            eq(organizations.providerInstallationId, String(installation.id))
+          )
+          .limit(1);
+
+        // Cancel Polar subscriptions if customer exists (fire-and-forget)
+        if (orgToDelete[0]?.polarCustomerId && c.env.POLAR_ACCESS_TOKEN) {
+          const {
+            cancelCustomerSubscriptions,
+            createPolarClient,
+            getPolarOrgId,
+          } = await import("../../../services/polar");
+
+          const polar = createPolarClient(c.env);
+          const polarOrgId = getPolarOrgId(c.env);
+          cancelCustomerSubscriptions(
+            polar,
+            polarOrgId,
+            orgToDelete[0].polarCustomerId
+          )
+            .then((count) => {
+              console.log(
+                `[installation] Canceled ${count} Polar subscription(s) for org ${orgToDelete[0]?.id}`
+              );
+            })
+            .catch((error) => {
+              console.error(
+                "[installation] Failed to cancel Polar subscriptions:",
+                error
+              );
+            });
+        }
+
         await db
           .update(organizations)
           .set({ deletedAt: new Date(), updatedAt: new Date() })

@@ -1,8 +1,14 @@
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK official pattern
+import * as Sentry from "@sentry/cloudflare";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { organizations, projects, runs, usageEvents } from "../db/schema";
 import type { Env } from "../types/env";
-import { createPolarClient, ingestUsageEvents } from "./polar";
+import {
+  createPolarClient,
+  getCustomerStateByExternalId,
+  ingestUsageEvents,
+} from "./polar";
 
 // ============================================================================
 // Constants
@@ -185,7 +191,40 @@ export const recordUsage = async (
         }
       })
       .catch((error) => {
-        console.error(`${LOG_PREFIX} Failed to ingest usage to Polar:`, error);
+        // Structured log for log aggregators (Cloudflare Logpush, etc.)
+        // Event persists locally with polarIngested=false for later retry via retryFailedPolarIngestions
+        const errorType =
+          error instanceof Error ? error.constructor.name : "UnknownError";
+        console.error(
+          JSON.stringify({
+            level: "error",
+            service: "billing",
+            operation: "polar_ingestion",
+            orgId,
+            eventId,
+            usageType: usage.type,
+            errorType,
+            message: error instanceof Error ? error.message : String(error),
+            recoverable: true,
+          })
+        );
+
+        // Track in Sentry for alerting on frequent failures
+        Sentry.withScope((scope) => {
+          scope.setTag("billing.operation", "polar_ingestion");
+          scope.setTag("billing.org_id", orgId);
+          scope.setTag("billing.usage_type", usage.type);
+          scope.setTag("billing.recoverable", "true");
+          scope.setLevel("warning");
+          // Aggregate all ingestion failures together for systemic visibility
+          scope.setFingerprint(["billing", "polar_ingestion_failure"]);
+          scope.setContext("usage_event", {
+            eventId,
+            usageType: usage.type,
+            costUSD: usage.costUSD,
+          });
+          Sentry.captureException(error);
+        });
       });
   } finally {
     await client.end();
@@ -215,6 +254,7 @@ export const canRunHeal = async (
   env: Env,
   orgId: string
 ): Promise<BillingCheckResult> => {
+  // If Polar not configured, allow all (dev mode)
   if (!env.POLAR_ACCESS_TOKEN) {
     return { allowed: true };
   }
@@ -229,8 +269,54 @@ export const canRunHeal = async (
       return { allowed: false, reason: "Organization not found" };
     }
 
-    // TODO: Implement actual billing checks when Polar subscription status is needed
-    // For now, all orgs with valid config are allowed
+    // Check customer state in Polar for subscription/meter status
+    const polar = createPolarClient(env);
+    const customerState = await getCustomerStateByExternalId(polar, orgId);
+
+    // Customer not found in Polar - not subscribed yet
+    if (!customerState) {
+      return {
+        allowed: false,
+        reason: "No active subscription. Please subscribe to use healing.",
+      };
+    }
+
+    // Check for active subscription
+    const hasActiveSubscription = customerState.activeSubscriptions.some(
+      (sub) => sub.status === "active"
+    );
+    if (hasActiveSubscription) {
+      return { allowed: true };
+    }
+
+    // Check meter balance (for metered/credit-based plans)
+    const hasCredits = customerState.activeMeters.some(
+      (meter) => meter.balance > 0
+    );
+    if (hasCredits) {
+      return { allowed: true };
+    }
+
+    // No active subscription or credits
+    return {
+      allowed: false,
+      reason: "No credits remaining. Please add more credits to continue.",
+    };
+  } catch (error) {
+    // Log error but don't block on Polar API issues
+    console.error(`${LOG_PREFIX} Failed to check billing status:`, error);
+
+    // Alert on Polar API failures - fail-open allows unbilled usage during outages
+    Sentry.withScope((scope) => {
+      scope.setTag("billing.fail_open", "true");
+      scope.setTag("billing.org_id", orgId);
+      scope.setLevel("warning");
+      // Aggregate all Polar outages together for visibility into systemic issues
+      scope.setFingerprint(["billing", "polar_api_failure"]);
+      Sentry.captureException(error);
+    });
+
+    // Fail open - allow healing if we can't reach Polar
     return { allowed: true };
   } finally {
     await client.end();

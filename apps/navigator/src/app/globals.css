@@ -1,2 +1,12 @@
 @import "tailwindcss";
 @source "../../node_modules/@detent/ui/src";
+
+@theme inline {
+  --font-sans: var(--font-sans);
+}
+
+@layer base {
+  body {
+    letter-spacing: -0.03em;
+  }
+}

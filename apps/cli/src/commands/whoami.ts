@@ -35,7 +35,7 @@ const displayTokenClaims = (accessToken: string): void => {
     const expiry = claims.exp
       ? new Date(claims.exp * 1000).toISOString()
       : "N/A";
-    const apiUrl = process.env.DETENT_API_URL ?? "https://api.detent.sh";
+    const apiUrl = process.env.DETENT_API_URL ?? "https://backend.detent.sh";
 
     console.log("Token claims:");
     console.log(`  iss: ${claims.iss}`);

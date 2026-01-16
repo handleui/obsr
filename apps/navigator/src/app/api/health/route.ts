@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 // Health check endpoint for uptime monitoring (Better Stack, OpenStatus, etc.)
 // Verifies Navigator's direct dependencies, not cross-service connectivity.
-// API health is monitored separately via api.detent.sh/health to avoid
+// API health is monitored separately via backend.detent.sh/health to avoid
 // cascading cold start failures in serverless environments.
 
 // Timeout constants

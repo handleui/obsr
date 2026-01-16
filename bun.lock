@@ -20,7 +20,7 @@
     },
     "apps/api": {
       "name": "@detent/api",
-      "version": "0.11.0",
+      "version": "0.12.1",
       "dependencies": {
         "@detent/healing": "*",
         "@detent/parser": "*",
@@ -47,7 +47,7 @@
     },
     "apps/cli": {
       "name": "@detent/cli",
-      "version": "0.8.0",
+      "version": "0.8.1",
       "bin": {
         "dt": "./dist/index.js",
       },
@@ -162,7 +162,7 @@
     },
     "packages/parser": {
       "name": "@detent/parser",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "devDependencies": {
         "@detent/typescript-config": "*",
         "@types/node": "^25.0.3",

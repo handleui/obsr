@@ -102,5 +102,5 @@ Biome handles all standard linting. These are project-specific deviations:
 ## Production
 
 - **URL**: `detent.sh`
-- **API**: `api.detent.sh`
+- **API**: `backend.detent.sh`
 - **Auth**: `navigator.detent.sh`

@@ -1,0 +1,103 @@
+export interface GitHubServiceConfig {
+  appId: string;
+  privateKey: string;
+}
+
+export interface RateLimitInfo {
+  limit: number;
+  remaining: number;
+  reset: Date;
+  isExceeded: boolean;
+}
+
+export interface InstallationTokenResponse {
+  token: string;
+  expires_at: string;
+}
+
+export interface WorkflowRunResponse {
+  pull_requests: Array<{ number: number }>;
+}
+
+export interface GitTreeItem {
+  path: string;
+  mode: "100644";
+  type: "blob";
+  content: string;
+}
+
+export interface CreateTreeResponse {
+  sha: string;
+}
+
+export interface CreateCommitResponse {
+  sha: string;
+}
+
+export interface RefResponse {
+  object: { sha: string };
+}
+
+export interface InstallationInfo {
+  id: number;
+  account: {
+    id: number;
+    login: string;
+    type: "Organization" | "User";
+    avatar_url?: string;
+  };
+  suspended_at: string | null;
+}
+
+export interface InstallationReposResponse {
+  total_count: number;
+  repositories: Array<{
+    id: number;
+    name: string;
+    full_name: string;
+    private: boolean;
+    default_branch: string;
+  }>;
+}
+
+export interface WorkflowRunsResponse {
+  workflow_runs: Array<{
+    id: number;
+    name: string;
+    status: string;
+    conclusion: string | null;
+    head_branch: string;
+    run_attempt: number;
+    run_started_at: string | null;
+    event: string;
+  }>;
+}
+
+export interface CheckRunResponse {
+  id: number;
+  html_url: string;
+}
+
+export interface CommentResponse {
+  id: number;
+  html_url: string;
+}
+
+export interface CheckRunAnnotation {
+  path: string;
+  start_line: number;
+  end_line: number;
+  start_column?: number;
+  end_column?: number;
+  annotation_level: "notice" | "warning" | "failure";
+  message: string;
+  title?: string;
+  raw_details?: string;
+}
+
+export interface CheckRunOutput {
+  title: string;
+  summary: string;
+  text?: string;
+  annotations?: CheckRunAnnotation[];
+}

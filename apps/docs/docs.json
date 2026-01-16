@@ -2,6 +2,7 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "palm",
   "name": "Detent Docs",
+  "favicon": "/favicon.svg",
   "colors": {
     "primary": "#000000",
     "light": "#ffffff"

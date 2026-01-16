@@ -184,6 +184,7 @@ describe("auth routes", () => {
         github_username: "testuser",
         organizations_updated: 2,
         installer_orgs_linked: 0,
+        github_orgs_joined: 0,
       });
 
       // Verify database was updated

@@ -60,22 +60,14 @@ export const addCommand = defineCommand({
       process.exit(1);
     }
 
-    // Open browser to GitHub App install page
-    console.log("Opening GitHub to add an organization to Detent...\n");
+    // Open browser and wait for installation
+    console.log("Opening GitHub... (Ctrl+C to cancel)\n");
 
     try {
       await openBrowser(GITHUB_APP_INSTALL_URL);
-    } catch (error) {
-      console.error(
-        "Failed to open browser:",
-        error instanceof Error ? error.message : error
-      );
-      console.log("\nPlease open this URL in your browser:");
-      console.log(`  ${GITHUB_APP_INSTALL_URL}\n`);
+    } catch {
+      console.log(`Open this URL: ${GITHUB_APP_INSTALL_URL}\n`);
     }
-
-    // Poll for new organization
-    console.log("Waiting for installation... (Ctrl+C to cancel)\n");
 
     const startTime = Date.now();
 
@@ -112,16 +104,15 @@ export const addCommand = defineCommand({
           // Ignore project fetch errors
         }
 
-        const projectText =
+        const repoText =
           projectCount === 1 ? "1 repository" : `${projectCount} repositories`;
 
-        console.log(`✓ Added: ${org.organization_name} (${projectText})`);
+        console.log(`Connected gh/${org.github_org} with ${repoText}`);
         return;
       }
     }
 
     // Timeout reached
-    console.log("No new organization detected.");
-    console.log("Run 'dt org list' to check status.");
+    console.log("Timed out. Run `dt org list` to check status.");
   },
 });

@@ -12,6 +12,9 @@ import { organizationMembers, organizations } from "../db/schema";
 import { verifyGitHubMembership } from "../lib/github-membership";
 import type { Env } from "../types/env";
 
+// Regex for parsing GitHub Link header pagination
+const GITHUB_LINK_NEXT_REGEX = /<([^>]+)>;\s*rel="next"/;
+
 // GitHub API types
 interface GitHubOrg {
   id: number;
@@ -273,7 +276,10 @@ const linkInstallerOrganizations = async (
   const existingOrgIds = new Set(
     existingMemberships.map((m) => m.organizationId)
   );
-  const orgsToLink = installerOrgs.filter((org) => !existingOrgIds.has(org.id));
+  const orgsToLink = installerOrgs.filter(
+    (org) =>
+      !existingOrgIds.has(org.id) && org.settings?.allowAutoJoin !== false
+  );
 
   // Verify current GitHub membership before granting owner access
   // This prevents users who have left the org from claiming access
@@ -313,20 +319,171 @@ const linkInstallerOrganizations = async (
   const verifiedOrgs = verificationResults.filter(isVerifiedOrg);
 
   if (verifiedOrgs.length > 0) {
-    await db.insert(organizationMembers).values(
-      verifiedOrgs.map((org) => ({
-        id: crypto.randomUUID(),
-        organizationId: org.id,
-        userId,
-        role: "owner" as const,
-        providerUserId: githubUserId,
-        providerUsername: githubUsername,
-        providerLinkedAt: new Date(),
-      }))
-    );
+    const inserted = await db
+      .insert(organizationMembers)
+      .values(
+        verifiedOrgs.map((org) => ({
+          id: crypto.randomUUID(),
+          organizationId: org.id,
+          userId,
+          role: "owner" as const,
+          providerUserId: githubUserId,
+          providerUsername: githubUsername,
+          providerLinkedAt: new Date(),
+        }))
+      )
+      .onConflictDoNothing({
+        target: [
+          organizationMembers.organizationId,
+          organizationMembers.userId,
+        ],
+      })
+      .returning({ id: organizationMembers.id });
+    return inserted.length;
   }
 
-  return verifiedOrgs.length;
+  return 0;
+};
+
+/**
+ * Fetch all GitHub orgs for a user, handling pagination.
+ * GitHub paginates at 100 results per page.
+ */
+const fetchAllGitHubOrgs = async (
+  githubToken: string
+): Promise<{ id: number; login: string }[] | null> => {
+  const allOrgs: { id: number; login: string }[] = [];
+  let url: string | null = "https://api.github.com/user/orgs?per_page=100";
+
+  while (url) {
+    const response: Response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${githubToken}`,
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "Detent-API",
+      },
+    });
+
+    if (!response.ok) {
+      console.warn(
+        `[sync-identity] Failed to fetch GitHub orgs page: ${response.status}, fetched ${allOrgs.length} so far`
+      );
+      return allOrgs.length > 0 ? allOrgs : null;
+    }
+
+    const orgs = (await response.json()) as { id: number; login: string }[];
+    allOrgs.push(...orgs);
+
+    // Parse Link header for next page
+    const linkHeader: string | null = response.headers.get("link");
+    const nextMatch: RegExpMatchArray | null | undefined = linkHeader?.match(
+      GITHUB_LINK_NEXT_REGEX
+    );
+    url = nextMatch?.[1] ?? null;
+  }
+
+  return allOrgs;
+};
+
+/**
+ * Auto-join user to GitHub orgs where Detent is already installed.
+ * This allows non-installer admins/members to join existing orgs.
+ */
+const linkGitHubMemberOrganizations = async (
+  db: Database,
+  userId: string,
+  githubUserId: string,
+  githubUsername: string,
+  githubToken: string,
+  env: Env
+): Promise<number> => {
+  // 1. Fetch all user's GitHub orgs (with pagination)
+  const githubOrgs = await fetchAllGitHubOrgs(githubToken);
+  if (!githubOrgs || githubOrgs.length === 0) {
+    return 0;
+  }
+
+  // 2. Find installed Detent orgs matching these GitHub orgs
+  const githubOrgIds = githubOrgs.map((o) => String(o.id));
+  const detentOrgs = await db.query.organizations.findMany({
+    where: and(
+      eq(organizations.provider, "github"),
+      inArray(organizations.providerAccountId, githubOrgIds),
+      isNull(organizations.deletedAt)
+    ),
+  });
+  if (detentOrgs.length === 0) {
+    return 0;
+  }
+
+  // 3. Filter out orgs user already has membership in
+  const existingMemberships = await db.query.organizationMembers.findMany({
+    where: eq(organizationMembers.userId, userId),
+  });
+  const existingOrgIds = new Set(
+    existingMemberships.map((m) => m.organizationId)
+  );
+
+  const orgsToJoin = detentOrgs.filter(
+    (org) =>
+      !existingOrgIds.has(org.id) && org.settings?.allowAutoJoin !== false
+  );
+  if (orgsToJoin.length === 0) {
+    return 0;
+  }
+
+  // 4. Verify membership & create records
+  let joined = 0;
+  for (const org of orgsToJoin) {
+    if (!(org.providerInstallationId && org.providerAccountLogin)) {
+      continue;
+    }
+
+    try {
+      const membership = await verifyGitHubMembership(
+        githubUsername,
+        org.providerAccountLogin,
+        org.providerInstallationId,
+        env
+      );
+      if (!membership.isMember) {
+        continue;
+      }
+
+      const role = membership.role === "admin" ? "admin" : "member";
+      const result = await db
+        .insert(organizationMembers)
+        .values({
+          id: crypto.randomUUID(),
+          organizationId: org.id,
+          userId,
+          role: role as "admin" | "member",
+          providerUserId: githubUserId,
+          providerUsername: githubUsername,
+          providerLinkedAt: new Date(),
+        })
+        .onConflictDoNothing({
+          target: [
+            organizationMembers.organizationId,
+            organizationMembers.userId,
+          ],
+        })
+        .returning({ id: organizationMembers.id });
+
+      if (result.length > 0) {
+        joined++;
+        console.log(
+          `[sync-identity] Auto-joined ${githubUsername} to ${org.slug} as ${role}`
+        );
+      }
+    } catch (error) {
+      console.warn(
+        `[sync-identity] Failed to verify/join ${githubUsername} to ${org.slug}:`,
+        error instanceof Error ? error.message : error
+      );
+    }
+  }
+  return joined;
 };
 
 /**
@@ -399,6 +556,19 @@ app.post("/sync-identity", async (c) => {
       c.env
     );
 
+    // Auto-join GitHub orgs where app is already installed (non-installer path)
+    let autoJoinedCount = 0;
+    if (providedGitHubToken && identity.username) {
+      autoJoinedCount = await linkGitHubMemberOrganizations(
+        db,
+        auth.userId,
+        identity.userId,
+        identity.username,
+        providedGitHubToken,
+        c.env
+      );
+    }
+
     return c.json({
       user_id: auth.userId,
       email: user.email,
@@ -409,6 +579,7 @@ app.post("/sync-identity", async (c) => {
       github_username: identity.username,
       organizations_updated: updatedMembers.length,
       installer_orgs_linked: autoLinkedCount,
+      github_orgs_joined: autoJoinedCount,
     });
   } finally {
     await client.end();
@@ -1101,15 +1272,18 @@ app.get("/organizations", async (c) => {
     });
 
     return c.json({
-      organizations: memberships.map((m) => ({
-        organization_id: m.organizationId,
-        organization_name: m.organization.name,
-        organization_slug: m.organization.slug,
-        github_org: m.organization.providerAccountLogin,
-        role: m.role,
-        github_linked: Boolean(m.providerUserId),
-        github_username: m.providerUsername,
-      })),
+      organizations: memberships
+        .filter((m) => m.organization.deletedAt === null)
+        .map((m) => ({
+          organization_id: m.organizationId,
+          organization_name: m.organization.name,
+          organization_slug: m.organization.slug,
+          github_org: m.organization.providerAccountLogin,
+          provider_account_type: m.organization.providerAccountType,
+          role: m.role,
+          github_linked: Boolean(m.providerUserId),
+          github_username: m.providerUsername,
+        })),
     });
   } finally {
     await client.end();

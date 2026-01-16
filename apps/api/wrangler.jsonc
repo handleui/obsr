@@ -7,7 +7,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "routes": [
     {
-      "pattern": "api.detent.sh",
+      "pattern": "backend.detent.sh",
       "custom_domain": true
     }
   ],

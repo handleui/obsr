@@ -1689,3 +1689,328 @@ describe("webhooks - installation_repositories (add/remove)", () => {
     expect(mockValues).not.toHaveBeenCalled();
   });
 });
+
+describe("webhooks - organization events", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockSelect.mockReturnValue({ from: mockFrom });
+    mockFrom.mockReturnValue({ where: mockWhere });
+    mockWhere.mockReturnValue({ limit: mockLimit });
+    mockLimit.mockResolvedValue([]);
+
+    mockUpdate.mockReturnValue({ set: mockSet });
+    mockSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+  });
+
+  it("updates organization login when GitHub org is renamed", async () => {
+    // Mock finding existing org
+    mockLimit.mockResolvedValueOnce([
+      {
+        id: "org-uuid-rename",
+        slug: "gh/old-org-name",
+        providerAccountLogin: "old-org-name",
+      },
+    ]);
+
+    const payload = {
+      action: "renamed",
+      organization: {
+        id: 12_345_678,
+        login: "new-org-name",
+        avatar_url: "https://avatars.example.com/u/12345678",
+      },
+      changes: {
+        login: {
+          from: "old-org-name",
+        },
+      },
+      installation: {
+        id: 99_999_999,
+      },
+    };
+
+    const res = await makeWebhookRequest("organization", payload);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json).toEqual({
+      message: "organization renamed",
+      organization_id: "org-uuid-rename",
+      old_login: "old-org-name",
+      new_login: "new-org-name",
+      old_slug: "gh/old-org-name",
+      new_slug: "gh/new-org-name",
+    });
+
+    expect(mockUpdate).toHaveBeenCalled();
+    expect(mockSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerAccountLogin: "new-org-name",
+        slug: "gh/new-org-name",
+        name: "new-org-name",
+      })
+    );
+  });
+
+  it("ignores organization event without installation ID", async () => {
+    const payload = {
+      action: "renamed",
+      organization: {
+        id: 12_345_678,
+        login: "some-org",
+      },
+      changes: {
+        login: { from: "old-name" },
+      },
+      // No installation field
+    };
+
+    const res = await makeWebhookRequest("organization", payload);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json).toEqual({
+      message: "ignored",
+      reason: "no installation",
+    });
+  });
+
+  it("ignores non-renamed organization actions", async () => {
+    const payload = {
+      action: "member_added",
+      organization: {
+        id: 12_345_678,
+        login: "some-org",
+      },
+      installation: {
+        id: 99_999_999,
+      },
+    };
+
+    const res = await makeWebhookRequest("organization", payload);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json).toEqual({
+      message: "ignored",
+      action: "member_added",
+    });
+  });
+});
+
+describe("webhooks - issue_comment events", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("ignores non-created comment actions", async () => {
+    const payload = {
+      action: "edited",
+      comment: {
+        body: "@detent help",
+        user: { type: "User", login: "test-user" },
+      },
+      issue: {
+        number: 123,
+        pull_request: {},
+      },
+      repository: {
+        full_name: "test-org/test-repo",
+        owner: { login: "test-org" },
+        name: "test-repo",
+      },
+      installation: { id: 12_345_678 },
+    };
+
+    const res = await makeWebhookRequest("issue_comment", payload);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json).toEqual({
+      message: "ignored",
+      reason: "not created",
+    });
+  });
+
+  it("ignores comments on issues (not PRs)", async () => {
+    const payload = {
+      action: "created",
+      comment: {
+        body: "@detent help",
+        user: { type: "User", login: "test-user" },
+      },
+      issue: {
+        number: 123,
+        // No pull_request field = this is an issue, not a PR
+      },
+      repository: {
+        full_name: "test-org/test-repo",
+        owner: { login: "test-org" },
+        name: "test-repo",
+      },
+      installation: { id: 12_345_678 },
+    };
+
+    const res = await makeWebhookRequest("issue_comment", payload);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json).toEqual({
+      message: "ignored",
+      reason: "not a pull request",
+    });
+  });
+
+  it("ignores bot comments", async () => {
+    const payload = {
+      action: "created",
+      comment: {
+        body: "@detent/cli package was updated",
+        user: { type: "Bot", login: "changeset-bot" },
+      },
+      issue: {
+        number: 123,
+        pull_request: {},
+      },
+      repository: {
+        full_name: "test-org/test-repo",
+        owner: { login: "test-org" },
+        name: "test-repo",
+      },
+      installation: { id: 12_345_678 },
+    };
+
+    const res = await makeWebhookRequest("issue_comment", payload);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json).toEqual({
+      message: "ignored",
+      reason: "bot comment",
+    });
+  });
+
+  it("ignores comments without @detent mention", async () => {
+    const payload = {
+      action: "created",
+      comment: {
+        body: "This is a regular comment without any mention",
+        user: { type: "User", login: "test-user" },
+      },
+      issue: {
+        number: 123,
+        pull_request: {},
+      },
+      repository: {
+        full_name: "test-org/test-repo",
+        owner: { login: "test-org" },
+        name: "test-repo",
+      },
+      installation: { id: 12_345_678 },
+    };
+
+    const res = await makeWebhookRequest("issue_comment", payload);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json).toEqual({
+      message: "ignored",
+      reason: "no @detent mention",
+    });
+  });
+});
+
+describe("webhooks - check_suite events", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("ignores non-requested check_suite actions", async () => {
+    const payload = {
+      action: "completed",
+      check_suite: {
+        head_sha: "abc123def456",
+        head_branch: "feature-branch",
+        pull_requests: [{ number: 42 }],
+      },
+      repository: {
+        full_name: "test-org/test-repo",
+        owner: { login: "test-org" },
+        name: "test-repo",
+      },
+      installation: { id: 12_345_678 },
+    };
+
+    const res = await makeWebhookRequest("check_suite", payload);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json).toEqual({
+      message: "ignored",
+      action: "completed",
+    });
+  });
+
+  it("skips check_suite without PR", async () => {
+    const payload = {
+      action: "requested",
+      check_suite: {
+        head_sha: "abc123def456",
+        head_branch: "main",
+        pull_requests: [], // No PR associated
+      },
+      repository: {
+        full_name: "test-org/test-repo",
+        owner: { login: "test-org" },
+        name: "test-repo",
+      },
+      installation: { id: 12_345_678 },
+    };
+
+    const res = await makeWebhookRequest("check_suite", payload);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json).toEqual({
+      message: "skipped",
+      reason: "no_pr",
+      branch: "main",
+    });
+  });
+});
+
+describe("webhooks - workflow_run events", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("ignores non-handled workflow_run actions", async () => {
+    const payload = {
+      action: "requested",
+      workflow_run: {
+        id: 12_345,
+        name: "CI",
+        head_sha: "abc123",
+        head_branch: "feature",
+        conclusion: null,
+        pull_requests: [],
+      },
+      repository: {
+        full_name: "test-org/test-repo",
+        owner: { login: "test-org" },
+        name: "test-repo",
+      },
+      installation: { id: 12_345_678 },
+    };
+
+    const res = await makeWebhookRequest("workflow_run", payload);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json).toEqual({
+      message: "ignored",
+      reason: "action requested not handled",
+    });
+  });
+});

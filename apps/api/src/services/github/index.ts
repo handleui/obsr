@@ -1,329 +1,39 @@
-import type { Env } from "../types/env";
-import type { WorkflowRunSummary } from "./github/workflow-runs";
-import { evaluateWorkflowRuns } from "./github/workflow-runs";
+import type { Env } from "../../types/env";
+import type { LogExtractionResult } from "../log-extractor";
+import { blobToArrayBuffer, extractLogsFromZip } from "../log-extractor";
+import { generateAppJwt } from "./jwt";
 import {
-  blobToArrayBuffer,
-  extractLogsFromZip,
-  type LogExtractionResult,
-} from "./log-extractor";
-
-// GitHub App API service
-// Handles: JWT generation, installation tokens, API calls
-
-const GITHUB_API = "https://api.github.com";
-
-// Top-level regex constants for performance
-const PEM_BEGIN_RSA = /-----BEGIN RSA PRIVATE KEY-----/;
-const PEM_END_RSA = /-----END RSA PRIVATE KEY-----/;
-const PEM_BEGIN_PKCS8 = /-----BEGIN PRIVATE KEY-----/;
-const PEM_END_PKCS8 = /-----END PRIVATE KEY-----/;
-const WHITESPACE = /\s/g;
-const BASE64_TRAILING_EQUALS = /=+$/;
-
-// Validation patterns for GitHub identifiers
-// Owner/repo names: alphanumeric, hyphen, underscore, period (not starting with period)
-const GITHUB_NAME_PATTERN = /^[a-zA-Z0-9][-a-zA-Z0-9._]*$/;
-// Branch names: more permissive but no path traversal
-const GITHUB_BRANCH_PATTERN = /^[a-zA-Z0-9][-a-zA-Z0-9._/]*$/;
-// Git SHA: 40-character hexadecimal (full SHA) or 7+ character short SHA
-const GIT_SHA_PATTERN = /^[a-fA-F0-9]{7,40}$/;
-// Full SHA only (exactly 40 characters) - required for commits API
-const GIT_FULL_SHA_PATTERN = /^[a-fA-F0-9]{40}$/;
-
-const isValidGitHubName = (name: string): boolean => {
-  return (
-    name.length > 0 &&
-    name.length <= 100 &&
-    GITHUB_NAME_PATTERN.test(name) &&
-    !name.includes("..")
-  );
-};
-
-const isValidBranchName = (branch: string): boolean => {
-  return (
-    branch.length > 0 &&
-    branch.length <= 255 &&
-    GITHUB_BRANCH_PATTERN.test(branch) &&
-    !branch.includes("..") &&
-    !branch.startsWith("/") &&
-    !branch.endsWith("/")
-  );
-};
-
-const isValidGitSha = (sha: string): boolean => {
-  return GIT_SHA_PATTERN.test(sha);
-};
-
-// Rate limit information extracted from GitHub API response headers
-interface RateLimitInfo {
-  limit: number;
-  remaining: number;
-  reset: Date;
-  isExceeded: boolean;
-}
-
-// Parse rate limit headers from GitHub API response
-const parseRateLimitHeaders = (response: Response): RateLimitInfo | null => {
-  const limit = response.headers.get("x-ratelimit-limit");
-  const remaining = response.headers.get("x-ratelimit-remaining");
-  const reset = response.headers.get("x-ratelimit-reset");
-
-  if (!(limit && remaining && reset)) {
-    return null;
-  }
-
-  const resetTimestamp = Number.parseInt(reset, 10) * 1000; // Convert to milliseconds
-  return {
-    limit: Number.parseInt(limit, 10),
-    remaining: Number.parseInt(remaining, 10),
-    reset: new Date(resetTimestamp),
-    isExceeded: Number.parseInt(remaining, 10) === 0,
-  };
-};
-
-// Log rate limit warning if remaining requests are low
-const logRateLimitWarning = (
-  rateLimitInfo: RateLimitInfo | null,
-  context: string
-): void => {
-  if (!rateLimitInfo) {
-    return;
-  }
-
-  const { remaining, limit, reset } = rateLimitInfo;
-  const percentRemaining = (remaining / limit) * 100;
-
-  // Warn if less than 10% of rate limit remaining
-  if (percentRemaining < 10) {
-    console.warn(
-      `[github] Rate limit warning for ${context}: ${remaining}/${limit} remaining (resets at ${reset.toISOString()})`
-    );
-  }
-};
-
-// Create enhanced error with rate limit context
-const createRateLimitError = (
-  response: Response,
-  rateLimitInfo: RateLimitInfo | null,
-  context: string
-): Error => {
-  if (rateLimitInfo?.isExceeded) {
-    const retryAfter = response.headers.get("retry-after");
-    const resetTime = rateLimitInfo.reset.toISOString();
-    return new Error(
-      `Rate limit exceeded for ${context}. ` +
-        `Resets at ${resetTime}` +
-        (retryAfter ? `. Retry after ${retryAfter}s` : "")
-    );
-  }
-  return new Error(`GitHub API error for ${context}: ${response.status}`);
-};
-
-// Common validation for owner/repo
-const validateOwnerRepo = (
-  owner: string,
-  repo: string,
-  context: string
-): void => {
-  if (!(isValidGitHubName(owner) && isValidGitHubName(repo))) {
-    throw new Error(`${context}: Invalid owner or repo name`);
-  }
-};
-
-// Common validation for git SHA
-const validateGitSha = (sha: string, context: string): void => {
-  if (!isValidGitSha(sha)) {
-    throw new Error(
-      `${context}: Invalid SHA format. Expected 7-40 character hex string`
-    );
-  }
-};
-
-// Handle common GitHub API error responses and throw appropriate errors
-const handleApiError = async (
-  response: Response,
-  rateLimitInfo: RateLimitInfo | null,
-  context: string,
-  errorMessages: { 404?: string; 422?: string }
-): Promise<never> => {
-  // Check for rate limit errors
-  if (
-    (response.status === 403 || response.status === 429) &&
-    rateLimitInfo?.isExceeded
-  ) {
-    throw createRateLimitError(response, rateLimitInfo, context);
-  }
-
-  const error = await response.text();
-
-  // Provide more specific error messages for common failures
-  if (response.status === 404 && errorMessages[404]) {
-    throw new Error(`${context}: ${errorMessages[404]}`);
-  }
-  if (response.status === 422 && errorMessages[422]) {
-    throw new Error(`${context}: ${errorMessages[422]} ${error}`);
-  }
-
-  throw new Error(
-    `${context}: API request failed - ${response.status} ${error}`
-  );
-};
-
-interface GitHubServiceConfig {
-  appId: string;
-  privateKey: string;
-}
-
-// Convert PEM to ArrayBuffer for Web Crypto API
-const pemToArrayBuffer = (pem: string): ArrayBuffer => {
-  const base64 = pem
-    .replace(PEM_BEGIN_RSA, "")
-    .replace(PEM_END_RSA, "")
-    .replace(PEM_BEGIN_PKCS8, "")
-    .replace(PEM_END_PKCS8, "")
-    .replace(WHITESPACE, "");
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
-};
-
-// Base64URL encode (JWT-safe)
-const base64UrlEncode = (data: ArrayBuffer | string): string => {
-  const bytes =
-    typeof data === "string" ? new TextEncoder().encode(data) : data;
-  const binary = Array.from(new Uint8Array(bytes))
-    .map((b) => String.fromCharCode(b))
-    .join("");
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(BASE64_TRAILING_EQUALS, "");
-};
-
-// Generate JWT for GitHub App authentication (RS256)
-const generateAppJwt = async (config: GitHubServiceConfig): Promise<string> => {
-  const now = Math.floor(Date.now() / 1000);
-
-  const header = { alg: "RS256", typ: "JWT" };
-  const payload = {
-    iat: now - 60, // 60 seconds in the past to account for clock drift
-    exp: now + 600, // 10 minutes from now (max allowed)
-    iss: config.appId,
-  };
-
-  const encodedHeader = base64UrlEncode(JSON.stringify(header));
-  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
-  const signingInput = `${encodedHeader}.${encodedPayload}`;
-
-  // Import the private key
-  const keyData = pemToArrayBuffer(config.privateKey);
-
-  // Try PKCS#8 first, fall back to PKCS#1
-  let privateKey: CryptoKey;
-  try {
-    privateKey = await crypto.subtle.importKey(
-      "pkcs8",
-      keyData,
-      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-      false,
-      ["sign"]
-    );
-  } catch {
-    // GitHub generates PKCS#1 keys, need to convert or use different format
-    throw new Error(
-      "Failed to import private key. Ensure it's in PKCS#8 format. " +
-        "Convert with: openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in key.pem -out key-pkcs8.pem"
-    );
-  }
-
-  // Sign the JWT
-  const signature = await crypto.subtle.sign(
-    "RSASSA-PKCS1-v1_5",
-    privateKey,
-    new TextEncoder().encode(signingInput)
-  );
-
-  return `${signingInput}.${base64UrlEncode(signature)}`;
-};
-
-// API response types
-interface InstallationTokenResponse {
-  token: string;
-  expires_at: string;
-}
-
-interface WorkflowRunResponse {
-  pull_requests: Array<{ number: number }>;
-}
-
-interface GitTreeItem {
-  path: string;
-  mode: "100644";
-  type: "blob";
-  content: string;
-}
-
-interface CreateTreeResponse {
-  sha: string;
-}
-
-interface CreateCommitResponse {
-  sha: string;
-}
-
-interface RefResponse {
-  object: { sha: string };
-}
-
-interface InstallationInfo {
-  id: number;
-  account: {
-    id: number;
-    login: string;
-    type: "Organization" | "User";
-    avatar_url?: string;
-  };
-  suspended_at: string | null;
-}
-
-interface InstallationReposResponse {
-  total_count: number;
-  repositories: Array<{
-    id: number;
-    name: string;
-    full_name: string;
-    private: boolean;
-    default_branch: string;
-  }>;
-}
-
-interface WorkflowRunsResponse {
-  workflow_runs: Array<{
-    id: number;
-    name: string;
-    status: string;
-    conclusion: string | null;
-    head_branch: string;
-    run_attempt: number;
-    run_started_at: string | null;
-    // Event that triggered the run (e.g., "pull_request", "push", "workflow_dispatch")
-    event: string;
-    // Note: GitHub doesn't have run_completed_at, we use receivedAt instead
-  }>;
-}
-
-interface CheckRunResponse {
-  id: number;
-  html_url: string;
-}
-
-interface CommentResponse {
-  id: number;
-  html_url: string;
-}
+  handleApiError,
+  logRateLimitWarning,
+  parseRateLimitHeaders,
+} from "./rate-limit";
+import type {
+  CheckRunOutput,
+  CheckRunResponse,
+  CommentResponse,
+  CreateCommitResponse,
+  CreateTreeResponse,
+  GitHubServiceConfig,
+  GitTreeItem,
+  InstallationInfo,
+  InstallationReposResponse,
+  InstallationTokenResponse,
+  RefResponse,
+  WorkflowRunResponse,
+  WorkflowRunsResponse,
+} from "./types";
+import {
+  GIT_FULL_SHA_PATTERN,
+  GITHUB_API,
+  isValidBranchName,
+  isValidGitHubName,
+  validateCommentId,
+  validateGitSha,
+  validateIssueNumber,
+  validateOwnerRepo,
+} from "./validation";
+import type { WorkflowRunSummary } from "./workflow-runs";
+import { evaluateWorkflowRuns } from "./workflow-runs";
 
 // Module-level cache for installation tokens (survives across function calls within isolate)
 const tokenCache = new Map<number, { token: string; expiresAt: number }>();
@@ -907,33 +617,6 @@ const createGitHubServiceInternal = (env: Env) => {
     return { id: data.id, htmlUrl: data.html_url };
   };
 
-  // GitHub Check Run Annotation
-  // See: https://docs.github.com/en/rest/checks/runs#update-a-check-run
-  //
-  // Annotation levels:
-  // - "failure": Blocks PR merging (if branch protection requires checks), shown as red X
-  // - "warning": Shows warning icon (yellow), does not block
-  // - "notice": Informational (blue info icon), does not block
-  interface CheckRunAnnotation {
-    path: string;
-    start_line: number;
-    end_line: number;
-    start_column?: number; // Column precision (same line only)
-    end_column?: number;
-    annotation_level: "notice" | "warning" | "failure";
-    message: string; // Max 64 KB
-    title?: string; // Max 255 chars
-    raw_details?: string; // Max 64 KB - additional context (stack traces, etc.)
-  }
-
-  // Check run output with optional detailed text and annotations
-  interface CheckRunOutput {
-    title: string;
-    summary: string;
-    text?: string;
-    annotations?: CheckRunAnnotation[];
-  }
-
   // PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}
   const updateCheckRun = async (
     token: string,
@@ -1022,9 +705,7 @@ const createGitHubServiceInternal = (env: Env) => {
 
     // Validate inputs
     validateOwnerRepo(owner, repo, context);
-    if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
-      throw new Error(`${context}: Invalid issue number`);
-    }
+    validateIssueNumber(issueNumber, context);
     if (!body || body.trim().length === 0) {
       throw new Error(`${context}: Comment body cannot be empty`);
     }
@@ -1085,9 +766,7 @@ const createGitHubServiceInternal = (env: Env) => {
 
     // Validate inputs
     validateOwnerRepo(owner, repo, context);
-    if (!Number.isInteger(commentId) || commentId <= 0) {
-      throw new Error(`${context}: Invalid comment ID`);
-    }
+    validateCommentId(commentId, context);
     if (!body || body.trim().length === 0) {
       throw new Error(`${context}: Comment body cannot be empty`);
     }

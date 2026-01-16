@@ -9,7 +9,7 @@ The Detent API enables programmatic access to CI management, healing, and organi
 
 <CodeGroup>
 ```bash Cloud
-https://api.detent.sh/v1
+https://backend.detent.sh/v1
 ```
 
 ```bash Self-Hosted
@@ -22,7 +22,7 @@ https://your-domain.com/v1
 All API requests require authentication via JWT bearer token from WorkOS.
 
 ```bash
-curl https://api.detent.sh/v1/projects \
+curl https://backend.detent.sh/v1/projects \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
@@ -107,7 +107,7 @@ Currently, the recommended way to interact with the API is via the CLI or direct
 ## Example: List Projects
 
 ```bash
-curl https://api.detent.sh/v1/projects?organization_id=YOUR_ORG_ID \
+curl https://backend.detent.sh/v1/projects?organization_id=YOUR_ORG_ID \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 

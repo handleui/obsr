@@ -91,7 +91,7 @@ For custom integrations:
 Include the JWT in the `Authorization` header:
 
 ```bash
-curl https://api.detent.sh/v1/projects \
+curl https://backend.detent.sh/v1/projects \
   -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIs..."
 ```
 
@@ -141,7 +141,7 @@ Users can link their GitHub/GitLab accounts to enable provider-specific features
 
 ```bash
 # Check linked accounts
-curl https://api.detent.sh/v1/auth/whoami \
+curl https://backend.detent.sh/v1/auth/whoami \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 

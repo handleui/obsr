@@ -9,7 +9,7 @@ export const VERIFICATION_CODE_LENGTH = 6;
  * Used for server-side API calls (e.g., invitation acceptance)
  */
 export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "https://api.detent.sh";
+  process.env.NEXT_PUBLIC_API_URL ?? "https://backend.detent.sh";
 
 export const COOKIE_NAMES = {
   session: "session",

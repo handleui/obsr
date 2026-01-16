@@ -14,7 +14,9 @@ const DashboardPage = async () => {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 bg-white">
-      <p className="text-zinc-600">{user?.firstName || user?.email}</p>
+      <p className="text-zinc-600">
+        {user?.firstName || user?.email}? How'd you get here?
+      </p>
       <div className="flex gap-3">
         {productId && (
           <Button asChild>

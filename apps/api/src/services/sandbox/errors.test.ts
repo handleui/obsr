@@ -331,13 +331,14 @@ describe("error wrapping in service methods", () => {
 
     const svc = createSandboxService(createMockEnv());
     const sbx = await svc.create();
-    await expect(svc.setTimeout(sbx as never, 60_000)).rejects.toThrow(
+    await expect(svc.setTimeout(sbx as never, 60)).rejects.toThrow(
       "Failed to set timeout: Invalid timeout"
     );
   });
 
   it("wraps list errors with context prefix", async () => {
     mockList.mockReturnValueOnce({
+      hasNext: true,
       nextItems: vi.fn().mockRejectedValue(new Error("API unreachable")),
     });
 

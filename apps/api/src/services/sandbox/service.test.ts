@@ -461,26 +461,26 @@ describe("setTimeout", () => {
     mockSandbox.setTimeout.mockResolvedValueOnce(undefined);
     const svc = createSandboxService(createEnv());
 
-    await svc.setTimeout(mockSandbox as never, 60_000);
+    await svc.setTimeout(mockSandbox as never, 60);
 
     expect(mockSandbox.setTimeout).toHaveBeenCalledWith(60_000);
   });
 
-  it("rejects timeout below minimum (1000ms)", async () => {
+  it("rejects timeout below minimum (1 second)", async () => {
     const svc = createSandboxService(createEnv());
 
-    await expect(svc.setTimeout(mockSandbox as never, 500)).rejects.toThrow(
-      "Timeout must be between 1000ms and 3600000ms"
+    await expect(svc.setTimeout(mockSandbox as never, 0.5)).rejects.toThrow(
+      "Timeout must be between 1 and 3600 seconds"
     );
     expect(mockSandbox.setTimeout).not.toHaveBeenCalled();
   });
 
-  it("rejects timeout above maximum (3600000ms)", async () => {
+  it("rejects timeout above maximum (3600 seconds)", async () => {
     const svc = createSandboxService(createEnv());
 
-    await expect(
-      svc.setTimeout(mockSandbox as never, 4_000_000)
-    ).rejects.toThrow("Timeout must be between 1000ms and 3600000ms");
+    await expect(svc.setTimeout(mockSandbox as never, 3601)).rejects.toThrow(
+      "Timeout must be between 1 and 3600 seconds"
+    );
     expect(mockSandbox.setTimeout).not.toHaveBeenCalled();
   });
 
@@ -490,7 +490,7 @@ describe("setTimeout", () => {
     );
     const svc = createSandboxService(createEnv());
 
-    await expect(svc.setTimeout(mockSandbox as never, 5000)).rejects.toThrow(
+    await expect(svc.setTimeout(mockSandbox as never, 5)).rejects.toThrow(
       "Failed to set timeout: Invalid operation"
     );
   });
@@ -528,7 +528,12 @@ describe("isRunning", () => {
 
 describe("list", () => {
   it("maps paginator results to SandboxInfo[]", async () => {
+    let hasNextCalls = 0;
     const mockPaginator = {
+      get hasNext() {
+        hasNextCalls++;
+        return hasNextCalls === 1; // true first time, false after
+      },
       nextItems: vi.fn().mockResolvedValueOnce([
         {
           sandboxId: "sbx-1",
@@ -571,6 +576,7 @@ describe("list", () => {
 
   it("returns empty array when no sandboxes", async () => {
     const mockPaginator = {
+      hasNext: false,
       nextItems: vi.fn().mockResolvedValueOnce([]),
     };
     mockSandboxList.mockReturnValueOnce(mockPaginator as never);
@@ -583,6 +589,7 @@ describe("list", () => {
 
   it("wraps SDK errors with context", async () => {
     const mockPaginator = {
+      hasNext: true,
       nextItems: vi.fn().mockRejectedValueOnce(new Error("API error")),
     };
     mockSandboxList.mockReturnValueOnce(mockPaginator as never);

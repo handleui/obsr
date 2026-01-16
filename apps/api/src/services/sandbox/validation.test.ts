@@ -447,55 +447,51 @@ describe("sandbox validation", () => {
       setTimeout: vi.fn().mockResolvedValue(undefined),
     });
 
-    describe("valid timeouts (in ms)", () => {
-      it("accepts minimum timeout (1000ms = 1 second)", async () => {
+    describe("valid timeouts (in seconds)", () => {
+      it("accepts minimum timeout (1 second)", async () => {
         const sbx = createMockSandbox();
-        await expect(
-          svc.setTimeout(sbx as never, 1000)
-        ).resolves.toBeUndefined();
+        await expect(svc.setTimeout(sbx as never, 1)).resolves.toBeUndefined();
       });
 
-      it("accepts maximum timeout (3600000ms = 1 hour)", async () => {
+      it("accepts maximum timeout (3600 seconds = 1 hour)", async () => {
         const sbx = createMockSandbox();
         await expect(
-          svc.setTimeout(sbx as never, 3_600_000)
+          svc.setTimeout(sbx as never, 3600)
         ).resolves.toBeUndefined();
       });
 
       it("accepts mid-range timeout", async () => {
         const sbx = createMockSandbox();
-        await expect(
-          svc.setTimeout(sbx as never, 60_000)
-        ).resolves.toBeUndefined();
+        await expect(svc.setTimeout(sbx as never, 60)).resolves.toBeUndefined();
       });
     });
 
-    describe("invalid timeouts (in ms)", () => {
-      it("rejects timeout below minimum (999ms)", async () => {
+    describe("invalid timeouts (in seconds)", () => {
+      it("rejects timeout below minimum (0.5 seconds)", async () => {
         const sbx = createMockSandbox();
-        await expect(svc.setTimeout(sbx as never, 999)).rejects.toThrow(
-          "Timeout must be between 1000ms and 3600000ms"
+        await expect(svc.setTimeout(sbx as never, 0.5)).rejects.toThrow(
+          "Timeout must be between 1 and 3600 seconds"
         );
       });
 
-      it("rejects timeout above maximum (3600001ms)", async () => {
+      it("rejects timeout above maximum (3601 seconds)", async () => {
         const sbx = createMockSandbox();
-        await expect(svc.setTimeout(sbx as never, 3_600_001)).rejects.toThrow(
-          "Timeout must be between 1000ms and 3600000ms"
+        await expect(svc.setTimeout(sbx as never, 3601)).rejects.toThrow(
+          "Timeout must be between 1 and 3600 seconds"
         );
       });
 
       it("rejects zero timeout", async () => {
         const sbx = createMockSandbox();
         await expect(svc.setTimeout(sbx as never, 0)).rejects.toThrow(
-          "Timeout must be between 1000ms and 3600000ms"
+          "Timeout must be between 1 and 3600 seconds"
         );
       });
 
       it("rejects negative timeout", async () => {
         const sbx = createMockSandbox();
-        await expect(svc.setTimeout(sbx as never, -1000)).rejects.toThrow(
-          "Timeout must be between 1000ms and 3600000ms"
+        await expect(svc.setTimeout(sbx as never, -1)).rejects.toThrow(
+          "Timeout must be between 1 and 3600 seconds"
         );
       });
 
@@ -503,13 +499,13 @@ describe("sandbox validation", () => {
         const sbx = createMockSandbox();
         await expect(
           svc.setTimeout(sbx as never, Number.POSITIVE_INFINITY)
-        ).rejects.toThrow("Timeout must be between 1000ms and 3600000ms");
+        ).rejects.toThrow("Timeout must be between 1 and 3600 seconds");
       });
 
       it("rejects NaN", async () => {
         const sbx = createMockSandbox();
         await expect(svc.setTimeout(sbx as never, Number.NaN)).rejects.toThrow(
-          "Timeout must be between 1000ms and 3600000ms"
+          "Timeout must be between 1 and 3600 seconds"
         );
       });
     });

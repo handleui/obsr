@@ -1,5 +1,12 @@
 # @detent/api
 
+## 0.14.0
+
+### Minor Changes
+
+- 0128b42: Add E2B sandbox service for secure AI code execution.
+  Supports Python, TypeScript, and Bash with configurable timeouts, file operations, and sandbox lifecycle management.
+
 ## 0.13.0
 
 ### Minor Changes

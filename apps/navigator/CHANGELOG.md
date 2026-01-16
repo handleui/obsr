@@ -1,5 +1,12 @@
 # @detent/navigator
 
+## 0.5.0
+
+### Minor Changes
+
+- d25af57: Add Polar checkout integration for purchasing credits.
+  Includes checkout API route and billing success page.
+
 ## 0.4.2
 
 ### Patch Changes

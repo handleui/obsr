@@ -227,9 +227,23 @@ export class HealLoop {
 
       const response = await generateText({
         model: modelName,
-        system: systemPrompt,
-        prompt: userPrompt,
+        messages: [
+          { role: "system", content: systemPrompt },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: userPrompt,
+                providerOptions: {
+                  anthropic: { cacheControl: { type: "ephemeral" } },
+                },
+              },
+            ],
+          },
+        ],
         maxOutputTokens: MAX_TOKENS_PER_RESPONSE,
+        maxRetries: 5,
         tools: this.registry.toAiTools(),
         stopWhen: [stepCountIs(MAX_ITERATIONS), budgetStopCondition],
         abortSignal: abortController.signal,

@@ -356,7 +356,7 @@ const fetchAllGitHubOrgs = async (
   let url: string | null = "https://api.github.com/user/orgs?per_page=100";
 
   while (url) {
-    const response = await fetch(url, {
+    const response: Response = await fetch(url, {
       headers: {
         Authorization: `Bearer ${githubToken}`,
         Accept: "application/vnd.github.v3+json",
@@ -375,9 +375,11 @@ const fetchAllGitHubOrgs = async (
     allOrgs.push(...orgs);
 
     // Parse Link header for next page
-    const linkHeader = response.headers.get("link");
-    const nextMatch = linkHeader?.match(GITHUB_LINK_NEXT_REGEX);
-    url = nextMatch ? nextMatch[1] : null;
+    const linkHeader: string | null = response.headers.get("link");
+    const nextMatch: RegExpMatchArray | null | undefined = linkHeader?.match(
+      GITHUB_LINK_NEXT_REGEX
+    );
+    url = nextMatch?.[1] ?? null;
   }
 
   return allOrgs;

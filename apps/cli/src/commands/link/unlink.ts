@@ -6,7 +6,7 @@ import { findGitRoot } from "@detent/git";
 import { defineCommand } from "citty";
 import { getProjectConfig, removeProjectConfig } from "../../lib/config.js";
 import { printHeader } from "../../tui/components/index.js";
-import { ANSI_RESET, colors, hexToAnsi } from "../../tui/styles.js";
+import { printOrgProjectTable } from "../../tui/styles.js";
 
 const confirm = async (message: string): Promise<boolean> => {
   const readline = await import("node:readline");
@@ -53,10 +53,9 @@ export const unlinkCommand = defineCommand({
       return;
     }
 
-    const mutedAnsi = hexToAnsi(colors.muted);
-    console.log(`${mutedAnsi}org                 project${ANSI_RESET}`);
-    console.log(
-      `${projectConfig.organizationSlug}    →    ${projectConfig.projectHandle}`
+    printOrgProjectTable(
+      projectConfig.organizationSlug,
+      projectConfig.projectHandle
     );
     console.log();
 

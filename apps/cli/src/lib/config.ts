@@ -99,7 +99,7 @@ const ALLOWED_MODELS = [
 // ============================================================================
 
 // Import from centralized env module
-import { getDetentHome } from "./env.js";
+import { getDetentHome, isProduction } from "./env.js";
 
 /**
  * Gets the global detent directory path
@@ -118,9 +118,6 @@ export const getDetentDir = getDetentHome;
  * Uses .detent-dev in development and .detent in production
  */
 export const getRepoDetentDir = (repoRoot: string): string => {
-  const { isProduction } = require("./env.js") as {
-    isProduction: () => boolean;
-  };
   const dirName = isProduction() ? DETENT_DIR_NAME : DETENT_DEV_DIR_NAME;
   return join(repoRoot, dirName);
 };

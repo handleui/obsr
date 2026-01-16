@@ -31,7 +31,7 @@ export const MAX_PR_NUMBER = 1_000_000_000; // GitHub PR numbers are 32-bit inte
 
 // SHA validation regex (40 hex characters)
 export const SHA_REGEX = /^[a-fA-F0-9]{40}$/;
-export const MAX_RUN_ATTEMPT = 10_000; // GitHub allows re-runs but has practical limits
+export const MAX_RUN_ATTEMPT = 100; // GitHub allows re-runs but UI typically shows ~10 attempts
 export const MAX_LINE_NUMBER = 10_000_000;
 export const MAX_COLUMN_NUMBER = 100_000;
 

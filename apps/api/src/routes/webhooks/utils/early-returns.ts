@@ -173,6 +173,7 @@ export const handleNoPrEarlyReturn = async (
 // ============================================================================
 // Releases the commit lock but preserves the check run in "queued" state.
 // The check run will be finalized when all workflows complete.
+// Note: _github and _token are unused but kept for API consistency with other early-return helpers
 export const handleWaitingForRunsEarlyReturn = async (
   _github: ReturnType<typeof createGitHubService>,
   _token: string,

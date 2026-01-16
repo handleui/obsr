@@ -35,10 +35,20 @@ import {
 import type { WorkflowRunSummary } from "./workflow-runs";
 import { evaluateWorkflowRuns } from "./workflow-runs";
 
-// Module-level cache for installation tokens (survives across function calls within isolate)
+/**
+ * Module-level cache for installation tokens.
+ * Survives across function calls within the same Worker isolate.
+ * Cache lifecycle: persists until isolate is recycled (cold start clears it).
+ * This is intentional - tokens are short-lived (1hr) and isolate recycling
+ * provides natural cache invalidation without explicit TTL management.
+ */
 const tokenCache = new Map<number, { token: string; expiresAt: number }>();
 
-// Module-level singleton for GitHub service instance
+/**
+ * Module-level singleton for GitHub service instance.
+ * Re-uses the same service across all requests within an isolate to share
+ * the token cache. Cleared on cold start when new isolate is created.
+ */
 let cachedService: ReturnType<typeof createGitHubServiceInternal> | null = null;
 let cachedAppId: string | null = null;
 

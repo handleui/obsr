@@ -128,7 +128,9 @@ const isDatabaseError = (message: string): boolean =>
   message.includes("database") ||
   (message.includes("connection") && !message.includes("github")) ||
   message.includes("econnrefused") ||
-  message.includes("sql");
+  message.includes("sql error") ||
+  message.includes("sql syntax") ||
+  message.includes("violates constraint");
 
 // Helper: Check if message indicates GitHub API error
 const isGitHubApiError = (message: string): boolean =>

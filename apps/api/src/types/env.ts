@@ -55,6 +55,9 @@ export interface Env {
   // Sentry error monitoring
   SENTRY_DSN?: string;
 
+  // E2B sandbox for AI code execution
+  E2B_API_KEY: string;
+
   // Cloudflare version metadata for Sentry release tracking
   CF_VERSION_METADATA?: {
     id: string;

@@ -11,6 +11,18 @@
 import type { CIProvider, ContextParser, ParseLineResult } from "./types.js";
 
 /**
+ * Safely access an environment variable.
+ * Returns undefined if process.env is not available (e.g., in Cloudflare Workers).
+ */
+const getEnvVar = (key: string): string | undefined => {
+  try {
+    return typeof process !== "undefined" ? process.env[key] : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
  * GitLab timestamp pattern: 2024-01-15T10:30:45.123Z
  * Format: YYYY-MM-DDTHH:MM:SS.sssZ followed by optional whitespace
  *

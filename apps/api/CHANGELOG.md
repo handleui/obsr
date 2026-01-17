@@ -1,5 +1,12 @@
 # @detent/api
 
+## 0.17.0
+
+### Minor Changes
+
+- dfeb6da: Add job-level step tracking to check run output.
+  When workflows are in progress, the check run now shows individual job status and progress instead of just workflow-level information. This provides better visibility into which specific jobs are running, completed, or failed within each workflow.
+
 ## 0.16.0
 
 ### Minor Changes

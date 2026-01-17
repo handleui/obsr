@@ -19,7 +19,7 @@ describe("GitHubAnnotationParser", () => {
 
       expect(result).not.toBeNull();
       expect(result.message).toBe("Test failed");
-      expect(result.file).toBe("src/test.ts");
+      expect(result.filePath).toBe("src/test.ts");
       expect(result.line).toBe(42);
       expect(result.severity).toBe("error");
       expect(result.source).toBe("github-annotations");
@@ -31,7 +31,7 @@ describe("GitHubAnnotationParser", () => {
 
       expect(result).not.toBeNull();
       expect(result.message).toBe("Missing semicolon");
-      expect(result.file).toBe("src/app.js");
+      expect(result.filePath).toBe("src/app.js");
       expect(result.line).toBe(10);
       expect(result.column).toBe(15);
     });
@@ -62,7 +62,7 @@ describe("GitHubAnnotationParser", () => {
 
       expect(result).not.toBeNull();
       expect(result.message).toBe("Unused variable");
-      expect(result.file).toBe("src/utils.ts");
+      expect(result.filePath).toBe("src/utils.ts");
       expect(result.line).toBe(20);
       expect(result.severity).toBe("warning");
     });
@@ -76,7 +76,7 @@ describe("GitHubAnnotationParser", () => {
 
       expect(result).not.toBeNull();
       expect(result.message).toBe("Documentation update needed");
-      expect(result.file).toBe("README.md");
+      expect(result.filePath).toBe("README.md");
       expect(result.line).toBe(1);
       expect(result.severity).toBe("warning"); // notice maps to warning
     });
@@ -144,7 +144,7 @@ describe("GitHubAnnotationParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("src/test.ts");
+      expect(result.filePath).toBe("src/test.ts");
     });
 
     it("handles paths with spaces", () => {
@@ -153,7 +153,7 @@ describe("GitHubAnnotationParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("src/my component/test.ts");
+      expect(result.filePath).toBe("src/my component/test.ts");
     });
 
     it("handles long messages", () => {
@@ -176,7 +176,7 @@ describe("GitHubAnnotationParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("src/test.ts");
+      expect(result.filePath).toBe("src/test.ts");
       expect(result.line).toBeUndefined();
       expect(result.lineKnown).toBe(false);
     });
@@ -186,7 +186,7 @@ describe("GitHubAnnotationParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("src/test.ts");
+      expect(result.filePath).toBe("src/test.ts");
       expect(result.line).toBeUndefined();
       expect(result.column).toBeUndefined();
       expect(result.lineKnown).toBe(false);
@@ -201,7 +201,7 @@ describe("GitHubAnnotationParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("src/lib/config.test.ts");
+      expect(result.filePath).toBe("src/lib/config.test.ts");
       expect(result.line).toBe(45);
       expect(result.ruleId).toBe(
         "project config > resolveProjectConfig > does nothing when config file does not exist"
@@ -222,8 +222,8 @@ describe("GitHubAnnotationParser", () => {
 
       expect(results[0]).not.toBeNull();
       expect(results[1]).not.toBeNull();
-      expect((results[0] as ExtractedError).file).toBe("src/test1.test.ts");
-      expect((results[1] as ExtractedError).file).toBe("src/test2.test.ts");
+      expect((results[0] as ExtractedError).filePath).toBe("src/test1.test.ts");
+      expect((results[1] as ExtractedError).filePath).toBe("src/test2.test.ts");
     });
   });
 });

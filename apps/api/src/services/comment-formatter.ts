@@ -2,6 +2,11 @@
 // Formats error summaries in a clean, scannable format
 
 import type { ParsedError } from "./error-parser";
+import type { JobEvaluation, JobSummary } from "./github/workflow-jobs";
+import type {
+  WorkflowRunEvaluation,
+  WorkflowRunSummary,
+} from "./github/workflow-runs";
 
 export interface WorkflowRunResult {
   name: string;
@@ -959,9 +964,9 @@ export const formatCheckRunOutput = (
 // Options for formatting a "waiting" check run output (when CI is still running)
 export interface FormatWaitingCheckRunOptions {
   /** Full workflow evaluation from evaluateWorkflowRuns */
-  evaluation: import("./github/workflow-runs").WorkflowRunEvaluation;
+  evaluation: WorkflowRunEvaluation;
   /** Optional: job-level details for in-progress workflows */
-  jobsByRunId?: Map<number, import("./github/workflow-jobs").JobEvaluation>;
+  jobsByRunId?: Map<number, JobEvaluation>;
 }
 
 // Helper: format duration from start time to now
@@ -1031,10 +1036,7 @@ const formatJobStatus = (status: string, conclusion: string | null): string => {
 const MAX_WORKFLOWS_IN_TABLE = 50;
 
 // Helper: Build job table lines for a workflow run
-const buildJobTableLines = (
-  jobs: import("./github/workflow-jobs").JobSummary[],
-  nowMs: number
-): string[] => {
+const buildJobTableLines = (jobs: JobSummary[], nowMs: number): string[] => {
   const lines: string[] = [];
   lines.push("| Job | Status | Duration |");
   lines.push("|-----|--------|----------|");
@@ -1061,7 +1063,7 @@ const buildJobTableLines = (
 
 // Helper: Count job progress across all runs
 const countJobProgress = (
-  jobsByRunId?: Map<number, import("./github/workflow-jobs").JobEvaluation>
+  jobsByRunId?: Map<number, JobEvaluation>
 ): { totalJobs: number; completedJobs: number } => {
   if (!jobsByRunId || jobsByRunId.size === 0) {
     return { totalJobs: 0, completedJobs: 0 };
@@ -1093,9 +1095,9 @@ const buildTitle = (
 
 // Helper: Build job tables section for pending CI runs
 const buildJobTablesSection = (
-  pendingCiRuns: import("./github/workflow-runs").WorkflowRunSummary[],
-  ciRelevantRuns: import("./github/workflow-runs").WorkflowRunSummary[],
-  jobsByRunId: Map<number, import("./github/workflow-jobs").JobEvaluation>,
+  pendingCiRuns: WorkflowRunSummary[],
+  ciRelevantRuns: WorkflowRunSummary[],
+  jobsByRunId: Map<number, JobEvaluation>,
   completedCount: number,
   nowMs: number
 ): string[] => {
@@ -1130,9 +1132,9 @@ const buildJobTablesSection = (
 const buildFooterStats = (
   totalJobs: number,
   totalCount: number,
-  stuckRuns: import("./github/workflow-runs").WorkflowRunSummary[],
-  skippedRuns: import("./github/workflow-runs").WorkflowRunSummary[],
-  blacklistedRuns: import("./github/workflow-runs").WorkflowRunSummary[]
+  stuckRuns: WorkflowRunSummary[],
+  skippedRuns: WorkflowRunSummary[],
+  blacklistedRuns: WorkflowRunSummary[]
 ): string[] => {
   const lines: string[] = [];
   lines.push("");
@@ -1173,8 +1175,8 @@ const buildFooterStats = (
 
 // Helper: Build workflow table lines
 const buildWorkflowTableLines = (
-  ciRelevantRuns: import("./github/workflow-runs").WorkflowRunSummary[],
-  stuckRuns: import("./github/workflow-runs").WorkflowRunSummary[],
+  ciRelevantRuns: WorkflowRunSummary[],
+  stuckRuns: WorkflowRunSummary[],
   nowMs: number
 ): { lines: string[]; truncatedCount: number } => {
   const lines: string[] = [];
@@ -1213,6 +1215,53 @@ const buildWorkflowTableLines = (
   return { lines, truncatedCount };
 };
 
+// Helper: Build summary for when no CI-relevant workflows are found
+const buildNoWorkflowsSummary = (
+  blacklistedRuns: WorkflowRunSummary[],
+  skippedRuns: WorkflowRunSummary[]
+): string => {
+  const filteredCount = blacklistedRuns.length + skippedRuns.length;
+
+  // Case 1: No workflows at all yet
+  if (filteredCount === 0) {
+    return [
+      "Detent will analyze CI results once all workflows finish.",
+      "",
+      "_Waiting for CI workflows to start..._",
+    ].join("\n");
+  }
+
+  // Case 2: Workflows exist but all were filtered
+  const lines = [
+    "Detent will analyze CI results once all workflows finish.",
+    "",
+    `_No CI-relevant workflows found (${filteredCount} filtered)._`,
+    "",
+  ];
+
+  if (blacklistedRuns.length > 0) {
+    const names = blacklistedRuns
+      .slice(0, 3)
+      .map((r) => escapeTableCell(r.name))
+      .join(", ");
+    const more =
+      blacklistedRuns.length > 3 ? ` +${blacklistedRuns.length - 3} more` : "";
+    lines.push(`_Excluded: ${names}${more}_`);
+  }
+
+  if (skippedRuns.length > 0) {
+    const names = skippedRuns
+      .slice(0, 3)
+      .map((r) => `${escapeTableCell(r.name)} (${r.event})`)
+      .join(", ");
+    const more =
+      skippedRuns.length > 3 ? ` +${skippedRuns.length - 3} more` : "";
+    lines.push(`_Non-CI events: ${names}${more}_`);
+  }
+
+  return lines.join("\n");
+};
+
 // Format a "waiting" check run output with job tracking visibility
 // Shows which workflows are being tracked and their current status
 // When job data is available, shows job-level progress for better visibility
@@ -1238,14 +1287,12 @@ export const formatWaitingCheckRunOutput = (
     completedCount
   );
 
-  // If no workflows detected yet, show a simple message
+  // If no CI-relevant workflows, show diagnostic info about filtered workflows
   if (totalCount === 0) {
-    const summary = [
-      "Detent will analyze CI results once all workflows finish.",
-      "",
-      "_No CI workflows detected yet._",
-    ].join("\n");
-    return { title, summary };
+    return {
+      title,
+      summary: buildNoWorkflowsSummary(blacklistedRuns, skippedRuns),
+    };
   }
 
   const nowMs = Date.now();

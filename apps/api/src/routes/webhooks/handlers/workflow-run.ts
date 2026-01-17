@@ -451,6 +451,8 @@ export const handleWorkflowRunInProgress = async (
 
   // Even if check run exists, we should update it with current workflow status
   // The check_suite.requested handler may have fetched workflows before they were visible
+  // IMPORTANT: Also post/update waiting comment here as backup - check_suite.requested
+  // may have failed to post it (e.g., lock was held by previous workflow_run.completed)
   if (existingCheckRunId) {
     console.log(
       `[workflow_run] Check run ${existingCheckRunId} exists for ${headSha.slice(0, 7)}, updating with workflow status`
@@ -458,6 +460,17 @@ export const handleWorkflowRunInProgress = async (
 
     try {
       const token = await github.getInstallationToken(installation.id);
+
+      // Get PR number for waiting comment
+      let prNumber = workflow_run.pull_requests[0]?.number;
+      if (!prNumber) {
+        // For fork PRs, workflow_run.pull_requests is empty but commits API works
+        // Convert null -> undefined to match optional chaining semantics above
+        prNumber =
+          (await github.getPullRequestForCommit(token, owner, repo, headSha)) ??
+          undefined;
+      }
+
       const { evaluation } = await github.listWorkflowRunsForCommit(
         token,
         owner,
@@ -465,30 +478,60 @@ export const handleWorkflowRunInProgress = async (
         headSha
       );
 
-      // Only update if we found CI-relevant workflows (otherwise leave existing output)
-      if (evaluation.ciRelevantRuns.length > 0) {
-        const jobsByRunId = await fetchJobDetailsWithRateLimit(
-          github,
-          token,
-          owner,
-          repo,
-          evaluation,
-          `workflow_run:${existingCheckRunId}`
-        );
+      // Always update check run with current workflow status
+      // Even if 0 CI-relevant workflows found, we show diagnostic info
+      const jobsByRunId =
+        evaluation.ciRelevantRuns.length > 0
+          ? await fetchJobDetailsWithRateLimit(
+              github,
+              token,
+              owner,
+              repo,
+              evaluation,
+              `workflow_run:${existingCheckRunId}`
+            )
+          : new Map();
 
-        const { title, summary } = formatWaitingCheckRunOutput({
-          evaluation,
-          jobsByRunId: jobsByRunId.size > 0 ? jobsByRunId : undefined,
-        });
-        await github.updateCheckRun(token, {
-          owner,
-          repo,
-          checkRunId: existingCheckRunId,
-          status: "in_progress",
-          output: { title, summary },
-        });
+      // Log diagnostic info when no CI-relevant workflows found
+      if (evaluation.ciRelevantRuns.length === 0) {
+        const totalRuns =
+          evaluation.blacklistedRuns.length + evaluation.skippedRuns.length;
         console.log(
-          `[workflow_run] Updated check run ${existingCheckRunId} with ${evaluation.ciRelevantRuns.length} workflows, ${jobsByRunId.size} with job details`
+          `[workflow_run] No CI-relevant workflows for ${headSha.slice(0, 7)}: ` +
+            `${evaluation.blacklistedRuns.length} blacklisted, ${evaluation.skippedRuns.length} skipped (non-CI events), ` +
+            `${totalRuns} total filtered`
+        );
+      }
+
+      const { title, summary } = formatWaitingCheckRunOutput({
+        evaluation,
+        jobsByRunId: jobsByRunId.size > 0 ? jobsByRunId : undefined,
+      });
+      await github.updateCheckRun(token, {
+        owner,
+        repo,
+        checkRunId: existingCheckRunId,
+        status: "in_progress",
+        output: { title, summary },
+      });
+      console.log(
+        `[workflow_run] Updated check run ${existingCheckRunId} with ${evaluation.ciRelevantRuns.length} CI-relevant workflows, ${jobsByRunId.size} with job details`
+      );
+
+      // Post/update waiting comment in background (non-blocking)
+      // This ensures the PR comment shows "waiting" even if check_suite.requested failed
+      if (prNumber) {
+        c.executionCtx.waitUntil(
+          postWaitingComment({
+            env: c.env,
+            token,
+            owner,
+            repo,
+            repository: repository.full_name,
+            prNumber,
+            headSha,
+            headCommitMessage: workflow_run.head_commit?.message,
+          })
         );
       }
     } catch (error) {
@@ -512,6 +555,7 @@ export const handleWorkflowRunInProgress = async (
     let prNumber = workflow_run.pull_requests[0]?.number;
     if (!prNumber) {
       // For fork PRs, workflow_run.pull_requests is empty but commits API works
+      // Convert null -> undefined to match optional chaining semantics above
       prNumber =
         (await github.getPullRequestForCommit(token, owner, repo, headSha)) ??
         undefined;

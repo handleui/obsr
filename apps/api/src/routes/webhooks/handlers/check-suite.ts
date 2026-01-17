@@ -1,5 +1,11 @@
+import { sleep } from "../../../lib/async";
 import { captureWebhookError } from "../../../lib/sentry";
 import { formatWaitingCheckRunOutput } from "../../../services/comment-formatter";
+
+// Delay before fetching workflows to allow GitHub to start them
+// Workflows may not be visible immediately after check_suite.requested fires
+const WORKFLOW_VISIBILITY_DELAY_MS = 3000;
+
 import { createGitHubService } from "../../../services/github";
 import {
   getStoredCheckRunId,
@@ -105,6 +111,7 @@ export const handleCheckSuiteRequested = async (
         // Fetch workflow list and job details, update check run with detailed status
         (async () => {
           try {
+            await sleep(WORKFLOW_VISIBILITY_DELAY_MS);
             const { evaluation } = await github.listWorkflowRunsForCommit(
               token,
               owner,

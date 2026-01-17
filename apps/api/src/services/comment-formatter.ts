@@ -1092,7 +1092,7 @@ export const formatWaitingCheckRunOutput = (
   if (skippedRuns.length > 0) {
     const skippedList = skippedRuns
       .slice(0, 5)
-      .map((r) => `${escapeTableCell(r.name)} (${r.event})`)
+      .map((r) => `${escapeTableCell(r.name)} (${escapeTableCell(r.event)})`)
       .join(", ");
     const moreCount =
       skippedRuns.length > 5 ? ` +${skippedRuns.length - 5} more` : "";

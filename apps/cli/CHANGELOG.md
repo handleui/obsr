@@ -1,5 +1,12 @@
 # @detent/cli
 
+## 0.11.1
+
+### Patch Changes
+
+- 0812dd0: Rename sync-identity to sync-user for consistency with API endpoint change.
+  Remove unused browser open behavior from org delete flow.
+
 ## 0.11.0
 
 ### Minor Changes

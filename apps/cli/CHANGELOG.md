@@ -1,5 +1,13 @@
 # @detent/cli
 
+## 0.12.0
+
+### Minor Changes
+
+- afb9b1d: Add organization invitation management commands.
+  New commands: `dt org invite`, `dt org invitations list`, `dt org invitations revoke`.
+  Includes interactive TUI flows and non-interactive mode for scripting.
+
 ## 0.11.1
 
 ### Patch Changes

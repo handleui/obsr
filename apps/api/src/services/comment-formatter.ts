@@ -69,7 +69,9 @@ const escapeHtml = (text: string): string => {
   return text.replace(HTML_TAG_PATTERN, (char) => HTML_ENTITIES[char] ?? char);
 };
 
-// Helper: escape text for markdown table cells
+// Helper: escape text for markdown table cells (NOT for HTML contexts)
+// Only escapes markdown table syntax characters (|, `, [], newlines)
+// Does NOT escape HTML entities (< > &) - use escapeHtml for HTML contexts
 // Pipe chars break table structure, backticks can interfere with inline code
 // Newlines break table rows, brackets can create links
 const escapeTableCell = (text: string): string => {
@@ -128,6 +130,7 @@ const formatHeader = (message: string): string => {
 const MAX_UNSUPPORTED_TOOLS_TO_DISPLAY = 10;
 
 // Format unsupported tools notice for display in comments
+// Escapes tool names to prevent markdown/HTML injection from malicious step commands
 const formatUnsupportedToolsNotice = (
   tools: string[] | undefined
 ): string | undefined => {
@@ -135,14 +138,18 @@ const formatUnsupportedToolsNotice = (
     return undefined;
   }
 
+  // Escape each tool name to prevent injection attacks
+  // Tool names come from workflow step commands which could be attacker-controlled
+  const escapedTools = tools.map((t) => escapeHtml(t));
+
   // Truncate long lists to avoid excessively long notices
-  if (tools.length > MAX_UNSUPPORTED_TOOLS_TO_DISPLAY) {
-    const displayed = tools.slice(0, MAX_UNSUPPORTED_TOOLS_TO_DISPLAY);
-    const remaining = tools.length - MAX_UNSUPPORTED_TOOLS_TO_DISPLAY;
+  if (escapedTools.length > MAX_UNSUPPORTED_TOOLS_TO_DISPLAY) {
+    const displayed = escapedTools.slice(0, MAX_UNSUPPORTED_TOOLS_TO_DISPLAY);
+    const remaining = escapedTools.length - MAX_UNSUPPORTED_TOOLS_TO_DISPLAY;
     return `_Detected ${displayed.join(", ")} (+${remaining} more) - parsers not yet available_`;
   }
 
-  return `_Detected ${tools.join(", ")} - parsers not yet available_`;
+  return `_Detected ${escapedTools.join(", ")} - parsers not yet available_`;
 };
 
 // Group errors by workflow job and step for display
@@ -228,12 +235,15 @@ const formatFallbackRunErrors = (
 };
 
 // Truncate commit message to first line and max length
+// Also escapes HTML entities to prevent XSS/markdown injection
 const truncateCommitMessage = (message: string, maxLen = 50): string => {
   const firstLine = message.split("\n")[0] ?? message;
-  if (firstLine.length <= maxLen) {
-    return firstLine;
+  // Escape HTML entities first (XSS prevention)
+  const escaped = escapeHtml(firstLine);
+  if (escaped.length <= maxLen) {
+    return escaped;
   }
-  return `${firstLine.slice(0, maxLen - 1)}…`;
+  return `${escaped.slice(0, maxLen - 1)}…`;
 };
 
 // Format the main PR comment with error summary (list format with job + step)
@@ -944,6 +954,169 @@ export const formatCheckRunOutput = (
     text,
     annotations: annotations.length > 0 ? annotations : undefined,
   };
+};
+
+// Options for formatting a "waiting" check run output (when CI is still running)
+export interface FormatWaitingCheckRunOptions {
+  /** Full workflow evaluation from evaluateWorkflowRuns */
+  evaluation: import("./github/workflow-runs").WorkflowRunEvaluation;
+}
+
+// Helper: format duration from start time to now
+const formatDuration = (startedAt: Date | null, nowMs: number): string => {
+  if (!startedAt) {
+    return "-";
+  }
+  const durationMs = nowMs - startedAt.getTime();
+  const minutes = Math.floor(durationMs / 60_000);
+  if (minutes < 1) {
+    return "<1m";
+  }
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${remainingMinutes}m`;
+};
+
+// Helper: format workflow status for display
+const formatWorkflowStatus = (
+  status: string,
+  conclusion: string | null,
+  isStuck: boolean
+): string => {
+  if (status === "completed") {
+    if (conclusion === "success") {
+      return "✓ passed";
+    }
+    if (conclusion === "failure") {
+      return "✗ failed";
+    }
+    return conclusion ?? "done";
+  }
+  if (status === "in_progress") {
+    return isStuck ? "(!) running (stuck?)" : "running";
+  }
+  return status; // queued, waiting, etc.
+};
+
+// Maximum workflows to display in the waiting table before truncating
+// Keeps output under GitHub's 65535 char limit even with long workflow names
+const MAX_WORKFLOWS_IN_TABLE = 50;
+
+// Format a "waiting" check run output with job tracking visibility
+// Shows which workflows are being tracked and their current status
+export const formatWaitingCheckRunOutput = (
+  options: FormatWaitingCheckRunOptions
+): { title: string; summary: string } => {
+  const { evaluation } = options;
+  const {
+    ciRelevantRuns,
+    pendingCiRuns,
+    stuckRuns,
+    skippedRuns,
+    blacklistedRuns,
+  } = evaluation;
+
+  const completedCount = ciRelevantRuns.length - pendingCiRuns.length;
+  const totalCount = ciRelevantRuns.length;
+
+  // Title shows progress
+  const title =
+    totalCount === 0
+      ? "Waiting for CI workflows..."
+      : `Waiting for CI (${completedCount}/${totalCount} complete)`;
+
+  const lines: string[] = [];
+
+  // If no workflows detected yet, show a simple message
+  if (totalCount === 0) {
+    lines.push("Detent will analyze CI results once all workflows finish.");
+    lines.push("");
+    lines.push("_No CI workflows detected yet._");
+    return { title, summary: lines.join("\n") };
+  }
+
+  // Build workflow table
+  const nowMs = Date.now();
+  lines.push("| Workflow | Status | Duration |");
+  lines.push("|----------|--------|----------|");
+
+  // Sort: pending first, then completed
+  const sortedRuns = [...ciRelevantRuns].sort((a, b) => {
+    const aCompleted = a.status === "completed";
+    const bCompleted = b.status === "completed";
+    if (aCompleted !== bCompleted) {
+      return aCompleted ? 1 : -1;
+    }
+    return a.name.localeCompare(b.name);
+  });
+
+  // Build a set of stuck workflow names for O(1) lookup
+  const stuckNames = new Set(stuckRuns.map((r) => r.name));
+
+  // Limit table rows to prevent exceeding GitHub's output limits
+  const displayRuns = sortedRuns.slice(0, MAX_WORKFLOWS_IN_TABLE);
+  const truncatedCount = sortedRuns.length - displayRuns.length;
+
+  for (const run of displayRuns) {
+    const safeName = escapeTableCell(run.name);
+    const isStuck = stuckNames.has(run.name);
+    const statusText = formatWorkflowStatus(
+      run.status,
+      run.conclusion,
+      isStuck
+    );
+    const duration = formatDuration(run.runStartedAt, nowMs);
+    const nameDisplay = safeName;
+
+    lines.push(`| ${nameDisplay} | ${statusText} | ${duration} |`);
+  }
+
+  // Show truncation notice if workflows were hidden
+  if (truncatedCount > 0) {
+    lines.push("");
+    lines.push(`_+${truncatedCount} more workflows not shown_`);
+  }
+
+  // Footer stats
+  lines.push("");
+  const statsLine: string[] = [`${totalCount} workflows tracked`];
+  if (stuckRuns.length > 0) {
+    statsLine.push(`${stuckRuns.length} may be stuck (>30m)`);
+  }
+  lines.push(statsLine.join(" · "));
+
+  // Show skipped workflows (non-CI events)
+  if (skippedRuns.length > 0) {
+    const skippedList = skippedRuns
+      .slice(0, 5)
+      .map((r) => `${escapeTableCell(r.name)} (${escapeTableCell(r.event)})`)
+      .join(", ");
+    const moreCount =
+      skippedRuns.length > 5 ? ` +${skippedRuns.length - 5} more` : "";
+    lines.push(`_Skipped: ${skippedList}${moreCount}_`);
+  }
+
+  // Show blacklisted workflows
+  if (blacklistedRuns.length > 0) {
+    const blacklistNames = blacklistedRuns
+      .slice(0, 3)
+      .map((r) => escapeTableCell(r.name))
+      .join(", ");
+    const moreCount =
+      blacklistedRuns.length > 3 ? ` +${blacklistedRuns.length - 3} more` : "";
+    lines.push(`_Excluded: ${blacklistNames}${moreCount}_`);
+  }
+
+  // Ensure summary doesn't exceed GitHub's output limit (65535 chars)
+  let summary = lines.join("\n");
+  if (summary.length > OUTPUT_LIMITS.SUMMARY_MAX_CHARS) {
+    summary = `${summary.slice(0, OUTPUT_LIMITS.SUMMARY_MAX_CHARS - 100)}\n\n_Summary truncated_`;
+  }
+
+  return { title, summary };
 };
 
 // Options for formatting a "waiting" comment (when CI is still running)

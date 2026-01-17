@@ -1,5 +1,7 @@
-import type { KVNamespace } from "@cloudflare/workers-types";
+import type { ExecutionContext, KVNamespace } from "@cloudflare/workers-types";
+import { formatWaitingCheckRunOutput } from "../../../services/comment-formatter";
 import type { createGitHubService } from "../../../services/github";
+import type { WorkflowRunEvaluation } from "../../../services/github/workflow-runs";
 import { releaseCommitLock } from "../../../services/idempotency";
 import {
   classifyError,
@@ -171,13 +173,15 @@ export const handleNoPrEarlyReturn = async (
 // ============================================================================
 // Helper: Handle early return when waiting for other runs to complete
 // ============================================================================
-// Releases the commit lock but preserves the check run in "queued" state.
+// Performance optimization (Cloudflare Workers):
+// - Updates check run in background via waitUntil (non-blocking)
+// - Returns response immediately for faster webhook response time
 // The check run will be finalized when all workflows complete.
-// Note: _github and _token are unused but kept for API consistency with other early-return helpers
 export const handleWaitingForRunsEarlyReturn = async (
-  _github: ReturnType<typeof createGitHubService>,
-  _token: string,
+  github: ReturnType<typeof createGitHubService>,
+  token: string,
   kv: KVNamespace,
+  executionCtx: ExecutionContext,
   context: {
     installationId: number;
     owner: string;
@@ -188,6 +192,8 @@ export const handleWaitingForRunsEarlyReturn = async (
     storedCheckRunId: number | null;
     completedCount: number;
     pendingCount: number;
+    /** Workflow evaluation for displaying status in check run */
+    evaluation: WorkflowRunEvaluation;
   }
 ): Promise<{
   message: string;
@@ -195,15 +201,50 @@ export const handleWaitingForRunsEarlyReturn = async (
   completed: number;
   pending: number;
 }> => {
-  const { repository, headSha, completedCount, pendingCount } = context;
+  const {
+    owner,
+    repo,
+    repository,
+    headSha,
+    storedCheckRunId,
+    completedCount,
+    pendingCount,
+    evaluation,
+  } = context;
 
   console.log(
     `[workflow_run] Waiting for ${pendingCount} more runs to complete`
   );
 
-  // NOTE: Do NOT clean up the check run here. It should remain in "queued" state
-  // and will be properly finalized when all workflows complete. Cleaning it up
-  // here would mark it as "cancelled" prematurely.
+  // Update check run in background (non-blocking for faster webhook response)
+  // The status update shows which jobs are still pending
+  if (storedCheckRunId) {
+    executionCtx.waitUntil(
+      (async () => {
+        try {
+          const { title, summary } = formatWaitingCheckRunOutput({
+            evaluation,
+          });
+          await github.updateCheckRun(token, {
+            owner,
+            repo,
+            checkRunId: storedCheckRunId,
+            status: "in_progress",
+            output: { title, summary },
+          });
+          console.log(
+            `[workflow_run] Updated check run ${storedCheckRunId} with workflow status`
+          );
+        } catch (error) {
+          // Non-fatal: check run update failure shouldn't block processing
+          console.error(
+            `[workflow_run] Failed to update check run ${storedCheckRunId} with status:`,
+            error
+          );
+        }
+      })()
+    );
+  }
 
   await releaseCommitLock(kv, repository, headSha);
 

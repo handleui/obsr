@@ -4,6 +4,7 @@ import { captureWebhookError, type ParserContext } from "../../../lib/sentry";
 import {
   formatCheckRunOutput,
   formatResultsComment,
+  formatWaitingCheckRunOutput,
 } from "../../../services/comment-formatter";
 import type { ParsedError } from "../../../services/error-parser";
 import { parseWorkflowLogsWithFallback } from "../../../services/error-parser";
@@ -419,6 +420,11 @@ const finalizeAndPostResults = async (
 // Handle workflow_run.in_progress
 // ============================================================================
 // Creates a "queued" check run to show users we're watching
+//
+// Performance optimization (Cloudflare Workers):
+// - Creates check run immediately with minimal output (fast response to GitHub)
+// - Fetches workflow list in background via waitUntil (non-blocking)
+// - Updates check run with detailed workflow status asynchronously
 export const handleWorkflowRunInProgress = async (
   c: WebhookContext,
   payload: WorkflowRunPayload
@@ -476,7 +482,8 @@ export const handleWorkflowRunInProgress = async (
       });
     }
 
-    // Create a "queued" check run so users know we're watching
+    // Create a "queued" check run immediately with minimal output (fast webhook response)
+    // The workflow list will be fetched in background and check run updated
     const checkRun = await github.createCheckRun(token, {
       owner,
       repo,
@@ -484,8 +491,8 @@ export const handleWorkflowRunInProgress = async (
       name: "Detent Parser",
       status: "queued",
       output: {
-        title: "Waiting for CI to complete...",
-        summary: "Detent will analyze CI results once all workflows finish.",
+        title: "Waiting for CI to complete",
+        summary: "Monitoring workflow runs...",
       },
     });
 
@@ -501,19 +508,51 @@ export const handleWorkflowRunInProgress = async (
       `[workflow_run] Created queued check run ${checkRun.id} for ${headSha.slice(0, 7)}`
     );
 
-    // Post waiting comment in background (non-blocking for faster webhook response)
-    // The postWaitingComment function handles idempotency - won't post if comment exists
+    // Background tasks (non-blocking for faster webhook response):
+    // 1. Fetch workflow list and update check run with detailed status
+    // 2. Post waiting comment to PR
     c.executionCtx.waitUntil(
-      postWaitingComment({
-        env: c.env,
-        token,
-        owner,
-        repo,
-        repository: repository.full_name,
-        prNumber,
-        headSha,
-        headCommitMessage: workflow_run.head_commit?.message,
-      })
+      Promise.all([
+        (async () => {
+          try {
+            // Fetch all workflows for this commit to show detailed status
+            const { evaluation } = await github.listWorkflowRunsForCommit(
+              token,
+              owner,
+              repo,
+              headSha
+            );
+
+            // Update check run with workflow visibility
+            const { title, summary } = formatWaitingCheckRunOutput({
+              evaluation,
+            });
+            await github.updateCheckRun(token, {
+              owner,
+              repo,
+              checkRunId: checkRun.id,
+              status: "in_progress",
+              output: { title, summary },
+            });
+          } catch (error) {
+            // Non-fatal: check run was created, just missing detailed status
+            console.error(
+              `[workflow_run] Background update failed for check run ${checkRun.id}:`,
+              error
+            );
+          }
+        })(),
+        postWaitingComment({
+          env: c.env,
+          token,
+          owner,
+          repo,
+          repository: repository.full_name,
+          prNumber,
+          headSha,
+          headCommitMessage: workflow_run.head_commit?.message,
+        }),
+      ])
     );
 
     return c.json({
@@ -645,18 +684,19 @@ export const handleWorkflowRunCompleted = async (
     }
 
     // Check if ALL workflow runs for this commit are done BEFORE creating check run
-    const { allCompleted, runs: workflowRuns } =
-      await github.listWorkflowRunsForCommit(token, owner, repo, headSha);
+    const {
+      allCompleted,
+      runs: workflowRuns,
+      evaluation,
+    } = await github.listWorkflowRunsForCommit(token, owner, repo, headSha);
 
     if (!allCompleted) {
-      const pendingCount = workflowRuns.filter(
-        (r) => r.status !== "completed"
-      ).length;
       return c.json(
         await handleWaitingForRunsEarlyReturn(
           github,
           token,
           c.env["detent-idempotency"],
+          c.executionCtx,
           {
             installationId: installation.id,
             owner,
@@ -665,9 +705,11 @@ export const handleWorkflowRunCompleted = async (
             headSha,
             deliveryId,
             storedCheckRunId: storedCheckRunIdForRecovery,
-            completedCount: workflowRuns.filter((r) => r.status === "completed")
-              .length,
-            pendingCount,
+            completedCount:
+              evaluation.ciRelevantRuns.length -
+              evaluation.pendingCiRuns.length,
+            pendingCount: evaluation.pendingCiRuns.length,
+            evaluation,
           }
         )
       );

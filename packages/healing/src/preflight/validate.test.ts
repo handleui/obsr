@@ -81,7 +81,12 @@ describe("validateErrors", () => {
       makeError({
         file: "code.ts",
         line: 1,
-        codeSnippet: { lines: ["const x = 1;"], startLine: 1 },
+        codeSnippet: {
+          lines: ["const x = 1;"],
+          startLine: 1,
+          errorLine: 1,
+          language: "typescript",
+        },
       }),
     ];
 
@@ -101,7 +106,12 @@ describe("validateErrors", () => {
       makeError({
         file: "code.ts",
         line: 1,
-        codeSnippet: { lines: ["const x = 1;"], startLine: 1 },
+        codeSnippet: {
+          lines: ["const x = 1;"],
+          startLine: 1,
+          errorLine: 1,
+          language: "typescript",
+        },
       }),
     ];
 
@@ -119,7 +129,12 @@ describe("validateErrors", () => {
       makeError({
         file: "code.ts",
         line: 1,
-        codeSnippet: { lines: [], startLine: 1 },
+        codeSnippet: {
+          lines: [],
+          startLine: 1,
+          errorLine: 1,
+          language: "typescript",
+        },
       }),
     ];
 
@@ -174,7 +189,12 @@ describe("validateErrors", () => {
       makeError({
         file: "src/utils/helpers.ts",
         line: 1,
-        codeSnippet: { lines: ["export const foo = 1;"], startLine: 1 },
+        codeSnippet: {
+          lines: ["export const foo = 1;"],
+          startLine: 1,
+          errorLine: 1,
+          language: "typescript",
+        },
       }),
     ];
 
@@ -191,7 +211,12 @@ describe("validateErrors", () => {
       makeError({
         file: "code.ts",
         line: 1,
-        codeSnippet: { lines: ["const x = 1;"], startLine: 1 },
+        codeSnippet: {
+          lines: ["const x = 1;"],
+          startLine: 1,
+          errorLine: 1,
+          language: "typescript",
+        },
       }),
     ];
 

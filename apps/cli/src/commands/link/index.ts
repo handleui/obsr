@@ -126,7 +126,6 @@ export const linkCommand = defineCommand({
     }
 
     printHeader();
-    console.log();
 
     let accessToken: string;
     try {
@@ -142,7 +141,7 @@ export const linkCommand = defineCommand({
         existingConfig.organizationSlug,
         existingConfig.projectHandle
       );
-      console.log();
+      console.log("");
       console.log("Already linked. Run `dt link --force` to relink.");
       return;
     }
@@ -157,7 +156,7 @@ export const linkCommand = defineCommand({
     });
 
     printOrgProjectTable(result.organizationSlug, result.projectHandle);
-    console.log();
+    console.log("");
     console.log("Linked successfully.");
   },
 });

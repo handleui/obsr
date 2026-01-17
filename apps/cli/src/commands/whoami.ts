@@ -43,7 +43,7 @@ const displayTokenClaims = (accessToken: string): void => {
     console.log(`  sub: ${claims.sub}`);
     console.log(`  exp: ${expiry}`);
     console.log(`  API URL: ${apiUrl}`);
-    console.log();
+    console.log("");
   } catch (e) {
     console.error("Failed to decode token:", e);
   }

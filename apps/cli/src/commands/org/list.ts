@@ -23,7 +23,6 @@ export const listCommand = defineCommand({
     }
 
     printHeader();
-    console.log();
 
     const githubToken = await getGitHubToken();
     await syncUser(accessToken, githubToken).catch(() => undefined);

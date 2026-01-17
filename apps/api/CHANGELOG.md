@@ -1,5 +1,13 @@
 # @detent/api
 
+## 0.16.0
+
+### Minor Changes
+
+- 32433ca: Add job tracking visibility to check run output while CI is running.
+  Shows a table of tracked workflows with status and duration, including stuck workflow detection.
+  Background updates keep the check run current without blocking webhook responses.
+
 ## 0.15.0
 
 ### Minor Changes

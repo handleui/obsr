@@ -1,138 +1,36 @@
 /**
  * Core types for error extraction and representation.
  * Migrated from packages/core/errors/types.go
+ *
+ * Foundational types (ErrorCategory, ErrorSeverity, ErrorSource, CodeSnippet, WorkflowContext)
+ * are defined in @detent/types and re-exported here for backwards compatibility.
  */
 
-// ============================================================================
-// Error Categories
-// ============================================================================
+// Re-export foundational types from @detent/types for backwards compatibility
+export type {
+  CodeSnippet,
+  ErrorCategory,
+  ErrorSeverity,
+  ErrorSource,
+  WorkflowContext,
+} from "@detent/types";
+// biome-ignore lint/performance/noBarrelFile: intentional re-exports for API stability
+export {
+  AllCategories,
+  cloneWorkflowContext,
+  ErrorSources,
+  isValidCategory,
+} from "@detent/types";
 
-/**
- * ErrorCategory represents the type of error for categorization and AI prompt generation.
- */
-export type ErrorCategory =
-  | "lint"
-  | "type-check"
-  | "test"
-  | "compile"
-  | "runtime"
-  | "metadata"
-  | "security"
-  | "dependency"
-  | "config"
-  | "infrastructure"
-  | "docs"
-  | "unknown";
-
-/**
- * All defined error categories.
- */
-export const AllCategories: readonly ErrorCategory[] = [
-  "lint",
-  "type-check",
-  "test",
-  "compile",
-  "runtime",
-  "metadata",
-  "security",
-  "dependency",
-  "config",
-  "infrastructure",
-  "docs",
-  "unknown",
-] as const;
-
-/**
- * Check if a string is a valid error category.
- */
-export const isValidCategory = (cat: string): cat is ErrorCategory =>
-  AllCategories.includes(cat as ErrorCategory);
-
-// ============================================================================
-// Error Sources
-// ============================================================================
-
-/**
- * Error sources for attribution and filtering.
- */
-export type ErrorSource =
-  | "biome"
-  | "eslint"
-  | "typescript"
-  | "go"
-  | "go-test"
-  | "python"
-  | "rust"
-  | "vitest"
-  | "docker"
-  | "nodejs"
-  | "metadata"
-  | "infrastructure"
-  | "generic";
-
-export const ErrorSources = {
-  Biome: "biome" as const,
-  ESLint: "eslint" as const,
-  TypeScript: "typescript" as const,
-  Go: "go" as const,
-  GoTest: "go-test" as const,
-  Python: "python" as const,
-  Rust: "rust" as const,
-  Vitest: "vitest" as const,
-  Docker: "docker" as const,
-  NodeJS: "nodejs" as const,
-  Metadata: "metadata" as const,
-  Infrastructure: "infrastructure" as const,
-  Generic: "generic" as const,
-};
-
-// ============================================================================
-// Error Severity
-// ============================================================================
-
-export type ErrorSeverity = "error" | "warning";
-
-// ============================================================================
-// Core Interfaces
-// ============================================================================
-
-/**
- * WorkflowContext captures GitHub Actions workflow execution context.
- */
-export interface WorkflowContext {
-  /** From [workflow/job] prefix in act output */
-  readonly job?: string;
-  /** Parse from step names */
-  readonly step?: string;
-  /** Parse from action names */
-  readonly action?: string;
-}
-
-/**
- * Clone a WorkflowContext for safe mutation.
- */
-export const cloneWorkflowContext = (
-  ctx: WorkflowContext | undefined
-): WorkflowContext | undefined => {
-  if (!ctx) {
-    return undefined;
-  }
-  return { ...ctx };
-};
-
-/**
- * CodeSnippet contains source code context around an error location.
- */
-export interface CodeSnippet {
-  /** Lines of source code context */
-  readonly lines: readonly string[];
-  /** First line number in snippet (1-indexed in original file) */
-  readonly startLine: number;
-  /** Position of error line within lines array (1-indexed, e.g., 1 = lines[0]) */
-  readonly errorLine: number;
-  /** Language identifier: "go", "typescript", "python", etc. */
-  readonly language: string;
-}
+// Import types for local use in this file
+import type {
+  CodeSnippet,
+  ErrorCategory,
+  ErrorSeverity,
+  ErrorSource,
+  WorkflowContext,
+} from "@detent/types";
+import { cloneWorkflowContext } from "@detent/types";
 
 /**
  * ExtractedError represents a single error extracted from CI output.

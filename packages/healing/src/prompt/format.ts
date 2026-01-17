@@ -1,29 +1,14 @@
+import type { ErrorCategory, ErrorSeverity } from "@detent/types";
 import { INTERNAL_FRAME_PATTERNS, MAX_STACK_TRACE_LINES } from "./system.js";
 
-/**
- * Error categories in priority order.
- */
-export type ErrorCategory =
-  | "compile"
-  | "type-check"
-  | "test"
-  | "runtime"
-  | "lint"
-  | "infrastructure"
-  | "metadata"
-  | "security"
-  | "dependency"
-  | "config"
-  | "docs"
-  | "unknown";
-
-/**
- * Error severity levels.
- */
-export type ErrorSeverity = "error" | "warning";
+// Re-export types for consumers
+export type { ErrorCategory, ErrorSeverity } from "@detent/types";
 
 /**
  * Extracted error with full diagnostic context.
+ *
+ * Note: Uses `filePath` for the file field. This differs from parser's ExtractedError
+ * which uses `file`. A future consolidation will unify these in @detent/types.
  */
 export interface ExtractedError {
   filePath?: string;

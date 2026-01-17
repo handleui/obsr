@@ -152,6 +152,8 @@
       "version": "0.4.0",
       "dependencies": {
         "@detent/lore": "workspace:*",
+        "@detent/parser": "workspace:*",
+        "@detent/types": "workspace:*",
         "ai": "^5.0.0",
         "fast-glob": "^3.3.3",
         "zod": "^3.25.34",
@@ -180,11 +182,22 @@
     "packages/parser": {
       "name": "@detent/parser",
       "version": "0.5.2",
+      "dependencies": {
+        "@detent/types": "workspace:*",
+      },
       "devDependencies": {
         "@detent/typescript-config": "*",
         "@types/node": "^25.0.3",
         "typescript": "5.9.2",
         "vitest": "^4.0.16",
+      },
+    },
+    "packages/types": {
+      "name": "@detent/types",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@detent/typescript-config": "*",
+        "typescript": "5.9.2",
       },
     },
     "packages/typescript-config": {
@@ -371,6 +384,8 @@
     "@detent/navigator": ["@detent/navigator@workspace:apps/navigator"],
 
     "@detent/parser": ["@detent/parser@workspace:packages/parser"],
+
+    "@detent/types": ["@detent/types@workspace:packages/types"],
 
     "@detent/typescript-config": ["@detent/typescript-config@workspace:packages/typescript-config"],
 

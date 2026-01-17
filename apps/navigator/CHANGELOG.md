@@ -1,5 +1,12 @@
 # @detent/navigator
 
+## 0.5.2
+
+### Patch Changes
+
+- 0812dd0: Add sync-user API call during auth callback for faster org auto-join.
+  The call is non-blocking so auth flow continues even if sync fails.
+
 ## 0.5.1
 
 ### Patch Changes

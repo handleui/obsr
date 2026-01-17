@@ -37,10 +37,10 @@ export const stripAnsi = (s: string): string =>
 // ============================================================================
 
 /**
- * Maps file extensions to parser IDs for fast-path lookup.
- * Enables O(1) parser selection when a line contains a file path with known extension.
+ * Default extension to parser ID mappings.
+ * Used to initialize the mutable registry.
  */
-export const extensionToParserID: Readonly<Record<string, string>> = {
+const defaultExtensionMappings: Readonly<Record<string, string>> = {
   // Go
   ".go": "go",
 
@@ -69,8 +69,133 @@ export const extensionToParserID: Readonly<Record<string, string>> = {
   ".pyw": "python", // Windows Python
 };
 
+/**
+ * Mutable extension to parser ID registry.
+ * Starts with default mappings, can be extended via addExtensionMapping().
+ */
+const mutableExtensionMap = new Map<string, string>(
+  Object.entries(defaultExtensionMappings)
+);
+
+/**
+ * Set of custom extension keys added via addExtensionMapping().
+ * Tracks extensions that are NOT part of the default mappings.
+ * Used to accurately enforce the custom extension limit.
+ */
+const customExtensionKeys = new Set<string>();
+
+/**
+ * Maps file extensions to parser IDs for fast-path lookup.
+ * Enables O(1) parser selection when a line contains a file path with known extension.
+ *
+ * @deprecated Use getExtensionMapping() or addExtensionMapping() for runtime access.
+ * This export returns only the DEFAULT mappings and does NOT include runtime additions.
+ * For a complete view of all mappings, use getExtensionMappings() instead.
+ *
+ * WARNING: Custom mappings added via addExtensionMapping() will NOT appear here.
+ */
+export const extensionToParserID: Readonly<Record<string, string>> =
+  defaultExtensionMappings;
+
+/**
+ * Get the parser ID for a file extension.
+ * Returns undefined if no mapping exists.
+ */
+export const getExtensionMapping = (ext: string): string | undefined =>
+  mutableExtensionMap.get(ext.toLowerCase());
+
+/**
+ * Maximum number of custom extension mappings allowed to prevent memory exhaustion.
+ */
+const maxCustomExtensions = 100;
+
+/**
+ * Add a custom extension to parser ID mapping.
+ * Extensions should start with a dot (e.g., ".custom").
+ *
+ * SECURITY: Validates inputs to prevent:
+ * - Memory exhaustion from unbounded extension registration
+ * - Invalid extension formats that could cause unexpected behavior
+ *
+ * @throws Error if extension limit exceeded or inputs are invalid
+ *
+ * @example
+ * ```typescript
+ * import { addExtensionMapping } from "@detent/parser";
+ *
+ * // Map .elm files to a custom parser
+ * addExtensionMapping(".elm", "elm");
+ * ```
+ */
+export const addExtensionMapping = (ext: string, parserID: string): void => {
+  // SECURITY: Validate inputs
+  if (typeof ext !== "string" || ext.length === 0) {
+    throw new Error("addExtensionMapping: ext must be a non-empty string");
+  }
+  if (typeof parserID !== "string" || parserID.length === 0) {
+    throw new Error("addExtensionMapping: parserID must be a non-empty string");
+  }
+  if (!ext.startsWith(".")) {
+    throw new Error('addExtensionMapping: ext must start with "."');
+  }
+  // Limit extension length to prevent memory abuse
+  if (ext.length > 20) {
+    throw new Error("addExtensionMapping: ext must be 20 characters or fewer");
+  }
+
+  const normalizedExt = ext.toLowerCase();
+  const isDefault = normalizedExt in defaultExtensionMappings;
+  const isNewCustom = !(isDefault || customExtensionKeys.has(normalizedExt));
+
+  // SECURITY: Prevent unbounded growth (only count truly custom extensions)
+  if (isNewCustom && customExtensionKeys.size >= maxCustomExtensions) {
+    throw new Error(
+      `addExtensionMapping: maximum of ${maxCustomExtensions} custom extensions exceeded`
+    );
+  }
+
+  mutableExtensionMap.set(normalizedExt, parserID);
+  knownExtensions.add(normalizedExt);
+
+  // Track custom extensions (not overrides of defaults)
+  if (!isDefault) {
+    customExtensionKeys.add(normalizedExt);
+  }
+};
+
+/**
+ * Add multiple extension mappings at once.
+ */
+export const addExtensionMappings = (
+  mappings: Readonly<Record<string, string>>
+): void => {
+  for (const [ext, parserID] of Object.entries(mappings)) {
+    addExtensionMapping(ext, parserID);
+  }
+};
+
+/**
+ * Get all registered extension mappings (as readonly record).
+ */
+export const getExtensionMappings = (): Readonly<Record<string, string>> =>
+  Object.fromEntries(mutableExtensionMap);
+
+/**
+ * Reset extension mappings to defaults only.
+ */
+export const resetExtensionMappings = (): void => {
+  mutableExtensionMap.clear();
+  knownExtensions.clear();
+  customExtensionKeys.clear();
+  // Single iteration to populate both structures
+  for (const [ext, parserID] of Object.entries(defaultExtensionMappings)) {
+    mutableExtensionMap.set(ext, parserID);
+    knownExtensions.add(ext);
+  }
+};
+
 /** Set of known extensions for O(1) lookup */
-const knownExtensions = new Set(Object.keys(extensionToParserID));
+const knownExtensions = new Set(Object.keys(defaultExtensionMappings));
 
 /**
  * Check if a character code is valid for a file extension (a-z, A-Z, 0-9).

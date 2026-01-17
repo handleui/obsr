@@ -33,7 +33,7 @@ describe("TypeScriptParser", () => {
       expect(parser.canParse(line, ctx)).toBeGreaterThan(0);
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("file.ts");
+      expect(result?.filePath).toBe("file.ts");
       expect(result?.line).toBe(1);
       expect(result?.column).toBe(2);
       expect(result?.ruleId).toBe("TS2304");
@@ -48,7 +48,7 @@ describe("TypeScriptParser", () => {
       expect(parser.canParse(line, ctx)).toBeGreaterThan(0);
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("path/to/component.tsx");
+      expect(result?.filePath).toBe("path/to/component.tsx");
       expect(result?.line).toBe(10);
       expect(result?.column).toBe(15);
       expect(result?.ruleId).toBe("TS2339");
@@ -70,7 +70,7 @@ describe("TypeScriptParser", () => {
       const line = "src/app.ts(1,1): Some error message without code";
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("src/app.ts");
+      expect(result?.filePath).toBe("src/app.ts");
       expect(result?.line).toBe(1);
       expect(result?.column).toBe(1);
       expect(result?.message).toBe("Some error message without code");
@@ -88,7 +88,7 @@ describe("TypeScriptParser", () => {
       const result = parser.finishMultiLine(ctx);
 
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("file.ts");
+      expect(result?.filePath).toBe("file.ts");
       expect(result?.line).toBe(1);
       expect(result?.column).toBe(2);
       expect(result?.ruleId).toBe("TS2304");
@@ -105,7 +105,7 @@ describe("TypeScriptParser", () => {
       const result = parser.finishMultiLine(ctx);
 
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("src/utils.ts");
+      expect(result?.filePath).toBe("src/utils.ts");
       expect(result?.line).toBe(100);
       expect(result?.column).toBe(5);
       expect(result?.severity).toBe("warning");
@@ -119,7 +119,7 @@ describe("TypeScriptParser", () => {
       const result = parser.finishMultiLine(ctx);
 
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("app.tsx");
+      expect(result?.filePath).toBe("app.tsx");
       expect(result?.line).toBe(42);
       expect(result?.column).toBe(8);
       expect(result?.ruleId).toBeUndefined();
@@ -132,7 +132,7 @@ describe("TypeScriptParser", () => {
       expect(parser.canParse(line, ctx)).toBe(0.95);
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
-      expect(result?.file).toBeUndefined();
+      expect(result?.filePath).toBeUndefined();
       expect(result?.line).toBeUndefined();
       expect(result?.column).toBeUndefined();
       expect(result?.ruleId).toBe("TS5023");
@@ -218,7 +218,7 @@ describe("TypeScriptParser", () => {
       expect(parser.canParse(line, ctx)).toBeGreaterThan(0);
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("C:\\project\\src\\file.ts");
+      expect(result?.filePath).toBe("C:\\project\\src\\file.ts");
       expect(result?.line).toBe(10);
       expect(result?.column).toBe(5);
     });
@@ -237,7 +237,7 @@ describe("TypeScriptParser", () => {
         "\\\\server\\share\\project\\file.ts(1,1): error TS2304: Cannot find name";
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("\\\\server\\share\\project\\file.ts");
+      expect(result?.filePath).toBe("\\\\server\\share\\project\\file.ts");
     });
   });
 
@@ -256,7 +256,7 @@ describe("TypeScriptParser", () => {
         "path/with-dashes/my_file.ts(5,10): error TS2304: Cannot find name 'foo'";
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("path/with-dashes/my_file.ts");
+      expect(result?.filePath).toBe("path/with-dashes/my_file.ts");
     });
   });
 
@@ -266,7 +266,7 @@ describe("TypeScriptParser", () => {
       const line = `${longPath}(1,1): error TS2304: Cannot find name 'x'`;
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
-      expect(result?.file).toBe(longPath);
+      expect(result?.filePath).toBe(longPath);
     });
 
     it("rejects overly long lines (security - ReDoS prevention)", () => {
@@ -282,7 +282,7 @@ describe("TypeScriptParser", () => {
         "src/componentes/BotaoAcao.tsx(10,5): error TS2304: Cannot find name 'foo'";
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("src/componentes/BotaoAcao.tsx");
+      expect(result?.filePath).toBe("src/componentes/BotaoAcao.tsx");
     });
 
     it("parses message with unicode characters", () => {
@@ -344,7 +344,7 @@ describe("TypeScriptParser", () => {
         expect(parser.canParse(line, ctx)).toBeGreaterThan(0);
         const result = parser.parse(line, ctx);
         expect(result).not.toBeNull();
-        expect(result?.file).toBe(`src/types${ext}`);
+        expect(result?.filePath).toBe(`src/types${ext}`);
       });
     }
   });
@@ -650,12 +650,12 @@ describe("TypeScriptParser", () => {
 
       const firstResult = parser.parse(line2, ctx);
       expect(firstResult).not.toBeNull();
-      expect(firstResult?.file).toBe("src/a.ts");
+      expect(firstResult?.filePath).toBe("src/a.ts");
       expect(firstResult?.message).toBe("First error");
 
       const secondResult = parser.finishMultiLine(ctx);
       expect(secondResult).not.toBeNull();
-      expect(secondResult?.file).toBe("src/b.ts");
+      expect(secondResult?.filePath).toBe("src/b.ts");
     });
 
     it("returns immediately for parenthesized errors (no multi-line)", () => {
@@ -667,13 +667,13 @@ describe("TypeScriptParser", () => {
       parser.reset();
       const firstResult = parser.parse(line1, ctx);
       expect(firstResult).not.toBeNull();
-      expect(firstResult?.file).toBe("src/a.ts");
+      expect(firstResult?.filePath).toBe("src/a.ts");
 
       // Parse second line starts new multi-line context
       parser.parse(line2, ctx);
       const secondResult = parser.finishMultiLine(ctx);
       expect(secondResult).not.toBeNull();
-      expect(secondResult?.file).toBe("src/b.ts");
+      expect(secondResult?.filePath).toBe("src/b.ts");
     });
 
     it("finalizes pending error when global error arrives", () => {
@@ -685,7 +685,7 @@ describe("TypeScriptParser", () => {
 
       const firstResult = parser.parse(line2, ctx);
       expect(firstResult).not.toBeNull();
-      expect(firstResult?.file).toBe("src/a.ts");
+      expect(firstResult?.filePath).toBe("src/a.ts");
     });
   });
 

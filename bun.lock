@@ -24,6 +24,7 @@
       "dependencies": {
         "@detent/healing": "*",
         "@detent/parser": "*",
+        "@detent/types": "*",
         "@e2b/code-interpreter": "^2.3.3",
         "@polar-sh/sdk": "^0.42.2",
         "@sentry/cloudflare": "^10.32.1",
@@ -49,7 +50,7 @@
     },
     "apps/cli": {
       "name": "@detent/cli",
-      "version": "0.8.2",
+      "version": "0.9.0",
       "bin": {
         "dt": "./dist/index.js",
       },

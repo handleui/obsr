@@ -176,7 +176,7 @@ const truncateMessage = (msg: string): string =>
 // ============================================================================
 
 interface PendingError {
-  file: string;
+  filePath: string;
   line: number;
   column: number;
   ruleId: string;
@@ -252,7 +252,7 @@ class BiomeParser extends BaseParser implements NoisePatternProvider {
       if (file && lineNum !== undefined && ruleId) {
         // Store pending error, wait for message line
         this.pending = {
-          file,
+          filePath: file,
           line: lineNum,
           column: colNum ?? 0,
           ruleId,
@@ -308,7 +308,7 @@ class BiomeParser extends BaseParser implements NoisePatternProvider {
 
     const err: MutableExtractedError = {
       message: truncateMessage(message.trim()),
-      file: file || undefined,
+      filePath: file || undefined,
       line: lineNum,
       column: colNum,
       ruleId: title,
@@ -333,7 +333,7 @@ class BiomeParser extends BaseParser implements NoisePatternProvider {
   ): MutableExtractedError {
     const err: MutableExtractedError = {
       message: truncateMessage(message.trim()),
-      file: pending.file,
+      filePath: pending.filePath,
       line: pending.line,
       column: pending.column,
       ruleId: pending.ruleId,

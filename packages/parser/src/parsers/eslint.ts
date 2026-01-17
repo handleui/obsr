@@ -495,7 +495,7 @@ class ESLintParser extends MultiLineParser implements NoisePatternProvider {
 
     const err: MutableExtractedError = {
       message,
-      file: file || undefined,
+      filePath: file || undefined,
       line: lineNum,
       column: colNum,
       ruleId: ruleId || undefined,
@@ -538,7 +538,7 @@ class ESLintParser extends MultiLineParser implements NoisePatternProvider {
 
     const err: MutableExtractedError = {
       message,
-      file,
+      filePath: file,
       line: lineNum,
       column: colNum,
       ruleId: ruleId || undefined,
@@ -581,7 +581,7 @@ class ESLintParser extends MultiLineParser implements NoisePatternProvider {
 
     const err: MutableExtractedError = {
       message,
-      file,
+      filePath: file,
       line: lineNum,
       column: colNum,
       ruleId,

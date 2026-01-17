@@ -2,12 +2,14 @@
 
 // System prompt and constants
 
-// Formatting functions and types
+// Types re-exported from @detent/types
 export type {
   ErrorCategory,
   ErrorSeverity,
   ExtractedError,
-} from "./format.js";
+} from "@detent/types";
+
+// Formatting functions
 export {
   countByCategory,
   countErrors,

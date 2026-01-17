@@ -291,7 +291,7 @@ const extractExceptionMessage = (lines: readonly string[]): string => {
 
 interface TracebackState {
   inTraceback: boolean;
-  file: string;
+  filePath: string;
   line: number;
   function: string;
   stackTrace: string[];
@@ -305,7 +305,7 @@ interface TracebackState {
 
 const createTracebackState = (): TracebackState => ({
   inTraceback: false,
-  file: "",
+  filePath: "",
   line: 0,
   function: "",
   stackTrace: [],
@@ -318,7 +318,7 @@ const createTracebackState = (): TracebackState => ({
 
 const resetTracebackState = (state: TracebackState): void => {
   state.inTraceback = false;
-  state.file = "";
+  state.filePath = "";
   state.line = 0;
   state.function = "";
   state.stackTrace = [];
@@ -553,7 +553,7 @@ export class PythonParser
     this.traceback.stackTrace = [rawLine];
     this.traceback.byteCount = rawLine.length;
     this.traceback.frameCount = 0;
-    this.traceback.file = "";
+    this.traceback.filePath = "";
     this.traceback.line = 0;
     this.traceback.function = "";
     this.traceback.isSyntaxError = false;
@@ -624,9 +624,9 @@ export class PythonParser
     // Handle File line - extract location (we want the LAST/deepest one)
     const fileMatch = tracebackFilePattern.exec(stripped);
     if (fileMatch) {
-      const [, filePath, lineNum, funcName] = fileMatch;
-      if (filePath && lineNum) {
-        this.traceback.file = filePath;
+      const [, matchedFilePath, lineNum, funcName] = fileMatch;
+      if (matchedFilePath && lineNum) {
+        this.traceback.filePath = matchedFilePath;
         this.traceback.line = Number.parseInt(lineNum, 10);
         if (funcName) {
           this.traceback.function = funcName;
@@ -640,9 +640,9 @@ export class PythonParser
     // Handle SyntaxError-specific File line (without function)
     const syntaxFileMatch = syntaxErrorFilePattern.exec(stripped);
     if (syntaxFileMatch) {
-      const [, filePath, lineNum] = syntaxFileMatch;
-      if (filePath && lineNum) {
-        this.traceback.file = filePath;
+      const [, matchedFilePath, lineNum] = syntaxFileMatch;
+      if (matchedFilePath && lineNum) {
+        this.traceback.filePath = matchedFilePath;
         this.traceback.line = Number.parseInt(lineNum, 10);
         this.traceback.isSyntaxError = true;
         this.pushTracebackLine(line);
@@ -701,7 +701,7 @@ export class PythonParser
 
     const err: MutableExtractedError = {
       message,
-      file: this.traceback.file || undefined,
+      filePath: this.traceback.filePath || undefined,
       line: this.traceback.line || undefined,
       column: this.traceback.column || undefined,
       severity: "error",
@@ -709,7 +709,7 @@ export class PythonParser
       stackTrace,
       category,
       source: "python",
-      lineKnown: this.traceback.file !== "" && this.traceback.line > 0,
+      lineKnown: this.traceback.filePath !== "" && this.traceback.line > 0,
       columnKnown: this.traceback.column > 0,
       stackTraceTruncated,
       messageTruncated,
@@ -740,7 +740,7 @@ export class PythonParser
 
     const err: MutableExtractedError = {
       message: fullMessage,
-      file,
+      filePath: file,
       severity: "error",
       raw: rawLine,
       category: "test",
@@ -766,7 +766,7 @@ export class PythonParser
 
     const err: MutableExtractedError = {
       message: `Collection error: ${message}`,
-      file,
+      filePath: file,
       severity: "error",
       raw: rawLine,
       category: "test",
@@ -808,7 +808,7 @@ export class PythonParser
 
     const err: MutableExtractedError = {
       message,
-      file,
+      filePath: file,
       line: lineNum,
       severity: mappedSeverity,
       raw: rawLine,
@@ -840,7 +840,7 @@ export class PythonParser
 
     const err: MutableExtractedError = {
       message,
-      file,
+      filePath: file,
       line: lineNum,
       column: col,
       severity,
@@ -872,7 +872,7 @@ export class PythonParser
 
     const err: MutableExtractedError = {
       message,
-      file,
+      filePath: file,
       line: lineNum,
       severity,
       raw: rawLine,
@@ -904,7 +904,7 @@ export class PythonParser
 
     const err: MutableExtractedError = {
       message,
-      file,
+      filePath: file,
       line: lineNum,
       column: col,
       severity,

@@ -538,7 +538,7 @@ class RustParser extends MultiLineParser {
 
     const err: MutableExtractedError = {
       message: this.state.errorMessage,
-      file: this.state.errorFile || undefined,
+      filePath: this.state.errorFile || undefined,
       line: this.state.errorLine > 0 ? this.state.errorLine : undefined,
       column: this.state.errorColumn > 0 ? this.state.errorColumn : undefined,
       severity,

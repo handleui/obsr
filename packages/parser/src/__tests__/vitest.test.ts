@@ -21,7 +21,7 @@ describe("VitestParser", () => {
       expect(result.message).toBe(
         "Test suite failed: src/__tests__/math.test.ts"
       );
-      expect(result.file).toBe("src/__tests__/math.test.ts");
+      expect(result.filePath).toBe("src/__tests__/math.test.ts");
       expect(result.severity).toBe("error");
       expect(result.category).toBe("test");
       expect(result.source).toBe("vitest");
@@ -32,7 +32,7 @@ describe("VitestParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("src/components/Button.spec.tsx");
+      expect(result.filePath).toBe("src/components/Button.spec.tsx");
     });
 
     it("parses FAIL marker with .mts extension", () => {
@@ -40,7 +40,7 @@ describe("VitestParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("tests/utils.test.mts");
+      expect(result.filePath).toBe("tests/utils.test.mts");
     });
   });
 
@@ -52,7 +52,7 @@ describe("VitestParser", () => {
       expect(result).not.toBeNull();
       expect(result.message).toContain("src/__tests__/math.test.ts");
       expect(result.message).toContain("2 failed");
-      expect(result.file).toBe("src/__tests__/math.test.ts");
+      expect(result.filePath).toBe("src/__tests__/math.test.ts");
       expect(result.category).toBe("test");
       expect(result.source).toBe("vitest");
     });
@@ -62,7 +62,7 @@ describe("VitestParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("src/__tests__/api.test.ts");
+      expect(result.filePath).toBe("src/__tests__/api.test.ts");
     });
 
     it("parses spec file with failure count", () => {
@@ -70,7 +70,7 @@ describe("VitestParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("components/Modal.spec.tsx");
+      expect(result.filePath).toBe("components/Modal.spec.tsx");
     });
   });
 
@@ -152,7 +152,7 @@ describe("VitestParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("/Users/dev/project/src/math.ts");
+      expect(result.filePath).toBe("/Users/dev/project/src/math.ts");
       expect(result.line).toBe(42);
       expect(result.column).toBe(10);
     });
@@ -162,7 +162,7 @@ describe("VitestParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("/project/tests/utils.test.ts");
+      expect(result.filePath).toBe("/project/tests/utils.test.ts");
       expect(result.line).toBe(15);
       expect(result.column).toBe(20);
     });
@@ -172,7 +172,7 @@ describe("VitestParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("/project/src/math.ts");
+      expect(result.filePath).toBe("/project/src/math.ts");
       expect(result.line).toBe(10);
       expect(result.column).toBe(5);
     });
@@ -189,7 +189,7 @@ describe("VitestParser", () => {
 
       expect(result).not.toBeNull();
       expect(result.stackTrace).toContain("/test/first.ts");
-      expect(result.file).toBe("/test/first.ts");
+      expect(result.filePath).toBe("/test/first.ts");
       expect(result.line).toBe(1);
     });
   });
@@ -205,7 +205,7 @@ describe("VitestParser", () => {
       const result = parser.finishMultiLine(ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("/test/math.ts");
+      expect(result.filePath).toBe("/test/math.ts");
       expect(result.line).toBe(10);
     });
 
@@ -431,7 +431,7 @@ describe("VitestParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("/project/src/__tests__/math.test.ts");
+      expect(result.filePath).toBe("/project/src/__tests__/math.test.ts");
       expect(result.line).toBe(42);
     });
 
@@ -440,7 +440,7 @@ describe("VitestParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("/project/src/utils/math.ts");
+      expect(result.filePath).toBe("/project/src/utils/math.ts");
       expect(result.line).toBe(15);
     });
 
@@ -451,7 +451,7 @@ describe("VitestParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("/project/node_modules/lodash/debounce.js");
+      expect(result.filePath).toBe("/project/node_modules/lodash/debounce.js");
     });
   });
 
@@ -461,7 +461,7 @@ describe("VitestParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("src/math.test.ts");
+      expect(result.filePath).toBe("src/math.test.ts");
     });
 
     it("handles various test file extensions", () => {
@@ -481,7 +481,7 @@ describe("VitestParser", () => {
         const result = parser.parse(line, ctx) as ExtractedError;
 
         expect(result).not.toBeNull();
-        expect(result.file).toBe(`src/file.${ext}`);
+        expect(result.filePath).toBe(`src/file.${ext}`);
       }
     });
 
@@ -490,7 +490,7 @@ describe("VitestParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("./src/utils.ts");
+      expect(result.filePath).toBe("./src/utils.ts");
     });
   });
 

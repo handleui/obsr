@@ -29,7 +29,7 @@ describe("GolangParser", () => {
 
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("./main.go");
+      expect(result?.filePath).toBe("./main.go");
       expect(result?.line).toBe(10);
       expect(result?.column).toBe(5);
       expect(result?.message).toBe("undefined: foo");
@@ -43,7 +43,7 @@ describe("GolangParser", () => {
 
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("main.go");
+      expect(result?.filePath).toBe("main.go");
       expect(result?.line).toBe(10);
       expect(result?.column).toBe(5);
       expect(result?.message).toBe("cannot use x (type int) as type string");
@@ -57,7 +57,7 @@ describe("GolangParser", () => {
 
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("main.go");
+      expect(result?.filePath).toBe("main.go");
       expect(result?.line).toBe(25);
       expect(result?.column).toBeUndefined();
       expect(result?.message).toBe("missing return at end of function");
@@ -91,7 +91,7 @@ describe("GolangParser", () => {
 
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("main.go");
+      expect(result?.filePath).toBe("main.go");
       expect(result?.line).toBe(10);
       expect(result?.column).toBe(5);
       expect(result?.message).toBe("regexp.MustCompile");
@@ -223,7 +223,7 @@ describe("GolangParser", () => {
       expect(finished?.message).toBe("expected true, got false");
       expect(finished?.category).toBe("test");
       expect(finished?.source).toBe("go-test");
-      expect(finished?.file).toBe("foo_test.go");
+      expect(finished?.filePath).toBe("foo_test.go");
       expect(finished?.line).toBe(15);
     });
 
@@ -234,7 +234,7 @@ describe("GolangParser", () => {
 
       const finished = parser.finishMultiLine(ctx);
       expect(finished).not.toBeNull();
-      expect(finished?.file).toBe("foo_test.go");
+      expect(finished?.filePath).toBe("foo_test.go");
       expect(finished?.line).toBe(20);
     });
 
@@ -249,7 +249,7 @@ describe("GolangParser", () => {
 
       const finished = parser.finishMultiLine(ctx);
       expect(finished).not.toBeNull();
-      expect(finished?.file).toBe("complex_test.go");
+      expect(finished?.filePath).toBe("complex_test.go");
       expect(finished?.stackTrace).toContain("expected: 1");
     });
 
@@ -259,7 +259,7 @@ describe("GolangParser", () => {
 
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("pkg/foo/foo.go");
+      expect(result?.filePath).toBe("pkg/foo/foo.go");
       expect(result?.category).toBe("compile");
     });
 
@@ -297,7 +297,7 @@ describe("GolangParser", () => {
       );
       expect(finished?.category).toBe("runtime");
       expect(finished?.source).toBe("go");
-      expect(finished?.file).toBe("/home/user/project/main.go");
+      expect(finished?.filePath).toBe("/home/user/project/main.go");
       expect(finished?.line).toBe(25);
       expect(finished?.stackTrace).toContain("goroutine 1 [running]:");
     });
@@ -320,7 +320,7 @@ describe("GolangParser", () => {
       const finished = parser.finishMultiLine(ctx);
       expect(finished).not.toBeNull();
       expect(finished?.message).toContain("nil pointer dereference");
-      expect(finished?.file).toBe("/app/handler.go");
+      expect(finished?.filePath).toBe("/app/handler.go");
       expect(finished?.line).toBe(45);
     });
 
@@ -344,7 +344,7 @@ describe("GolangParser", () => {
       const finished = parser.finishMultiLine(ctx);
       expect(finished).not.toBeNull();
       expect(finished?.stackTrace).toContain("goroutine 18");
-      expect(finished?.file).toBe("/app/worker.go");
+      expect(finished?.filePath).toBe("/app/worker.go");
       expect(finished?.line).toBe(30);
     });
 
@@ -378,7 +378,9 @@ describe("GolangParser", () => {
 
       const finished = parser.finishMultiLine(ctx);
       expect(finished).not.toBeNull();
-      expect(finished?.file).toBe("/usr/local/go/src/runtime/debug/stack.go");
+      expect(finished?.filePath).toBe(
+        "/usr/local/go/src/runtime/debug/stack.go"
+      );
     });
   });
 
@@ -484,7 +486,7 @@ describe("GolangParser", () => {
 
         const result = parser.parse(line, ctx);
         expect(result).not.toBeNull();
-        expect(result?.file).toBe("pkg\\handler\\main.go");
+        expect(result?.filePath).toBe("pkg\\handler\\main.go");
         expect(result?.line).toBe(10);
       });
 
@@ -494,7 +496,7 @@ describe("GolangParser", () => {
 
         const result = parser.parse(line, ctx);
         expect(result).not.toBeNull();
-        expect(result?.file).toBe("/Users/dev/project/main.go");
+        expect(result?.filePath).toBe("/Users/dev/project/main.go");
       });
     });
 
@@ -506,7 +508,7 @@ describe("GolangParser", () => {
 
         const result = parser.parse(line, ctx);
         expect(result).not.toBeNull();
-        expect(result?.file).toBe("github.com/foo/bar/v2/pkg/handler.go");
+        expect(result?.filePath).toBe("github.com/foo/bar/v2/pkg/handler.go");
         expect(result?.line).toBe(25);
       });
 
@@ -557,7 +559,7 @@ describe("GolangParser", () => {
 
         const result = parser.parse(line, ctx);
         expect(result).not.toBeNull();
-        expect(result?.file).toBe("main.go");
+        expect(result?.filePath).toBe("main.go");
         expect(result?.message).toBe("undefined: foo");
       });
     });

@@ -665,13 +665,13 @@ export const extractSnippetsForErrors = async (
     }
 
     // Skip if no file or no valid line number
-    if (!(err.file && err.line) || err.line <= 0) {
+    if (!(err.filePath && err.line) || err.line <= 0) {
       resultErrors.push(err);
       continue;
     }
 
     // Resolve file path
-    let filePath = err.file;
+    let filePath = err.filePath;
     if (cleanBasePath && !isAbsolute(filePath)) {
       // Security: Join paths and then verify the result is still under basePath
       filePath = join(cleanBasePath, filePath);

@@ -805,7 +805,7 @@ class InfrastructureParser extends BaseParser implements NoisePatternProvider {
 
     const err: MutableExtractedError = {
       message: `Permission denied: ${filePath}`,
-      file: filePath,
+      filePath,
       severity: "error",
       raw: rawLine,
       category: "infrastructure",

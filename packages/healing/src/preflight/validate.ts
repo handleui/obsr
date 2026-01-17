@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ExtractedError } from "@detent/parser";
+import type { ExtractedError } from "@detent/types";
 import type { PreflightResult, StaleError, ValidationReason } from "./types.js";
 
 const normalizeLine = (line: string): string =>
@@ -11,12 +11,12 @@ const groupByFile = (
 ): Map<string, ExtractedError[]> => {
   const groups = new Map<string, ExtractedError[]>();
   for (const error of errors) {
-    if (error.file) {
-      const existing = groups.get(error.file);
+    if (error.filePath) {
+      const existing = groups.get(error.filePath);
       if (existing) {
         existing.push(error);
       } else {
-        groups.set(error.file, [error]);
+        groups.set(error.filePath, [error]);
       }
     }
   }
@@ -128,7 +128,7 @@ export const validateErrors = (
   // Errors without file path pass through as valid
   const withFile: ExtractedError[] = [];
   for (const error of errors) {
-    if (error.file) {
+    if (error.filePath) {
       withFile.push(error);
     } else {
       valid.push(error);

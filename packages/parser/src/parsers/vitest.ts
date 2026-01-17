@@ -269,7 +269,7 @@ const truncateMessage = (msg: string): string => {
 
 interface VitestErrorState {
   inError: boolean;
-  file: string | undefined;
+  filePath: string | undefined;
   line: number | undefined;
   column: number | undefined;
   testName: string | undefined;
@@ -284,7 +284,7 @@ interface VitestErrorState {
 
 const createErrorState = (): VitestErrorState => ({
   inError: false,
-  file: undefined,
+  filePath: undefined,
   line: undefined,
   column: undefined,
   testName: undefined,
@@ -299,7 +299,7 @@ const createErrorState = (): VitestErrorState => ({
 
 const resetErrorState = (state: VitestErrorState): void => {
   state.inError = false;
-  state.file = undefined;
+  state.filePath = undefined;
   state.line = undefined;
   state.column = undefined;
   state.testName = undefined;
@@ -717,8 +717,8 @@ export class VitestParser
         const [, file, lineStr, colStr] = stackMatch;
         if (file && lineStr && colStr) {
           // Keep the first (deepest) stack frame
-          if (!this.errorState.file) {
-            this.errorState.file = file;
+          if (!this.errorState.filePath) {
+            this.errorState.filePath = file;
             this.errorState.line = Number.parseInt(lineStr, 10);
             this.errorState.column = Number.parseInt(colStr, 10);
           }
@@ -797,7 +797,7 @@ export class VitestParser
 
     const err: MutableExtractedError = {
       message,
-      file: this.errorState.file,
+      filePath: this.errorState.filePath,
       line: this.errorState.line,
       column: this.errorState.column,
       severity: "error",
@@ -833,11 +833,11 @@ export class VitestParser
     rawLine: string,
     ctx: ParseContext
   ): ParseResult {
-    const [, file] = matches;
+    const [, filePath] = matches;
 
     const err: MutableExtractedError = {
-      message: `Test suite failed: ${file}`,
-      file,
+      message: `Test suite failed: ${filePath}`,
+      filePath,
       severity: "error",
       raw: rawLine,
       category: "test",
@@ -855,11 +855,11 @@ export class VitestParser
     rawLine: string,
     ctx: ParseContext
   ): ParseResult {
-    const [, file, failedCount] = matches;
+    const [, filePath, failedCount] = matches;
 
     const err: MutableExtractedError = {
-      message: `Test file failed: ${file} (${failedCount} failed)`,
-      file,
+      message: `Test file failed: ${filePath} (${failedCount} failed)`,
+      filePath,
       severity: "error",
       raw: rawLine,
       category: "test",
@@ -899,15 +899,15 @@ export class VitestParser
     rawLine: string,
     ctx: ParseContext
   ): ParseResult {
-    const [, file, lineStr, colStr] = matches;
-    if (!(file && lineStr && colStr)) {
+    const [, filePath, lineStr, colStr] = matches;
+    if (!(filePath && lineStr && colStr)) {
       return null;
     }
 
     // Filter out internal vitest runner frames - they're not useful for debugging.
     // Users care about their test code, not the test runner's internal stack.
     // This follows Vitest's own onStackTrace recommendation to filter node_modules.
-    if (vitestInternalFramePattern.test(file)) {
+    if (vitestInternalFramePattern.test(filePath)) {
       return null;
     }
 
@@ -915,8 +915,8 @@ export class VitestParser
     const col = Number.parseInt(colStr, 10);
 
     const err: MutableExtractedError = {
-      message: `Error at ${file}:${lineNum}:${col}`,
-      file,
+      message: `Error at ${filePath}:${lineNum}:${col}`,
+      filePath,
       line: lineNum,
       column: col,
       severity: "error",

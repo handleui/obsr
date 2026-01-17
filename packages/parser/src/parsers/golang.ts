@@ -307,7 +307,7 @@ type MultiLineState = "idle" | "panic" | "test-failure";
 
 interface PanicState {
   message: string;
-  file: string;
+  filePath: string;
   line: number;
   stackTrace: string[];
   goroutineSeen: boolean;
@@ -315,7 +315,7 @@ interface PanicState {
 
 interface TestFailureState {
   testName: string;
-  file: string;
+  filePath: string;
   line: number;
   message: string;
   stackTrace: string[];
@@ -367,14 +367,14 @@ export class GolangParser extends MultiLineParser {
   private state: MultiLineState = "idle";
   private panicState: PanicState = {
     message: "",
-    file: "",
+    filePath: "",
     line: 0,
     stackTrace: [],
     goroutineSeen: false,
   };
   private testState: TestFailureState = {
     testName: "",
-    file: "",
+    filePath: "",
     line: 0,
     message: "",
     stackTrace: [],
@@ -536,14 +536,14 @@ export class GolangParser extends MultiLineParser {
     this.state = "idle";
     this.panicState = {
       message: "",
-      file: "",
+      filePath: "",
       line: 0,
       stackTrace: [],
       goroutineSeen: false,
     };
     this.testState = {
       testName: "",
-      file: "",
+      filePath: "",
       line: 0,
       message: "",
       stackTrace: [],
@@ -608,7 +608,7 @@ export class GolangParser extends MultiLineParser {
 
     const err: MutableExtractedError = {
       message: parsedMessage,
-      file,
+      filePath: file,
       line: lineNum,
       column: col > 0 ? col : undefined,
       severity: severity === "warning" ? "warning" : "error",
@@ -647,7 +647,7 @@ export class GolangParser extends MultiLineParser {
     this.state = "panic";
     this.panicState = {
       message,
-      file: "",
+      filePath: "",
       line: 0,
       stackTrace: [rawLine],
       goroutineSeen: false,
@@ -658,7 +658,7 @@ export class GolangParser extends MultiLineParser {
     this.state = "test-failure";
     this.testState = {
       testName,
-      file: "",
+      filePath: "",
       line: 0,
       message: "",
       stackTrace: [],
@@ -703,10 +703,10 @@ export class GolangParser extends MultiLineParser {
       }
 
       // Extract first file location as the error location
-      if (this.panicState.file === "") {
+      if (this.panicState.filePath === "") {
         const fileMatches = goStackFilePattern.exec(line);
         if (fileMatches) {
-          this.panicState.file = fileMatches[1] ?? "";
+          this.panicState.filePath = fileMatches[1] ?? "";
           this.panicState.line = safeParseInt(fileMatches[2]) ?? 0;
         }
       }
@@ -748,8 +748,8 @@ export class GolangParser extends MultiLineParser {
     // Check for test output with file:line reference
     const fileLineMatches = testFileLinePattern.exec(line);
     if (fileLineMatches) {
-      if (this.testState.file === "") {
-        this.testState.file = fileLineMatches[1] ?? "";
+      if (this.testState.filePath === "") {
+        this.testState.filePath = fileLineMatches[1] ?? "";
         this.testState.line = safeParseInt(fileLineMatches[2]) ?? 0;
         this.testState.message = fileLineMatches[3] ?? "";
       }
@@ -787,14 +787,14 @@ export class GolangParser extends MultiLineParser {
 
     const err: MutableExtractedError = {
       message: `panic: ${this.panicState.message}`,
-      file: this.panicState.file || undefined,
+      filePath: this.panicState.filePath || undefined,
       line: this.panicState.line > 0 ? this.panicState.line : undefined,
       severity: "error",
       raw: stackTraceStr,
       stackTrace: stackTraceStr,
       category: "runtime",
       source: "go",
-      lineKnown: this.panicState.file !== "" && this.panicState.line > 0,
+      lineKnown: this.panicState.filePath !== "" && this.panicState.line > 0,
       columnKnown: false,
       stackTraceTruncated: truncated,
     };
@@ -821,14 +821,14 @@ export class GolangParser extends MultiLineParser {
 
     const err: MutableExtractedError = {
       message,
-      file: this.testState.file || undefined,
+      filePath: this.testState.filePath || undefined,
       line: this.testState.line > 0 ? this.testState.line : undefined,
       severity: "error",
       raw: `--- FAIL: ${this.testState.testName}`,
       stackTrace: stackTraceStr || undefined,
       category: "test",
       source: "go-test",
-      lineKnown: this.testState.file !== "" && this.testState.line > 0,
+      lineKnown: this.testState.filePath !== "" && this.testState.line > 0,
       columnKnown: false,
       stackTraceTruncated: truncated,
     };

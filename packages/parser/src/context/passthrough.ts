@@ -6,7 +6,7 @@
  * This parser is STATELESS - it simply passes lines through.
  */
 
-import type { ContextParser, ParseLineResult } from "./types.js";
+import type { ContextParser, ParseLineResult } from "@detent/types";
 
 /**
  * Create a passthrough context parser.

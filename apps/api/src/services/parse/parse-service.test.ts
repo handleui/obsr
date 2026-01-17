@@ -205,7 +205,7 @@ describe("parseService.parseAndPersist", () => {
         message: "TypeScript error: Cannot find name 'foo'",
         category: "type-check",
         source: "typescript",
-        file: "src/app.ts",
+        filePath: "src/app.ts",
         line: 10,
       }),
       createError({

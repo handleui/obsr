@@ -11,7 +11,7 @@ const MAX_ERROR_LENGTH = 10_000;
 
 interface ErrorItem {
   message?: string;
-  file?: string;
+  filePath?: string;
   line?: number;
   column?: number;
   type?: string;
@@ -33,7 +33,7 @@ const isValidError = (error: unknown): error is ErrorItem => {
   if (e.message !== undefined && typeof e.message !== "string") {
     return false;
   }
-  if (e.file !== undefined && typeof e.file !== "string") {
+  if (e.filePath !== undefined && typeof e.filePath !== "string") {
     return false;
   }
   if (e.type !== undefined && typeof e.type !== "string") {

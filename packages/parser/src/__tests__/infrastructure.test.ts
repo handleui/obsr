@@ -187,7 +187,7 @@ describe("Infrastructure Error Parser", () => {
       expect(result).not.toBeNull();
       expect(result?.message).toContain("Permission denied");
       expect(result?.message).toContain("./script.sh");
-      expect(result?.file).toBe("./script.sh");
+      expect(result?.filePath).toBe("./script.sh");
       expect(result?.category).toBe("infrastructure");
       expect(result?.ruleId).toBe("exit-126");
     });
@@ -201,7 +201,7 @@ describe("Infrastructure Error Parser", () => {
       const result = parser.parse(line, ctx);
       expect(result).not.toBeNull();
       expect(result?.message).toContain("Permission denied");
-      expect(result?.file).toBe("/usr/bin/test");
+      expect(result?.filePath).toBe("/usr/bin/test");
     });
   });
 

@@ -304,7 +304,7 @@ const NOISE_REGEX_PATTERNS: readonly RegExp[] = [
 
 interface TypeScriptParserState {
   inError: boolean;
-  file: string | undefined;
+  filePath: string | undefined;
   line: number | undefined;
   column: number | undefined;
   message: string;
@@ -341,7 +341,7 @@ export class TypeScriptParser
   private createEmptyState(): TypeScriptParserState {
     return {
       inError: false,
-      file: undefined,
+      filePath: undefined,
       line: undefined,
       column: undefined,
       message: "",
@@ -614,7 +614,7 @@ export class TypeScriptParser
 
     this.state = {
       inError: true,
-      file: undefined,
+      filePath: undefined,
       line: undefined,
       column: undefined,
       message,
@@ -634,7 +634,7 @@ export class TypeScriptParser
     // Groups differ between formats:
     // Colon: 1=file, 2=line, 3=col, 4=severity, 5=code, 6=message
     // Paren: 1=file, 2=line, 3=col, 4=severity, 5=code, 6=message
-    const file = match[1];
+    const filePath = match[1];
     const lineNum = safeParseInt(match[2]);
     const colNum = safeParseInt(match[3]);
     const severity = (match[4]?.toLowerCase() ?? "error") as ErrorSeverity;
@@ -647,7 +647,7 @@ export class TypeScriptParser
 
     this.state = {
       inError: true,
-      file,
+      filePath,
       line: lineNum,
       column: colNum,
       message,
@@ -697,7 +697,7 @@ export class TypeScriptParser
     ctx: ParseContext,
     _format: "colon" | "paren"
   ): MutableExtractedError {
-    const file = match[1];
+    const filePath = match[1];
     const lineNum = safeParseInt(match[2]);
     const colNum = safeParseInt(match[3]);
     const severity = (match[4]?.toLowerCase() ?? "error") as ErrorSeverity;
@@ -712,7 +712,7 @@ export class TypeScriptParser
 
     const err: MutableExtractedError = {
       message,
-      file,
+      filePath,
       line: lineNum,
       column: colNum,
       severity,
@@ -745,7 +745,7 @@ export class TypeScriptParser
 
     const err: MutableExtractedError = {
       message: state.message,
-      file: state.file,
+      filePath: state.filePath,
       line: state.line,
       column: state.column,
       severity: state.severity,

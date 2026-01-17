@@ -15,7 +15,7 @@
  * - Filters noise (debug, user groups) while preserving step context
  */
 
-import type { ContextParser, ParseLineResult } from "./types.js";
+import type { ContextParser, ParseLineResult } from "@detent/types";
 
 /**
  * Maximum step name length to prevent memory exhaustion from malicious input.

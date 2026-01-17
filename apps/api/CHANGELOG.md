@@ -1,5 +1,18 @@
 # @detent/api
 
+## 0.19.0
+
+### Minor Changes
+
+- afb9b1d: Add React Email templates for organization invitations.
+  Replaces inline HTML with reusable email components and shared layout.
+
+### Patch Changes
+
+- 1ae043d: Fix race condition where workflows weren't visible immediately after check_suite.requested.
+  Adds 3-second delay before fetching workflows and posts waiting comment from workflow_run
+  handler as fallback when check_suite fails to acquire the lock.
+
 ## 0.18.0
 
 ### Minor Changes

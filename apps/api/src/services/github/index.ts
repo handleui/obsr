@@ -1,8 +1,10 @@
+import { CACHE_TTL, cacheKey, getFromCache, setInCache } from "../../lib/cache";
 import type { Env } from "../../types/env";
 import type { LogExtractionResult } from "../log-extractor";
 import { blobToArrayBuffer, extractLogsFromZip } from "../log-extractor";
 import { generateAppJwt } from "./jwt";
 import {
+  createRateLimitError,
   handleApiError,
   logRateLimitWarning,
   parseRateLimitHeaders,
@@ -13,6 +15,7 @@ import type {
   CommentResponse,
   CreateCommitResponse,
   CreateTreeResponse,
+  GitHubOrgMember,
   GitHubServiceConfig,
   GitTreeItem,
   InstallationInfo,
@@ -460,6 +463,143 @@ const createGitHubServiceInternal = (env: Env) => {
     }
 
     return allRepos;
+  };
+
+  // Helper: fetch paginated org members from GitHub API
+  const fetchOrgMembersFromGitHub = async (
+    token: string,
+    orgLogin: string,
+    context: string
+  ): Promise<GitHubOrgMember[]> => {
+    const allMembers: GitHubOrgMember[] = [];
+    let page = 1;
+    const perPage = 100;
+
+    while (true) {
+      const response = await fetch(
+        `${GITHUB_API}/orgs/${encodeURIComponent(orgLogin)}/members?per_page=${perPage}&page=${page}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "Detent-App",
+          },
+        }
+      );
+
+      const rateLimitInfo = parseRateLimitHeaders(response);
+      logRateLimitWarning(rateLimitInfo, context);
+
+      // 403 can mean rate limit exceeded OR missing members:read permission
+      if (response.status === 403 && rateLimitInfo?.isExceeded) {
+        throw createRateLimitError(response, rateLimitInfo, context);
+      }
+      if (response.status === 403) {
+        const error = await response.text();
+        throw new Error(
+          `GitHub App lacks members:read permission for ${orgLogin}: ${error}`
+        );
+      }
+
+      if (!response.ok) {
+        await handleApiError(response, rateLimitInfo, context, {
+          404: "Organization not found",
+        });
+      }
+
+      const members = (await response.json()) as GitHubOrgMember[];
+      allMembers.push(...members);
+
+      // Check if more pages (GitHub returns empty array when done)
+      if (members.length < perPage) {
+        break;
+      }
+      page++;
+    }
+
+    console.log(
+      `[github] ${context}: Fetched ${allMembers.length} members (${page} pages)`
+    );
+    return allMembers;
+  };
+
+  // GET /orgs/{org}/members - fetch all members of a GitHub org
+  // Requires members:read permission on the installation
+  // Cached: in-memory 5min (fast, per-isolate) + KV 1hr (persists across isolates)
+  // See: https://docs.github.com/en/rest/orgs/members#list-organization-members
+  // Note: GitHub also supports `role` (admin/member) and `filter` (2fa_disabled) params
+  //
+  // Cache architecture (two-tier):
+  // - In-memory: 5min TTL, fastest access, per-isolate (cleared on cold start)
+  // - KV: 1hr TTL, eventually consistent across regions, survives isolate recycling
+  // - Keys use same format for both tiers to ensure consistency during invalidation
+  // - KV writes are fire-and-forget to avoid blocking the response
+  const getOrgMembers = async (
+    installationId: number,
+    orgLogin: string
+  ): Promise<GitHubOrgMember[]> => {
+    const context = `getOrgMembers(${orgLogin})`;
+    // Use consistent key format for both in-memory and KV caches
+    const membersCacheKey = cacheKey.githubOrgMembers(orgLogin);
+
+    // Check in-memory cache first - avoid multiple paginated API calls for large orgs
+    const cached = getFromCache<GitHubOrgMember[]>(membersCacheKey);
+    if (cached) {
+      console.log(`[github] ${context}: Cache hit (${cached.length} members)`);
+      return cached;
+    }
+
+    // Check KV cache (persists across isolates)
+    // Use same key format as in-memory for consistency during invalidation
+    try {
+      const kvCached = await env["detent-idempotency"].get(
+        membersCacheKey,
+        "json"
+      );
+      if (kvCached) {
+        const members = kvCached as GitHubOrgMember[];
+        // Populate in-memory cache from KV
+        setInCache(membersCacheKey, members, CACHE_TTL.GITHUB_ORG_MEMBERS);
+        console.log(
+          `[github] ${context}: KV cache hit (${members.length} members)`
+        );
+        return members;
+      }
+    } catch (kvError) {
+      // KV read failed - log and continue to fetch from GitHub
+      // This ensures we don't fail the request due to cache issues
+      console.warn(
+        `[github] ${context}: KV read failed, fetching fresh:`,
+        kvError
+      );
+    }
+
+    // Fetch fresh data from GitHub
+    const token = await getInstallationToken(installationId);
+    const allMembers = await fetchOrgMembersFromGitHub(
+      token,
+      orgLogin,
+      context
+    );
+
+    // Cache the full member list for 5 minutes (in-memory)
+    setInCache(membersCacheKey, allMembers, CACHE_TTL.GITHUB_ORG_MEMBERS);
+
+    // Write to KV with 1hr TTL (longer than in-memory 5min)
+    // Fire-and-forget: don't block response on KV write
+    // KV is eventually consistent so there's no guarantee of read-after-write anyway
+    // Errors are logged with structured context for CF Workers monitoring/alerting
+    env["detent-idempotency"]
+      .put(membersCacheKey, JSON.stringify(allMembers), {
+        expirationTtl: 3600, // 1 hour
+      })
+      .catch((kvError) => {
+        // Logged for monitoring visibility - search "[github]" + "KV write failed" in CF dashboard
+        console.error(`[github] ${context}: KV write failed:`, kvError);
+      });
+
+    return allMembers;
   };
 
   // GET /repos/{owner}/{repo}/actions/runs?head_sha={sha}
@@ -926,6 +1066,7 @@ const createGitHubServiceInternal = (env: Env) => {
     updateCheckRun,
     postCommentWithId,
     updateComment,
+    getOrgMembers,
   };
 };
 

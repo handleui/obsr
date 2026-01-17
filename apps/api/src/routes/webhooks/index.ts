@@ -4,6 +4,7 @@ export { handleCheckSuiteRequested } from "./handlers/check-suite";
 export { handleInstallationEvent } from "./handlers/installation";
 export { handleInstallationRepositoriesEvent } from "./handlers/installation-repos";
 export { handleIssueCommentEvent } from "./handlers/issue-comment";
+export { handleOrganizationWebhook } from "./handlers/organization";
 export {
   handleOrganizationEvent,
   handleRepositoryEvent,

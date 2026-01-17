@@ -197,6 +197,19 @@ app.route("/v1", api);
 // Export type for potential RPC client
 export type AppType = typeof app;
 
+const worker: ExportedHandler<Env> = {
+  fetch: (request, env, ctx) => app.fetch(request, env, ctx),
+  async scheduled(_event, env, ctx) {
+    const { syncAllOrganizations } = await import("./jobs/sync-organizations");
+    ctx.waitUntil(
+      syncAllOrganizations(env).catch((err) => {
+        console.error("[scheduled] Sync failed:", err);
+        Sentry.captureException(err);
+      })
+    );
+  },
+};
+
 export default Sentry.withSentry(
   (env: Env) => ({
     dsn: env.SENTRY_DSN,
@@ -231,5 +244,5 @@ export default Sentry.withSentry(
       return event;
     },
   }),
-  app
+  worker
 );

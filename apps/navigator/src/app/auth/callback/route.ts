@@ -195,6 +195,62 @@ const processGitHubTokens = async (
   return false;
 };
 
+/**
+ * Sync identity and auto-join orgs via API
+ * Non-blocking: failures are logged but don't break auth flow
+ */
+const syncIdentityWithApi = async (
+  authResponse: { sealedSession?: string },
+  rawOauthTokens: unknown,
+  log: BetterStackRequest["log"]
+): Promise<void> => {
+  if (!authResponse.sealedSession) {
+    return;
+  }
+
+  try {
+    const cookiePassword = getWorkOSCookiePassword();
+    const session = workos.userManagement.loadSealedSession({
+      sessionData: authResponse.sealedSession,
+      cookiePassword,
+    });
+
+    const refreshResult = await session.refresh({ cookiePassword });
+    if (!(refreshResult.authenticated && refreshResult.session?.accessToken)) {
+      return;
+    }
+
+    const accessToken = refreshResult.session.accessToken;
+
+    const headers: HeadersInit = {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    };
+
+    // Add GitHub token for org auto-join
+    if (isValidGitHubOAuthTokens(rawOauthTokens)) {
+      headers["X-GitHub-Token"] = rawOauthTokens.accessToken;
+    }
+
+    const apiUrl =
+      process.env.NEXT_PUBLIC_API_URL ?? "https://backend.detent.sh";
+    const response = await fetch(`${apiUrl}/v1/auth/sync-user`, {
+      method: "POST",
+      headers,
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!response.ok) {
+      log.warn("Sync user returned non-OK", { status: response.status });
+    }
+  } catch (error) {
+    // Non-blocking: log and continue (CLI will sync as fallback)
+    log.warn("Failed to sync user in callback", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+};
+
 const handler = async (request: BetterStackRequest) => {
   const { log } = request;
   const url = new URL(request.url);
@@ -257,6 +313,9 @@ const handler = async (request: BetterStackRequest) => {
       "oauthTokens" in authResponse ? authResponse.oauthTokens : null;
 
     const hasGitHubTokens = await processGitHubTokens(response, rawOauthTokens);
+
+    // Sync identity and auto-join orgs (non-blocking)
+    await syncIdentityWithApi(authResponse, rawOauthTokens, log);
 
     log.info("User authenticated successfully", {
       userId: user.id,

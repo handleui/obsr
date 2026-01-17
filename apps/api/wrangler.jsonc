@@ -11,6 +11,9 @@
       "custom_domain": true
     }
   ],
+  "triggers": {
+    "crons": ["0 */6 * * *"]
+  },
   "kv_namespaces": [
     {
       "binding": "detent-idempotency",

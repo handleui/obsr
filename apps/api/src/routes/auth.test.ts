@@ -132,7 +132,7 @@ describe("auth routes", () => {
     global.fetch = mockFetch;
   });
 
-  describe("POST /auth/sync-identity", () => {
+  describe("POST /auth/sync-user", () => {
     it("syncs identity with GitHub linked", async () => {
       // Mock WorkOS user fetch
       mockFetch
@@ -170,7 +170,7 @@ describe("auth routes", () => {
         { organizationId: "organization-2", providerUsername: "testuser" },
       ]);
 
-      const res = await makeRequest("POST", "/auth/sync-identity");
+      const res = await makeRequest("POST", "/auth/sync-user");
       const json = await res.json();
 
       expect(res.status).toBe(200);
@@ -203,7 +203,7 @@ describe("auth routes", () => {
           json: () => Promise.resolve(createIdentitiesResponse([])),
         });
 
-      const res = await makeRequest("POST", "/auth/sync-identity");
+      const res = await makeRequest("POST", "/auth/sync-user");
       const json = await res.json();
 
       expect(res.status).toBe(200);
@@ -231,7 +231,7 @@ describe("auth routes", () => {
           text: () => Promise.resolve("Unauthorized"),
         });
 
-      const res = await makeRequest("POST", "/auth/sync-identity");
+      const res = await makeRequest("POST", "/auth/sync-user");
       const json = await res.json();
 
       expect(res.status).toBe(200);
@@ -270,7 +270,7 @@ describe("auth routes", () => {
         { organizationId: "organization-1", providerUsername: null },
       ]);
 
-      const res = await makeRequest("POST", "/auth/sync-identity");
+      const res = await makeRequest("POST", "/auth/sync-user");
       const json = await res.json();
 
       expect(res.status).toBe(200);
@@ -316,7 +316,7 @@ describe("auth routes", () => {
         { organizationId: "organization-1", providerUsername: null },
       ]);
 
-      const res = await makeRequest("POST", "/auth/sync-identity");
+      const res = await makeRequest("POST", "/auth/sync-user");
       const json = await res.json();
 
       expect(res.status).toBe(200);
@@ -334,7 +334,7 @@ describe("auth routes", () => {
         text: () => Promise.resolve("Internal Server Error"),
       });
 
-      const res = await makeRequest("POST", "/auth/sync-identity");
+      const res = await makeRequest("POST", "/auth/sync-user");
       const json = await res.json();
 
       expect(res.status).toBe(500);
@@ -366,7 +366,7 @@ describe("auth routes", () => {
             ),
         });
 
-      const res = await makeRequest("POST", "/auth/sync-identity");
+      const res = await makeRequest("POST", "/auth/sync-user");
       const json = (await res.json()) as {
         github_synced: boolean;
         github_username: string | null;

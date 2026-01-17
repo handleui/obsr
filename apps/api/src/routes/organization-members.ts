@@ -10,7 +10,7 @@
  * 2. Having their GitHub identity linked via WorkOS OAuth
  */
 
-import { and, count, eq, inArray } from "drizzle-orm";
+import { and, count, eq, inArray, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { createDb } from "../db/client";
 import { organizationMembers } from "../db/schema";
@@ -25,7 +25,34 @@ import type { Env } from "../types/env";
 
 const app = new Hono<{ Bindings: Env }>();
 
-const VALID_ROLES: OrgAccessRole[] = ["owner", "admin", "member"];
+const VALID_ROLES: OrgAccessRole[] = ["owner", "admin", "member", "visitor"];
+
+// Helper to check admin permission constraints for role changes
+const checkAdminRoleConstraints = (
+  actorRole: OrgAccessRole,
+  oldRole: OrgAccessRole,
+  newRole: string
+): { error: string; message: string } | null => {
+  if (actorRole !== "admin") {
+    return null;
+  }
+
+  // Admins cannot promote anyone to owner
+  if (newRole === "owner") {
+    return {
+      error: "Insufficient permissions",
+      message: "Only owners can promote members to owner",
+    };
+  }
+  // Admins cannot modify owners at all
+  if (oldRole === "owner") {
+    return {
+      error: "Insufficient permissions",
+      message: "Only owners can modify other owners",
+    };
+  }
+  return null;
+};
 
 /**
  * POST /leave
@@ -51,11 +78,12 @@ app.post("/leave", async (c) => {
     // Use transaction to prevent TOCTOU race conditions
     // All checks and the delete happen atomically
     const result = await db.transaction(async (tx) => {
-      // Find the membership record (if exists)
+      // Find the active membership record (if exists)
       const member = await tx.query.organizationMembers.findFirst({
         where: and(
           eq(organizationMembers.userId, auth.userId),
-          eq(organizationMembers.organizationId, organizationId)
+          eq(organizationMembers.organizationId, organizationId),
+          isNull(organizationMembers.removedAt)
         ),
       });
 
@@ -63,11 +91,16 @@ app.post("/leave", async (c) => {
         return { success: true, message: "No membership record to remove" };
       }
 
-      // Check if user is the sole member - must use delete instead
+      // Check if user is the sole active member - must use delete instead
       const memberCountResult = await tx
         .select({ count: count() })
         .from(organizationMembers)
-        .where(eq(organizationMembers.organizationId, organizationId));
+        .where(
+          and(
+            eq(organizationMembers.organizationId, organizationId),
+            isNull(organizationMembers.removedAt)
+          )
+        );
 
       if (memberCountResult[0]?.count === 1) {
         return {
@@ -86,7 +119,8 @@ app.post("/leave", async (c) => {
           .where(
             and(
               eq(organizationMembers.organizationId, organizationId),
-              inArray(organizationMembers.role, ["owner", "admin"])
+              inArray(organizationMembers.role, ["owner", "admin"]),
+              isNull(organizationMembers.removedAt)
             )
           );
 
@@ -98,9 +132,17 @@ app.post("/leave", async (c) => {
         }
       }
 
-      // Remove the Detent membership record
+      // Soft-delete the membership record (maintains audit trail)
+      // user_left blocks auto-rejoin via webhook, but admin can re-invite
+      // If re-invited and in GitHub org, cron will verify them (upgrade to github_sync)
       await tx
-        .delete(organizationMembers)
+        .update(organizationMembers)
+        .set({
+          removedAt: new Date(),
+          removalReason: "user_left",
+          removedBy: auth.userId,
+          updatedAt: new Date(),
+        })
         .where(
           and(
             eq(organizationMembers.userId, auth.userId),
@@ -136,9 +178,12 @@ app.get("/:orgId/members", githubOrgAccessMiddleware, async (c) => {
 
   const { db, client } = await createDb(c.env);
   try {
-    // Get Detent-specific member records for this org
+    // Get Detent-specific member records for this org (active members only)
     const detentMembers = await db.query.organizationMembers.findMany({
-      where: eq(organizationMembers.organizationId, organization.id),
+      where: and(
+        eq(organizationMembers.organizationId, organization.id),
+        isNull(organizationMembers.removedAt)
+      ),
     });
 
     // Return the current user's access plus any stored Detent records
@@ -179,11 +224,12 @@ app.get("/:orgId/me", githubOrgAccessMiddleware, async (c) => {
 
   const { db, client } = await createDb(c.env);
   try {
-    // Check if user has a Detent record
+    // Check if user has an active Detent record
     const detentRecord = await db.query.organizationMembers.findFirst({
       where: and(
         eq(organizationMembers.userId, auth.userId),
-        eq(organizationMembers.organizationId, organization.id)
+        eq(organizationMembers.organizationId, organization.id),
+        isNull(organizationMembers.removedAt)
       ),
     });
 
@@ -283,128 +329,122 @@ app.put(
 
     const { db, client } = await createDb(c.env);
     try {
-      // Find the target member
-      const targetMember = await db.query.organizationMembers.findFirst({
-        where: and(
-          eq(organizationMembers.userId, targetUserId),
-          eq(organizationMembers.organizationId, organization.id)
-        ),
-      });
+      // Use transaction to prevent TOCTOU race conditions
+      // All checks and the update happen atomically
+      const result = await db.transaction(async (tx) => {
+        // Find the target member (active members only)
+        const targetMember = await tx.query.organizationMembers.findFirst({
+          where: and(
+            eq(organizationMembers.userId, targetUserId),
+            eq(organizationMembers.organizationId, organization.id),
+            isNull(organizationMembers.removedAt)
+          ),
+        });
 
-      if (!targetMember) {
-        return c.json(
-          {
-            error: "Member not found",
-          },
-          404
+        if (!targetMember) {
+          return { error: "Member not found", status: 404 as const };
+        }
+
+        const oldRole = targetMember.role;
+
+        // No change needed
+        if (oldRole === newRole) {
+          return {
+            success: true,
+            user_id: targetUserId,
+            old_role: oldRole,
+            new_role: newRole,
+          };
+        }
+
+        // SECURITY: Enforce role hierarchy for admins
+        const adminConstraintError = checkAdminRoleConstraints(
+          actorRole,
+          oldRole,
+          newRole
         );
-      }
+        if (adminConstraintError) {
+          return { ...adminConstraintError, status: 403 as const };
+        }
 
-      const oldRole = targetMember.role;
+        // If demoting from owner, check if they're the last active owner
+        // (different from last owner/admin - we specifically protect last owner)
+        if (oldRole === "owner" && newRole !== "owner") {
+          const ownerCountResult = await tx
+            .select({ count: count() })
+            .from(organizationMembers)
+            .where(
+              and(
+                eq(organizationMembers.organizationId, organization.id),
+                eq(organizationMembers.role, "owner"),
+                isNull(organizationMembers.removedAt)
+              )
+            );
 
-      // No change needed
-      if (oldRole === newRole) {
-        return c.json({
+          if (ownerCountResult[0]?.count === 1) {
+            return {
+              error: "Cannot demote the last owner",
+              message:
+                "Transfer ownership to another member before demoting yourself",
+              status: 400 as const,
+            };
+          }
+        }
+
+        // If demoting from admin to member or visitor, check if they're the last elevated member
+        // (ensures org always has at least one owner or admin)
+        if (
+          oldRole === "admin" &&
+          (newRole === "member" || newRole === "visitor")
+        ) {
+          const elevatedCountResult = await tx
+            .select({ count: count() })
+            .from(organizationMembers)
+            .where(
+              and(
+                eq(organizationMembers.organizationId, organization.id),
+                inArray(organizationMembers.role, ["owner", "admin"]),
+                isNull(organizationMembers.removedAt)
+              )
+            );
+
+          if (elevatedCountResult[0]?.count === 1) {
+            return {
+              error: "Cannot demote the last admin",
+              message: "Promote another member to admin first",
+              status: 400 as const,
+            };
+          }
+        }
+
+        // Update the role
+        await tx
+          .update(organizationMembers)
+          .set({
+            role: newRole as OrgAccessRole,
+            updatedAt: new Date(),
+          })
+          .where(eq(organizationMembers.id, targetMember.id));
+
+        return {
           success: true,
           user_id: targetUserId,
           old_role: oldRole,
           new_role: newRole,
-        });
+        };
+      });
+
+      // Handle transaction result
+      if ("error" in result && "status" in result) {
+        const { status, ...errorBody } = result;
+        return c.json(errorBody, status);
       }
-
-      // SECURITY: Enforce role hierarchy for admins
-      // Admins cannot: promote to owner, demote owners, or modify other owners
-      if (actorRole === "admin") {
-        // Admins cannot promote anyone to owner
-        if (newRole === "owner") {
-          return c.json(
-            {
-              error: "Insufficient permissions",
-              message: "Only owners can promote members to owner",
-            },
-            403
-          );
-        }
-        // Admins cannot modify owners at all
-        if (oldRole === "owner") {
-          return c.json(
-            {
-              error: "Insufficient permissions",
-              message: "Only owners can modify other owners",
-            },
-            403
-          );
-        }
-      }
-
-      // If demoting from owner, check if they're the last owner
-      // (different from last owner/admin - we specifically protect last owner)
-      if (oldRole === "owner" && newRole !== "owner") {
-        const ownerCountResult = await db
-          .select({ count: count() })
-          .from(organizationMembers)
-          .where(
-            and(
-              eq(organizationMembers.organizationId, organization.id),
-              eq(organizationMembers.role, "owner")
-            )
-          );
-
-        if (ownerCountResult[0]?.count === 1) {
-          return c.json(
-            {
-              error: "Cannot demote the last owner",
-              message:
-                "Transfer ownership to another member before demoting yourself",
-            },
-            400
-          );
-        }
-      }
-
-      // If demoting from admin to member, check if they're the last elevated member
-      // (ensures org always has at least one owner or admin)
-      if (oldRole === "admin" && newRole === "member") {
-        const elevatedCountResult = await db
-          .select({ count: count() })
-          .from(organizationMembers)
-          .where(
-            and(
-              eq(organizationMembers.organizationId, organization.id),
-              inArray(organizationMembers.role, ["owner", "admin"])
-            )
-          );
-
-        if (elevatedCountResult[0]?.count === 1) {
-          return c.json(
-            {
-              error: "Cannot demote the last admin",
-              message: "Promote another member to admin first",
-            },
-            400
-          );
-        }
-      }
-
-      // Update the role
-      await db
-        .update(organizationMembers)
-        .set({
-          role: newRole as OrgAccessRole,
-          updatedAt: new Date(),
-        })
-        .where(eq(organizationMembers.id, targetMember.id));
 
       console.log(
-        `[role-update] ${auth.userId} (${actorRole}) changed ${targetUserId} role from ${oldRole} to ${newRole} in ${organization.slug}`
+        `[role-update] ${auth.userId} (${actorRole}) changed ${targetUserId} role from ${result.old_role} to ${result.new_role} in ${organization.slug}`
       );
 
-      return c.json({
-        success: true,
-        user_id: targetUserId,
-        old_role: oldRole,
-        new_role: newRole,
-      });
+      return c.json(result);
     } finally {
       await client.end();
     }

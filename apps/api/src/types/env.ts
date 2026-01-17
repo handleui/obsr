@@ -36,7 +36,7 @@ export interface Env {
   UPSTASH_REDIS_REST_URL: string;
   UPSTASH_REDIS_REST_TOKEN: string;
 
-  // KV for webhook idempotency
+  // KV for webhook idempotency and caching (member lists, etc.)
   "detent-idempotency": KVNamespace;
 
   // OpenStatus monitoring (optional)

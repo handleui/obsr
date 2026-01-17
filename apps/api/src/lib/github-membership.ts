@@ -7,6 +7,8 @@ const GITHUB_API = "https://api.github.com";
 interface GitHubMembershipResult {
   isMember: boolean;
   role: "admin" | "member" | null;
+  /** True if the check failed due to missing permissions (app lacks members:read) */
+  permissionDenied?: boolean;
 }
 
 interface GitHubMembershipResponse {
@@ -64,6 +66,16 @@ export const verifyGitHubMembership = async (
     // Cache non-membership for shorter time (they might get added)
     setInCache(cacheKey, result, CACHE_TTL.GITHUB_MEMBERSHIP);
     return result;
+  }
+
+  // 403 means app lacks members:read permission for this org
+  if (response.status === 403) {
+    const error = await response.text();
+    console.warn(
+      `[github-membership] Permission denied checking ${githubUsername}@${githubOrgLogin}: ${error}`
+    );
+    // Don't cache - this is a permission issue, not membership state
+    return { isMember: false, role: null, permissionDenied: true };
   }
 
   if (!response.ok) {

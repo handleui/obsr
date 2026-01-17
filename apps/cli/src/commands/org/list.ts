@@ -3,7 +3,7 @@
  */
 
 import { defineCommand } from "citty";
-import { getOrganizations, syncIdentity } from "../../lib/api.js";
+import { getOrganizations, syncUser } from "../../lib/api.js";
 import { getAccessToken, getGitHubToken } from "../../lib/auth.js";
 import { printHeader } from "../../tui/components/index.js";
 import { ANSI_RESET, colors, hexToAnsi } from "../../tui/styles.js";
@@ -26,7 +26,7 @@ export const listCommand = defineCommand({
     console.log();
 
     const githubToken = await getGitHubToken();
-    await syncIdentity(accessToken, githubToken).catch(() => undefined);
+    await syncUser(accessToken, githubToken).catch(() => undefined);
 
     try {
       const response = await getOrganizations(accessToken);

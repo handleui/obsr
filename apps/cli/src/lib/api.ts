@@ -119,17 +119,17 @@ export interface MeResponse {
 }
 
 // Auth API methods
-export const syncIdentity = (
+export const syncUser = (
   accessToken: string,
   githubToken?: string | null
 ): Promise<SyncIdentityResponse> => {
   // Debug: log whether GitHub token is being sent
   if (process.env.DEBUG) {
     console.log(
-      `[sync-identity] Sending request with GitHub token: ${githubToken ? "yes" : "no"}`
+      `[sync-user] Sending request with GitHub token: ${githubToken ? "yes" : "no"}`
     );
   }
-  return apiRequest<SyncIdentityResponse>("/v1/auth/sync-identity", {
+  return apiRequest<SyncIdentityResponse>("/v1/auth/sync-user", {
     accessToken,
     method: "POST",
     // Pass GitHub OAuth token if available (used to get user's GitHub ID for installer linking)

@@ -124,6 +124,13 @@ export interface OrganizationPayload {
     login: string;
     avatar_url?: string;
   };
+  membership?: {
+    user: {
+      id: number;
+      login: string;
+    };
+    role: string;
+  };
   changes?: {
     login?: {
       from: string;

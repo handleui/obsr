@@ -5,7 +5,7 @@
  * Used across multiple routes to ensure consistent access control.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import type * as schema from "../db/schema";
 import { organizationMembers } from "../db/schema";
@@ -29,7 +29,7 @@ export interface OrgForVerification {
 
 export interface OrgAccessResult {
   allowed: boolean;
-  role?: "owner" | "admin" | "member";
+  role?: "owner" | "admin" | "member" | "visitor";
   error?: string;
 }
 
@@ -54,11 +54,12 @@ export const verifyOrgAccess = async (
     return { allowed: false, error: "GitHub App not installed" };
   }
 
-  // Check for existing membership with stored GitHub identity
+  // Check for existing membership with stored GitHub identity (active members only)
   const existingMember = await db.query.organizationMembers.findFirst({
     where: and(
       eq(organizationMembers.userId, userId),
-      eq(organizationMembers.organizationId, org.id)
+      eq(organizationMembers.organizationId, org.id),
+      isNull(organizationMembers.removedAt)
     ),
   });
 
@@ -110,6 +111,15 @@ export const verifyOrgAccess = async (
     org.providerInstallationId,
     env
   );
+
+  // App lacks members:read permission - can't auto-join
+  if (membership.permissionDenied) {
+    return {
+      allowed: false,
+      error:
+        "Cannot verify GitHub membership automatically. Please ask an organization admin to invite you.",
+    };
+  }
 
   if (!membership.isMember) {
     return {

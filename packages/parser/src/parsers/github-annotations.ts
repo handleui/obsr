@@ -158,7 +158,7 @@ class GitHubAnnotationParser extends BaseParser {
 
     const err: MutableExtractedError = {
       message: message.trim(),
-      file: params.file,
+      filePath: params.file,
       line: params.line,
       column: params.col,
       severity,

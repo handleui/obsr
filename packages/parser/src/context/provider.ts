@@ -1,8 +1,12 @@
+import type {
+  CIProvider,
+  CIProviderID,
+  CIProviderOptions,
+} from "@detent/types";
 import { createActParser } from "./act.js";
 import { createGitHubContextParser } from "./github.js";
 import { gitlabProvider } from "./gitlab.js";
 import { createPassthroughParser } from "./passthrough.js";
-import type { CIProvider, CIProviderID, CIProviderOptions } from "./types.js";
 
 // ============================================================================
 // Security Constants

@@ -8,7 +8,7 @@
  * - Returns inline object literal for minimal allocation
  */
 
-import type { CIProvider, ContextParser, ParseLineResult } from "./types.js";
+import type { CIProvider, ContextParser, ParseLineResult } from "@detent/types";
 
 /**
  * Safely access an environment variable.

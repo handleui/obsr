@@ -78,7 +78,7 @@ export const redactSensitive = <T>(obj: T): T => {
 export const stripAnsiFromError = (err: ExtractedError): ExtractedError => ({
   ...err,
   message: stripAnsi(err.message),
-  file: err.file ? stripAnsi(err.file) : undefined,
+  filePath: err.filePath ? stripAnsi(err.filePath) : undefined,
   raw: err.raw ? stripAnsi(err.raw) : undefined,
   ruleId: err.ruleId ? stripAnsi(err.ruleId) : undefined,
   stackTrace: err.stackTrace ? stripAnsi(err.stackTrace) : undefined,
@@ -207,8 +207,8 @@ export const formatErrorCompact = (err: ExtractedError): string => {
   const parts: string[] = [];
 
   // Location
-  if (err.file) {
-    let loc = err.file;
+  if (err.filePath) {
+    let loc = err.filePath;
     if (err.line !== undefined) {
       loc += `:${err.line}`;
       if (err.column !== undefined) {

@@ -755,7 +755,7 @@ export const redactPII = (text: string): string => {
  * - message
  * - raw
  * - stackTrace
- * - file (user paths)
+ * - filePath (user paths)
  * - suggestions
  * - codeSnippet lines
  *
@@ -766,12 +766,12 @@ export const redactPII = (text: string): string => {
  * ```typescript
  * const error: ExtractedError = {
  *   message: "Failed to connect to user@host.com",
- *   file: "/Users/johndoe/project/src/app.ts",
+ *   filePath: "/Users/johndoe/project/src/app.ts",
  *   line: 42,
  * };
  * const redacted = redactErrorMessage(error);
  * // redacted.message: "Failed to connect to [EMAIL]"
- * // redacted.file: "/Users/[USER]/project/src/app.ts"
+ * // redacted.filePath: "/Users/[USER]/project/src/app.ts"
  * ```
  */
 export const redactErrorMessage = (error: ExtractedError): ExtractedError => {
@@ -780,7 +780,7 @@ export const redactErrorMessage = (error: ExtractedError): ExtractedError => {
     message: redactPII(error.message),
     raw: error.raw ? redactPII(error.raw) : undefined,
     stackTrace: error.stackTrace ? redactPII(error.stackTrace) : undefined,
-    file: error.file ? redactPII(error.file) : undefined,
+    filePath: error.filePath ? redactPII(error.filePath) : undefined,
     suggestions: error.suggestions
       ? error.suggestions.map((s) => redactPII(s))
       : undefined,

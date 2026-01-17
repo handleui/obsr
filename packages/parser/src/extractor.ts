@@ -3,7 +3,7 @@
  * Migrated from packages/core/extract/extractor.go
  */
 
-import type { ContextParser, ParseLineResult } from "./context/types.js";
+import type { ContextParser, ParseLineResult } from "@detent/types";
 import type { ParseContext, ToolParser } from "./parser-types.js";
 import type { ParserRegistry } from "./registry.js";
 import { sanitizeForTelemetry } from "./sanitize.js";
@@ -96,7 +96,7 @@ export class Extractor {
       if (seen.size >= maxDeduplicationSize) {
         return;
       }
-      const key = createErrKey(err.message, err.file, err.line);
+      const key = createErrKey(err.message, err.filePath, err.line);
       if (!seen.has(key)) {
         seen.add(key);
         extracted.push(err);

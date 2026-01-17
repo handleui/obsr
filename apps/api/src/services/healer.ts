@@ -1,11 +1,11 @@
+import type { ExtractedError } from "@detent/types";
 import type { Env } from "../types/env";
 import { canRunHeal } from "./billing";
-import type { ApiExtractedError } from "./parse/types";
 
 interface HealOptions {
   env: Env;
   orgId: string;
-  errors: ApiExtractedError[];
+  errors: ExtractedError[];
   repoUrl: string;
   branch: string;
   byok?: boolean;

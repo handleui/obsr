@@ -2,9 +2,9 @@
  * Tests for the GitHub Actions context parser step tracking.
  */
 
+import type { ContextParser } from "@detent/types";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createGitHubContextParser, githubParser } from "../context/github.js";
-import type { ContextParser } from "../context/types.js";
 
 // ============================================================================
 // Test Fixtures

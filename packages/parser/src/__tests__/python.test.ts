@@ -39,7 +39,7 @@ describe("PythonParser", () => {
         expect(result.message).toBe(
           "Test failed: test_addition - AssertionError: assert 1 == 2"
         );
-        expect(result.file).toBe("tests/test_math.py");
+        expect(result.filePath).toBe("tests/test_math.py");
         expect(result.severity).toBe("error");
         expect(result.category).toBe("test");
         expect(result.source).toBe("python");
@@ -53,7 +53,7 @@ describe("PythonParser", () => {
 
         expect(result).not.toBeNull();
         expect(result.message).toContain("Test failed: TestClient::test_post");
-        expect(result.file).toBe("tests/test_api.py");
+        expect(result.filePath).toBe("tests/test_api.py");
         expect(result.category).toBe("test");
       });
 
@@ -64,7 +64,7 @@ describe("PythonParser", () => {
 
         expect(result).not.toBeNull();
         expect(result.message).toContain("test_divide[10-0]");
-        expect(result.file).toBe("tests/test_calc.py");
+        expect(result.filePath).toBe("tests/test_calc.py");
       });
     });
 
@@ -78,7 +78,7 @@ describe("PythonParser", () => {
         expect(result.message).toBe(
           "Collection error: ModuleNotFoundError: No module named 'nonexistent'"
         );
-        expect(result.file).toBe("tests/test_imports.py");
+        expect(result.filePath).toBe("tests/test_imports.py");
         expect(result.severity).toBe("error");
         expect(result.category).toBe("test");
       });
@@ -90,7 +90,7 @@ describe("PythonParser", () => {
 
         expect(result).not.toBeNull();
         expect(result.message).toContain("Collection error:");
-        expect(result.file).toBe("tests/test_db.py");
+        expect(result.filePath).toBe("tests/test_db.py");
       });
     });
   });
@@ -105,7 +105,7 @@ describe("PythonParser", () => {
       expect(result.message).toBe(
         'Missing type parameters for generic type "Dict"'
       );
-      expect(result.file).toBe("app/models.py");
+      expect(result.filePath).toBe("app/models.py");
       expect(result.line).toBe(42);
       expect(result.severity).toBe("error");
       expect(result.category).toBe("type-check");
@@ -120,7 +120,7 @@ describe("PythonParser", () => {
 
       expect(result).not.toBeNull();
       expect(result.message).toContain("Incompatible types in assignment");
-      expect(result.file).toBe("config.py");
+      expect(result.filePath).toBe("config.py");
       expect(result.line).toBe(15);
       expect(result.ruleId).toBe("assignment");
     });
@@ -167,7 +167,7 @@ describe("PythonParser", () => {
       const result = parser.parse(line, ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("stubs/mymodule.pyi");
+      expect(result.filePath).toBe("stubs/mymodule.pyi");
       expect(result.ruleId).toBe("return");
     });
   });
@@ -181,7 +181,7 @@ describe("PythonParser", () => {
 
         expect(result).not.toBeNull();
         expect(result.message).toBe("Line too long (150 > 120 characters)");
-        expect(result.file).toBe("app/views.py");
+        expect(result.filePath).toBe("app/views.py");
         expect(result.line).toBe(42);
         expect(result.column).toBe(120);
         expect(result.severity).toBe("warning");
@@ -274,7 +274,7 @@ describe("PythonParser", () => {
         const result = parser.parse(line, ctx) as ExtractedError;
 
         expect(result).not.toBeNull();
-        expect(result.file).toBe("legacy.py");
+        expect(result.filePath).toBe("legacy.py");
         expect(result.line).toBe(25);
         expect(result.column).toBeUndefined();
         expect(result.columnKnown).toBe(false);
@@ -291,7 +291,7 @@ describe("PythonParser", () => {
 
       expect(result).not.toBeNull();
       expect(result.message).toBe("Missing module docstring");
-      expect(result.file).toBe("mymodule.py");
+      expect(result.filePath).toBe("mymodule.py");
       expect(result.line).toBe(1);
       expect(result.column).toBe(0);
       expect(result.severity).toBe("warning");
@@ -362,7 +362,7 @@ describe("PythonParser", () => {
 
       expect(result).not.toBeNull();
       expect(result.message).toBe("ValueError: Invalid input");
-      expect(result.file).toBe("/app/processor.py");
+      expect(result.filePath).toBe("/app/processor.py");
       expect(result.line).toBe(15);
       expect(result.severity).toBe("error");
       expect(result.category).toBe("runtime");
@@ -388,7 +388,7 @@ describe("PythonParser", () => {
 
       expect(result).not.toBeNull();
       expect(result.message).toBe("KeyError: 'missing_key'");
-      expect(result.file).toBe("app.py");
+      expect(result.filePath).toBe("app.py");
       expect(result.line).toBe(10);
     });
 
@@ -434,7 +434,7 @@ describe("PythonParser", () => {
       const result = parser.finishMultiLine(ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("d.py");
+      expect(result.filePath).toBe("d.py");
       expect(result.line).toBe(4);
       expect(result.message).toBe("RuntimeError: deep");
     });
@@ -487,7 +487,7 @@ describe("PythonParser", () => {
       const result = parser.finishMultiLine(ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("broken.py");
+      expect(result.filePath).toBe("broken.py");
       expect(result.line).toBe(5);
       expect(result.column).toBe(10);
       expect(result.message).toContain("SyntaxError");
@@ -513,7 +513,7 @@ describe("PythonParser", () => {
 
       expect(result).not.toBeNull();
       expect(result.message).toContain("SyntaxError");
-      expect(result.file).toBe("<string>");
+      expect(result.filePath).toBe("<string>");
       expect(result.line).toBe(1);
     });
 
@@ -534,7 +534,7 @@ describe("PythonParser", () => {
       const result = parser.finishMultiLine(ctx) as ExtractedError;
 
       expect(result).not.toBeNull();
-      expect(result.file).toBe("indent.py");
+      expect(result.filePath).toBe("indent.py");
       expect(result.line).toBe(3);
       expect(result.message).toContain("IndentationError");
     });
@@ -618,7 +618,7 @@ describe("PythonParser", () => {
         const result = parser.finishMultiLine(ctx) as ExtractedError;
 
         expect(result).not.toBeNull();
-        expect(result.file).toBe("/home/user/project/app.py");
+        expect(result.filePath).toBe("/home/user/project/app.py");
         expect(result.line).toBe(20);
       });
 
@@ -628,7 +628,7 @@ describe("PythonParser", () => {
         const result = parser.parse(line, ctx) as ExtractedError;
 
         expect(result).not.toBeNull();
-        expect(result.file).toContain("site-packages");
+        expect(result.filePath).toContain("site-packages");
       });
     });
 
@@ -665,7 +665,7 @@ describe("PythonParser", () => {
         const result = parser.parse(line, ctx) as ExtractedError;
 
         expect(result).not.toBeNull();
-        expect(result.file).toContain("unicod");
+        expect(result.filePath).toContain("unicod");
       });
 
       it("parses traceback with unicode in message", () => {
@@ -706,7 +706,7 @@ describe("PythonParser", () => {
 
         expect(result).not.toBeNull();
         expect(result.stackTraceTruncated).toBe(true);
-        expect(result.file).toBe("module_99.py");
+        expect(result.filePath).toBe("module_99.py");
         expect(result.line).toBe(100);
       });
 
@@ -735,7 +735,7 @@ describe("PythonParser", () => {
         const result = parser.parse(line, ctx) as ExtractedError;
 
         expect(result).not.toBeNull();
-        expect(result.file).toBe("app/main.py");
+        expect(result.filePath).toBe("app/main.py");
       });
     });
   });

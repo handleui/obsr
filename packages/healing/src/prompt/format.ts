@@ -1,26 +1,5 @@
-import type { ErrorCategory, ErrorSeverity } from "@detent/types";
+import type { ErrorCategory, ExtractedError } from "@detent/types";
 import { INTERNAL_FRAME_PATTERNS, MAX_STACK_TRACE_LINES } from "./system.js";
-
-// Re-export types for consumers
-export type { ErrorCategory, ErrorSeverity } from "@detent/types";
-
-/**
- * Extracted error with full diagnostic context.
- *
- * Note: Uses `filePath` for the file field. This differs from parser's ExtractedError
- * which uses `file`. A future consolidation will unify these in @detent/types.
- */
-export interface ExtractedError {
-  filePath?: string;
-  line?: number;
-  column?: number;
-  message: string;
-  category?: ErrorCategory;
-  severity?: ErrorSeverity;
-  ruleId?: string;
-  source?: string;
-  stackTrace?: string;
-}
 
 /**
  * Default values for error formatting.

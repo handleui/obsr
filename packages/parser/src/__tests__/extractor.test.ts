@@ -108,7 +108,7 @@ describe("Extractor", () => {
 
       expect(errors).toHaveLength(1);
       expect(errors[0]).toMatchObject({
-        file: "main.go",
+        filePath: "main.go",
         line: 10,
         column: 5,
         message: "undefined: someFunc",
@@ -121,12 +121,12 @@ describe("Extractor", () => {
 
       expect(errors).toHaveLength(2);
       expect(errors[0]).toMatchObject({
-        file: "main.go",
+        filePath: "main.go",
         line: 10,
         message: "undefined: someFunc",
       });
       expect(errors[1]).toMatchObject({
-        file: "utils.go",
+        filePath: "utils.go",
         line: 20,
         message: "cannot use x (type int) as type string",
       });
@@ -140,12 +140,12 @@ describe("Extractor", () => {
       // TypeScript error
       const tsError = errors.find((e) => e.source === "typescript");
       expect(tsError).toBeDefined();
-      expect(tsError?.file).toBe("src/main.ts");
+      expect(tsError?.filePath).toBe("src/main.ts");
 
       // Go error
       const goError = errors.find((e) => e.source === "go");
       expect(goError).toBeDefined();
-      expect(goError?.file).toBe("main.go");
+      expect(goError?.filePath).toBe("main.go");
     });
 
     it("handles empty input", () => {
@@ -235,7 +235,7 @@ utils.go:10:5: undefined: x`;
       expect(error).toBeDefined();
       expect(error?.source).toBe("python");
       expect(error?.message).toContain("ZeroDivisionError");
-      expect(error?.file).toBe("/app/utils.py");
+      expect(error?.filePath).toBe("/app/utils.py");
       expect(error?.line).toBe(18);
       expect(error?.stackTrace).toBeDefined();
       expect(error?.stackTrace).toContain("Traceback");
@@ -381,7 +381,7 @@ ${"y".repeat(maxLineLength + 50)}`;
         passthroughParser
       );
       expect(errors2).toHaveLength(1);
-      expect(errors2[0]?.file).toBe("utils.go");
+      expect(errors2[0]?.filePath).toBe("utils.go");
     });
   });
 
@@ -516,7 +516,7 @@ main.go:20:3: undefined: y`;
     // Go error should be captured
     const goError = errors.find((e) => e.source === "go");
     expect(goError).toBeDefined();
-    expect(goError?.file).toBe("main.go");
+    expect(goError?.filePath).toBe("main.go");
   });
 
   it("does NOT filter legitimate errors containing 'errors found'", () => {

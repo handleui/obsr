@@ -107,7 +107,7 @@ describe("parseService", () => {
     const workspacePath = join(tmpdir(), "detent-parser-workspace");
     const error = createError({
       message: "snippet error",
-      file: "src/app.ts",
+      filePath: "src/app.ts",
       line: 2,
       category: "lint",
       source: "typescript",

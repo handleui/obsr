@@ -2,6 +2,7 @@
 
 /**
  * CI event types for job/step lifecycle tracking.
+ * Re-exported directly from @detent/types for optimal tree-shaking.
  */
 
 export type {
@@ -12,6 +13,6 @@ export type {
   ManifestJob,
   StepEvent,
   StepStatus,
-} from "./types.js";
+} from "@detent/types";
 
-export { JobStatuses, StepStatuses } from "./types.js";
+export { JobStatuses, StepStatuses } from "@detent/types";

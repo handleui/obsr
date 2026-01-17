@@ -116,7 +116,7 @@ describe("BiomeParser", () => {
       expect(result).not.toBeNull();
       expect(result?.severity).toBe("error");
       expect(result?.ruleId).toBe("lint/suspicious/noDoubleEquals");
-      expect(result?.file).toBe("main.ts");
+      expect(result?.filePath).toBe("main.ts");
       expect(result?.line).toBe(4);
       expect(result?.column).toBe(3);
       expect(result?.message).toBe("Use === instead of ==");
@@ -144,7 +144,7 @@ describe("BiomeParser", () => {
       expect(result).not.toBeNull();
       expect(result?.ruleId).toBe("format");
       expect(result?.category).toBe("lint");
-      expect(result?.file).toBe("src/index.ts");
+      expect(result?.filePath).toBe("src/index.ts");
     });
 
     it("extracts organizeImports errors", () => {
@@ -162,7 +162,7 @@ describe("BiomeParser", () => {
         "::error title=lint/suspicious/noDebugger,file=src/components/Button.tsx,line=6,col=1::This is an unexpected use of the debugger statement";
       const result = parser.parse(line, ctx);
 
-      expect(result?.file).toBe("src/components/Button.tsx");
+      expect(result?.filePath).toBe("src/components/Button.tsx");
     });
 
     it("handles messages with special characters", () => {
@@ -193,7 +193,7 @@ describe("BiomeParser", () => {
       const result = parser.parse(line, ctx);
 
       expect(result).not.toBeNull();
-      expect(result?.file).toBe("main.ts");
+      expect(result?.filePath).toBe("main.ts");
     });
 
     it("returns null for non-Biome GitHub Actions format", () => {

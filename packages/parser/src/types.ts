@@ -9,9 +9,21 @@
 // Re-export foundational types from @detent/types for backwards compatibility
 export type {
   CodeSnippet,
+  ContextParser,
   ErrorCategory,
   ErrorSeverity,
   ErrorSource,
+  ExtractedError,
+  JobEvent,
+  JobStatus,
+  LineContext,
+  ManifestEvent,
+  ManifestInfo,
+  ManifestJob,
+  MutableExtractedError,
+  ParseLineResult,
+  StepEvent,
+  StepStatus,
   WorkflowContext,
 } from "@detent/types";
 // biome-ignore lint/performance/noBarrelFile: intentional re-exports for API stability
@@ -20,97 +32,19 @@ export {
   cloneWorkflowContext,
   ErrorSources,
   isValidCategory,
+  JobStatuses,
+  StepStatuses,
 } from "@detent/types";
 
 // Import types for local use in this file
 import type {
-  CodeSnippet,
   ErrorCategory,
   ErrorSeverity,
   ErrorSource,
-  WorkflowContext,
+  ExtractedError,
+  MutableExtractedError,
 } from "@detent/types";
 import { cloneWorkflowContext } from "@detent/types";
-
-/**
- * ExtractedError represents a single error extracted from CI output.
- */
-export interface ExtractedError {
-  readonly message: string;
-  readonly file?: string;
-  readonly line?: number;
-  readonly column?: number;
-  readonly severity?: ErrorSeverity;
-  readonly raw?: string;
-  /** Multi-line stack trace for detailed error context */
-  readonly stackTrace?: string;
-  /** e.g., "no-var", "TS2749" */
-  readonly ruleId?: string;
-  /** lint, type-check, test, etc. */
-  readonly category?: ErrorCategory;
-  /** Job/step info */
-  readonly workflowContext?: WorkflowContext;
-  /** Flattened from WorkflowContext.job for easier access */
-  readonly workflowJob?: string;
-  /** "eslint", "typescript", "go", etc. */
-  readonly source?: ErrorSource;
-  /** True if matched by generic fallback parser */
-  readonly unknownPattern?: boolean;
-
-  // AI-optimized fields for enhanced context
-  /** Source code context around error */
-  readonly codeSnippet?: CodeSnippet;
-  /** Fix suggestions from tools (Rust notes, TS hints) */
-  readonly suggestions?: readonly string[];
-  /** True if line is a real value, false if line=0 means unknown */
-  readonly lineKnown?: boolean;
-  /** True if column is a real value, false if column=0 means unknown */
-  readonly columnKnown?: boolean;
-  /** True if stack trace was truncated due to size limits */
-  readonly stackTraceTruncated?: boolean;
-  /** True if message was truncated due to size limits */
-  readonly messageTruncated?: boolean;
-
-  // Infrastructure error fields
-  /** Actionable hint for fixing the error */
-  readonly hint?: string;
-  /** Exit code if this was a process failure */
-  readonly exitCode?: number;
-  /** Whether this is CI configuration vs code error */
-  readonly isInfrastructure?: boolean;
-  /** True if error may be test output noise (vitest/jest progress, etc.) */
-  readonly possiblyTestOutput?: boolean;
-}
-
-/**
- * Create a mutable error builder for constructing ExtractedError objects.
- * This helps with building errors incrementally (e.g., multi-line parsing).
- */
-export interface MutableExtractedError {
-  message: string;
-  file?: string;
-  line?: number;
-  column?: number;
-  severity?: ErrorSeverity;
-  raw?: string;
-  stackTrace?: string;
-  ruleId?: string;
-  category?: ErrorCategory;
-  workflowContext?: WorkflowContext;
-  workflowJob?: string;
-  source?: ErrorSource;
-  unknownPattern?: boolean;
-  codeSnippet?: CodeSnippet;
-  suggestions?: string[];
-  lineKnown?: boolean;
-  columnKnown?: boolean;
-  stackTraceTruncated?: boolean;
-  messageTruncated?: boolean;
-  hint?: string;
-  exitCode?: number;
-  isInfrastructure?: boolean;
-  possiblyTestOutput?: boolean;
-}
 
 /**
  * Convert a mutable error to an immutable ExtractedError.
@@ -228,8 +162,10 @@ export const createErrorReport = (
       bySource[err.source] = (bySource[err.source] ?? 0) + 1;
     }
 
-    if (err.file) {
-      const file = basePath ? makeRelative(err.file, basePath) : err.file;
+    if (err.filePath) {
+      const file = basePath
+        ? makeRelative(err.filePath, basePath)
+        : err.filePath;
       byFile[file] = (byFile[file] ?? 0) + 1;
       uniqueFiles.add(file);
     }
@@ -266,8 +202,10 @@ export const groupByFile = (
   const noFile: ExtractedError[] = [];
 
   for (const err of errors) {
-    if (err.file) {
-      const file = basePath ? makeRelative(err.file, basePath) : err.file;
+    if (err.filePath) {
+      const file = basePath
+        ? makeRelative(err.filePath, basePath)
+        : err.filePath;
       if (!byFile[file]) {
         byFile[file] = [];
       }
@@ -313,7 +251,7 @@ export interface OrchestratorView {
   /** Summary counts by category */
   readonly categoryCounts: Record<string, number>;
   /** Top files with most errors (max 10) */
-  readonly topFiles: readonly { file: string; count: number }[];
+  readonly topFiles: readonly { filePath: string; count: number }[];
   /** Critical errors (first 5) */
   readonly criticalErrors: readonly ExtractedError[];
   /** Total count */
@@ -347,9 +285,9 @@ export const filterByFile = (
   pattern: string | RegExp
 ): ExtractedError[] => {
   if (typeof pattern === "string") {
-    return errors.filter((err) => err.file?.includes(pattern));
+    return errors.filter((err) => err.filePath?.includes(pattern));
   }
-  return errors.filter((err) => err.file && pattern.test(err.file));
+  return errors.filter((err) => err.filePath && pattern.test(err.filePath));
 };
 
 /**
@@ -391,12 +329,12 @@ export const groupErrors = (
 
   for (const err of errors) {
     // Group by file
-    if (err.file) {
-      const fileErrors = byFile.get(err.file);
+    if (err.filePath) {
+      const fileErrors = byFile.get(err.filePath);
       if (fileErrors) {
         fileErrors.push(err);
       } else {
-        byFile.set(err.file, [err]);
+        byFile.set(err.filePath, [err]);
       }
     }
 
@@ -456,8 +394,8 @@ export const createOrchestratorView = (
     categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
 
     // File counts
-    if (err.file) {
-      fileCounts.set(err.file, (fileCounts.get(err.file) ?? 0) + 1);
+    if (err.filePath) {
+      fileCounts.set(err.filePath, (fileCounts.get(err.filePath) ?? 0) + 1);
     }
 
     // Collect critical errors (severity = error)
@@ -470,7 +408,7 @@ export const createOrchestratorView = (
   const topFiles = [...fileCounts.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10)
-    .map(([file, count]) => ({ file, count }));
+    .map(([filePath, count]) => ({ filePath, count }));
 
   return {
     categoryCounts,

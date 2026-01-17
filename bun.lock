@@ -24,6 +24,7 @@
       "dependencies": {
         "@detent/healing": "*",
         "@detent/parser": "*",
+        "@detent/types": "*",
         "@e2b/code-interpreter": "^2.3.3",
         "@polar-sh/sdk": "^0.42.2",
         "@sentry/cloudflare": "^10.32.1",

@@ -128,7 +128,7 @@ const summarizeErrors = (
 
 const mapError = (error: ParserExtractedError): ApiExtractedError => ({
   message: error.message,
-  filePath: error.file,
+  filePath: error.filePath,
   line: error.line,
   column: error.column,
   severity: error.severity,

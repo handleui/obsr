@@ -3,7 +3,7 @@ import { createDb } from "../../db/client";
 import { runErrors, runs } from "../../db/schema";
 import type { Env } from "../../types/env";
 import type {
-  ApiExtractedError,
+  ExtractedError,
   ParseResult,
   ParseSource,
   Provider,
@@ -33,7 +33,7 @@ type RunErrorInsert = InferInsertModel<typeof runErrors>;
 const BATCH_SIZE = 2000;
 
 const mapErrorToRow = (
-  error: ApiExtractedError,
+  error: ExtractedError,
   runRecordId: string
 ): RunErrorInsert => ({
   id: crypto.randomUUID(),

@@ -1,7 +1,6 @@
 // Error parser service - bridges @detent/parser to webhook ParsedError format
 
 import {
-  type ExtractedError,
   getDefaultRegistry,
   getUnsupportedToolDisplayName,
   isUnsupportedToolID,
@@ -10,6 +9,7 @@ import {
   resetDefaultExtractor,
   setUnknownPatternReporter,
 } from "@detent/parser";
+import type { ExtractedError } from "@detent/types";
 import { createUnknownPatternReporter } from "../lib/sentry";
 
 // Re-export and import separately to satisfy both type checker and linter
@@ -97,7 +97,7 @@ const ensureReporterInitialized = (): void => {
 
 // Map ExtractedError from @detent/parser to ParsedError for webhooks
 const mapToParsedError = (error: ExtractedError): ParsedError => ({
-  filePath: error.file,
+  filePath: error.filePath,
   line: error.lineKnown === false ? undefined : error.line,
   column: error.columnKnown === false ? undefined : error.column,
   message: error.message,

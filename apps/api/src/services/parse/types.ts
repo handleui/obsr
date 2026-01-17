@@ -1,10 +1,10 @@
-import type {
-  CodeSnippet,
-  ErrorCategory,
-  ErrorSeverity,
-  ErrorSource,
-  WorkflowContext,
-} from "@detent/parser";
+import type { ErrorCategory, ErrorSource, ExtractedError } from "@detent/types";
+
+// Re-export ExtractedError for use by other modules in the API
+export type { ExtractedError } from "@detent/types";
+
+// API error type alias (maintains backwards compatibility with API consumers)
+export type ApiExtractedError = ExtractedError;
 
 // Request types
 export interface ParseRequest {
@@ -50,32 +50,6 @@ export interface ValidatedParseRequest {
   workspacePath?: string;
 }
 
-// API error type (what we return to clients)
-export interface ApiExtractedError {
-  readonly message: string;
-  readonly filePath?: string;
-  readonly line?: number;
-  readonly column?: number;
-  readonly severity?: ErrorSeverity;
-  readonly stackTrace?: string;
-  readonly ruleId?: string;
-  readonly category?: ErrorCategory;
-  readonly workflowContext?: WorkflowContext;
-  readonly workflowJob?: string;
-  readonly source?: ErrorSource;
-  readonly unknownPattern?: boolean;
-  readonly codeSnippet?: CodeSnippet;
-  readonly suggestions?: readonly string[];
-  readonly lineKnown?: boolean;
-  readonly columnKnown?: boolean;
-  readonly stackTraceTruncated?: boolean;
-  readonly messageTruncated?: boolean;
-  readonly hint?: string;
-  readonly exitCode?: number;
-  readonly isInfrastructure?: boolean;
-  readonly possiblyTestOutput?: boolean;
-}
-
 // Metadata about the parse run
 export interface ParseRunMetadata {
   runId?: string;
@@ -87,7 +61,7 @@ export interface ParseRunMetadata {
 
 // Internal parse result (before persistence)
 export interface ParseResult {
-  errors: ApiExtractedError[];
+  errors: ExtractedError[];
   summary: {
     total: number;
     byCategory: Record<ErrorCategory, number>;

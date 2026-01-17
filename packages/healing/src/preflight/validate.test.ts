@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtractedError } from "@detent/parser";
+import type { ExtractedError } from "@detent/types";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { validateErrors } from "./validate.js";
 
@@ -19,8 +19,7 @@ const makeError = (
   overrides: Partial<ExtractedError> = {}
 ): ExtractedError => ({
   message: "test error",
-  category: "error",
-  tool: "test",
+  category: "unknown",
   ...overrides,
 });
 
@@ -28,7 +27,7 @@ describe("validateErrors", () => {
   test("errors without file paths pass through as valid", () => {
     const errors = [
       makeError({ message: "no file" }),
-      makeError({ message: "also no file", file: undefined }),
+      makeError({ message: "also no file", filePath: undefined }),
     ];
 
     const result = validateErrors(errors, repoRoot);
@@ -38,7 +37,7 @@ describe("validateErrors", () => {
   });
 
   test("missing files marked as stale", () => {
-    const errors = [makeError({ file: "does-not-exist.ts", line: 1 })];
+    const errors = [makeError({ filePath: "does-not-exist.ts", line: 1 })];
 
     const result = validateErrors(errors, repoRoot);
 
@@ -49,8 +48,8 @@ describe("validateErrors", () => {
 
   test("path traversal attempts marked as stale", () => {
     const errors = [
-      makeError({ file: "../../../etc/passwd", line: 1 }),
-      makeError({ file: "foo/../../bar/../../../secret", line: 1 }),
+      makeError({ filePath: "../../../etc/passwd", line: 1 }),
+      makeError({ filePath: "foo/../../bar/../../../secret", line: 1 }),
     ];
 
     const result = validateErrors(errors, repoRoot);
@@ -65,7 +64,7 @@ describe("validateErrors", () => {
   test("line out of bounds detected", async () => {
     await writeFile(join(repoRoot, "short.ts"), "line1\nline2\n");
 
-    const errors = [makeError({ file: "short.ts", line: 10 })];
+    const errors = [makeError({ filePath: "short.ts", line: 10 })];
 
     const result = validateErrors(errors, repoRoot);
 
@@ -79,7 +78,7 @@ describe("validateErrors", () => {
 
     const errors = [
       makeError({
-        file: "code.ts",
+        filePath: "code.ts",
         line: 1,
         codeSnippet: {
           lines: ["const x = 1;"],
@@ -104,7 +103,7 @@ describe("validateErrors", () => {
 
     const errors = [
       makeError({
-        file: "code.ts",
+        filePath: "code.ts",
         line: 1,
         codeSnippet: {
           lines: ["const x = 1;"],
@@ -127,7 +126,7 @@ describe("validateErrors", () => {
 
     const errors = [
       makeError({
-        file: "code.ts",
+        filePath: "code.ts",
         line: 1,
         codeSnippet: {
           lines: [],
@@ -149,7 +148,7 @@ describe("validateErrors", () => {
 
     const errors = [
       makeError({
-        file: "code.ts",
+        filePath: "code.ts",
         line: 1,
         codeSnippet: undefined,
       }),
@@ -166,7 +165,7 @@ describe("validateErrors", () => {
 
     const errors = [
       makeError({
-        file: "code.ts",
+        filePath: "code.ts",
         line: 999,
         lineKnown: false,
       }),
@@ -187,7 +186,7 @@ describe("validateErrors", () => {
 
     const errors = [
       makeError({
-        file: "src/utils/helpers.ts",
+        filePath: "src/utils/helpers.ts",
         line: 1,
         codeSnippet: {
           lines: ["export const foo = 1;"],
@@ -209,7 +208,7 @@ describe("validateErrors", () => {
 
     const errors = [
       makeError({
-        file: "code.ts",
+        filePath: "code.ts",
         line: 1,
         codeSnippet: {
           lines: ["const x = 1;"],
@@ -230,9 +229,9 @@ describe("validateErrors", () => {
     await writeFile(join(repoRoot, "code.ts"), "line1\nline2\nline3\n");
 
     const errors = [
-      makeError({ file: "code.ts", line: 1 }),
-      makeError({ file: "code.ts", line: 2 }),
-      makeError({ file: "code.ts", line: 3 }),
+      makeError({ filePath: "code.ts", line: 1 }),
+      makeError({ filePath: "code.ts", line: 2 }),
+      makeError({ filePath: "code.ts", line: 3 }),
     ];
 
     const result = validateErrors(errors, repoRoot);

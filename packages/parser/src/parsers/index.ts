@@ -15,6 +15,7 @@
 export { createBiomeParser } from "./biome.js";
 export { createESLintParser } from "./eslint.js";
 export { createGenericParser } from "./generic.js";
+export { createGitHubAnnotationParser } from "./github-annotations.js";
 export { createGolangParser, GolangParser } from "./golang.js";
 export { createInfrastructureParser } from "./infrastructure.js";
 export { createPythonParser, PythonParser } from "./python.js";

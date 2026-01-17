@@ -3,6 +3,9 @@ export { AllCategories, isValidCategory } from "./category.js";
 export type { CodeSnippet, WorkflowContext } from "./context.js";
 export { cloneWorkflowContext } from "./context.js";
 export type {
+  CIProvider,
+  CIProviderID,
+  CIProviderOptions,
   ContextParser,
   LineContext,
   ParseLineResult,

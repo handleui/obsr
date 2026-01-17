@@ -12,6 +12,8 @@
 // ============================================================================
 
 export type {
+  CIProvider,
+  CIProviderID,
   ContextParser,
   LineContext,
   ParseLineResult,
@@ -19,11 +21,26 @@ export type {
 
 export {
   actParser,
+  actProvider,
+  addCIProvider,
   createActParser,
   createGitHubContextParser,
+  createGitLabContextParser,
   createPassthroughParser,
+  detectCIProvider,
+  getAllProviders,
+  getCIProviderName,
+  getCIProviders,
+  getProviderByID,
   githubParser,
+  githubProvider,
+  gitlabParser,
+  gitlabProvider,
+  isCI,
   passthroughParser,
+  passthroughProvider,
+  removeCIProvider,
+  resetCIProviders,
 } from "./context/index.js";
 
 // ============================================================================
@@ -115,7 +132,10 @@ export {
   createParseContext,
   MultiLineParser,
 } from "./parser-types.js";
+export type { ToolPattern } from "./registry.js";
 export {
+  addToolPattern,
+  addToolPatterns,
   allSupported,
   createRegistry,
   detectAllToolsFromRun,
@@ -123,10 +143,12 @@ export {
   firstTool,
   firstToolID,
   formatUnsupportedToolsWarning,
+  getToolPatterns,
   getUnsupportedToolDisplayName,
   hasTools,
   isUnsupportedToolID,
   ParserRegistry,
+  resetToolPatterns,
   unsupportedTools,
 } from "./registry.js";
 export type { RedactionPattern } from "./sanitize.js";
@@ -179,10 +201,15 @@ export {
   makeRelative,
 } from "./types.js";
 export {
+  addExtensionMapping,
+  addExtensionMappings,
   extensionToParserID,
   extractFileExtension,
+  getExtensionMapping,
+  getExtensionMappings,
   parseLocation,
   patterns,
+  resetExtensionMappings,
   safeParseInt,
   splitCommands,
   stripAnsi,
@@ -196,6 +223,7 @@ import {
   createBiomeParser,
   createESLintParser,
   createGenericParser,
+  createGitHubAnnotationParser,
   createGolangParser,
   createInfrastructureParser,
   createPythonParser,
@@ -210,6 +238,7 @@ import { createRegistry, type ParserRegistry } from "./registry.js";
  * Parsers are registered in priority order (automatic sorting by registry).
  *
  * Priority order (highest to lowest):
+ * - GitHub Annotations (95): ::error file=...:: format (Vitest/Jest GitHub reporters)
  * - Language-specific (80): Go, Python, Rust, TypeScript, Vitest
  * - Linter (75): Biome, ESLint
  * - Infrastructure (70): CI/CD infrastructure failures
@@ -217,6 +246,10 @@ import { createRegistry, type ParserRegistry } from "./registry.js";
  */
 export const createDefaultRegistry = (): ParserRegistry => {
   const registry = createRegistry();
+
+  // GitHub Actions annotation parser (priority 95)
+  // Handles ::error file=...:: format from test frameworks and linters
+  registry.register(createGitHubAnnotationParser());
 
   // Language-specific parsers (priority 80)
   registry.register(createGolangParser());
@@ -245,6 +278,26 @@ export const createDefaultRegistry = (): ParserRegistry => {
 // Convenience API for Simple Usage
 // ============================================================================
 
+/**
+ * SINGLETON CONTEXT PARSERS - SINGLE-THREADED USE ONLY
+ *
+ * The singleton parsers (githubParser, actParser, passthroughParser) maintain
+ * internal state between calls. They are designed for single-threaded use
+ * in a single parsing session.
+ *
+ * WARNING: Do NOT use these singletons concurrently (e.g., in parallel async
+ * operations or worker threads). State corruption will occur if multiple
+ * parsing sessions share these singletons simultaneously.
+ *
+ * Usage pattern:
+ *   1. Parse a complete log file using parse(), parseActLogs(), or parseGitHubLogs()
+ *   2. Call resetDefaultExtractor() before parsing a new, unrelated log
+ *
+ * For concurrent parsing, create dedicated instances using factory functions:
+ *   const parser = createActParser();
+ *   const extractor = createExtractor(createDefaultRegistry());
+ *   extractor.extract(logs, parser);
+ */
 import { actParser, githubParser, passthroughParser } from "./context/index.js";
 import { createExtractor, type Extractor } from "./extractor.js";
 import type { ExtractedError } from "./types.js";
@@ -260,6 +313,14 @@ let defaultRegistry: ParserRegistry | undefined;
  * Created lazily on first use.
  */
 let defaultExtractor: Extractor | undefined;
+
+/**
+ * Track concurrent extraction attempts to detect misuse.
+ * SECURITY: Uses a counter (not boolean) to detect overlapping async calls.
+ * If count > 1, multiple extractions are running concurrently on singletons.
+ * Using object wrapper to allow mutation while satisfying linter const rule.
+ */
+const extractionState = { count: 0 };
 
 /**
  * Get the default registry (creates it on first call).
@@ -287,6 +348,32 @@ export const getDefaultExtractor = (): Extractor => {
 };
 
 /**
+ * Internal wrapper to track extraction state for misuse detection.
+ * SECURITY: Uses counter to detect concurrent singleton usage.
+ */
+const extractWithTracking = (
+  logs: string,
+  ctxParser: Parameters<Extractor["extract"]>[1]
+): ExtractedError[] => {
+  extractionState.count++;
+  if (extractionState.count > 1) {
+    console.warn(
+      `[parser] Concurrent singleton usage detected (${extractionState.count} active extractions). ` +
+        "This will cause state corruption. For concurrent parsing, create dedicated instances:\n" +
+        "  const parser = createActParser();\n" +
+        "  const extractor = createExtractor(createDefaultRegistry());\n" +
+        "  extractor.extract(logs, parser);\n" +
+        "See: https://github.com/detent-sh/detent/tree/main/packages/parser#concurrent-parsing"
+    );
+  }
+  try {
+    return getDefaultExtractor().extract(logs, ctxParser);
+  } finally {
+    extractionState.count--;
+  }
+};
+
+/**
  * Parse logs using the default extractor and passthrough context parser.
  * This is the simplest way to extract errors from raw log output.
  *
@@ -299,7 +386,7 @@ export const getDefaultExtractor = (): Extractor => {
  * ```
  */
 export const parse = (logs: string): ExtractedError[] =>
-  getDefaultExtractor().extract(logs, passthroughParser);
+  extractWithTracking(logs, passthroughParser);
 
 /**
  * Parse logs from Act (local GitHub Actions runner) format.
@@ -314,7 +401,7 @@ export const parse = (logs: string): ExtractedError[] =>
  * ```
  */
 export const parseActLogs = (logs: string): ExtractedError[] =>
-  getDefaultExtractor().extract(logs, actParser);
+  extractWithTracking(logs, actParser);
 
 /**
  * Parse logs from GitHub Actions format.
@@ -329,7 +416,7 @@ export const parseActLogs = (logs: string): ExtractedError[] =>
  * ```
  */
 export const parseGitHubLogs = (logs: string): ExtractedError[] =>
-  getDefaultExtractor().extract(logs, githubParser);
+  extractWithTracking(logs, githubParser);
 
 /**
  * Reset the default extractor and all singleton context parsers.
@@ -340,8 +427,21 @@ export const parseGitHubLogs = (logs: string): ExtractedError[] =>
  * - All registered tool parsers
  * - The singleton GitHub parser's step tracking state
  * - The singleton Act parser (no-op, included for consistency)
+ *
+ * WARNING: This function should only be called between parsing sessions,
+ * never during an active extraction. The singletons are designed for
+ * single-threaded, sequential use only.
  */
 export const resetDefaultExtractor = (): void => {
+  // SECURITY: Detect misuse - resetting during active extraction causes corruption
+  if (extractionState.count > 0) {
+    console.warn(
+      `[parser] resetDefaultExtractor() called while ${extractionState.count} extraction(s) in progress. ` +
+        "This may cause state corruption. For concurrent parsing, use factory functions: " +
+        "createActParser(), createGitHubContextParser(), createExtractor()."
+    );
+  }
+
   defaultExtractor?.reset();
   // Reset all singleton context parsers to ensure clean state
   githubParser.reset();

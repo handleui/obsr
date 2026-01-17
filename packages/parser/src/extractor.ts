@@ -92,8 +92,15 @@ export class Extractor {
     // Helper to add error with deduplication
     // SECURITY: Once deduplication limit is reached, stop adding errors entirely
     // to prevent memory exhaustion from malicious input with many unique errors
+    let limitWarned = false;
     const addError = (err: ExtractedError): void => {
       if (seen.size >= maxDeduplicationSize) {
+        if (!limitWarned) {
+          limitWarned = true;
+          console.warn(
+            `[parser] Deduplication limit of ${maxDeduplicationSize} reached. Additional errors are being dropped.`
+          );
+        }
         return;
       }
       const key = createErrKey(err.message, err.filePath, err.line);

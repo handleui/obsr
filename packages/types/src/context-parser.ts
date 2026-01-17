@@ -66,3 +66,90 @@ export interface ContextParser {
    */
   reset(): void;
 }
+
+// ============================================================================
+// CI Provider Abstraction
+// ============================================================================
+
+/**
+ * CI provider identifiers.
+ * Used to identify which CI platform generated the logs.
+ */
+export type CIProviderID =
+  | "github"
+  | "act"
+  | "gitlab"
+  | "circleci"
+  | "jenkins"
+  | "passthrough";
+
+/**
+ * CIProvider represents a CI platform that can be detected and parsed.
+ * This abstraction allows auto-detection of CI providers and centralized
+ * registration of new providers.
+ *
+ * @example
+ * ```typescript
+ * const provider = detectCIProvider();
+ * const parser = provider.createContextParser();
+ * const errors = extractor.extract(logs, parser);
+ * ```
+ */
+export interface CIProvider {
+  /** Unique identifier for this provider */
+  readonly id: CIProviderID;
+
+  /** Human-readable name for display */
+  readonly name: string;
+
+  /**
+   * Detect if running in this CI environment from environment variables.
+   * Returns true if the environment indicates this CI provider.
+   */
+  detectFromEnv(): boolean;
+
+  /**
+   * Create a new context parser instance for this provider.
+   * Use factory to create isolated instances for concurrent parsing.
+   */
+  createContextParser(): ContextParser;
+
+  /**
+   * Whether the context parser maintains state between lines.
+   * Stateful parsers require reset() calls between unrelated logs.
+   */
+  readonly isStateful: boolean;
+
+  /**
+   * Optional priority for provider ordering during detection.
+   * Higher priority providers are checked first.
+   * Default: 0. Passthrough should have lowest priority (-1000).
+   */
+  readonly priority?: number;
+
+  /**
+   * Optional description for documentation and debugging.
+   */
+  readonly description?: string;
+}
+
+/**
+ * Options for creating a CI provider.
+ * All required CIProvider fields except createContextParser factory.
+ */
+export interface CIProviderOptions {
+  /** Unique identifier for this provider */
+  readonly id: CIProviderID;
+  /** Human-readable name for display */
+  readonly name: string;
+  /** Environment variable detection function */
+  readonly detectFromEnv: () => boolean;
+  /** Factory function to create context parsers */
+  readonly createContextParser: () => ContextParser;
+  /** Whether the context parser maintains state between lines */
+  readonly isStateful: boolean;
+  /** Optional priority for ordering (default: 0) */
+  readonly priority?: number;
+  /** Optional description */
+  readonly description?: string;
+}

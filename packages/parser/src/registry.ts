@@ -9,8 +9,8 @@ import type {
   ToolParser,
 } from "./parser-types.js";
 import {
-  extensionToParserID,
   extractFileExtension,
+  getExtensionMappings,
   splitCommands,
   stripAnsi,
 } from "./utils.js";
@@ -149,17 +149,28 @@ const isNoiseWithChecker = (
 /**
  * Tool detection pattern with metadata.
  */
-interface ToolPattern {
+export interface ToolPattern {
   readonly pattern: RegExp;
   readonly parserID: string;
   readonly displayName: string;
 }
 
+// ============================================================================
+// Tool Pattern Registry (Plugin Support)
+// ============================================================================
+
 /**
- * Patterns for detecting tools from run commands.
- * Only patterns for tools with implemented parsers are included.
+ * Mutable tool patterns array for runtime registration.
+ * Starts with default patterns, can be extended via addToolPattern().
  */
-const toolPatterns: readonly ToolPattern[] = [
+const mutableToolPatterns: ToolPattern[] = [];
+
+/**
+ * Default patterns for detecting tools from run commands.
+ * Only patterns for tools with implemented parsers are included.
+ * These are copied to mutableToolPatterns at module load time.
+ */
+const defaultToolPatterns: readonly ToolPattern[] = [
   // Go tools
   {
     pattern: /(?:^|\s|\/)golangci-lint\s/,
@@ -497,6 +508,178 @@ const toolPatterns: readonly ToolPattern[] = [
   },
 ];
 
+// Initialize mutable patterns from defaults
+mutableToolPatterns.push(...defaultToolPatterns);
+
+/**
+ * Maximum number of custom tool patterns allowed to prevent memory exhaustion.
+ * This is in addition to the default patterns.
+ */
+const maxCustomToolPatterns = 100;
+
+/**
+ * Maximum length for parserID strings to prevent memory exhaustion.
+ */
+const maxParserIDLength = 64;
+
+/**
+ * Maximum length for displayName strings to prevent memory exhaustion.
+ */
+const maxDisplayNameLength = 128;
+
+/**
+ * Dangerous property names that could enable prototype pollution attacks.
+ * These must be rejected as parserIDs to prevent attackers from
+ * registering patterns with IDs like "__proto__" that could pollute
+ * Object.prototype when used as object keys in Maps or lookups.
+ */
+const dangerousPropertyNames: ReadonlySet<string> = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+
+/**
+ * Add a custom tool pattern for detection.
+ * Patterns are checked in order, so add more specific patterns first.
+ *
+ * SECURITY: This function validates inputs to prevent:
+ * - Memory exhaustion from unbounded pattern registration
+ * - Empty/invalid pattern data that could cause runtime errors
+ *
+ * WARNING: User-provided RegExp patterns are NOT validated for ReDoS
+ * (Regular Expression Denial of Service) vulnerabilities. Callers are
+ * responsible for ensuring their patterns are safe and do not contain
+ * constructs prone to catastrophic backtracking (e.g., nested quantifiers
+ * like `(a+)+` or overlapping alternations).
+ *
+ * @throws Error if pattern limit exceeded or pattern is invalid
+ *
+ * @example
+ * ```typescript
+ * import { addToolPattern } from "@detent/parser";
+ *
+ * // Add pattern for a custom tool
+ * addToolPattern({
+ *   pattern: /(?:^|\s|\/)my-linter\b/,
+ *   parserID: "my-linter",
+ *   displayName: "My Linter",
+ * });
+ * ```
+ */
+export const addToolPattern = (pattern: ToolPattern): void => {
+  validateToolPattern(pattern);
+
+  // SECURITY: Prevent unbounded growth of custom patterns (memory exhaustion)
+  const customPatternCount =
+    mutableToolPatterns.length - defaultToolPatterns.length;
+  if (customPatternCount >= maxCustomToolPatterns) {
+    throw new Error(
+      `addToolPattern: maximum of ${maxCustomToolPatterns} custom patterns exceeded`
+    );
+  }
+
+  mutableToolPatterns.push(pattern);
+};
+
+/**
+ * Validate a tool pattern without adding it to the registry.
+ * Used by addToolPatterns to ensure atomic operations.
+ */
+const validateToolPattern = (pattern: ToolPattern): void => {
+  // SECURITY: Validate pattern object structure
+  if (!pattern || typeof pattern !== "object") {
+    throw new Error("addToolPattern: pattern must be a non-null object");
+  }
+
+  // SECURITY: Prevent arrays from being treated as valid objects
+  if (Array.isArray(pattern)) {
+    throw new Error("addToolPattern: pattern must be an object, not an array");
+  }
+
+  if (!(pattern.pattern instanceof RegExp)) {
+    throw new Error("addToolPattern: pattern.pattern must be a RegExp");
+  }
+
+  // SECURITY: Validate parserID with length limits and prototype pollution protection
+  if (typeof pattern.parserID !== "string" || pattern.parserID.length === 0) {
+    throw new Error("addToolPattern: parserID must be a non-empty string");
+  }
+  if (pattern.parserID.length > maxParserIDLength) {
+    throw new Error(
+      `addToolPattern: parserID must be at most ${maxParserIDLength} characters`
+    );
+  }
+  // SECURITY: Prevent prototype pollution via dangerous property names
+  if (dangerousPropertyNames.has(pattern.parserID)) {
+    throw new Error(
+      `addToolPattern: parserID "${pattern.parserID}" is a reserved property name`
+    );
+  }
+
+  // SECURITY: Validate displayName with length limits
+  if (
+    typeof pattern.displayName !== "string" ||
+    pattern.displayName.length === 0
+  ) {
+    throw new Error("addToolPattern: displayName must be a non-empty string");
+  }
+  if (pattern.displayName.length > maxDisplayNameLength) {
+    throw new Error(
+      `addToolPattern: displayName must be at most ${maxDisplayNameLength} characters`
+    );
+  }
+};
+
+/**
+ * Add multiple tool patterns at once (atomic operation).
+ * Validates all patterns before adding any, ensuring either all succeed or none are added.
+ *
+ * SECURITY: Each pattern is validated before any are added.
+ * @throws Error if any pattern is invalid or limit would be exceeded
+ */
+export const addToolPatterns = (patterns: readonly ToolPattern[]): void => {
+  // Pre-validate all patterns before adding any (atomic operation)
+  for (const pattern of patterns) {
+    validateToolPattern(pattern);
+  }
+
+  // Check if adding all would exceed the limit
+  const customPatternCount =
+    mutableToolPatterns.length - defaultToolPatterns.length;
+  if (customPatternCount + patterns.length > maxCustomToolPatterns) {
+    throw new Error(
+      `addToolPattern: adding ${patterns.length} patterns would exceed maximum of ${maxCustomToolPatterns} custom patterns`
+    );
+  }
+
+  // All validation passed, now add all patterns
+  for (const pattern of patterns) {
+    mutableToolPatterns.push(pattern);
+  }
+};
+
+/**
+ * Get all registered tool patterns (defensive copy).
+ * Includes both default and custom patterns.
+ *
+ * SECURITY: Returns a shallow copy to prevent external mutation of the internal array.
+ * TypeScript's readonly is only a compile-time check; without copying, callers could
+ * cast away readonly or use array methods that mutate in place.
+ */
+export const getToolPatterns = (): readonly ToolPattern[] => [
+  ...mutableToolPatterns,
+];
+
+/**
+ * Reset tool patterns to defaults only.
+ * Removes all custom patterns added via addToolPattern().
+ */
+export const resetToolPatterns = (): void => {
+  mutableToolPatterns.length = 0;
+  mutableToolPatterns.push(...defaultToolPatterns);
+};
+
 // ============================================================================
 // Detection Types
 // ============================================================================
@@ -575,7 +758,7 @@ export const getUnsupportedToolDisplayName = (
   if (!id.startsWith("unsupported:")) {
     return undefined;
   }
-  const pattern = toolPatterns.find((p) => p.parserID === id);
+  const pattern = mutableToolPatterns.find((p) => p.parserID === id);
   return pattern?.displayName;
 };
 
@@ -602,7 +785,8 @@ export class ParserRegistry {
     this.byID.set(parser.id, parser);
 
     // Populate extension index for this parser
-    for (const [ext, parserID] of Object.entries(extensionToParserID)) {
+    // Use getExtensionMappings() to include runtime-registered extensions
+    for (const [ext, parserID] of Object.entries(getExtensionMappings())) {
       if (parserID === parser.id) {
         this.byExt.set(ext, parser);
       }
@@ -771,7 +955,7 @@ const detectSingleCommand = (
   opts: DetectionOptions,
   registry?: ParserRegistry
 ): DetectedTool | undefined => {
-  for (const tp of toolPatterns) {
+  for (const tp of mutableToolPatterns) {
     if (tp.pattern.test(cmd) && !seen.has(tp.parserID)) {
       seen.add(tp.parserID);
       return {

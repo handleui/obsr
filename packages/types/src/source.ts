@@ -14,6 +14,7 @@ export type ErrorSource =
   | "nodejs"
   | "metadata"
   | "infrastructure"
+  | "github-annotations"
   | "generic";
 
 /**
@@ -32,5 +33,6 @@ export const ErrorSources = {
   NodeJS: "nodejs" as const,
   Metadata: "metadata" as const,
   Infrastructure: "infrastructure" as const,
+  GitHubAnnotations: "github-annotations" as const,
   Generic: "generic" as const,
 };

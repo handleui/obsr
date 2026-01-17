@@ -44,7 +44,6 @@ export const unlinkCommand = defineCommand({
     }
 
     printHeader();
-    console.log();
 
     // Check if repository is linked
     const projectConfig = getProjectConfig(repoRoot);
@@ -57,7 +56,7 @@ export const unlinkCommand = defineCommand({
       projectConfig.organizationSlug,
       projectConfig.projectHandle
     );
-    console.log();
+    console.log("");
 
     if (!args.force) {
       const confirmed = await confirm("Are you sure you want to unlink?");

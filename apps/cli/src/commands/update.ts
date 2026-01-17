@@ -26,24 +26,24 @@ export const updateCommand = defineCommand({
       console.log(
         `${brandAnsi}✓${ANSI_RESET} Already on latest version (v${currentVersion})`
       );
-      console.log();
+      console.log("");
       return;
     }
 
     console.log(
       `${mutedAnsi}v${currentVersion}${ANSI_RESET} → ${brandAnsi}${latestVersion}${ANSI_RESET}`
     );
-    console.log();
+    console.log("");
 
     const success = await runUpdate();
 
-    console.log();
+    console.log("");
     if (success) {
       console.log(`${brandAnsi}✓${ANSI_RESET} Updated successfully`);
     } else {
       console.log(`${errorAnsi}✗${ANSI_RESET} Update failed`);
       process.exit(1);
     }
-    console.log();
+    console.log("");
   },
 });

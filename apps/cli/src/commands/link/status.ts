@@ -21,7 +21,6 @@ export const statusCommand = defineCommand({
     }
 
     printHeader();
-    console.log();
 
     const projectConfig = getProjectConfig(repoRoot);
     if (!projectConfig) {

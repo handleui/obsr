@@ -522,6 +522,41 @@ export const getProjectConfig = (repoRoot: string): ProjectConfig | null => {
   return result.config;
 };
 
+// Project config validation constants
+const MAX_ID_LENGTH = 128;
+const MAX_SLUG_LENGTH = 256;
+// Safe pattern: alphanumeric, hyphens, underscores (no path traversal chars)
+const SAFE_SLUG_PATTERN = /^[a-zA-Z0-9_-]+$/;
+// UUIDs or similar IDs: alphanumeric with optional hyphens
+const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+/**
+ * Validates a project config field for security
+ */
+const validateProjectConfigField = (
+  value: unknown,
+  fieldName: string,
+  maxLength: number,
+  pattern: RegExp
+): string | null => {
+  if (typeof value !== "string") {
+    return `${fieldName} must be a string`;
+  }
+  if (value.length === 0) {
+    return `${fieldName} cannot be empty`;
+  }
+  if (value.length > maxLength) {
+    return `${fieldName} exceeds maximum length of ${maxLength}`;
+  }
+  if (value.includes("\0")) {
+    return `${fieldName} contains null bytes`;
+  }
+  if (!pattern.test(value)) {
+    return `${fieldName} contains invalid characters`;
+  }
+  return null;
+};
+
 /**
  * Loads project config with detailed error information.
  */
@@ -554,6 +589,50 @@ export const getProjectConfigSafe = (
         error:
           "invalid project config: missing required fields. Run `dt link` to relink.",
       };
+    }
+
+    // Validate field formats to prevent injection attacks
+    const idError = validateProjectConfigField(
+      parsed.organizationId,
+      "organizationId",
+      MAX_ID_LENGTH,
+      SAFE_ID_PATTERN
+    );
+    if (idError) {
+      return { config: null, error: `invalid project config: ${idError}` };
+    }
+
+    const slugError = validateProjectConfigField(
+      parsed.organizationSlug,
+      "organizationSlug",
+      MAX_SLUG_LENGTH,
+      SAFE_SLUG_PATTERN
+    );
+    if (slugError) {
+      return { config: null, error: `invalid project config: ${slugError}` };
+    }
+
+    const projectIdError = validateProjectConfigField(
+      parsed.projectId,
+      "projectId",
+      MAX_ID_LENGTH,
+      SAFE_ID_PATTERN
+    );
+    if (projectIdError) {
+      return {
+        config: null,
+        error: `invalid project config: ${projectIdError}`,
+      };
+    }
+
+    const handleError = validateProjectConfigField(
+      parsed.projectHandle,
+      "projectHandle",
+      MAX_SLUG_LENGTH,
+      SAFE_SLUG_PATTERN
+    );
+    if (handleError) {
+      return { config: null, error: `invalid project config: ${handleError}` };
     }
 
     return { config: parsed };

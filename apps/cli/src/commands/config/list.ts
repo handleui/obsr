@@ -33,7 +33,7 @@ export const configListCommand = defineCommand({
 
     // Per-repo config
     console.log(`Config file: ${configPath}`);
-    console.log();
+    console.log("");
     const maskedKey = maskApiKey(config.apiKey);
     const apiKeyDisplay = maskedKey || "(not set)";
     const apiKeySource = hasEnvApiKey ? " (from environment)" : "";
@@ -42,7 +42,7 @@ export const configListCommand = defineCommand({
     console.log(`budgetPerRunUsd: ${formatBudget(config.budgetPerRunUsd)}`);
     console.log(`budgetMonthlyUsd: ${formatBudget(config.budgetMonthlyUsd)}`);
     console.log(`timeoutMins: ${config.timeoutMins}`);
-    console.log();
+    console.log("");
 
     // Global preferences
     console.log("Global preferences:");
@@ -50,6 +50,6 @@ export const configListCommand = defineCommand({
       const value = prefs[key];
       console.log(`  ${key}: ${formatPreferenceValue(key, value)}`);
     }
-    console.log();
+    console.log("");
   },
 });

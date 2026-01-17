@@ -354,3 +354,69 @@ export const getErrors = (
     `/v1/errors?commit=${encodeURIComponent(commit)}&repository=${encodeURIComponent(repository)}`,
     { accessToken }
   );
+
+// ============================================================================
+// Invitation Types
+// ============================================================================
+
+export interface Invitation {
+  id: string;
+  email: string;
+  role: "admin" | "member" | "visitor";
+  status: "pending" | "accepted" | "expired" | "revoked";
+  expires_at: string;
+  invited_by: string | null;
+  inviter_name?: string;
+  created_at: string;
+}
+
+export interface InvitationsResponse {
+  invitations: Invitation[];
+}
+
+export interface CreateInvitationResponse {
+  id: string;
+  email: string;
+  role: string;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface RevokeInvitationResponse {
+  success: boolean;
+}
+
+// Invitation API methods
+export const createInvitation = (
+  accessToken: string,
+  organizationId: string,
+  email: string,
+  role: "admin" | "member" | "visitor"
+): Promise<CreateInvitationResponse> =>
+  apiRequest<CreateInvitationResponse>(
+    `/v1/orgs/${encodeURIComponent(organizationId)}/invitations`,
+    {
+      accessToken,
+      method: "POST",
+      body: { email, role },
+    }
+  );
+
+export const listInvitations = (
+  accessToken: string,
+  organizationId: string
+): Promise<InvitationsResponse> =>
+  apiRequest<InvitationsResponse>(
+    `/v1/orgs/${encodeURIComponent(organizationId)}/invitations`,
+    { accessToken }
+  );
+
+export const revokeInvitation = (
+  accessToken: string,
+  organizationId: string,
+  invitationId: string
+): Promise<RevokeInvitationResponse> =>
+  apiRequest<RevokeInvitationResponse>(
+    `/v1/orgs/${encodeURIComponent(organizationId)}/invitations/${encodeURIComponent(invitationId)}`,
+    { accessToken, method: "DELETE" }
+  );

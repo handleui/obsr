@@ -1,5 +1,17 @@
 # @detent/healing
 
+## 0.4.2
+
+### Patch Changes
+
+- 6bfca1a: Update to use shared types from @detent/types.
+- Updated dependencies [6bfca1a]
+- Updated dependencies [6bfca1a]
+- Updated dependencies [6bfca1a]
+  - @detent/parser@0.6.0
+  - @detent/types@0.3.0
+  - @detent/lore@0.1.2
+
 ## 0.4.1
 
 ### Patch Changes

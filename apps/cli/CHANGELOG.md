@@ -1,5 +1,22 @@
 # @detent/cli
 
+## 0.11.0
+
+### Minor Changes
+
+- 6bfca1a: Redesign `dt link` command to mirror GitHub's repository structure.
+  Linking now verifies the project exists in Detent via the GitHub App installation
+  and stores project-level details (projectId, projectHandle) alongside org info.
+  Simplified status and unlink commands with cleaner output formatting.
+
+### Patch Changes
+
+- Updated dependencies [6bfca1a]
+- Updated dependencies [6bfca1a]
+- Updated dependencies [6bfca1a]
+  - @detent/parser@0.6.0
+  - @detent/healing@0.4.2
+
 ## 0.10.0
 
 ### Minor Changes

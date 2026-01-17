@@ -42,6 +42,7 @@ import {
   handleNoPrEarlyReturn,
   handleWaitingForRunsEarlyReturn,
 } from "../utils/early-returns";
+import { fetchJobDetailsWithRateLimit } from "../utils/job-fetcher";
 import { postWaitingComment } from "../waiting-comment";
 
 // ============================================================================
@@ -439,6 +440,8 @@ export const handleWorkflowRunInProgress = async (
     `[workflow_run] In progress: ${repository.full_name} / ${workflow_run.name} [delivery: ${deliveryId}]`
   );
 
+  const github = createGitHubService(c.env);
+
   // Check if we already created a check run for this commit
   const existingCheckRunId = await getStoredCheckRunId(
     c.env["detent-idempotency"],
@@ -446,17 +449,61 @@ export const handleWorkflowRunInProgress = async (
     headSha
   );
 
+  // Even if check run exists, we should update it with current workflow status
+  // The check_suite.requested handler may have fetched workflows before they were visible
   if (existingCheckRunId) {
     console.log(
-      `[workflow_run] Check run ${existingCheckRunId} already exists for ${headSha.slice(0, 7)}`
+      `[workflow_run] Check run ${existingCheckRunId} exists for ${headSha.slice(0, 7)}, updating with workflow status`
     );
+
+    try {
+      const token = await github.getInstallationToken(installation.id);
+      const { evaluation } = await github.listWorkflowRunsForCommit(
+        token,
+        owner,
+        repo,
+        headSha
+      );
+
+      // Only update if we found CI-relevant workflows (otherwise leave existing output)
+      if (evaluation.ciRelevantRuns.length > 0) {
+        const jobsByRunId = await fetchJobDetailsWithRateLimit(
+          github,
+          token,
+          owner,
+          repo,
+          evaluation,
+          `workflow_run:${existingCheckRunId}`
+        );
+
+        const { title, summary } = formatWaitingCheckRunOutput({
+          evaluation,
+          jobsByRunId: jobsByRunId.size > 0 ? jobsByRunId : undefined,
+        });
+        await github.updateCheckRun(token, {
+          owner,
+          repo,
+          checkRunId: existingCheckRunId,
+          status: "in_progress",
+          output: { title, summary },
+        });
+        console.log(
+          `[workflow_run] Updated check run ${existingCheckRunId} with ${evaluation.ciRelevantRuns.length} workflows, ${jobsByRunId.size} with job details`
+        );
+      }
+    } catch (error) {
+      // Non-fatal: check run exists, just couldn't update status
+      console.error(
+        `[workflow_run] Failed to update existing check run ${existingCheckRunId}:`,
+        error
+      );
+    }
+
     return c.json({
       message: "check run already exists",
       checkRunId: existingCheckRunId,
     });
   }
-
-  const github = createGitHubService(c.env);
 
   try {
     const token = await github.getInstallationToken(installation.id);
@@ -509,7 +556,7 @@ export const handleWorkflowRunInProgress = async (
     );
 
     // Background tasks (non-blocking for faster webhook response):
-    // 1. Fetch workflow list and update check run with detailed status
+    // 1. Fetch workflow list and job details, update check run with detailed status
     // 2. Post waiting comment to PR
     c.executionCtx.waitUntil(
       Promise.all([
@@ -523,9 +570,19 @@ export const handleWorkflowRunInProgress = async (
               headSha
             );
 
-            // Update check run with workflow visibility
+            const jobsByRunId = await fetchJobDetailsWithRateLimit(
+              github,
+              token,
+              owner,
+              repo,
+              evaluation,
+              `workflow_run:${checkRun.id}`
+            );
+
+            // Update check run with workflow and job visibility
             const { title, summary } = formatWaitingCheckRunOutput({
               evaluation,
+              jobsByRunId: jobsByRunId.size > 0 ? jobsByRunId : undefined,
             });
             await github.updateCheckRun(token, {
               owner,

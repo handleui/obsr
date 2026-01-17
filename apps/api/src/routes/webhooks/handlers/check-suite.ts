@@ -7,6 +7,7 @@ import {
 } from "../../../services/idempotency";
 import { classifyError } from "../../../services/webhooks/error-classifier";
 import type { CheckSuitePayload, WebhookContext } from "../types";
+import { fetchJobDetailsWithRateLimit } from "../utils/job-fetcher";
 import { postWaitingComment } from "../waiting-comment";
 
 // Handle check_suite.requested - create a "queued" check run immediately
@@ -101,7 +102,7 @@ export const handleCheckSuiteRequested = async (
     c.executionCtx.waitUntil(
       Promise.all([
         storeCheckRunId(kv, repository.full_name, headSha, checkRun.id),
-        // Fetch workflow list and update check run with detailed status
+        // Fetch workflow list and job details, update check run with detailed status
         (async () => {
           try {
             const { evaluation } = await github.listWorkflowRunsForCommit(
@@ -110,8 +111,19 @@ export const handleCheckSuiteRequested = async (
               repo,
               headSha
             );
+
+            const jobsByRunId = await fetchJobDetailsWithRateLimit(
+              github,
+              token,
+              owner,
+              repo,
+              evaluation,
+              `check_suite:${checkRun.id}`
+            );
+
             const { title, summary } = formatWaitingCheckRunOutput({
               evaluation,
+              jobsByRunId: jobsByRunId.size > 0 ? jobsByRunId : undefined,
             });
             await github.updateCheckRun(token, {
               owner,

@@ -101,3 +101,40 @@ export interface CheckRunOutput {
   text?: string;
   annotations?: CheckRunAnnotation[];
 }
+
+// Response from GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs
+// See: https://docs.github.com/en/rest/actions/workflow-jobs
+export interface WorkflowJobsResponse {
+  total_count: number;
+  jobs: Array<{
+    id: number;
+    run_id: number;
+    name: string;
+    status: "queued" | "in_progress" | "completed" | "waiting" | "pending";
+    conclusion:
+      | "success"
+      | "failure"
+      | "cancelled"
+      | "skipped"
+      | "timed_out"
+      | "action_required"
+      | null;
+    started_at: string | null;
+    completed_at: string | null;
+    // Additional useful fields from GitHub API
+    html_url: string | null;
+    workflow_name: string | null;
+    head_branch: string | null;
+    runner_name: string | null;
+    runner_id: number | null;
+    // Steps within the job (useful for step-level error tracking)
+    steps?: Array<{
+      name: string;
+      status: "queued" | "in_progress" | "completed";
+      conclusion: "success" | "failure" | "cancelled" | "skipped" | null;
+      number: number;
+      started_at: string | null;
+      completed_at: string | null;
+    }>;
+  }>;
+}

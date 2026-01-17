@@ -18,7 +18,8 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:check": "bun scripts/check-db.ts"
+    "db:check": "bun scripts/check-db.ts",
+    "email:dev": "email dev --dir src/emails --port 3003"
   },
   "dependencies": {
     "@detent/healing": "*",
@@ -26,6 +27,9 @@
     "@detent/types": "*",
     "@e2b/code-interpreter": "^2.3.3",
     "@polar-sh/sdk": "^0.42.2",
+    "@react-email/components": "^0.0.34",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "@sentry/cloudflare": "^10.32.1",
     "@upstash/ratelimit": "^2.0.7",
     "@upstash/redis": "^1.36.0",
@@ -40,6 +44,8 @@
     "@cloudflare/workers-types": "^4.20250106.0",
     "@types/node": "^25.0.3",
     "@types/pg": "^8.16.0",
+    "@types/react": "^18.3.3",
+    "react-email": "^3.0.4",
     "dotenv": "^17.2.3",
     "drizzle-kit": "^0.31.8",
     "typescript": "5.9.2",

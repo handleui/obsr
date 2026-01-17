@@ -5,12 +5,12 @@
  * Typically invoked via the link in GitHub PR comments.
  */
 
-import { findGitRoot, getCurrentRefs, getRemoteUrl } from "@detent/git";
+import { getCurrentRefs } from "@detent/git";
 import { defineCommand } from "citty";
 import type { ErrorInfo, ErrorsResponse } from "../lib/api.js";
 import { getErrors } from "../lib/api.js";
 import { getAccessToken } from "../lib/auth.js";
-import { parseRemoteUrl } from "../lib/git-utils.js";
+import { requireProjectLink } from "../lib/require-link.js";
 
 // Display constants
 const MAX_MESSAGE_LENGTH = 80;
@@ -149,12 +149,8 @@ export const errorsCommand = defineCommand({
     },
   },
   run: async ({ args }) => {
-    // Find git root
-    const repoRoot = await findGitRoot(process.cwd());
-    if (!repoRoot) {
-      console.error("Not in a git repository.");
-      process.exit(1);
-    }
+    // Require project to be linked
+    const { repoRoot, config } = await requireProjectLink();
 
     // Get commit SHA (from args or HEAD)
     let commitSha: string;
@@ -170,21 +166,6 @@ export const errorsCommand = defineCommand({
       }
     }
 
-    // Get repository from remote URL
-    const remoteUrl = await getRemoteUrl(repoRoot);
-    if (!remoteUrl) {
-      console.error(
-        "No git remote found. This repository must have an origin remote."
-      );
-      process.exit(1);
-    }
-
-    const repository = parseRemoteUrl(remoteUrl);
-    if (!repository) {
-      console.error(`Failed to parse remote URL: ${remoteUrl}`);
-      process.exit(1);
-    }
-
     // Get access token
     let accessToken: string;
     try {
@@ -193,6 +174,9 @@ export const errorsCommand = defineCommand({
       console.error("Not logged in. Run `dt auth login` first.");
       process.exit(1);
     }
+
+    // Build repository identifier from project config
+    const repository = `${config.organizationSlug}/${config.projectHandle}`;
 
     // Fetch errors from API
     try {
@@ -205,6 +189,7 @@ export const errorsCommand = defineCommand({
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const messageLower = message.toLowerCase();
 
       if (message.includes("No CI runs found")) {
         // Not an error, just no data yet - exit successfully
@@ -213,12 +198,13 @@ export const errorsCommand = defineCommand({
         console.log("This commit may not have been processed by Detent yet.");
         process.exit(0);
       } else if (
-        message.includes("not found") ||
-        message.includes("not linked")
+        messageLower.includes("not found") ||
+        messageLower.includes("404")
       ) {
-        console.error(`Repository ${repository} is not linked to Detent.`);
+        // Project may have been deleted or renamed remotely
+        console.error("Project not found:", repository);
         console.error(
-          "Make sure the Detent GitHub App is installed on this repository."
+          "The project may have been deleted or renamed. Run `dt link` to reconnect."
         );
         process.exit(1);
       } else {

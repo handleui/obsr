@@ -19,6 +19,7 @@ import type {
   InstallationReposResponse,
   InstallationTokenResponse,
   RefResponse,
+  WorkflowJobsResponse,
   WorkflowRunResponse,
   WorkflowRunsResponse,
 } from "./types";
@@ -32,6 +33,8 @@ import {
   validateIssueNumber,
   validateOwnerRepo,
 } from "./validation";
+import type { JobEvaluation, JobSummary } from "./workflow-jobs";
+import { evaluateJobs } from "./workflow-jobs";
 import type {
   WorkflowRunEvaluation,
   WorkflowRunSummary,
@@ -567,6 +570,66 @@ const createGitHubServiceInternal = (env: Env) => {
     return { allCompleted, runs: nonBlacklistedRuns, evaluation };
   };
 
+  // GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs
+  // Returns all jobs for a workflow run with evaluation details
+  const listJobsForWorkflowRun = async (
+    token: string,
+    owner: string,
+    repo: string,
+    runId: number
+  ): Promise<{
+    jobs: JobSummary[];
+    evaluation: JobEvaluation;
+  }> => {
+    const context = `listJobsForWorkflowRun(${owner}/${repo}, runId=${runId})`;
+
+    // Validate inputs
+    validateOwnerRepo(owner, repo, context);
+    if (!Number.isInteger(runId) || runId <= 0) {
+      throw new Error(`${context}: Invalid run ID`);
+    }
+
+    const response = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/actions/runs/${runId}/jobs`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "Detent-App",
+        },
+      }
+    );
+
+    const rateLimitInfo = parseRateLimitHeaders(response);
+    logRateLimitWarning(rateLimitInfo, context);
+
+    if (!response.ok) {
+      await handleApiError(response, rateLimitInfo, context, {
+        404: "Workflow run not found",
+      });
+    }
+
+    const data = (await response.json()) as WorkflowJobsResponse;
+
+    const jobs: JobSummary[] = (data.jobs ?? []).map((job) => ({
+      id: job.id,
+      runId: job.run_id,
+      name: job.name,
+      status: job.status,
+      conclusion: job.conclusion,
+      startedAt: job.started_at ? new Date(job.started_at) : null,
+    }));
+
+    const evaluation = evaluateJobs(jobs);
+
+    console.log(
+      `[github] ${context}: Found ${jobs.length} jobs (${evaluation.pendingJobs.length} pending, ${evaluation.failedJobs.length} failed)`
+    );
+
+    return { jobs, evaluation };
+  };
+
   // POST /repos/{owner}/{repo}/check-runs
   const createCheckRun = async (
     token: string,
@@ -838,6 +901,7 @@ const createGitHubServiceInternal = (env: Env) => {
     getPullRequestForRun,
     getPullRequestForCommit,
     listWorkflowRunsForCommit,
+    listJobsForWorkflowRun,
     createCheckRun,
     updateCheckRun,
     postCommentWithId,

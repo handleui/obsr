@@ -101,7 +101,7 @@ export const handleCheckSuiteRequested = async (
     c.executionCtx.waitUntil(
       Promise.all([
         storeCheckRunId(kv, repository.full_name, headSha, checkRun.id),
-        // Fetch workflow list and update check run with detailed status
+        // Fetch workflow list and job details, update check run with detailed status
         (async () => {
           try {
             const { evaluation } = await github.listWorkflowRunsForCommit(
@@ -110,8 +110,34 @@ export const handleCheckSuiteRequested = async (
               repo,
               headSha
             );
+
+            // Fetch job details for in-progress workflows (limit to 3 for rate limiting)
+            const jobsByRunId = new Map<
+              number,
+              import("../../../services/github/workflow-jobs").JobEvaluation
+            >();
+            const inProgressRuns = evaluation.pendingCiRuns.slice(0, 3);
+
+            await Promise.all(
+              inProgressRuns.map(async (run) => {
+                try {
+                  const { evaluation: jobEval } =
+                    await github.listJobsForWorkflowRun(
+                      token,
+                      owner,
+                      repo,
+                      run.id
+                    );
+                  jobsByRunId.set(run.id, jobEval);
+                } catch {
+                  // Silent fail for job fetch - will fall back to workflow display
+                }
+              })
+            );
+
             const { title, summary } = formatWaitingCheckRunOutput({
               evaluation,
+              jobsByRunId: jobsByRunId.size > 0 ? jobsByRunId : undefined,
             });
             await github.updateCheckRun(token, {
               owner,

@@ -960,6 +960,8 @@ export const formatCheckRunOutput = (
 export interface FormatWaitingCheckRunOptions {
   /** Full workflow evaluation from evaluateWorkflowRuns */
   evaluation: import("./github/workflow-runs").WorkflowRunEvaluation;
+  /** Optional: job-level details for in-progress workflows */
+  jobsByRunId?: Map<number, import("./github/workflow-jobs").JobEvaluation>;
 }
 
 // Helper: format duration from start time to now
@@ -1001,45 +1003,181 @@ const formatWorkflowStatus = (
   return status; // queued, waiting, etc.
 };
 
+// Helper: format job status for display (similar to workflow status)
+const formatJobStatus = (status: string, conclusion: string | null): string => {
+  if (status === "completed") {
+    if (conclusion === "success") {
+      return "✓ passed";
+    }
+    if (conclusion === "failure") {
+      return "✗ failed";
+    }
+    if (conclusion === "skipped") {
+      return "skipped";
+    }
+    if (conclusion === "cancelled") {
+      return "cancelled";
+    }
+    return conclusion ?? "done";
+  }
+  if (status === "in_progress") {
+    return "running";
+  }
+  return status; // queued, waiting, etc.
+};
+
 // Maximum workflows to display in the waiting table before truncating
 // Keeps output under GitHub's 65535 char limit even with long workflow names
 const MAX_WORKFLOWS_IN_TABLE = 50;
 
-// Format a "waiting" check run output with job tracking visibility
-// Shows which workflows are being tracked and their current status
-export const formatWaitingCheckRunOutput = (
-  options: FormatWaitingCheckRunOptions
-): { title: string; summary: string } => {
-  const { evaluation } = options;
-  const {
-    ciRelevantRuns,
-    pendingCiRuns,
-    stuckRuns,
-    skippedRuns,
-    blacklistedRuns,
-  } = evaluation;
-
-  const completedCount = ciRelevantRuns.length - pendingCiRuns.length;
-  const totalCount = ciRelevantRuns.length;
-
-  // Title shows progress
-  const title =
-    totalCount === 0
-      ? "Waiting for CI workflows..."
-      : `Waiting for CI (${completedCount}/${totalCount} complete)`;
-
+// Helper: Build job table lines for a workflow run
+const buildJobTableLines = (
+  jobs: import("./github/workflow-jobs").JobSummary[],
+  nowMs: number
+): string[] => {
   const lines: string[] = [];
+  lines.push("| Job | Status | Duration |");
+  lines.push("|-----|--------|----------|");
 
-  // If no workflows detected yet, show a simple message
-  if (totalCount === 0) {
-    lines.push("Detent will analyze CI results once all workflows finish.");
-    lines.push("");
-    lines.push("_No CI workflows detected yet._");
-    return { title, summary: lines.join("\n") };
+  // Sort jobs: pending first, then completed
+  const sortedJobs = [...jobs].sort((a, b) => {
+    const aCompleted = a.status === "completed";
+    const bCompleted = b.status === "completed";
+    if (aCompleted !== bCompleted) {
+      return aCompleted ? 1 : -1;
+    }
+    return a.name.localeCompare(b.name);
+  });
+
+  for (const job of sortedJobs) {
+    const safeName = escapeTableCell(job.name);
+    const statusText = formatJobStatus(job.status, job.conclusion);
+    const duration = formatDuration(job.startedAt, nowMs);
+    lines.push(`| ${safeName} | ${statusText} | ${duration} |`);
   }
 
-  // Build workflow table
-  const nowMs = Date.now();
+  return lines;
+};
+
+// Helper: Count job progress across all runs
+const countJobProgress = (
+  jobsByRunId?: Map<number, import("./github/workflow-jobs").JobEvaluation>
+): { totalJobs: number; completedJobs: number } => {
+  if (!jobsByRunId || jobsByRunId.size === 0) {
+    return { totalJobs: 0, completedJobs: 0 };
+  }
+  let totalJobs = 0;
+  let completedJobs = 0;
+  for (const jobEval of jobsByRunId.values()) {
+    totalJobs += jobEval.jobs.length;
+    completedJobs += jobEval.jobs.length - jobEval.pendingJobs.length;
+  }
+  return { totalJobs, completedJobs };
+};
+
+// Helper: Build title based on progress
+const buildTitle = (
+  totalCount: number,
+  totalJobs: number,
+  completedJobs: number,
+  completedCount: number
+): string => {
+  if (totalCount === 0) {
+    return "Waiting for CI workflows...";
+  }
+  if (totalJobs > 0) {
+    return `Waiting for CI (${completedJobs}/${totalJobs} jobs complete)`;
+  }
+  return `Waiting for CI (${completedCount}/${totalCount} complete)`;
+};
+
+// Helper: Build job tables section for pending CI runs
+const buildJobTablesSection = (
+  pendingCiRuns: import("./github/workflow-runs").WorkflowRunSummary[],
+  ciRelevantRuns: import("./github/workflow-runs").WorkflowRunSummary[],
+  jobsByRunId: Map<number, import("./github/workflow-jobs").JobEvaluation>,
+  completedCount: number,
+  nowMs: number
+): string[] => {
+  const lines: string[] = [];
+
+  // Show job table for each workflow with job data
+  for (const run of pendingCiRuns) {
+    const jobEval = jobsByRunId.get(run.id);
+    if (jobEval && jobEval.jobs.length > 0) {
+      lines.push(`**${escapeTableCell(run.name)}**`);
+      lines.push("");
+      lines.push(...buildJobTableLines(jobEval.jobs, nowMs));
+      lines.push("");
+    }
+  }
+
+  // Show completed workflows summary
+  if (completedCount > 0) {
+    const completedNames = ciRelevantRuns
+      .filter((r) => r.status === "completed")
+      .map((r) => escapeTableCell(r.name))
+      .slice(0, 5)
+      .join(", ");
+    const moreCount = completedCount > 5 ? ` +${completedCount - 5} more` : "";
+    lines.push(`_Completed: ${completedNames}${moreCount}_`);
+  }
+
+  return lines;
+};
+
+// Helper: Build footer stats lines
+const buildFooterStats = (
+  totalJobs: number,
+  totalCount: number,
+  stuckRuns: import("./github/workflow-runs").WorkflowRunSummary[],
+  skippedRuns: import("./github/workflow-runs").WorkflowRunSummary[],
+  blacklistedRuns: import("./github/workflow-runs").WorkflowRunSummary[]
+): string[] => {
+  const lines: string[] = [];
+  lines.push("");
+
+  const statsLine: string[] =
+    totalJobs > 0
+      ? [`${totalJobs} jobs tracked`]
+      : [`${totalCount} workflows tracked`];
+  if (stuckRuns.length > 0) {
+    statsLine.push(`${stuckRuns.length} may be stuck (>30m)`);
+  }
+  lines.push(statsLine.join(" · "));
+
+  // Show skipped workflows (non-CI events)
+  if (skippedRuns.length > 0) {
+    const skippedList = skippedRuns
+      .slice(0, 5)
+      .map((r) => `${escapeTableCell(r.name)} (${escapeTableCell(r.event)})`)
+      .join(", ");
+    const moreCount =
+      skippedRuns.length > 5 ? ` +${skippedRuns.length - 5} more` : "";
+    lines.push(`_Skipped: ${skippedList}${moreCount}_`);
+  }
+
+  // Show blacklisted workflows
+  if (blacklistedRuns.length > 0) {
+    const blacklistNames = blacklistedRuns
+      .slice(0, 3)
+      .map((r) => escapeTableCell(r.name))
+      .join(", ");
+    const moreCount =
+      blacklistedRuns.length > 3 ? ` +${blacklistedRuns.length - 3} more` : "";
+    lines.push(`_Excluded: ${blacklistNames}${moreCount}_`);
+  }
+
+  return lines;
+};
+
+// Helper: Build workflow table lines
+const buildWorkflowTableLines = (
+  ciRelevantRuns: import("./github/workflow-runs").WorkflowRunSummary[],
+  stuckRuns: import("./github/workflow-runs").WorkflowRunSummary[],
+  nowMs: number
+): { lines: string[]; truncatedCount: number } => {
+  const lines: string[] = [];
   lines.push("| Workflow | Status | Duration |");
   lines.push("|----------|--------|----------|");
 
@@ -1069,46 +1207,83 @@ export const formatWaitingCheckRunOutput = (
       isStuck
     );
     const duration = formatDuration(run.runStartedAt, nowMs);
-    const nameDisplay = safeName;
-
-    lines.push(`| ${nameDisplay} | ${statusText} | ${duration} |`);
+    lines.push(`| ${safeName} | ${statusText} | ${duration} |`);
   }
 
-  // Show truncation notice if workflows were hidden
-  if (truncatedCount > 0) {
-    lines.push("");
-    lines.push(`_+${truncatedCount} more workflows not shown_`);
+  return { lines, truncatedCount };
+};
+
+// Format a "waiting" check run output with job tracking visibility
+// Shows which workflows are being tracked and their current status
+// When job data is available, shows job-level progress for better visibility
+export const formatWaitingCheckRunOutput = (
+  options: FormatWaitingCheckRunOptions
+): { title: string; summary: string } => {
+  const { evaluation, jobsByRunId } = options;
+  const {
+    ciRelevantRuns,
+    pendingCiRuns,
+    stuckRuns,
+    skippedRuns,
+    blacklistedRuns,
+  } = evaluation;
+
+  const completedCount = ciRelevantRuns.length - pendingCiRuns.length;
+  const totalCount = ciRelevantRuns.length;
+  const { totalJobs, completedJobs } = countJobProgress(jobsByRunId);
+  const title = buildTitle(
+    totalCount,
+    totalJobs,
+    completedJobs,
+    completedCount
+  );
+
+  // If no workflows detected yet, show a simple message
+  if (totalCount === 0) {
+    const summary = [
+      "Detent will analyze CI results once all workflows finish.",
+      "",
+      "_No CI workflows detected yet._",
+    ].join("\n");
+    return { title, summary };
   }
 
-  // Footer stats
-  lines.push("");
-  const statsLine: string[] = [`${totalCount} workflows tracked`];
-  if (stuckRuns.length > 0) {
-    statsLine.push(`${stuckRuns.length} may be stuck (>30m)`);
-  }
-  lines.push(statsLine.join(" · "));
+  const nowMs = Date.now();
+  const lines: string[] = [];
 
-  // Show skipped workflows (non-CI events)
-  if (skippedRuns.length > 0) {
-    const skippedList = skippedRuns
-      .slice(0, 5)
-      .map((r) => `${escapeTableCell(r.name)} (${escapeTableCell(r.event)})`)
-      .join(", ");
-    const moreCount =
-      skippedRuns.length > 5 ? ` +${skippedRuns.length - 5} more` : "";
-    lines.push(`_Skipped: ${skippedList}${moreCount}_`);
+  // Build content section (job tables or workflow table)
+  if (jobsByRunId && jobsByRunId.size > 0) {
+    lines.push(
+      ...buildJobTablesSection(
+        pendingCiRuns,
+        ciRelevantRuns,
+        jobsByRunId,
+        completedCount,
+        nowMs
+      )
+    );
+  } else {
+    const { lines: tableLines, truncatedCount } = buildWorkflowTableLines(
+      ciRelevantRuns,
+      stuckRuns,
+      nowMs
+    );
+    lines.push(...tableLines);
+    if (truncatedCount > 0) {
+      lines.push("", `_+${truncatedCount} more workflows not shown_`);
+    }
   }
 
-  // Show blacklisted workflows
-  if (blacklistedRuns.length > 0) {
-    const blacklistNames = blacklistedRuns
-      .slice(0, 3)
-      .map((r) => escapeTableCell(r.name))
-      .join(", ");
-    const moreCount =
-      blacklistedRuns.length > 3 ? ` +${blacklistedRuns.length - 3} more` : "";
-    lines.push(`_Excluded: ${blacklistNames}${moreCount}_`);
-  }
+  // Add footer stats
+  lines.push(
+    ...buildFooterStats(
+      totalJobs,
+      totalCount,
+      stuckRuns,
+      skippedRuns,
+      blacklistedRuns
+    )
+  );
 
   // Ensure summary doesn't exceed GitHub's output limit (65535 chars)
   let summary = lines.join("\n");

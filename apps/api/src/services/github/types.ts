@@ -101,3 +101,17 @@ export interface CheckRunOutput {
   text?: string;
   annotations?: CheckRunAnnotation[];
 }
+
+// Response from GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs
+export interface WorkflowJobsResponse {
+  total_count: number;
+  jobs: Array<{
+    id: number;
+    run_id: number;
+    name: string;
+    status: "queued" | "in_progress" | "completed";
+    conclusion: "success" | "failure" | "cancelled" | "skipped" | null;
+    started_at: string | null;
+    completed_at: string | null;
+  }>;
+}

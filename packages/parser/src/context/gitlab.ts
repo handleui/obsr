@@ -62,7 +62,7 @@ export const gitlabProvider: CIProvider = {
   isStateful: false,
   priority: 10,
   description: "GitLab CI/CD pipeline runner",
-  detectFromEnv: () => process.env.GITLAB_CI === "true",
+  detectFromEnv: () => getEnvVar("GITLAB_CI") === "true",
   createContextParser: createGitLabContextParser,
 };
 

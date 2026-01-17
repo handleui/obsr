@@ -1776,7 +1776,7 @@ describe("webhooks - organization events", () => {
     });
   });
 
-  it("ignores non-renamed organization actions", async () => {
+  it("processes member_added with cache invalidation", async () => {
     const payload = {
       action: "member_added",
       organization: {
@@ -1793,8 +1793,10 @@ describe("webhooks - organization events", () => {
 
     expect(res.status).toBe(200);
     expect(json).toEqual({
-      message: "ignored",
-      action: "member_added",
+      message: "organization member_added",
+      status: "cache_invalidated",
+      memberAdded: false,
+      memberDemoted: false,
     });
   });
 });
@@ -2011,6 +2013,99 @@ describe("webhooks - workflow_run events", () => {
     expect(json).toEqual({
       message: "ignored",
       reason: "action requested not handled",
+    });
+  });
+});
+
+describe("webhooks - organization member events", () => {
+  const mockKvDelete = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockKvDelete.mockResolvedValue(undefined);
+  });
+
+  const MOCK_ENV_WITH_KV = {
+    ...MOCK_ENV,
+    "detent-idempotency": {
+      delete: mockKvDelete,
+    },
+  };
+
+  describe("ignored actions", () => {
+    it("ignores member_invited action", async () => {
+      const payload = {
+        action: "member_invited",
+        organization: {
+          id: 98_765_432,
+          login: "test-org",
+        },
+        membership: {
+          user: {
+            id: 11_111_111,
+            login: "test-member",
+          },
+          role: "member",
+        },
+        installation: { id: 12_345_678 },
+      };
+
+      const res = await app.request(
+        "/github",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-GitHub-Event": "organization",
+            "X-GitHub-Delivery": "test-delivery-id",
+            "X-Hub-Signature-256": "sha256=mocked",
+          },
+          body: JSON.stringify(payload),
+        },
+        MOCK_ENV_WITH_KV
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      // Non-handled actions return "ignored" with the action name
+      expect(json).toEqual({ message: "ignored", action: "member_invited" });
+    });
+
+    it("ignores organization event without installation ID", async () => {
+      const payload = {
+        action: "member_added",
+        organization: {
+          id: 98_765_432,
+          login: "test-org",
+        },
+        membership: {
+          user: {
+            id: 11_111_111,
+            login: "test-member",
+          },
+          role: "member",
+        },
+        // No installation field
+      };
+
+      const res = await app.request(
+        "/github",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-GitHub-Event": "organization",
+            "X-GitHub-Delivery": "test-delivery-id",
+            "X-Hub-Signature-256": "sha256=mocked",
+          },
+          body: JSON.stringify(payload),
+        },
+        MOCK_ENV_WITH_KV
+      );
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json).toEqual({ message: "ignored", reason: "no installation" });
     });
   });
 });

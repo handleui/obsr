@@ -20,7 +20,7 @@
     },
     "apps/api": {
       "name": "@detent/api",
-      "version": "0.16.0",
+      "version": "0.17.0",
       "dependencies": {
         "@detent/healing": "*",
         "@detent/parser": "*",
@@ -50,7 +50,7 @@
     },
     "apps/cli": {
       "name": "@detent/cli",
-      "version": "0.10.0",
+      "version": "0.11.0",
       "bin": {
         "dt": "./dist/index.js",
       },
@@ -150,7 +150,7 @@
     },
     "packages/healing": {
       "name": "@detent/healing",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "dependencies": {
         "@detent/lore": "workspace:*",
         "@detent/parser": "workspace:*",
@@ -169,7 +169,7 @@
     },
     "packages/lore": {
       "name": "@detent/lore",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
         "@detent/parser": "workspace:*",
       },
@@ -182,7 +182,7 @@
     },
     "packages/parser": {
       "name": "@detent/parser",
-      "version": "0.5.3",
+      "version": "0.6.0",
       "dependencies": {
         "@detent/types": "workspace:*",
       },
@@ -195,7 +195,7 @@
     },
     "packages/types": {
       "name": "@detent/types",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "devDependencies": {
         "@detent/typescript-config": "*",
         "typescript": "5.9.2",

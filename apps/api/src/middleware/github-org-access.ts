@@ -4,7 +4,6 @@ import type { Context, Next } from "hono";
 import { createDb } from "../db/client";
 import type * as schema from "../db/schema";
 import {
-  getOrgSettings,
   type Organization,
   type OrganizationSettings,
   organizationMembers,
@@ -17,7 +16,7 @@ import type { Env } from "../types/env";
 import "../middleware/auth";
 
 // Role assigned based on GitHub membership + installer status
-export type OrgAccessRole = "owner" | "admin" | "member";
+export type OrgAccessRole = "owner" | "admin" | "member" | "visitor";
 
 interface GitHubIdentity {
   userId: string;
@@ -72,11 +71,12 @@ const seedRoleFromGitHub = async (
       .where(
         and(
           eq(organizationMembers.organizationId, org.id),
-          eq(organizationMembers.role, "owner")
+          eq(organizationMembers.role, "owner"),
+          isNull(organizationMembers.removedAt)
         )
       );
 
-    // If no owner exists, this admin becomes owner
+    // If no active owner exists, this admin becomes owner
     // Security: Only GitHub admins can become owners (not regular members who installed)
     if (ownerCountResult[0]?.count === 0) {
       return "owner";
@@ -96,31 +96,19 @@ const resolveGitHubOrgRole = async (
   githubIdentity: GitHubIdentity,
   env: Env
 ): Promise<{ role: OrgAccessRole } | { error: string; status: number }> => {
-  // Check for existing Detent membership first
+  // Check for existing Detent membership first (active members only)
   const existingMember = await db.query.organizationMembers.findFirst({
     where: and(
       eq(organizationMembers.userId, userId),
-      eq(organizationMembers.organizationId, org.id)
+      eq(organizationMembers.organizationId, org.id),
+      isNull(organizationMembers.removedAt)
     ),
   });
 
-  // Verify membership via GitHub API (access gate)
-  const membership = await verifyGitHubMembership(
-    githubIdentity.username,
-    org.providerAccountLogin,
-    org.providerInstallationId as string,
-    env
-  );
-
-  if (!membership.isMember) {
-    return {
-      error: "You are not a member of this GitHub organization",
-      status: 403,
-    };
-  }
-
+  // For existing active members, trust DB role without re-verifying GitHub membership.
+  // This avoids failures when GitHub App lacks members:read permission.
+  // The user was verified when they first joined.
   if (existingMember) {
-    // Existing member: use DB role for authorization
     // Update GitHub identity if changed
     if (
       existingMember.providerUserId !== githubIdentity.userId ||
@@ -139,11 +127,26 @@ const resolveGitHubOrgRole = async (
     return { role: existingMember.role };
   }
 
-  // New member: check if auto-join is allowed
-  const settings = getOrgSettings(org.settings);
-  if (!settings.allowAutoJoin) {
+  // Only verify membership via GitHub for NEW members trying to auto-join
+  const membership = await verifyGitHubMembership(
+    githubIdentity.username,
+    org.providerAccountLogin,
+    org.providerInstallationId as string,
+    env
+  );
+
+  // App lacks members:read permission - can't auto-join, need manual invite
+  if (membership.permissionDenied) {
     return {
-      error: "Organization requires invitation to join",
+      error:
+        "Cannot verify GitHub membership automatically. Please ask an organization admin to invite you.",
+      status: 403,
+    };
+  }
+
+  if (!membership.isMember) {
+    return {
+      error: "You are not a member of this GitHub organization",
       status: 403,
     };
   }
@@ -168,6 +171,7 @@ const resolveGitHubOrgRole = async (
       organizationId: org.id,
       userId,
       role: intendedRole,
+      membershipSource: "github_access",
       providerUserId: githubIdentity.userId,
       providerUsername: githubIdentity.username,
       providerLinkedAt: new Date(),
@@ -183,11 +187,12 @@ const resolveGitHubOrgRole = async (
   }
 
   // Insert was skipped due to conflict - another request beat us
-  // Fetch the actual record that was inserted by the other request
+  // Fetch the actual record that was inserted by the other request (active only)
   const actualMember = await db.query.organizationMembers.findFirst({
     where: and(
       eq(organizationMembers.userId, userId),
-      eq(organizationMembers.organizationId, org.id)
+      eq(organizationMembers.organizationId, org.id),
+      isNull(organizationMembers.removedAt)
     ),
   });
 
@@ -266,11 +271,12 @@ export const githubOrgAccessMiddleware = async (
       );
     }
 
-    // Check for existing membership with stored GitHub identity
+    // Check for existing membership with stored GitHub identity (active members only)
     const existingMember = await db.query.organizationMembers.findFirst({
       where: and(
         eq(organizationMembers.userId, auth.userId),
-        eq(organizationMembers.organizationId, org.id)
+        eq(organizationMembers.organizationId, org.id),
+        isNull(organizationMembers.removedAt)
       ),
     });
 
@@ -367,6 +373,11 @@ export const githubOrgAccessMiddleware = async (
 };
 
 // Helper to require specific roles
+// SECURITY: Does not expose the user's current role in error responses
+// to prevent information disclosure that could aid privilege escalation
+// BREAKING CHANGE: Previously returned { required, current } fields in 403 response.
+// These were removed to prevent role enumeration attacks. Internal clients should
+// not parse role info from error responses - use the orgAccess context directly.
 export const requireRole =
   (...allowedRoles: OrgAccessRole[]) =>
   async (
@@ -379,11 +390,14 @@ export const requireRole =
     }
 
     if (!allowedRoles.includes(orgAccess.role)) {
+      // Log the actual role for debugging but don't expose in response
+      console.log(
+        `[requireRole] Access denied: ${orgAccess.githubIdentity.username} has ${orgAccess.role} role, needs one of: ${allowedRoles.join(", ")}`
+      );
       return c.json(
         {
           error: "Insufficient permissions",
-          required: allowedRoles,
-          current: orgAccess.role,
+          message: "You do not have the required role to perform this action",
         },
         403
       );

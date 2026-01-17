@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { createDb } from "../../../db/client";
 import {
   createProviderSlug,
@@ -37,20 +37,21 @@ const autoLinkInstaller = async (
     return false;
   }
 
-  // Check if they already have membership to this specific org
+  // Check if they already have active membership to this specific org
   const existingMembership = await db
     .select({ id: organizationMembers.id })
     .from(organizationMembers)
     .where(
       and(
         eq(organizationMembers.userId, existingMember[0].userId),
-        eq(organizationMembers.organizationId, organizationId)
+        eq(organizationMembers.organizationId, organizationId),
+        isNull(organizationMembers.removedAt)
       )
     )
     .limit(1);
 
   if (existingMembership[0]) {
-    // Already a member of this org
+    // Already an active member of this org
     console.log(
       `[webhook] Installer ${installerGithubId} already has membership to org ${organizationId}`
     );
@@ -86,6 +87,7 @@ const autoLinkInstaller = async (
     providerUserId: installerGithubId,
     providerUsername: installerUsername,
     providerLinkedAt: new Date(),
+    membershipSource: "installer",
   });
 
   console.log(

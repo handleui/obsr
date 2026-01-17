@@ -102,6 +102,15 @@ export interface CheckRunOutput {
   annotations?: CheckRunAnnotation[];
 }
 
+// Response from GET /orgs/{org}/members
+export interface GitHubOrgMember {
+  id: number;
+  login: string;
+  avatar_url: string;
+  type: string;
+  site_admin: boolean;
+}
+
 // Response from GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs
 // See: https://docs.github.com/en/rest/actions/workflow-jobs
 export interface WorkflowJobsResponse {

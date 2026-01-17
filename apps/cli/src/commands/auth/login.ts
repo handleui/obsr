@@ -1,5 +1,5 @@
 import { defineCommand } from "citty";
-import { syncIdentity } from "../../lib/api.js";
+import { syncUser } from "../../lib/api.js";
 import {
   authenticateViaNavigator,
   getJwtExpiration,
@@ -78,7 +78,7 @@ const showLoginSuccess = async (
     );
   }
   try {
-    const identity = await syncIdentity(accessToken, githubToken);
+    const identity = await syncUser(accessToken, githubToken);
     const email = `${brand}${identity.email}${ANSI_RESET}`;
 
     if (identity.github_username) {

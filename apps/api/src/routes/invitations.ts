@@ -56,11 +56,12 @@ orgInvitationsRoutes.post(
     }
     const email = rawEmail.trim().toLowerCase();
 
-    // Validate role (only admin or member can be invited, not owner)
-    if (!["admin", "member"].includes(role)) {
+    // Validate role (only admin, member, or visitor can be invited, not owner)
+    if (!["admin", "member", "visitor"].includes(role)) {
       return c.json(
         {
-          error: "Role must be 'admin' or 'member'. Owners cannot be invited.",
+          error:
+            "Role must be 'admin', 'member', or 'visitor'. Owners cannot be invited.",
         },
         400
       );
@@ -378,7 +379,7 @@ invitationRoutes.post("/accept", async (c) => {
       );
     }
 
-    // Check if user is already a member
+    // Check for existing membership (active or soft-deleted)
     const existingMember = await db.query.organizationMembers.findFirst({
       where: and(
         eq(organizationMembers.organizationId, invitation.organizationId),
@@ -387,33 +388,58 @@ invitationRoutes.post("/accept", async (c) => {
     });
 
     if (existingMember) {
-      // Mark invitation as accepted anyway to clean up
+      // Already an active member
+      if (!existingMember.removedAt) {
+        await db
+          .update(invitations)
+          .set({
+            status: "accepted",
+            acceptedAt: new Date(),
+            acceptedByUserId: auth.userId,
+            updatedAt: new Date(),
+          })
+          .where(eq(invitations.id, invitation.id));
+
+        return c.json(
+          { error: "You are already a member of this organization" },
+          409
+        );
+      }
+
+      // Soft-deleted member - reactivate with the invited role
+      // Note: Invitation acceptance allows rejoining even if admin_action removed,
+      // since the invitation implies explicit admin approval to rejoin
       await db
-        .update(invitations)
+        .update(organizationMembers)
         .set({
-          status: "accepted",
-          acceptedAt: new Date(),
-          acceptedByUserId: auth.userId,
+          removedAt: null,
+          removalReason: null,
+          removedBy: null,
+          role: invitation.role,
+          providerUserId: githubIdentity.userId,
+          providerUsername: githubIdentity.username,
+          providerLinkedAt: new Date(),
+          membershipSource: "manual_invite",
           updatedAt: new Date(),
         })
-        .where(eq(invitations.id, invitation.id));
+        .where(eq(organizationMembers.id, existingMember.id));
 
-      return c.json(
-        { error: "You are already a member of this organization" },
-        409
+      console.log(
+        `[invitations] Reactivated soft-deleted member ${githubIdentity.username} via invitation to ${invitation.organization.slug} as ${invitation.role}`
       );
+    } else {
+      // Create new organization membership
+      await db.insert(organizationMembers).values({
+        id: crypto.randomUUID(),
+        organizationId: invitation.organizationId,
+        userId: auth.userId,
+        role: invitation.role,
+        providerUserId: githubIdentity.userId,
+        providerUsername: githubIdentity.username,
+        providerLinkedAt: new Date(),
+        membershipSource: "manual_invite",
+      });
     }
-
-    // Create organization membership
-    await db.insert(organizationMembers).values({
-      id: crypto.randomUUID(),
-      organizationId: invitation.organizationId,
-      userId: auth.userId,
-      role: invitation.role,
-      providerUserId: githubIdentity.userId,
-      providerUsername: githubIdentity.username,
-      providerLinkedAt: new Date(),
-    });
 
     // Mark invitation as accepted
     await db

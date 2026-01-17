@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -22,6 +22,7 @@ export const organizationRoleEnum = pgEnum("organization_role", [
   "owner",
   "admin",
   "member",
+  "visitor",
 ]);
 
 export const invitationStatusEnum = pgEnum("invitation_status", [
@@ -42,13 +43,11 @@ export const providerShortCodes: Record<"github" | "gitlab", string> = {
 // ============================================================================
 
 export interface OrganizationSettings {
-  allowAutoJoin?: boolean; // default: true - whether GitHub org members can auto-join
   enableInlineAnnotations?: boolean; // default: true - show inline annotations in check runs
   enablePrComments?: boolean; // default: true - post PR comments on failures
 }
 
 export const DEFAULT_ORG_SETTINGS: Required<OrganizationSettings> = {
-  allowAutoJoin: true,
   enableInlineAnnotations: true,
   enablePrComments: true,
 };
@@ -56,7 +55,6 @@ export const DEFAULT_ORG_SETTINGS: Required<OrganizationSettings> = {
 export const getOrgSettings = (
   settings: OrganizationSettings | null | undefined
 ): Required<OrganizationSettings> => ({
-  allowAutoJoin: settings?.allowAutoJoin ?? DEFAULT_ORG_SETTINGS.allowAutoJoin,
   enableInlineAnnotations:
     settings?.enableInlineAnnotations ??
     DEFAULT_ORG_SETTINGS.enableInlineAnnotations,
@@ -198,14 +196,33 @@ export const organizationMembers = pgTable(
     providerUsername: varchar("provider_username", { length: 255 }),
     providerLinkedAt: timestamp("provider_linked_at"),
 
+    // When membership was last verified with provider (GitHub org membership check)
+    providerVerifiedAt: timestamp("provider_verified_at"),
+
+    // How this membership was created (for UX display + sync logic)
+    // Values: "github_sync" | "github_webhook" | "github_access" | "manual_invite" | "installer"
+    // null for existing records (treat as "github_access")
+    membershipSource: varchar("membership_source", { length: 32 }),
+
+    // Soft-delete replaces hard-delete
+    removedAt: timestamp("removed_at"),
+
+    // Why removed (determines if auto-rejoin is allowed)
+    // Values: "admin_action" (manual, blocks rejoin) | "github_left" (mirror, allows rejoin)
+    removalReason: varchar("removal_reason", { length: 32 }),
+
+    // Who removed (audit trail) - WorkOS user ID or "system"
+    removedBy: varchar("removed_by", { length: 255 }),
+
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("organization_members_org_user_idx").on(
-      table.organizationId,
-      table.userId
-    ),
+    // Partial unique index: only active (non-deleted) members must be unique per org+user
+    // This allows soft-deleted records to exist alongside active ones, enabling rejoin
+    uniqueIndex("organization_members_org_user_active_idx")
+      .on(table.organizationId, table.userId)
+      .where(sql`${table.removedAt} IS NULL`),
     index("organization_members_user_id_idx").on(table.userId),
     index("organization_members_provider_user_id_idx").on(table.providerUserId),
     // Composite index for role-based queries (owner count checks, elevated role counts)
@@ -213,6 +230,14 @@ export const organizationMembers = pgTable(
     index("organization_members_org_role_idx").on(
       table.organizationId,
       table.role
+    ),
+    // Index for soft-delete filtering (active members only)
+    index("organization_members_removed_at_idx").on(table.removedAt),
+    // Composite index for webhook/sync lookups by org + GitHub user ID
+    // Covers: member add/remove webhooks, membership checks, rejoin logic
+    index("organization_members_org_provider_user_idx").on(
+      table.organizationId,
+      table.providerUserId
     ),
   ]
 );

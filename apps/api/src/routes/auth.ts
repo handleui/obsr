@@ -227,7 +227,7 @@ const resolveGitHubIdentity = async (
   if (providedToken) {
     const identity = await getGitHubIdentityFromToken(
       providedToken,
-      "sync-identity"
+      "sync-user"
     );
     if (identity) {
       return identity;
@@ -266,19 +266,23 @@ const linkInstallerOrganizations = async (
   }
 
   const orgIds = installerOrgs.map((org) => org.id);
-  const existingMemberships = await db.query.organizationMembers.findMany({
+
+  // Get active memberships only - soft-deleted users must go through invitation flow
+  const activeMemberships = await db.query.organizationMembers.findMany({
     where: and(
       eq(organizationMembers.userId, userId),
-      inArray(organizationMembers.organizationId, orgIds)
+      inArray(organizationMembers.organizationId, orgIds),
+      isNull(organizationMembers.removedAt)
     ),
   });
 
-  const existingOrgIds = new Set(
-    existingMemberships.map((m) => m.organizationId)
+  const activeMemberOrgIds = new Set(
+    activeMemberships.map((m) => m.organizationId)
   );
+
+  // Filter to orgs that need linking (no active membership)
   const orgsToLink = installerOrgs.filter(
-    (org) =>
-      !existingOrgIds.has(org.id) && org.settings?.allowAutoJoin !== false
+    (org) => !activeMemberOrgIds.has(org.id)
   );
 
   // Verify current GitHub membership before granting owner access
@@ -305,7 +309,7 @@ const linkInstallerOrganizations = async (
     } catch (error) {
       // Log but continue - don't fail entire operation if one org check fails
       console.warn(
-        `[sync-identity] Failed to verify membership for ${githubUsername} in ${org.providerAccountLogin}:`,
+        `[sync-user] Failed to verify membership for ${githubUsername} in ${org.providerAccountLogin}:`,
         error instanceof Error ? error.message : error
       );
       return null;
@@ -318,20 +322,22 @@ const linkInstallerOrganizations = async (
   ): org is (typeof orgsToLink)[number] => org !== null;
   const verifiedOrgs = verificationResults.filter(isVerifiedOrg);
 
-  if (verifiedOrgs.length > 0) {
-    const inserted = await db
+  let linked = 0;
+
+  for (const org of verifiedOrgs) {
+    // Create new membership - soft-deleted users must go through invitation flow
+    const result = await db
       .insert(organizationMembers)
-      .values(
-        verifiedOrgs.map((org) => ({
-          id: crypto.randomUUID(),
-          organizationId: org.id,
-          userId,
-          role: "owner" as const,
-          providerUserId: githubUserId,
-          providerUsername: githubUsername,
-          providerLinkedAt: new Date(),
-        }))
-      )
+      .values({
+        id: crypto.randomUUID(),
+        organizationId: org.id,
+        userId,
+        role: "owner",
+        providerUserId: githubUserId,
+        providerUsername: githubUsername,
+        providerLinkedAt: new Date(),
+        membershipSource: "installer",
+      })
       .onConflictDoNothing({
         target: [
           organizationMembers.organizationId,
@@ -339,10 +345,16 @@ const linkInstallerOrganizations = async (
         ],
       })
       .returning({ id: organizationMembers.id });
-    return inserted.length;
+
+    if (result.length > 0) {
+      console.log(
+        `[sync-user] Auto-linked installer ${githubUsername} as owner to ${org.slug}`
+      );
+      linked++;
+    }
   }
 
-  return 0;
+  return linked;
 };
 
 /**
@@ -366,7 +378,7 @@ const fetchAllGitHubOrgs = async (
 
     if (!response.ok) {
       console.warn(
-        `[sync-identity] Failed to fetch GitHub orgs page: ${response.status}, fetched ${allOrgs.length} so far`
+        `[sync-user] Failed to fetch GitHub orgs page: ${response.status}, fetched ${allOrgs.length} so far`
       );
       return allOrgs.length > 0 ? allOrgs : null;
     }
@@ -385,6 +397,211 @@ const fetchAllGitHubOrgs = async (
   return allOrgs;
 };
 
+// Type for organization with required fields for membership operations
+type DetentOrg = Awaited<
+  ReturnType<Database["query"]["organizations"]["findMany"]>
+>[number];
+
+// Type for soft-deleted membership info
+interface SoftDeletedMembership {
+  id: string;
+  removalReason: string | null;
+  role: string;
+}
+
+/**
+ * Fetch Detent orgs matching the user's GitHub orgs with mirroring enabled.
+ * Returns orgs that don't have an active membership for the user.
+ */
+const fetchMatchingDetentOrgs = async (
+  db: Database,
+  userId: string,
+  githubOrgs: { id: number; login: string }[]
+): Promise<{
+  orgsToJoin: DetentOrg[];
+  softDeletedByOrg: Map<string, SoftDeletedMembership>;
+} | null> => {
+  const githubOrgIds = githubOrgs.map((o) => String(o.id));
+  const detentOrgs = await db.query.organizations.findMany({
+    where: and(
+      eq(organizations.provider, "github"),
+      inArray(organizations.providerAccountId, githubOrgIds),
+      isNull(organizations.deletedAt)
+    ),
+  });
+
+  if (detentOrgs.length === 0) {
+    return null;
+  }
+
+  const detentOrgIds = detentOrgs.map((o) => o.id);
+  const allMemberships = await db.query.organizationMembers.findMany({
+    where: and(
+      eq(organizationMembers.userId, userId),
+      inArray(organizationMembers.organizationId, detentOrgIds)
+    ),
+  });
+
+  // Build maps for different membership states
+  const activeMemberOrgIds = new Set<string>();
+  const softDeletedByOrg = new Map<string, SoftDeletedMembership>();
+
+  for (const m of allMemberships) {
+    if (m.removedAt) {
+      softDeletedByOrg.set(m.organizationId, {
+        id: m.id,
+        removalReason: m.removalReason,
+        role: m.role,
+      });
+    } else {
+      activeMemberOrgIds.add(m.organizationId);
+    }
+  }
+
+  const orgsToJoin = detentOrgs.filter(
+    (org) => !activeMemberOrgIds.has(org.id)
+  );
+
+  if (orgsToJoin.length === 0) {
+    return null;
+  }
+
+  return { orgsToJoin, softDeletedByOrg };
+};
+
+/**
+ * Handle an existing soft-deleted membership by reactivating it.
+ * Returns true if membership was reactivated, false if blocked.
+ */
+const handleExistingMembership = async (
+  db: Database,
+  softDeleted: SoftDeletedMembership,
+  role: "admin" | "member",
+  githubUserId: string,
+  githubUsername: string,
+  orgSlug: string | null
+): Promise<boolean> => {
+  if (softDeleted.removalReason === "admin_action") {
+    console.log(
+      `[sync-user] User ${githubUsername} blocked from auto-join to ${orgSlug} (admin removed)`
+    );
+    return false;
+  }
+
+  await db
+    .update(organizationMembers)
+    .set({
+      removedAt: null,
+      removalReason: null,
+      removedBy: null,
+      role,
+      providerUserId: githubUserId,
+      providerUsername: githubUsername,
+      providerLinkedAt: new Date(),
+      providerVerifiedAt: new Date(),
+      membershipSource: "github_sync",
+      updatedAt: new Date(),
+    })
+    .where(eq(organizationMembers.id, softDeleted.id));
+
+  console.log(
+    `[sync-user] Reactivated ${githubUsername} to ${orgSlug} as ${role}`
+  );
+  return true;
+};
+
+/**
+ * Create a new membership for a user in an organization.
+ * Returns true if membership was created, false otherwise.
+ */
+const createNewMembership = async (
+  db: Database,
+  orgId: string,
+  userId: string,
+  role: "admin" | "member",
+  githubUserId: string,
+  githubUsername: string,
+  orgSlug: string | null
+): Promise<boolean> => {
+  const result = await db
+    .insert(organizationMembers)
+    .values({
+      id: crypto.randomUUID(),
+      organizationId: orgId,
+      userId,
+      role,
+      providerUserId: githubUserId,
+      providerUsername: githubUsername,
+      providerLinkedAt: new Date(),
+      membershipSource: "github_sync",
+    })
+    .onConflictDoNothing({
+      target: [organizationMembers.organizationId, organizationMembers.userId],
+    })
+    .returning({ id: organizationMembers.id });
+
+  if (result.length > 0) {
+    console.log(
+      `[sync-user] Auto-joined ${githubUsername} to ${orgSlug} as ${role}`
+    );
+    return true;
+  }
+  return false;
+};
+
+/**
+ * Process a single org for membership linking.
+ * Verifies GitHub membership and creates/reactivates Detent membership.
+ * Returns true if a membership was created or reactivated.
+ */
+const processOrgMembership = async (
+  db: Database,
+  org: DetentOrg,
+  userId: string,
+  githubUserId: string,
+  githubUsername: string,
+  softDeletedByOrg: Map<string, SoftDeletedMembership>,
+  env: Env
+): Promise<boolean> => {
+  if (!(org.providerInstallationId && org.providerAccountLogin)) {
+    return false;
+  }
+
+  const membership = await verifyGitHubMembership(
+    githubUsername,
+    org.providerAccountLogin,
+    org.providerInstallationId,
+    env
+  );
+  if (!membership.isMember) {
+    return false;
+  }
+
+  const role = membership.role === "admin" ? "admin" : "member";
+  const softDeleted = softDeletedByOrg.get(org.id);
+
+  if (softDeleted) {
+    return handleExistingMembership(
+      db,
+      softDeleted,
+      role,
+      githubUserId,
+      githubUsername,
+      org.slug
+    );
+  }
+
+  return createNewMembership(
+    db,
+    org.id,
+    userId,
+    role,
+    githubUserId,
+    githubUsername,
+    org.slug
+  );
+};
+
 /**
  * Auto-join user to GitHub orgs where Detent is already installed.
  * This allows non-installer admins/members to join existing orgs.
@@ -397,88 +614,36 @@ const linkGitHubMemberOrganizations = async (
   githubToken: string,
   env: Env
 ): Promise<number> => {
-  // 1. Fetch all user's GitHub orgs (with pagination)
   const githubOrgs = await fetchAllGitHubOrgs(githubToken);
   if (!githubOrgs || githubOrgs.length === 0) {
     return 0;
   }
 
-  // 2. Find installed Detent orgs matching these GitHub orgs
-  const githubOrgIds = githubOrgs.map((o) => String(o.id));
-  const detentOrgs = await db.query.organizations.findMany({
-    where: and(
-      eq(organizations.provider, "github"),
-      inArray(organizations.providerAccountId, githubOrgIds),
-      isNull(organizations.deletedAt)
-    ),
-  });
-  if (detentOrgs.length === 0) {
+  const matchResult = await fetchMatchingDetentOrgs(db, userId, githubOrgs);
+  if (!matchResult) {
     return 0;
   }
 
-  // 3. Filter out orgs user already has membership in
-  const existingMemberships = await db.query.organizationMembers.findMany({
-    where: eq(organizationMembers.userId, userId),
-  });
-  const existingOrgIds = new Set(
-    existingMemberships.map((m) => m.organizationId)
-  );
-
-  const orgsToJoin = detentOrgs.filter(
-    (org) =>
-      !existingOrgIds.has(org.id) && org.settings?.allowAutoJoin !== false
-  );
-  if (orgsToJoin.length === 0) {
-    return 0;
-  }
-
-  // 4. Verify membership & create records
+  const { orgsToJoin, softDeletedByOrg } = matchResult;
   let joined = 0;
-  for (const org of orgsToJoin) {
-    if (!(org.providerInstallationId && org.providerAccountLogin)) {
-      continue;
-    }
 
+  for (const org of orgsToJoin) {
     try {
-      const membership = await verifyGitHubMembership(
+      const success = await processOrgMembership(
+        db,
+        org,
+        userId,
+        githubUserId,
         githubUsername,
-        org.providerAccountLogin,
-        org.providerInstallationId,
+        softDeletedByOrg,
         env
       );
-      if (!membership.isMember) {
-        continue;
-      }
-
-      const role = membership.role === "admin" ? "admin" : "member";
-      const result = await db
-        .insert(organizationMembers)
-        .values({
-          id: crypto.randomUUID(),
-          organizationId: org.id,
-          userId,
-          role: role as "admin" | "member",
-          providerUserId: githubUserId,
-          providerUsername: githubUsername,
-          providerLinkedAt: new Date(),
-        })
-        .onConflictDoNothing({
-          target: [
-            organizationMembers.organizationId,
-            organizationMembers.userId,
-          ],
-        })
-        .returning({ id: organizationMembers.id });
-
-      if (result.length > 0) {
+      if (success) {
         joined++;
-        console.log(
-          `[sync-identity] Auto-joined ${githubUsername} to ${org.slug} as ${role}`
-        );
       }
     } catch (error) {
       console.warn(
-        `[sync-identity] Failed to verify/join ${githubUsername} to ${org.slug}:`,
+        `[sync-user] Failed to verify/join ${githubUsername} to ${org.slug}:`,
         error instanceof Error ? error.message : error
       );
     }
@@ -487,14 +652,14 @@ const linkGitHubMemberOrganizations = async (
 };
 
 /**
- * POST /sync-identity
+ * POST /sync-user
  * Sync GitHub identity and link user to organizations where they are the installer.
  *
  * Accepts optional X-GitHub-Token header with the user's GitHub OAuth token.
  * If provided, uses the token directly to get the user's GitHub ID (preferred).
  * Falls back to WorkOS identities if no token provided.
  */
-app.post("/sync-identity", async (c) => {
+app.post("/sync-user", async (c) => {
   const auth = c.get("auth");
   const providedGitHubToken = c.req.header("X-GitHub-Token");
 
@@ -1259,7 +1424,7 @@ app.get("/install-url", (c) => {
 
 /**
  * GET /organizations
- * List organizations the user is a member of
+ * List organizations the user is an active member of
  */
 app.get("/organizations", async (c) => {
   const auth = c.get("auth");
@@ -1267,7 +1432,10 @@ app.get("/organizations", async (c) => {
   const { db, client } = await createDb(c.env);
   try {
     const memberships = await db.query.organizationMembers.findMany({
-      where: eq(organizationMembers.userId, auth.userId),
+      where: and(
+        eq(organizationMembers.userId, auth.userId),
+        isNull(organizationMembers.removedAt)
+      ),
       with: { organization: true },
     });
 

@@ -287,8 +287,7 @@ describe("organizations - POST /:organizationId/sync", () => {
       expect(res.status).toBe(403);
       expect(json).toEqual({
         error: "Insufficient permissions",
-        required: ["owner", "admin"],
-        current: "member",
+        message: "You do not have the required role to perform this action",
       });
     });
 
@@ -657,13 +656,14 @@ describe("organizations - POST /:organizationId/sync", () => {
       expect(res.status).toBe(200);
       expect(json.projects_updated).toBeGreaterThanOrEqual(1);
 
-      // Verify providerRepoName was updated
-      expect(mockSet).toHaveBeenCalledWith(
-        expect.objectContaining({
-          providerRepoName: "new-name",
-          providerRepoFullName: "test-org/new-name",
-        })
+      // Verify providerRepoName was updated (uses SQL CASE expression for batch updates)
+      // Check that mockSet was called with SQL objects for batch update fields
+      const setCall = mockSet.mock.calls.find(
+        (call) => call[0].providerRepoName !== undefined
       );
+      expect(setCall).toBeDefined();
+      expect(setCall?.[0]).toHaveProperty("providerRepoName");
+      expect(setCall?.[0]).toHaveProperty("providerRepoFullName");
     });
 
     it("updates project when visibility changes", async () => {
@@ -703,12 +703,13 @@ describe("organizations - POST /:organizationId/sync", () => {
       expect(res.status).toBe(200);
       expect(json.projects_updated).toBeGreaterThanOrEqual(1);
 
-      // Verify isPrivate was updated
-      expect(mockSet).toHaveBeenCalledWith(
-        expect.objectContaining({
-          isPrivate: true,
-        })
+      // Verify isPrivate was updated (uses SQL CASE expression for batch updates)
+      // Check that mockSet was called with isPrivate field
+      const setCall = mockSet.mock.calls.find(
+        (call) => call[0].isPrivate !== undefined
       );
+      expect(setCall).toBeDefined();
+      expect(setCall?.[0]).toHaveProperty("isPrivate");
     });
 
     it("does NOT update project handle when repo name changes", async () => {

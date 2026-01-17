@@ -6,7 +6,7 @@
  */
 
 import { defineCommand } from "citty";
-import { getOrganizations, listProjects, syncIdentity } from "../../lib/api.js";
+import { getOrganizations, listProjects, syncUser } from "../../lib/api.js";
 import { getAccessToken, getGitHubToken } from "../../lib/auth.js";
 import { openBrowser } from "../../lib/browser.js";
 import { printHeader } from "../../tui/components/index.js";
@@ -41,8 +41,8 @@ export const addCommand = defineCommand({
     // Get GitHub token for installer linking (uses OAuth token directly)
     const githubToken = await getGitHubToken();
 
-    // Sync identity and record existing orgs before opening browser
-    await syncIdentity(accessToken, githubToken).catch(() => {
+    // Sync user and record existing orgs before opening browser
+    await syncUser(accessToken, githubToken).catch(() => {
       // Ignore sync errors
     });
     let existingOrgIds = new Set<string>();
@@ -76,9 +76,9 @@ export const addCommand = defineCommand({
     while (Date.now() - startTime < POLL_TIMEOUT_MS) {
       await sleep(POLL_INTERVAL_MS);
 
-      // Sync identity to link installer to new orgs (passes GitHub token for ID lookup)
+      // Sync user to link installer to new orgs (passes GitHub token for ID lookup)
       if (Date.now() - lastSyncAt >= SYNC_INTERVAL_MS) {
-        await syncIdentity(accessToken, githubToken).catch(() => {
+        await syncUser(accessToken, githubToken).catch(() => {
           // Ignore sync errors
         });
         lastSyncAt = Date.now();

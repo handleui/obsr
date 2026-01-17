@@ -81,6 +81,11 @@ const createMember = (
   providerUserId: "gh-user-456",
   providerUsername: "testuser",
   providerLinkedAt: new Date(),
+  providerVerifiedAt: null,
+  membershipSource: null,
+  removedAt: null,
+  removalReason: null,
+  removedBy: null,
   createdAt: new Date(),
   updatedAt: new Date(),
   ...overrides,
@@ -367,12 +372,11 @@ describe("github-org-access middleware", () => {
 
       expect(mockInsert).not.toHaveBeenCalled();
     });
-  });
 
-  describe("access gate - GitHub membership is always verified", () => {
-    it("denies access when user removed from GitHub org even with Detent membership", async () => {
+    it("existing visitor keeps visitor role regardless of GitHub role", async () => {
+      // Visitor role is manually assigned and persists even if GitHub says admin
       const org = createOrg();
-      const member = createMember({ role: "admin" }); // Has Detent membership
+      const member = createMember({ role: "visitor" });
 
       mockOrgFindFirst.mockResolvedValue(org);
       mockMemberFindFirst.mockResolvedValue(member);
@@ -383,8 +387,8 @@ describe("github-org-access middleware", () => {
       });
 
       mockVerifyGitHubMembership.mockResolvedValue({
-        isMember: false, // Removed from GitHub org
-        role: null,
+        isMember: true,
+        role: "admin", // GitHub says admin
       });
 
       const { githubOrgAccessMiddleware } = await import("./github-org-access");
@@ -393,6 +397,86 @@ describe("github-org-access middleware", () => {
 
       app.use("*", async (c, next) => {
         c.set("auth" as never, { userId: "user-abc" } as never);
+        await next();
+      });
+      app.use("/orgs/:orgId/*", githubOrgAccessMiddleware);
+      app.get("/orgs/:orgId/test", (c) => {
+        const orgAccess = c.get("orgAccess");
+        return c.json({ role: orgAccess.role });
+      });
+
+      const res = await app.request("/orgs/org-123/test", {}, MOCK_ENV);
+      const json = (await res.json()) as { role: string };
+
+      expect(res.status).toBe(200);
+      expect(json.role).toBe("visitor"); // DB role preserved
+
+      expect(mockInsert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("access control - membership trust model", () => {
+    it("existing members retain access without re-checking GitHub (to handle missing members:read permission)", async () => {
+      // Existing members trust DB role - GitHub membership is NOT re-verified on each request
+      // This handles the case where GitHub App lacks members:read permission
+      const org = createOrg();
+      const member = createMember({ role: "admin" });
+
+      mockOrgFindFirst.mockResolvedValue(org);
+      mockMemberFindFirst.mockResolvedValue(member);
+
+      mockGetVerifiedGitHubIdentity.mockResolvedValue({
+        userId: "gh-user-456",
+        username: "testuser",
+      });
+
+      // GitHub membership check is NOT called for existing members
+      // If it were, this would return false - but it's not called
+
+      const { githubOrgAccessMiddleware } = await import("./github-org-access");
+      const { Hono } = await import("hono");
+      const app = new Hono();
+
+      app.use("*", async (c, next) => {
+        c.set("auth" as never, { userId: "user-abc" } as never);
+        await next();
+      });
+      app.use("/orgs/:orgId/*", githubOrgAccessMiddleware);
+      app.get("/orgs/:orgId/test", (c) => {
+        const orgAccess = c.get("orgAccess");
+        return c.json({ role: orgAccess.role });
+      });
+
+      const res = await app.request("/orgs/org-123/test", {}, MOCK_ENV);
+      const json = (await res.json()) as { role: string };
+
+      expect(res.status).toBe(200);
+      expect(json.role).toBe("admin"); // DB role is trusted
+      expect(mockVerifyGitHubMembership).not.toHaveBeenCalled(); // Membership not re-checked
+    });
+
+    it("new users without GitHub membership are denied access", async () => {
+      const org = createOrg();
+
+      mockOrgFindFirst.mockResolvedValue(org);
+      mockMemberFindFirst.mockResolvedValue(undefined); // No existing membership
+
+      mockGetVerifiedGitHubIdentity.mockResolvedValue({
+        userId: "new-user-id",
+        username: "newuser",
+      });
+
+      mockVerifyGitHubMembership.mockResolvedValue({
+        isMember: false, // Not a GitHub org member
+        role: null,
+      });
+
+      const { githubOrgAccessMiddleware } = await import("./github-org-access");
+      const { Hono } = await import("hono");
+      const app = new Hono();
+
+      app.use("*", async (c, next) => {
+        c.set("auth" as never, { userId: "user-xyz" } as never);
         await next();
       });
       app.use("/orgs/:orgId/*", githubOrgAccessMiddleware);

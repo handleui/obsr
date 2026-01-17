@@ -173,7 +173,17 @@ export const handleOrganizationEvent = async (
     `[organization] ${action}: ${organization.login} (org ID: ${organization.id}) [delivery: ${deliveryId}]`
   );
 
-  // Only handle renamed action for now
+  // Handle member changes - invalidate cache and optionally auto-remove
+  if (action === "member_added" || action === "member_removed") {
+    const { handleOrganizationWebhook } = await import("./organization");
+    const result = await handleOrganizationWebhook(payload, c.env, deliveryId);
+    return c.json({
+      message: `organization ${action}`,
+      ...result,
+    });
+  }
+
+  // Only handle renamed action for DB updates
   if (action !== "renamed") {
     return c.json({ message: "ignored", action });
   }

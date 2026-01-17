@@ -12,7 +12,6 @@ import {
   type Organization,
 } from "../../lib/api.js";
 import { getAccessToken } from "../../lib/auth.js";
-import { openBrowser } from "../../lib/browser.js";
 import { findOrganizationByIdOrSlug } from "../../lib/ui.js";
 import { OrgActionFlow, printHeader } from "../../tui/components/index.js";
 import { colors } from "../../tui/styles.js";
@@ -22,7 +21,6 @@ const runOrgActionFlow = async (
   options: {
     initialOrganization?: Organization | null;
     confirm: boolean;
-    onSelect?: (org: Organization) => void | Promise<void>;
   }
 ): Promise<Organization | null> => {
   let result: Organization | null = null;
@@ -51,7 +49,6 @@ const runOrgActionFlow = async (
       onResult={(org) => {
         result = org;
       }}
-      onSelect={options.onSelect}
       organizations={organizations}
     />
   );
@@ -130,7 +127,6 @@ export const deleteCommand = defineCommand({
     }
 
     let selectedOrg: Organization;
-    let usedInteractiveFlow = false;
 
     if (args.organization) {
       const found = findOrganizationByIdOrSlug(ownedOrgs, args.organization);
@@ -143,21 +139,9 @@ export const deleteCommand = defineCommand({
       if (args.force) {
         selectedOrg = found;
       } else {
-        usedInteractiveFlow = true;
         const selected = await runOrgActionFlow([found], {
           confirm: true,
           initialOrganization: found,
-          onSelect: async (org) => {
-            const url = buildGitHubAppUrl(
-              org.github_org,
-              org.provider_account_type
-            );
-            try {
-              await openBrowser(url);
-            } catch {
-              // Ignore browser open errors
-            }
-          },
         });
         if (!selected) {
           process.exit(0);
@@ -165,39 +149,13 @@ export const deleteCommand = defineCommand({
         selectedOrg = selected;
       }
     } else {
-      usedInteractiveFlow = true;
       const selected = await runOrgActionFlow(ownedOrgs, {
         confirm: !args.force,
-        onSelect: async (org) => {
-          const url = buildGitHubAppUrl(
-            org.github_org,
-            org.provider_account_type
-          );
-          try {
-            await openBrowser(url);
-          } catch {
-            // Ignore browser open errors
-          }
-        },
       });
       if (!selected) {
         process.exit(0);
       }
       selectedOrg = selected;
-    }
-
-    const githubUrl = buildGitHubAppUrl(
-      selectedOrg.github_org,
-      selectedOrg.provider_account_type
-    );
-
-    if (args.force && !usedInteractiveFlow) {
-      try {
-        await openBrowser(githubUrl);
-      } catch {
-        // Ignore browser open errors
-      }
-      // With --force, skip the confirmation question and proceed directly
     }
 
     try {

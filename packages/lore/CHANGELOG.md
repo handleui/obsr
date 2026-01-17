@@ -1,5 +1,12 @@
 # @detent/lore
 
+## 0.1.1
+
+### Patch Changes
+
+- Updated dependencies [5fa4de0]
+  - @detent/parser@0.5.3
+
 ## 0.1.0
 
 ### Minor Changes

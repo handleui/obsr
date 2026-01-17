@@ -1,5 +1,12 @@
 # @detent/web
 
+## 0.2.2
+
+### Patch Changes
+
+- 1e7f542: Replace Google Fonts (Geist) with local PP Neue Montreal font.
+  Adds tighter letter-spacing and updates web app metadata to proper branding.
+
 ## 0.2.1
 
 ### Patch Changes

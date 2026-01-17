@@ -1,5 +1,20 @@
 # @detent/cli
 
+## 0.10.0
+
+### Minor Changes
+
+- 6a70db2: Add `dt org delete` command for owners to remove organizations from Detent.
+  Rewrite `leave` command with interactive Ink-based organization selector.
+  Add shared `OrgSelector` TUI component for destructive org actions.
+
+### Patch Changes
+
+- Updated dependencies [5fa4de0]
+- Updated dependencies [5fa4de0]
+  - @detent/healing@0.4.1
+  - @detent/parser@0.5.3
+
 ## 0.9.0
 
 ### Minor Changes

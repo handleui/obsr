@@ -1,4 +1,5 @@
 import { captureWebhookError } from "../../../lib/sentry";
+import { formatWaitingCheckRunOutput } from "../../../services/comment-formatter";
 import { createGitHubService } from "../../../services/github";
 import {
   getStoredCheckRunId,
@@ -9,6 +10,11 @@ import type { CheckSuitePayload, WebhookContext } from "../types";
 import { postWaitingComment } from "../waiting-comment";
 
 // Handle check_suite.requested - create a "queued" check run immediately
+//
+// Performance optimization (Cloudflare Workers):
+// - Creates check run immediately with minimal output (fast response to GitHub)
+// - Fetches workflow list in background via waitUntil (non-blocking)
+// - Updates check run with detailed workflow status asynchronously
 export const handleCheckSuiteRequested = async (
   c: WebhookContext,
   payload: CheckSuitePayload
@@ -67,17 +73,20 @@ export const handleCheckSuiteRequested = async (
 
   try {
     const token = await github.getInstallationToken(installation.id);
+    const owner = repository.owner.login;
+    const repo = repository.name;
 
-    // Create a "queued" check run so users know we're watching
+    // Create a "queued" check run immediately with minimal output (fast webhook response)
+    // The workflow list will be fetched in background and check run updated
     const checkRun = await github.createCheckRun(token, {
-      owner: repository.owner.login,
-      repo: repository.name,
+      owner,
+      repo,
       headSha,
       name: "Detent Parser",
       status: "queued",
       output: {
-        title: "Waiting for CI to complete...",
-        summary: "Detent will analyze CI results once all workflows finish.",
+        title: "Waiting for CI to complete",
+        summary: "Monitoring workflow runs...",
       },
     });
 
@@ -86,16 +95,44 @@ export const handleCheckSuiteRequested = async (
     );
 
     // Fire-and-forget background tasks (non-blocking for faster response)
+    // 1. Store check run ID for later retrieval
+    // 2. Fetch workflow list and update check run with detailed status
+    // 3. Post waiting comment to PR
     c.executionCtx.waitUntil(
       Promise.all([
-        // Store check run ID for later retrieval
         storeCheckRunId(kv, repository.full_name, headSha, checkRun.id),
-        // Post waiting comment immediately so users know we're watching
+        // Fetch workflow list and update check run with detailed status
+        (async () => {
+          try {
+            const { evaluation } = await github.listWorkflowRunsForCommit(
+              token,
+              owner,
+              repo,
+              headSha
+            );
+            const { title, summary } = formatWaitingCheckRunOutput({
+              evaluation,
+            });
+            await github.updateCheckRun(token, {
+              owner,
+              repo,
+              checkRunId: checkRun.id,
+              status: "in_progress",
+              output: { title, summary },
+            });
+          } catch (error) {
+            // Non-fatal: check run was created, just missing detailed status
+            console.error(
+              `[check_suite] Background update failed for check run ${checkRun.id}:`,
+              error
+            );
+          }
+        })(),
         postWaitingComment({
           env: c.env,
           token,
-          owner: repository.owner.login,
-          repo: repository.name,
+          owner,
+          repo,
           repository: repository.full_name,
           prNumber,
           headSha,

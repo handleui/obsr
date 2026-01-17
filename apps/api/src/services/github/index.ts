@@ -32,7 +32,10 @@ import {
   validateIssueNumber,
   validateOwnerRepo,
 } from "./validation";
-import type { WorkflowRunSummary } from "./workflow-runs";
+import type {
+  WorkflowRunEvaluation,
+  WorkflowRunSummary,
+} from "./workflow-runs";
 import { evaluateWorkflowRuns } from "./workflow-runs";
 
 /**
@@ -457,7 +460,7 @@ const createGitHubServiceInternal = (env: Env) => {
   };
 
   // GET /repos/{owner}/{repo}/actions/runs?head_sha={sha}
-  // Returns all workflow runs for a commit and whether CI-relevant ones are completed
+  // Returns all workflow runs for a commit with full evaluation details
   // Includes metadata for run tracking (branch, attempt, timing, event)
   const listWorkflowRunsForCommit = async (
     token: string,
@@ -467,6 +470,7 @@ const createGitHubServiceInternal = (env: Env) => {
   ): Promise<{
     allCompleted: boolean;
     runs: WorkflowRunSummary[];
+    evaluation: WorkflowRunEvaluation;
   }> => {
     const context = `listWorkflowRunsForCommit(${owner}/${repo}@${headSha.slice(0, 7)})`;
 
@@ -550,7 +554,17 @@ const createGitHubServiceInternal = (env: Env) => {
       );
     }
 
-    return { allCompleted, runs: nonBlacklistedRuns };
+    const evaluation: WorkflowRunEvaluation = {
+      allCompleted,
+      ciRelevantRuns,
+      skippedRuns,
+      pendingCiRuns,
+      stuckRuns,
+      blacklistedRuns,
+      nonBlacklistedRuns,
+    };
+
+    return { allCompleted, runs: nonBlacklistedRuns, evaluation };
   };
 
   // POST /repos/{owner}/{repo}/check-runs

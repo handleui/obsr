@@ -69,13 +69,13 @@ const escapeHtml = (text: string): string => {
   return text.replace(HTML_TAG_PATTERN, (char) => HTML_ENTITIES[char] ?? char);
 };
 
-// Helper: escape text for markdown table cells (NOT for HTML contexts)
-// Only escapes markdown table syntax characters (|, `, [], newlines)
-// Does NOT escape HTML entities (< > &) - use escapeHtml for HTML contexts
+// Helper: escape text for markdown table cells
+// Escapes both HTML entities (XSS prevention) and markdown table syntax
 // Pipe chars break table structure, backticks can interfere with inline code
 // Newlines break table rows, brackets can create links
+// HTML entities must be escaped because markdown renderers can interpret HTML
 const escapeTableCell = (text: string): string => {
-  return text
+  return escapeHtml(text)
     .replace(NEWLINE_PATTERN, " ") // Newlines break table rows
     .replace(PIPE_PATTERN, "\\|")
     .replace(BACKTICK_PATTERN, "\\`")

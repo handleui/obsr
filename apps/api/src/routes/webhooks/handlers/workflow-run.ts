@@ -42,6 +42,7 @@ import {
   handleNoPrEarlyReturn,
   handleWaitingForRunsEarlyReturn,
 } from "../utils/early-returns";
+import { fetchJobDetailsWithRateLimit } from "../utils/job-fetcher";
 import { postWaitingComment } from "../waiting-comment";
 
 // ============================================================================
@@ -466,23 +467,13 @@ export const handleWorkflowRunInProgress = async (
 
       // Only update if we found CI-relevant workflows (otherwise leave existing output)
       if (evaluation.ciRelevantRuns.length > 0) {
-        // Fetch job details for in-progress workflows (limit to 3 for rate limiting)
-        const jobsByRunId = new Map<
-          number,
-          import("../../../services/github/workflow-jobs").JobEvaluation
-        >();
-        const inProgressRuns = evaluation.pendingCiRuns.slice(0, 3);
-
-        await Promise.all(
-          inProgressRuns.map(async (run) => {
-            try {
-              const { evaluation: jobEval } =
-                await github.listJobsForWorkflowRun(token, owner, repo, run.id);
-              jobsByRunId.set(run.id, jobEval);
-            } catch {
-              // Silent fail for job fetch - will fall back to workflow display
-            }
-          })
+        const jobsByRunId = await fetchJobDetailsWithRateLimit(
+          github,
+          token,
+          owner,
+          repo,
+          evaluation,
+          `workflow_run:${existingCheckRunId}`
         );
 
         const { title, summary } = formatWaitingCheckRunOutput({
@@ -579,28 +570,13 @@ export const handleWorkflowRunInProgress = async (
               headSha
             );
 
-            // Fetch job details for in-progress workflows (limit to 3 for rate limiting)
-            const jobsByRunId = new Map<
-              number,
-              import("../../../services/github/workflow-jobs").JobEvaluation
-            >();
-            const inProgressRuns = evaluation.pendingCiRuns.slice(0, 3);
-
-            await Promise.all(
-              inProgressRuns.map(async (run) => {
-                try {
-                  const { evaluation: jobEval } =
-                    await github.listJobsForWorkflowRun(
-                      token,
-                      owner,
-                      repo,
-                      run.id
-                    );
-                  jobsByRunId.set(run.id, jobEval);
-                } catch {
-                  // Silent fail for job fetch - will fall back to workflow display
-                }
-              })
+            const jobsByRunId = await fetchJobDetailsWithRateLimit(
+              github,
+              token,
+              owner,
+              repo,
+              evaluation,
+              `workflow_run:${checkRun.id}`
             );
 
             // Update check run with workflow and job visibility

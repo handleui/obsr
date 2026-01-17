@@ -619,12 +619,32 @@ const createGitHubServiceInternal = (env: Env) => {
       status: job.status,
       conclusion: job.conclusion,
       startedAt: job.started_at ? new Date(job.started_at) : null,
+      completedAt: job.completed_at ? new Date(job.completed_at) : null,
+      htmlUrl: job.html_url ?? null,
+      workflowName: job.workflow_name ?? null,
+      headBranch: job.head_branch ?? null,
+      runnerName: job.runner_name ?? null,
+      // Map steps if present (useful for step-level error tracking)
+      steps: job.steps?.map((step) => ({
+        name: step.name,
+        status: step.status,
+        conclusion: step.conclusion,
+        number: step.number,
+        startedAt: step.started_at ? new Date(step.started_at) : null,
+        completedAt: step.completed_at ? new Date(step.completed_at) : null,
+      })),
     }));
 
-    const evaluation = evaluateJobs(jobs);
+    const now = Date.now();
+    const evaluation = evaluateJobs(jobs, now);
 
+    // Log with stuck detection similar to workflow-runs.ts
     console.log(
-      `[github] ${context}: Found ${jobs.length} jobs (${evaluation.pendingJobs.length} pending, ${evaluation.failedJobs.length} failed)`
+      `[github] ${context}: Found ${jobs.length} jobs (${evaluation.pendingJobs.length} pending, ${evaluation.failedJobs.length} failed, ${evaluation.successJobs.length} passed)${
+        evaluation.stuckJobs.length > 0
+          ? `, WARNING: ${evaluation.stuckJobs.length} may be stuck (>30m)`
+          : ""
+      }`
     );
 
     return { jobs, evaluation };

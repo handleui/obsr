@@ -7,6 +7,7 @@ import {
 } from "../../../services/idempotency";
 import { classifyError } from "../../../services/webhooks/error-classifier";
 import type { CheckSuitePayload, WebhookContext } from "../types";
+import { fetchJobDetailsWithRateLimit } from "../utils/job-fetcher";
 import { postWaitingComment } from "../waiting-comment";
 
 // Handle check_suite.requested - create a "queued" check run immediately
@@ -111,28 +112,13 @@ export const handleCheckSuiteRequested = async (
               headSha
             );
 
-            // Fetch job details for in-progress workflows (limit to 3 for rate limiting)
-            const jobsByRunId = new Map<
-              number,
-              import("../../../services/github/workflow-jobs").JobEvaluation
-            >();
-            const inProgressRuns = evaluation.pendingCiRuns.slice(0, 3);
-
-            await Promise.all(
-              inProgressRuns.map(async (run) => {
-                try {
-                  const { evaluation: jobEval } =
-                    await github.listJobsForWorkflowRun(
-                      token,
-                      owner,
-                      repo,
-                      run.id
-                    );
-                  jobsByRunId.set(run.id, jobEval);
-                } catch {
-                  // Silent fail for job fetch - will fall back to workflow display
-                }
-              })
+            const jobsByRunId = await fetchJobDetailsWithRateLimit(
+              github,
+              token,
+              owner,
+              repo,
+              evaluation,
+              `check_suite:${checkRun.id}`
             );
 
             const { title, summary } = formatWaitingCheckRunOutput({

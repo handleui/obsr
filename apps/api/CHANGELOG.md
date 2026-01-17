@@ -1,5 +1,20 @@
 # @detent/api
 
+## 0.15.0
+
+### Minor Changes
+
+- 6a70db2: Add auto-join for GitHub org members where Detent app is already installed.
+  Add organization delete endpoint with soft-delete support.
+  Wrap leave endpoint in transaction to prevent race conditions, add sole-member check.
+
+### Patch Changes
+
+- Updated dependencies [5fa4de0]
+- Updated dependencies [5fa4de0]
+  - @detent/healing@0.4.1
+  - @detent/parser@0.5.3
+
 ## 0.14.0
 
 ### Minor Changes

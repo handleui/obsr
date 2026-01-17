@@ -1,5 +1,14 @@
 # @detent/parser
 
+## 0.5.3
+
+### Patch Changes
+
+- 5fa4de0: Refactor to use shared types from @detent/types.
+  Re-exports foundational types for backwards compatibility.
+- Updated dependencies [5fa4de0]
+  - @detent/types@0.2.0
+
 ## 0.5.2
 
 ### Patch Changes

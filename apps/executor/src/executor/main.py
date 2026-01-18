@@ -14,16 +14,21 @@ import hmac
 from pathlib import Path
 
 import modal
+from fastapi import Request
 
 # Modal app and image configuration
 app = modal.App("detent-executor")
 
 # SECURITY NOTE: Commands like "bun run fix" and "npm run fix" execute scripts
 # defined in the repo's package.json. This is acceptable for trusted repos but
-# a malicious repo could define harmful scripts. Consider:
+# a malicious repo could define harmful scripts. Mitigations:
 # 1. Only enabling autofix for repos with verified ownership
 # 2. Running with network isolation in future versions
 # 3. Adding package.json scanning before execution
+#
+# TODO: Consider implementing package.json scanning to validate that "fix" and
+# "lint:fix" scripts only call known-safe tools (biome, eslint, prettier) before
+# executing them. This would provide defense-in-depth against malicious repos.
 
 # Allowlist of safe autofix commands
 ALLOWED_COMMANDS = {
@@ -330,12 +335,27 @@ def run_autofix_worker(
     return result
 
 
+def verify_auth_header(request: Request) -> bool:
+    """Verify the X-Detent-Auth header for defense-in-depth."""
+    expected_secret = os.environ.get("WEBHOOK_SECRET", "")
+    if not expected_secret:
+        # If no secret configured, allow requests (backward compatible)
+        return True
+
+    auth_header = request.headers.get("x-detent-auth", "")
+    if not auth_header:
+        return False
+
+    # Constant-time comparison to prevent timing attacks
+    return hmac.compare_digest(auth_header, expected_secret)
+
+
 @app.function(
     image=executor_image,
     secrets=[modal.Secret.from_name("detent-api")],
 )
 @modal.fastapi_endpoint(method="POST")
-def run_autofix(data: dict) -> dict:
+def run_autofix(data: dict, request: Request) -> dict:
     """
     Accept autofix job and spawn worker.
 
@@ -358,6 +378,13 @@ def run_autofix(data: dict) -> dict:
         "heal_id": "uuid"
     }
     """
+    # Verify auth header for defense-in-depth
+    if not verify_auth_header(request):
+        return {
+            "accepted": False,
+            "error": "Unauthorized: invalid or missing X-Detent-Auth header",
+        }
+
     heal_id = data.get("heal_id", "")
     repo_url = data.get("repo_url", "")
     commit_sha = data.get("commit_sha", "")

@@ -43,11 +43,19 @@ export const triggerModalAutofix = async (
   const { healId, repoUrl, commitSha, branch, command, githubToken } = options;
 
   try {
+    // Build headers with optional auth token for defense-in-depth
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    // Add auth token if configured (defense-in-depth - Modal validates server-side too)
+    if (env.MODAL_WEBHOOK_SECRET) {
+      headers["X-Detent-Auth"] = env.MODAL_WEBHOOK_SECRET;
+    }
+
     const response = await fetch(modalUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers,
       body: JSON.stringify({
         heal_id: healId,
         repo_url: repoUrl,

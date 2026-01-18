@@ -252,15 +252,19 @@ export const orchestrateHeals = async (
         );
 
         // Trigger Modal executor and release lock when done
-        triggerModalExecutor(
-          env,
-          db,
-          healId,
-          config.command,
-          ctx.repoFullName,
-          ctx.branch,
-          commitSha,
-          ctx.installationId
+        // Wrap in Promise.resolve() to ensure .finally() runs even if the function
+        // throws synchronously before returning a promise
+        Promise.resolve(
+          triggerModalExecutor(
+            env,
+            db,
+            healId,
+            config.command,
+            ctx.repoFullName,
+            ctx.branch,
+            commitSha,
+            ctx.installationId
+          )
         )
           .catch((err) => {
             console.error(`[autofix] Modal trigger failed for ${healId}:`, err);

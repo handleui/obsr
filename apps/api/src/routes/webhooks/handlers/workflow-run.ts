@@ -1003,19 +1003,20 @@ export const handleWorkflowRunCompleted = async (
             }
 
             // Guard: Ensure we have the required data
-            const projectId = storedRuns[0]?.projectId;
+            // Use first stored run's database ID (UUID), not GitHub run ID
+            const firstStoredRun = storedRuns[0];
             const firstRunToProcess = runsToProcess[0];
-            if (!(projectId && firstRunToProcess)) {
+            if (!(firstStoredRun?.projectId && firstRunToProcess)) {
               console.log(
-                "[workflow_run] Missing projectId or firstRunToProcess for heal orchestration"
+                "[workflow_run] Missing storedRun or firstRunToProcess for heal orchestration"
               );
               return;
             }
 
             const result = await orchestrateHeals({
               env: c.env,
-              projectId,
-              runId: firstRunToProcess.id.toString(),
+              projectId: firstStoredRun.projectId,
+              runId: firstStoredRun.id,
               commitSha: headSha,
               prNumber,
               branch: workflow_run.head_branch ?? "main",

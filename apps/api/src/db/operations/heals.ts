@@ -324,6 +324,9 @@ export const markStaleHealsAsFailed = async (
   healType: "autofix" | "heal"
 ): Promise<number> => {
   // SECURITY: Validate timeoutMinutes to prevent SQL injection via sql.raw()
+  // The validation below is CRITICAL - sql.raw() bypasses parameterization,
+  // so we must ensure timeoutMinutes is strictly an integer between 1-1440.
+  // Do NOT weaken this validation without updating the SQL construction.
   if (
     !Number.isInteger(timeoutMinutes) ||
     timeoutMinutes < 1 ||
@@ -334,6 +337,11 @@ export const markStaleHealsAsFailed = async (
     );
   }
 
+  // SECURITY NOTE: sql.raw() is used here because Drizzle doesn't support
+  // parameterized INTERVAL syntax. This is safe because:
+  // 1. timeoutMinutes is validated above as an integer in range [1, 1440]
+  // 2. String(timeoutMinutes) can only produce decimal digit characters
+  // 3. No user input reaches this function without validation
   const result = await db
     .update(heals)
     .set({

@@ -390,6 +390,60 @@ const createGitHubServiceInternal = (env: Env) => {
     return openPr?.number ?? prs[0]?.number ?? null;
   };
 
+  /**
+   * Get detailed information about a pull request.
+   * Returns the head branch name and current head SHA.
+   */
+  const getPullRequestInfo = async (
+    token: string,
+    owner: string,
+    repo: string,
+    prNumber: number
+  ): Promise<{ headBranch: string; headSha: string } | null> => {
+    const context = `getPullRequestInfo(${owner}/${repo}#${prNumber})`;
+
+    // Validate inputs to prevent URL manipulation
+    if (!(isValidGitHubName(owner) && isValidGitHubName(repo))) {
+      throw new Error(`${context}: Invalid owner or repo name`);
+    }
+
+    if (!Number.isInteger(prNumber) || prNumber <= 0) {
+      throw new Error(`${context}: Invalid PR number`);
+    }
+
+    const response = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/pulls/${prNumber}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "Detent-App",
+        },
+      }
+    );
+
+    if (response.status === 404) {
+      return null;
+    }
+
+    if (!response.ok) {
+      throw new Error(`${context}: Failed to get PR info: ${response.status}`);
+    }
+
+    const data = (await response.json()) as {
+      head: {
+        ref: string;
+        sha: string;
+      };
+    };
+
+    return {
+      headBranch: data.head.ref,
+      headSha: data.head.sha,
+    };
+  };
+
   const getInstallationInfo = async (
     installationId: number
   ): Promise<InstallationInfo | null> => {
@@ -1072,6 +1126,7 @@ const createGitHubServiceInternal = (env: Env) => {
     pushCommit,
     getPullRequestForRun,
     getPullRequestForCommit,
+    getPullRequestInfo,
     listWorkflowRunsForCommit,
     listJobsForWorkflowRun,
     createCheckRun,
@@ -1099,5 +1154,12 @@ export const createGitHubService = (env: Env): GitHubService => {
 
 export type GitHubService = ReturnType<typeof createGitHubServiceInternal>;
 
-// biome-ignore lint/performance/noBarrelFile: Re-exports needed for standalone file-content functions
+export type {
+  CommitPushOptions,
+  CommitPushResult,
+  FileChange,
+  PushHealOptions,
+} from "./commit-push";
+// biome-ignore lint/performance/noBarrelFile: Re-exports needed for standalone functions
+export { getBranchHead, pushCommit, pushHealCommit } from "./commit-push";
 export { fetchFileContent, fetchFileContents } from "./file-content";

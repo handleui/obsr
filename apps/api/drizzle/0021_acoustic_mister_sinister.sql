@@ -1,0 +1,1 @@
+ALTER TABLE "heals" ADD COLUMN "files_changed_with_content" jsonb;

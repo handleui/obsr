@@ -32,6 +32,16 @@ export const invitationStatusEnum = pgEnum("invitation_status", [
   "revoked",
 ]);
 
+export const healTypeEnum = pgEnum("heal_type", ["autofix", "heal"]);
+export const healStatusEnum = pgEnum("heal_status", [
+  "pending",
+  "running",
+  "completed",
+  "applied",
+  "rejected",
+  "failed",
+]);
+
 // Provider short codes for handles (used in slugs/URLs)
 export const providerShortCodes: Record<"github" | "gitlab", string> = {
   github: "gh",
@@ -45,11 +55,21 @@ export const providerShortCodes: Record<"github" | "gitlab", string> = {
 export interface OrganizationSettings {
   enableInlineAnnotations?: boolean; // default: true - show inline annotations in check runs
   enablePrComments?: boolean; // default: true - post PR comments on failures
+  autofixEnabled?: boolean; // default: true - run autofix scripts
+  autofixAutoCommit?: boolean; // default: false - auto-push to PR
+  healEnabled?: boolean; // default: false - enable AI heals
+  healAutoCommit?: boolean; // default: false - auto-push AI heals
+  healBudgetPerRunUsd?: number; // default: 100 (cents) - per-run limit
 }
 
 export const DEFAULT_ORG_SETTINGS: Required<OrganizationSettings> = {
   enableInlineAnnotations: true,
   enablePrComments: true,
+  autofixEnabled: true,
+  autofixAutoCommit: false,
+  healEnabled: false,
+  healAutoCommit: false,
+  healBudgetPerRunUsd: 100,
 };
 
 export const getOrgSettings = (
@@ -60,6 +80,15 @@ export const getOrgSettings = (
     DEFAULT_ORG_SETTINGS.enableInlineAnnotations,
   enablePrComments:
     settings?.enablePrComments ?? DEFAULT_ORG_SETTINGS.enablePrComments,
+  autofixEnabled:
+    settings?.autofixEnabled ?? DEFAULT_ORG_SETTINGS.autofixEnabled,
+  autofixAutoCommit:
+    settings?.autofixAutoCommit ?? DEFAULT_ORG_SETTINGS.autofixAutoCommit,
+  healEnabled: settings?.healEnabled ?? DEFAULT_ORG_SETTINGS.healEnabled,
+  healAutoCommit:
+    settings?.healAutoCommit ?? DEFAULT_ORG_SETTINGS.healAutoCommit,
+  healBudgetPerRunUsd:
+    settings?.healBudgetPerRunUsd ?? DEFAULT_ORG_SETTINGS.healBudgetPerRunUsd,
 });
 
 // Helper to create provider-prefixed slug
@@ -582,6 +611,76 @@ export const prComments = pgTable(
 );
 
 // ============================================================================
+// Heals (Autofix and AI heal operations)
+// ============================================================================
+
+export const heals = pgTable(
+  "heals",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    type: healTypeEnum("type").notNull(),
+    status: healStatusEnum("status").default("pending").notNull(),
+
+    // Context
+    runId: varchar("run_id", { length: 36 }).references(() => runs.id, {
+      onDelete: "set null",
+    }),
+    projectId: varchar("project_id", { length: 36 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    commitSha: varchar("commit_sha", { length: 64 }),
+    prNumber: integer("pr_number"),
+
+    // Error references (JSONB arrays of IDs)
+    errorIds: jsonb("error_ids").$type<string[]>(),
+    signatureIds: jsonb("signature_ids").$type<string[]>(),
+
+    // Patch data
+    patch: text("patch"),
+    commitMessage: varchar("commit_message", { length: 500 }),
+    filesChanged: jsonb("files_changed").$type<string[]>(),
+    // Full file content for pushing (path + content, null content = deleted)
+    filesChangedWithContent: jsonb("files_changed_with_content").$type<
+      Array<{ path: string; content: string | null }>
+    >(),
+
+    // Autofix specific
+    autofixSource: varchar("autofix_source", { length: 64 }), // e.g., "biome", "eslint"
+    autofixCommand: varchar("autofix_command", { length: 500 }),
+
+    // AI heal specific
+    healResult: jsonb("heal_result").$type<{
+      model?: string;
+      patchApplied?: boolean;
+      verificationPassed?: boolean;
+      toolCalls?: number;
+    }>(),
+    costUsd: integer("cost_usd"), // Store as cents to avoid floating point
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+
+    // Lifecycle
+    appliedAt: timestamp("applied_at"),
+    appliedCommitSha: varchar("applied_commit_sha", { length: 64 }),
+    rejectedAt: timestamp("rejected_at"),
+    rejectedBy: varchar("rejected_by", { length: 255 }),
+    rejectionReason: text("rejection_reason"),
+    failedReason: text("failed_reason"),
+
+    // Timestamps
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("heals_run_id_idx").on(table.runId),
+    index("heals_project_id_idx").on(table.projectId),
+    index("heals_pr_number_idx").on(table.prNumber),
+    index("heals_status_idx").on(table.status),
+    index("heals_project_status_idx").on(table.projectId, table.status),
+  ]
+);
+
+// ============================================================================
 // Relations (for Drizzle relational query API)
 // ============================================================================
 
@@ -620,11 +719,12 @@ export const invitationsRelations = relations(invitations, ({ one }) => ({
   }),
 }));
 
-export const projectsRelations = relations(projects, ({ one }) => ({
+export const projectsRelations = relations(projects, ({ one, many }) => ({
   organization: one(organizations, {
     fields: [projects.organizationId],
     references: [organizations.id],
   }),
+  heals: many(heals),
 }));
 
 export const runsRelations = relations(runs, ({ one, many }) => ({
@@ -633,6 +733,7 @@ export const runsRelations = relations(runs, ({ one, many }) => ({
     references: [projects.id],
   }),
   errors: many(runErrors),
+  heals: many(heals),
 }));
 
 export const runErrorsRelations = relations(runErrors, ({ one }) => ({
@@ -675,6 +776,17 @@ export const usageEventsRelations = relations(usageEvents, ({ one }) => ({
   }),
 }));
 
+export const healsRelations = relations(heals, ({ one }) => ({
+  run: one(runs, {
+    fields: [heals.runId],
+    references: [runs.id],
+  }),
+  project: one(projects, {
+    fields: [heals.projectId],
+    references: [projects.id],
+  }),
+}));
+
 // ============================================================================
 // Type Exports
 // ============================================================================
@@ -711,3 +823,6 @@ export type NewPrComment = typeof prComments.$inferInsert;
 
 export type UsageEvent = typeof usageEvents.$inferSelect;
 export type NewUsageEvent = typeof usageEvents.$inferInsert;
+
+export type Heal = typeof heals.$inferSelect;
+export type NewHeal = typeof heals.$inferInsert;

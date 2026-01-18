@@ -29,3 +29,6 @@ RESEND_EMAIL_FROM="Detent <noreply@detent.dev>"
 
 # Navigator (web app) base URL for invitation links
 NAVIGATOR_BASE_URL=http://localhost:3000
+
+# Modal executor webhook secret (HMAC signature verification)
+MODAL_WEBHOOK_SECRET=your_modal_webhook_secret

@@ -201,11 +201,19 @@ const worker: ExportedHandler<Env> = {
   fetch: (request, env, ctx) => app.fetch(request, env, ctx),
   async scheduled(_event, env, ctx) {
     const { syncAllOrganizations } = await import("./jobs/sync-organizations");
+    const { cleanupStaleHeals } = await import("./jobs/cleanup-stale-heals");
+
     ctx.waitUntil(
-      syncAllOrganizations(env).catch((err) => {
-        console.error("[scheduled] Sync failed:", err);
-        Sentry.captureException(err);
-      })
+      Promise.all([
+        syncAllOrganizations(env).catch((err) => {
+          console.error("[scheduled] Sync failed:", err);
+          Sentry.captureException(err);
+        }),
+        cleanupStaleHeals(env).catch((err) => {
+          console.error("[scheduled] Cleanup stale heals failed:", err);
+          Sentry.captureException(err);
+        }),
+      ])
     );
   },
 };

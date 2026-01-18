@@ -141,6 +141,20 @@
       "when": 1768759958378,
       "tag": "0019_curved_santa_claus",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1768763148225,
+      "tag": "0020_crazy_leopardon",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1768766919235,
+      "tag": "0021_acoustic_mister_sinister",
+      "breakpoints": true
     }
   ]
 }

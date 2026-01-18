@@ -597,3 +597,187 @@ export const releasePrCommentLock = async (
     );
   }
 };
+
+// ============================================================================
+// Heal Creation Lock
+// ============================================================================
+// Prevents duplicate heal creation for the same PR+source combination.
+// This is necessary because webhooks can fire multiple times rapidly, and
+// the database check for existing heals has a race window.
+
+const HEAL_CREATION_LOCK_PREFIX = "detent:heal:create";
+
+// Same TTL as commit locks (5 minutes)
+const HEAL_CREATION_LOCK_TTL_SECONDS = 5 * 60;
+
+// Stale threshold for heal creation locks (2 minutes)
+const HEAL_CREATION_LOCK_STALE_MS = 2 * 60 * 1000;
+
+// UUID format for project IDs
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Autofix source should be alphanumeric with optional hyphens/underscores
+const AUTOFIX_SOURCE_REGEX = /^[a-zA-Z0-9_-]{1,50}$/;
+
+interface HealCreationLockState {
+  lockId: string;
+  timestamp: number;
+}
+
+interface HealCreationLockResult {
+  acquired: boolean;
+  lockId?: string;
+  kvError?: boolean;
+  validationError?: boolean;
+}
+
+/**
+ * Validates inputs for heal creation lock operations.
+ * Returns normalized project ID if valid, null otherwise.
+ */
+const validateHealCreationInputs = (
+  projectId: string,
+  prNumber: number,
+  autofixSource: string
+): { projectId: string; prNumber: number; autofixSource: string } | null => {
+  if (!UUID_REGEX.test(projectId)) {
+    console.warn(
+      `[heal-creation-lock] Invalid project ID format rejected: ${projectId.substring(0, 20)}...`
+    );
+    return null;
+  }
+
+  // PR numbers must be positive integers within reasonable bounds
+  if (
+    !Number.isInteger(prNumber) ||
+    prNumber <= 0 ||
+    prNumber > 2_147_483_647
+  ) {
+    console.warn(
+      `[heal-creation-lock] Invalid PR number rejected: ${prNumber}`
+    );
+    return null;
+  }
+
+  if (!AUTOFIX_SOURCE_REGEX.test(autofixSource)) {
+    console.warn(
+      `[heal-creation-lock] Invalid autofix source rejected: ${autofixSource.substring(0, 20)}...`
+    );
+    return null;
+  }
+
+  return {
+    projectId: projectId.toLowerCase(),
+    prNumber,
+    autofixSource: autofixSource.toLowerCase(),
+  };
+};
+
+const buildHealCreationLockKey = (
+  projectId: string,
+  prNumber: number,
+  autofixSource: string
+): string =>
+  `${HEAL_CREATION_LOCK_PREFIX}:${projectId}:${prNumber}:${autofixSource}`;
+
+/**
+ * Attempts to acquire a lock for creating a heal for a specific PR+source.
+ * This prevents duplicate heal creation when multiple webhooks fire rapidly.
+ *
+ * Uses write-then-verify pattern to mitigate KV eventual consistency issues.
+ */
+export const acquireHealCreationLock = async (
+  kv: KVNamespace,
+  projectId: string,
+  prNumber: number,
+  autofixSource: string
+): Promise<HealCreationLockResult> => {
+  const validated = validateHealCreationInputs(
+    projectId,
+    prNumber,
+    autofixSource
+  );
+  if (!validated) {
+    // Invalid input - fail open but flag validation error for monitoring
+    return { acquired: true, validationError: true };
+  }
+
+  const key = buildHealCreationLockKey(
+    validated.projectId,
+    validated.prNumber,
+    validated.autofixSource
+  );
+
+  try {
+    const result = await tryAcquireLock<HealCreationLockState>(
+      kv,
+      key,
+      HEAL_CREATION_LOCK_TTL_SECONDS,
+      HEAL_CREATION_LOCK_STALE_MS,
+      (lockId) => ({ lockId, timestamp: Date.now() }),
+      "heal-creation-lock"
+    );
+
+    if (result.acquired) {
+      console.log(
+        `[heal-creation-lock] Acquired lock for project=${projectId} PR#${prNumber} source=${autofixSource}`
+      );
+    } else {
+      console.log(
+        `[heal-creation-lock] Lock held for project=${projectId} PR#${prNumber} source=${autofixSource}, skipping`
+      );
+    }
+
+    return {
+      acquired: result.acquired,
+      lockId: result.lockId,
+    };
+  } catch (error) {
+    // Fail-open: DB unique constraint is safety net
+    console.error(
+      `[heal-creation-lock] acquireHealCreationLock failed for project=${projectId} PR#${prNumber} source=${autofixSource}, proceeding with fail-open:`,
+      error
+    );
+    return { acquired: true, kvError: true };
+  }
+};
+
+/**
+ * Releases the heal creation lock after heal creation completes or fails.
+ */
+export const releaseHealCreationLock = async (
+  kv: KVNamespace,
+  projectId: string,
+  prNumber: number,
+  autofixSource: string
+): Promise<void> => {
+  const validated = validateHealCreationInputs(
+    projectId,
+    prNumber,
+    autofixSource
+  );
+  if (!validated) {
+    // Skip release for invalid inputs - TTL will clean up anyway
+    return;
+  }
+
+  const key = buildHealCreationLockKey(
+    validated.projectId,
+    validated.prNumber,
+    validated.autofixSource
+  );
+
+  try {
+    await kv.delete(key);
+    console.log(
+      `[heal-creation-lock] Released lock for project=${projectId} PR#${prNumber} source=${autofixSource}`
+    );
+  } catch (error) {
+    // Non-critical: TTL will clean up
+    console.error(
+      `[heal-creation-lock] releaseHealCreationLock failed for project=${projectId} PR#${prNumber} source=${autofixSource}:`,
+      error
+    );
+  }
+};

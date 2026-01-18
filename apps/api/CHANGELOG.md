@@ -1,5 +1,14 @@
 # @detent/api
 
+## 0.21.0
+
+### Minor Changes
+
+- bfd92f5: - Optimize workflow run processing by storing passing runs without fetching logs
+  - BREAKING: Failed workflow runs now report `failure` conclusion instead of `neutral`
+  - Add "skipped" conclusion when no CI-relevant workflows are found
+  - Add mintlify to workflow blacklist
+
 ## 0.20.0
 
 ### Minor Changes

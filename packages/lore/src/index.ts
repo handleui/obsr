@@ -4,7 +4,7 @@ export {
   HINT_RULES,
   matchHints,
 } from "./hints/index.js";
-export { generateSignature } from "./signatures/index.js";
+export * from "./signatures/index.js";
 export type {
   ErrorCategory,
   ErrorSource,

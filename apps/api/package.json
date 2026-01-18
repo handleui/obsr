@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@detent/healing": "*",
+    "@detent/lore": "*",
     "@detent/parser": "*",
     "@detent/types": "*",
     "@e2b/code-interpreter": "^2.3.3",

@@ -13,11 +13,14 @@ import {
   reportUnknownPatterns,
   setUnknownPatternReporter,
 } from "../extractor.js";
-import { createGenericParser } from "../parsers/generic.js";
-import { createGolangParser } from "../parsers/golang.js";
-import { createPythonParser } from "../parsers/python.js";
-import { createRustParser } from "../parsers/rust.js";
-import { createTypeScriptParser } from "../parsers/typescript.js";
+import {
+  createBiomeParser,
+  createGenericParser,
+  createGolangParser,
+  createPythonParser,
+  createRustParser,
+  createTypeScriptParser,
+} from "../parsers/index.js";
 import { createRegistry, type ParserRegistry } from "../registry.js";
 import type { ExtractedError } from "../types.js";
 
@@ -756,5 +759,100 @@ describe("Unknown pattern reporting", () => {
 
     setUnknownPatternReporter(undefined);
     expect(getUnknownPatternReporter()).toBeUndefined();
+  });
+});
+
+describe("Biome fixable field integration", () => {
+  // Integration tests to ensure `fixable` field flows through the extraction pipeline
+  let registry: ParserRegistry;
+  let extractor: Extractor;
+
+  beforeEach(() => {
+    registry = createRegistry();
+    registry.register(createBiomeParser());
+    registry.register(createGenericParser());
+    registry.initNoiseChecker();
+    extractor = createExtractor(registry);
+  });
+
+  it("extracts fixable=true from Biome console output with FIXABLE marker", () => {
+    const biomeOutput = `test.ts:6:7 lint/correctness/noUnusedVariables  FIXABLE  ━━━
+  × This variable is unused
+
+src/main.ts:10:1 lint/style/useConst  FIXABLE  ━━━
+  × Use const instead of let`;
+
+    const errors = extractor.extract(biomeOutput, passthroughParser);
+
+    expect(errors).toHaveLength(2);
+
+    const unusedVarError = errors.find(
+      (e) => e.ruleId === "lint/correctness/noUnusedVariables"
+    );
+    expect(unusedVarError).toBeDefined();
+    expect(unusedVarError?.fixable).toBe(true);
+    expect(unusedVarError?.source).toBe("biome");
+
+    const useConstError = errors.find(
+      (e) => e.ruleId === "lint/style/useConst"
+    );
+    expect(useConstError).toBeDefined();
+    expect(useConstError?.fixable).toBe(true);
+  });
+
+  it("extracts fixable=false from Biome console output without FIXABLE marker", () => {
+    const biomeOutput = `test.ts:10:1 lint/suspicious/noDebugger  ━━━
+  × Unexpected debugger statement`;
+
+    const errors = extractor.extract(biomeOutput, passthroughParser);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.fixable).toBe(false);
+    expect(errors[0]?.ruleId).toBe("lint/suspicious/noDebugger");
+  });
+
+  it("extracts mixed fixable and non-fixable errors from Biome output", () => {
+    const biomeOutput = `test.ts:6:7 lint/correctness/noUnusedVariables  FIXABLE  ━━━
+  × This variable is unused
+
+test.ts:10:1 lint/suspicious/noDebugger  ━━━
+  × Unexpected debugger statement
+
+src/index.ts:1:1 format  FIXABLE  ━━━
+  × Formatter would have printed different content`;
+
+    const errors = extractor.extract(biomeOutput, passthroughParser);
+
+    expect(errors).toHaveLength(3);
+
+    const fixableErrors = errors.filter((e) => e.fixable === true);
+    const nonFixableErrors = errors.filter((e) => e.fixable === false);
+
+    expect(fixableErrors).toHaveLength(2);
+    expect(nonFixableErrors).toHaveLength(1);
+  });
+
+  it("does not set fixable for Biome GitHub Actions format (information not available)", () => {
+    const ghActionsOutput = `::error title=lint/suspicious/noDoubleEquals,file=main.ts,line=4,col=3::Use === instead of ==
+::error title=lint/style/useConst,file=app.ts,line=10,col=1::Use const instead of let`;
+
+    const errors = extractor.extract(ghActionsOutput, passthroughParser);
+
+    expect(errors).toHaveLength(2);
+    // GitHub Actions format doesn't include fixable info
+    expect(errors[0]?.fixable).toBeUndefined();
+    expect(errors[1]?.fixable).toBeUndefined();
+  });
+
+  it("handles Biome organizeImports with FIXABLE marker", () => {
+    const biomeOutput = `src/app.ts:1:1 organizeImports  FIXABLE  ━━━
+  × Import statements could be sorted`;
+
+    const errors = extractor.extract(biomeOutput, passthroughParser);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.fixable).toBe(true);
+    expect(errors[0]?.ruleId).toBe("organizeImports");
+    expect(errors[0]?.category).toBe("lint");
   });
 });

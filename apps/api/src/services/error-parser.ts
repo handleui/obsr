@@ -54,6 +54,8 @@ export interface ParsedError {
   /** Infrastructure error context */
   exitCode?: number;
   isInfrastructure?: boolean;
+  /** True if error can be auto-fixed by the tool */
+  fixable?: boolean;
 }
 
 export interface ParseMetadata {
@@ -127,6 +129,7 @@ const mapToParsedError = (error: ExtractedError): ParsedError => ({
   stackTraceTruncated: error.stackTraceTruncated,
   exitCode: error.exitCode,
   isInfrastructure: error.isInfrastructure,
+  fixable: error.fixable,
 });
 
 // Generate a technical fallback error when parsing finds nothing

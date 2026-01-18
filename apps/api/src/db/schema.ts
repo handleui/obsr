@@ -434,6 +434,10 @@ export const runErrors = pgTable(
     exitCode: integer("exit_code"),
     isInfrastructure: boolean("is_infrastructure"),
     possiblyTestOutput: boolean("possibly_test_output"),
+    fixable: boolean("fixable"),
+    signatureId: varchar("signature_id", { length: 36 }).references(
+      () => errorSignatures.id
+    ),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
@@ -441,6 +445,87 @@ export const runErrors = pgTable(
     index("run_errors_category_idx").on(table.category),
     index("run_errors_source_idx").on(table.source),
     index("run_errors_rule_id_idx").on(table.ruleId),
+    index("run_errors_signature_idx").on(table.signatureId),
+  ]
+);
+
+// ============================================================================
+// Error Signatures (Deduplicated error fingerprints)
+// ============================================================================
+
+export const errorSignatures = pgTable(
+  "error_signatures",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    fingerprint: varchar("fingerprint", { length: 32 }).notNull().unique(),
+
+    // Classification
+    source: varchar("source", { length: 64 }),
+    ruleId: varchar("rule_id", { length: 255 }),
+    category: varchar("category", { length: 32 }),
+
+    // Pattern (for debugging/display)
+    normalizedPattern: text("normalized_pattern"),
+    exampleMessage: text("example_message"),
+
+    // Lore-readiness (future AI validation)
+    loreCandidate: boolean("lore_candidate").default(true),
+    loreSyncedAt: timestamp("lore_synced_at"),
+
+    // Timestamps
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    // NOTE: fingerprint column has unique() constraint which creates an index.
+    // No additional index needed for fingerprint lookups.
+    index("error_signatures_source_rule_idx").on(table.source, table.ruleId),
+  ]
+);
+
+// ============================================================================
+// Error Occurrences (Per-project error tracking)
+// ============================================================================
+
+export const errorOccurrences = pgTable(
+  "error_occurrences",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    signatureId: varchar("signature_id", { length: 36 })
+      .notNull()
+      .references(() => errorSignatures.id, { onDelete: "cascade" }),
+    projectId: varchar("project_id", { length: 36 })
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+
+    // Counters
+    occurrenceCount: integer("occurrence_count").default(1).notNull(),
+    runCount: integer("run_count").default(1).notNull(),
+
+    // Lifecycle
+    firstSeenCommit: varchar("first_seen_commit", { length: 40 }),
+    firstSeenAt: timestamp("first_seen_at").notNull(),
+    lastSeenCommit: varchar("last_seen_commit", { length: 40 }),
+    lastSeenAt: timestamp("last_seen_at").notNull(),
+
+    // Fix tracking (for lore)
+    fixedAt: timestamp("fixed_at"),
+    fixedByCommit: varchar("fixed_by_commit", { length: 40 }),
+    fixVerified: boolean("fix_verified").default(false),
+
+    // Context
+    commonFiles: jsonb("common_files").$type<string[]>(),
+  },
+  (table) => [
+    index("error_occurrences_project_idx").on(table.projectId),
+    // NOTE: signatureId index is covered by the composite unique index below.
+    // PostgreSQL uses leading columns of composite indexes for single-column queries.
+    index("error_occurrences_last_seen_idx").on(table.lastSeenAt),
+    // Primary lookup and upsert conflict target
+    uniqueIndex("error_occurrences_sig_proj_idx").on(
+      table.signatureId,
+      table.projectId
+    ),
   ]
 );
 
@@ -555,7 +640,33 @@ export const runErrorsRelations = relations(runErrors, ({ one }) => ({
     fields: [runErrors.runId],
     references: [runs.id],
   }),
+  signature: one(errorSignatures, {
+    fields: [runErrors.signatureId],
+    references: [errorSignatures.id],
+  }),
 }));
+
+export const errorSignaturesRelations = relations(
+  errorSignatures,
+  ({ many }) => ({
+    occurrences: many(errorOccurrences),
+    errors: many(runErrors),
+  })
+);
+
+export const errorOccurrencesRelations = relations(
+  errorOccurrences,
+  ({ one }) => ({
+    signature: one(errorSignatures, {
+      fields: [errorOccurrences.signatureId],
+      references: [errorSignatures.id],
+    }),
+    project: one(projects, {
+      fields: [errorOccurrences.projectId],
+      references: [projects.id],
+    }),
+  })
+);
 
 export const usageEventsRelations = relations(usageEvents, ({ one }) => ({
   organization: one(organizations, {
@@ -588,6 +699,12 @@ export type NewRun = typeof runs.$inferInsert;
 
 export type RunError = typeof runErrors.$inferSelect;
 export type NewRunError = typeof runErrors.$inferInsert;
+
+export type ErrorSignature = typeof errorSignatures.$inferSelect;
+export type NewErrorSignature = typeof errorSignatures.$inferInsert;
+
+export type ErrorOccurrence = typeof errorOccurrences.$inferSelect;
+export type NewErrorOccurrence = typeof errorOccurrences.$inferInsert;
 
 export type PrComment = typeof prComments.$inferSelect;
 export type NewPrComment = typeof prComments.$inferInsert;

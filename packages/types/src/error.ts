@@ -57,6 +57,8 @@ export interface ExtractedError {
   readonly stackTraceTruncated?: boolean;
   /** True if message was truncated due to size limits */
   readonly messageTruncated?: boolean;
+  /** True if error can be auto-fixed by the tool (e.g., biome check --write) */
+  readonly fixable?: boolean;
 
   // Infrastructure error fields
   /** Actionable hint for fixing the error */
@@ -93,6 +95,7 @@ export interface MutableExtractedError {
   columnKnown?: boolean;
   stackTraceTruncated?: boolean;
   messageTruncated?: boolean;
+  fixable?: boolean;
   hint?: string;
   exitCode?: number;
   isInfrastructure?: boolean;

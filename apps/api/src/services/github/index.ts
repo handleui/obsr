@@ -1086,3 +1086,6 @@ export const createGitHubService = (env: Env): GitHubService => {
 };
 
 export type GitHubService = ReturnType<typeof createGitHubServiceInternal>;
+
+// biome-ignore lint/performance/noBarrelFile: Re-exports needed for standalone file-content functions
+export { fetchFileContent, fetchFileContents } from "./file-content";

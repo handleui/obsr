@@ -91,9 +91,19 @@ const processAndStoreAllRuns = async (
   const allErrors: ParsedError[] = [];
   const allUnsupportedTools = new Set<string>();
   const failedRuns = allRuns.filter((r) => r.conclusion === "failure");
+  const passingRuns = allRuns.filter((r) => r.conclusion !== "failure");
 
   // Map to store errors by run ID
   const errorsByRunId = new Map<number, ParsedError[]>();
+
+  // Store passing runs with empty errors (no log fetching needed)
+  for (const run of passingRuns) {
+    errorsByRunId.set(run.id, []);
+  }
+
+  console.log(
+    `[workflow_run] Processing ${allRuns.length} runs: ${failedRuns.length} failed (fetching logs), ${passingRuns.length} passed (storing metadata only)`
+  );
 
   // Track aggregated parser context for Sentry error reporting
   let aggregatedLogBytes = 0;
@@ -248,6 +258,8 @@ const finalizeAndPostResults = async (
     // Feature settings
     enableInlineAnnotations: boolean;
     enablePrComments: boolean;
+    // Workflow evaluation for determining skip status
+    ciRelevantRunCount: number;
   }
 ): Promise<{
   runResults: Array<{
@@ -272,6 +284,7 @@ const finalizeAndPostResults = async (
     detectedUnsupportedTools,
     enableInlineAnnotations,
     enablePrComments,
+    ciRelevantRunCount,
   } = context;
 
   // Prepare run results for formatting
@@ -287,6 +300,31 @@ const finalizeAndPostResults = async (
   ).length;
   const hasFailed = failedCount > 0;
   const totalErrors = allErrors.length;
+
+  // Determine conclusion: skipped if no CI-relevant workflows, failure if any failed, success otherwise
+  const noValidWorkflows = ciRelevantRunCount === 0;
+  const getConclusion = () => {
+    if (noValidWorkflows) {
+      return "skipped";
+    }
+    if (hasFailed) {
+      return "failure";
+    }
+    return "success";
+  };
+  const conclusion = getConclusion();
+
+  // Determine title based on conclusion
+  const getTitle = () => {
+    if (noValidWorkflows) {
+      return "No CI workflows to analyze";
+    }
+    if (hasFailed) {
+      return `${totalErrors} error${totalErrors !== 1 ? "s" : ""} found`;
+    }
+    return "All checks passed";
+  };
+  const title = getTitle();
 
   // Format check run output with summary, error details, and inline annotations
   const checkRunOutput = formatCheckRunOutput({
@@ -305,11 +343,9 @@ const finalizeAndPostResults = async (
     repo,
     checkRunId,
     status: "completed",
-    conclusion: hasFailed ? "neutral" : "success",
+    conclusion,
     output: {
-      title: hasFailed
-        ? `${totalErrors} error${totalErrors !== 1 ? "s" : ""} found`
-        : "All checks passed",
+      title,
       summary: checkRunOutput.summary,
       text: checkRunOutput.text,
       // Only include annotations if enabled in org settings
@@ -935,6 +971,7 @@ export const handleWorkflowRunCompleted = async (
         detectedUnsupportedTools,
         enableInlineAnnotations: orgSettings.enableInlineAnnotations,
         enablePrComments: orgSettings.enablePrComments,
+        ciRelevantRunCount: evaluation.ciRelevantRuns.length,
       }
     );
 

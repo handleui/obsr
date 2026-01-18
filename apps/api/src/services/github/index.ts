@@ -873,7 +873,13 @@ const createGitHubServiceInternal = (env: Env) => {
           repo: string;
           checkRunId: number;
           status: "completed";
-          conclusion: "success" | "failure" | "neutral" | "cancelled";
+          conclusion:
+            | "success"
+            | "failure"
+            | "neutral"
+            | "cancelled"
+            | "skipped"
+            | "timed_out";
           output?: CheckRunOutput;
         }
       | {
@@ -902,7 +908,13 @@ const createGitHubServiceInternal = (env: Env) => {
     if (status === "completed") {
       body.conclusion = (
         options as {
-          conclusion: "success" | "failure" | "neutral" | "cancelled";
+          conclusion:
+            | "success"
+            | "failure"
+            | "neutral"
+            | "cancelled"
+            | "skipped"
+            | "timed_out";
         }
       ).conclusion;
       body.completed_at = new Date().toISOString();

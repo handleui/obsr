@@ -878,7 +878,8 @@ const createGitHubServiceInternal = (env: Env) => {
             | "failure"
             | "neutral"
             | "cancelled"
-            | "skipped";
+            | "skipped"
+            | "timed_out";
           output?: CheckRunOutput;
         }
       | {
@@ -912,7 +913,8 @@ const createGitHubServiceInternal = (env: Env) => {
             | "failure"
             | "neutral"
             | "cancelled"
-            | "skipped";
+            | "skipped"
+            | "timed_out";
         }
       ).conclusion;
       body.completed_at = new Date().toISOString();

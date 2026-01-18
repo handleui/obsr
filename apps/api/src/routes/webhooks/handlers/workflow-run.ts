@@ -91,9 +91,19 @@ const processAndStoreAllRuns = async (
   const allErrors: ParsedError[] = [];
   const allUnsupportedTools = new Set<string>();
   const failedRuns = allRuns.filter((r) => r.conclusion === "failure");
+  const passingRuns = allRuns.filter((r) => r.conclusion !== "failure");
 
   // Map to store errors by run ID
   const errorsByRunId = new Map<number, ParsedError[]>();
+
+  // Store passing runs with empty errors (no log fetching needed)
+  for (const run of passingRuns) {
+    errorsByRunId.set(run.id, []);
+  }
+
+  console.log(
+    `[workflow_run] Processing ${allRuns.length} runs: ${failedRuns.length} failed (fetching logs), ${passingRuns.length} passed (storing metadata only)`
+  );
 
   // Track aggregated parser context for Sentry error reporting
   let aggregatedLogBytes = 0;

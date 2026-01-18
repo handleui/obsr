@@ -1,5 +1,20 @@
 # @detent/lore
 
+## 0.2.0
+
+### Minor Changes
+
+- 74eab1c: Add hierarchical error fingerprinting with `generateFingerprints()`.
+  Produces lore (cross-repo), repo (per-project), and instance (exact location) fingerprints.
+  Includes message normalization and sensitive data sanitization for safe storage.
+
+### Patch Changes
+
+- Updated dependencies [74eab1c]
+- Updated dependencies [74eab1c]
+  - @detent/parser@0.7.0
+  - @detent/types@0.4.0
+
 ## 0.1.2
 
 ### Patch Changes

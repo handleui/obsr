@@ -1,5 +1,16 @@
 # @detent/healing
 
+## 0.4.3
+
+### Patch Changes
+
+- Updated dependencies [74eab1c]
+- Updated dependencies [74eab1c]
+- Updated dependencies [74eab1c]
+  - @detent/parser@0.7.0
+  - @detent/types@0.4.0
+  - @detent/lore@0.2.0
+
 ## 0.4.2
 
 ### Patch Changes

@@ -1,5 +1,17 @@
 # @detent/parser
 
+## 0.7.0
+
+### Minor Changes
+
+- 74eab1c: Add `fixable` field to Biome parser output.
+  Extracts FIXABLE marker from Biome console format headers to indicate auto-fixable errors.
+
+### Patch Changes
+
+- Updated dependencies [74eab1c]
+  - @detent/types@0.4.0
+
 ## 0.6.0
 
 ### Minor Changes

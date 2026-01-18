@@ -1,5 +1,12 @@
 # @detent/types
 
+## 0.4.0
+
+### Minor Changes
+
+- 74eab1c: Add error fingerprinting types for cross-repo error tracking.
+  New `ErrorFingerprints`, `ErrorSignature`, and `ErrorOccurrence` types support hierarchical error identification.
+
 ## 0.3.0
 
 ### Minor Changes

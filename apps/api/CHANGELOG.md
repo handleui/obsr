@@ -1,5 +1,23 @@
 # @detent/api
 
+## 0.20.0
+
+### Minor Changes
+
+- 74eab1c: Add error signature and occurrence tracking for cross-repo error analytics.
+  New database tables `error_signatures` and `error_occurrences` store deduplicated error patterns.
+  Errors are now fingerprinted on ingest and linked to signatures for historical tracking.
+
+### Patch Changes
+
+- Updated dependencies [74eab1c]
+- Updated dependencies [74eab1c]
+- Updated dependencies [74eab1c]
+  - @detent/parser@0.7.0
+  - @detent/types@0.4.0
+  - @detent/lore@0.2.0
+  - @detent/healing@0.4.3
+
 ## 0.19.0
 
 ### Minor Changes

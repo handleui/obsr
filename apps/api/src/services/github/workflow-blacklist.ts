@@ -27,6 +27,7 @@ const BLACKLISTED_WORKFLOW_PATTERNS = [
   "sonarqube",
   "codecov",
   "coveralls",
+  "mintlify",
 ] as const;
 
 const isBlacklistedWorkflow = (name: string): boolean => {

@@ -16,7 +16,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@detent/parser": "workspace:*"
+    "@detent/parser": "workspace:*",
+    "@detent/types": "workspace:*"
   },
   "devDependencies": {
     "@detent/typescript-config": "*",

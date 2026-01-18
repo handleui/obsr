@@ -111,6 +111,18 @@ export interface GitHubOrgMember {
   site_admin: boolean;
 }
 
+// Response from GET /repos/{owner}/{repo}/contents/{path}
+// See: https://docs.github.com/en/rest/repos/contents#get-repository-content
+export interface GitHubContentsResponse {
+  type: "file";
+  encoding: string;
+  size: number;
+  name: string;
+  path: string;
+  content: string;
+  sha: string;
+}
+
 // Response from GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs
 // See: https://docs.github.com/en/rest/actions/workflow-jobs
 export interface WorkflowJobsResponse {

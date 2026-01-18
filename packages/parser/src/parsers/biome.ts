@@ -59,13 +59,22 @@ const BIOME_RULE_PREFIXES = [
 
 /**
  * Console format header pattern.
- * Matches: filepath:line:col rule-id CATEGORY ━━━
+ * Matches: filepath:line:col rule-id [TAGS...] ━━━
  * Example: test-error.ts:6:7 lint/correctness/noUnusedVariables  FIXABLE  ━━━
  *
- * Groups: [1]=file, [2]=line, [3]=col, [4]=rule-id
+ * Biome diagnostic tags (in display order from Biome source):
+ * - INTERNAL: diagnostic from internal error
+ * - FIXABLE: has a fix suggestion
+ * - DEPRECATED: deprecated/obsolete code
+ * - VERBOSE: verbose diagnostic (shown with --verbose)
+ *
+ * Tags appear with space padding and multiple tags may appear in sequence.
+ * Example with multiple tags: "lint/foo  DEPRECATED  FIXABLE  ━━━"
+ *
+ * Groups: [1]=file, [2]=line, [3]=col, [4]=rule-id, [5]=all tags string (may be undefined)
  */
 const CONSOLE_HEADER_PATTERN =
-  /^([^\s:]+):(\d+):(\d+)\s+(lint\/\S+|format|organizeImports)\s+/;
+  /^([^\s:]+):(\d+):(\d+)\s+(lint\/\S+|format|organizeImports)\s+((?:(?:INTERNAL|FIXABLE|DEPRECATED|VERBOSE)\s+)+)?/;
 
 /**
  * Console format error message pattern.
@@ -171,6 +180,37 @@ const truncateMessage = (msg: string): string =>
     ? msg
     : `${msg.slice(0, MAX_MESSAGE_LENGTH - 3)}...`;
 
+/**
+ * Parse diagnostic tags from the captured tags string.
+ * Tags appear as: "FIXABLE  " or "DEPRECATED  FIXABLE  "
+ *
+ * @param tagsStr - The raw tags string from regex capture group (may be undefined)
+ * @returns Object with boolean flags for each recognized tag
+ */
+const parseTags = (
+  tagsStr: string | undefined
+): { fixable: boolean; deprecated: boolean } => {
+  if (!tagsStr) {
+    return { fixable: false, deprecated: false };
+  }
+  return {
+    fixable: tagsStr.includes("FIXABLE"),
+    deprecated: tagsStr.includes("DEPRECATED"),
+  };
+};
+
+/** Matches error pointer lines (e.g., "      │       ^^^^^^") */
+const POINTER_LINE_PATTERN = /^\s*│\s*[\^]+/;
+
+/** Check if a line is a context line (code snippets, box drawing, etc.) */
+const isContextLine = (stripped: string): boolean =>
+  LINE_NUMBER_PATTERN.test(stripped) ||
+  DIFF_LINE_PATTERN.test(stripped) ||
+  INFO_LINE_PATTERN.test(stripped) ||
+  BOX_DRAWING_PATTERN.test(stripped) ||
+  CARET_PATTERN.test(stripped) ||
+  POINTER_LINE_PATTERN.test(stripped);
+
 // ============================================================================
 // Pending Error State
 // ============================================================================
@@ -181,6 +221,23 @@ interface PendingError {
   column: number;
   ruleId: string;
   raw: string;
+  /** True if FIXABLE tag was present in header */
+  fixable: boolean;
+}
+
+// ============================================================================
+// Context Accumulation State
+// ============================================================================
+
+/**
+ * State for accumulating context lines after an error is emitted.
+ * Context lines are code snippets that follow the error (e.g., "  5 │ const foo = 'bar';")
+ */
+interface ContextAccumulator {
+  /** The error to append context to */
+  error: MutableExtractedError;
+  /** Accumulated context lines */
+  lines: string[];
 }
 
 // ============================================================================
@@ -193,6 +250,7 @@ interface PendingError {
  * Console format is multi-line:
  * 1. Header line with file:line:col and rule
  * 2. Error message line with × prefix
+ * 3. Context lines with code snippets (captured and appended to error's raw field)
  *
  * GitHub Actions format is single-line:
  * ::error title=rule,file=path,line=N,col=N::message
@@ -203,6 +261,9 @@ class BiomeParser extends BaseParser implements NoisePatternProvider {
 
   /** Pending console format header waiting for message */
   private pending: PendingError | null = null;
+
+  /** Context accumulator for capturing code context lines after errors */
+  private contextAccumulator: ContextAccumulator | null = null;
 
   canParse(line: string, _ctx: ParseContext): number {
     if (line.length > MAX_LINE_LENGTH || line.length < 10) {
@@ -236,18 +297,31 @@ class BiomeParser extends BaseParser implements NoisePatternProvider {
 
     const stripped = stripAnsi(line);
 
+    // Try to capture context lines for previous error before processing new content
+    // This allows us to accumulate context without interfering with error detection
+    if (this.contextAccumulator && isContextLine(stripped)) {
+      this.contextAccumulator.lines.push(line);
+      return null; // Line captured as context, don't process further
+    }
+
     // Try GitHub Actions format first
     if (isWorkflowCommand(stripped)) {
+      // Flush any accumulated context before processing new error
+      this.flushContext();
       return this.parseWorkflowCommand(stripped, line, ctx);
     }
 
     // Try console format header
     const headerMatch = CONSOLE_HEADER_PATTERN.exec(stripped);
     if (headerMatch) {
+      // Flush any accumulated context before processing new header
+      this.flushContext();
+
       const file = headerMatch[1];
       const lineNum = safeParseInt(headerMatch[2]);
       const colNum = safeParseInt(headerMatch[3]);
       const ruleId = headerMatch[4];
+      const tags = parseTags(headerMatch[5]);
 
       if (file && lineNum !== undefined && ruleId) {
         // Store pending error, wait for message line
@@ -257,6 +331,7 @@ class BiomeParser extends BaseParser implements NoisePatternProvider {
           column: colNum ?? 0,
           ruleId,
           raw: line,
+          fixable: tags.fixable,
         };
       }
       return null; // Wait for message line
@@ -270,11 +345,15 @@ class BiomeParser extends BaseParser implements NoisePatternProvider {
         if (message) {
           const err = this.createError(this.pending, message, line, ctx);
           this.pending = null;
+          // Start accumulating context for this error
+          this.startContextAccumulation(err);
           return err;
         }
       }
     }
 
+    // Non-matching line - flush any accumulated context
+    this.flushContext();
     return null;
   }
 
@@ -322,6 +401,8 @@ class BiomeParser extends BaseParser implements NoisePatternProvider {
     };
 
     applyWorkflowContext(err, ctx);
+    // Start accumulating context for this error
+    this.startContextAccumulation(err);
     return err;
   }
 
@@ -344,6 +425,7 @@ class BiomeParser extends BaseParser implements NoisePatternProvider {
       lineKnown: true,
       columnKnown: pending.column > 0,
       messageTruncated: message.length > MAX_MESSAGE_LENGTH,
+      fixable: pending.fixable,
     };
 
     applyWorkflowContext(err, ctx);
@@ -386,6 +468,11 @@ class BiomeParser extends BaseParser implements NoisePatternProvider {
       return true;
     }
 
+    // Error pointer lines (e.g., "      │       ^^^^^^")
+    if (POINTER_LINE_PATTERN.test(stripped)) {
+      return true;
+    }
+
     return false;
   }
 
@@ -399,6 +486,28 @@ class BiomeParser extends BaseParser implements NoisePatternProvider {
 
   reset(): void {
     this.pending = null;
+    this.flushContext();
+    this.contextAccumulator = null;
+  }
+
+  /**
+   * Flush accumulated context lines to the error's raw field.
+   */
+  private flushContext(): void {
+    if (this.contextAccumulator && this.contextAccumulator.lines.length > 0) {
+      const contextStr = this.contextAccumulator.lines.join("\n");
+      this.contextAccumulator.error.raw = `${this.contextAccumulator.error.raw}\n${contextStr}`;
+      this.contextAccumulator.lines = [];
+    }
+  }
+
+  /**
+   * Start accumulating context for an error.
+   */
+  private startContextAccumulation(error: MutableExtractedError): void {
+    // Flush any previous context first
+    this.flushContext();
+    this.contextAccumulator = { error, lines: [] };
   }
 }
 

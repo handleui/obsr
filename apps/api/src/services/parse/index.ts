@@ -11,9 +11,11 @@ import {
   resetDefaultExtractor,
 } from "@detent/parser";
 import type { Env } from "../../types/env";
+import { enrichErrorsWithFileContext } from "../error-enrichment";
 import { persistParseRun } from "./persistence";
 import {
   type ApiExtractedError,
+  type GitHubContext,
   type LogFormat,
   type ParseRequest,
   type ParseResponse,
@@ -27,6 +29,9 @@ import { validateParseRequest } from "./validation";
 
 // Timeout for parsing (30 seconds)
 const PARSE_TIMEOUT_MS = 30_000;
+
+// Re-export types for external use
+export type { FileEnrichmentContext, GitHubContext } from "./types";
 
 // Source detection signals
 const sourceSignals = {
@@ -170,6 +175,8 @@ interface ParseInternalOptions {
   source: ParseSource | "auto";
   runId?: string;
   workspacePath?: string;
+  /** GitHub context for remote file enrichment */
+  githubContext?: GitHubContext;
 }
 
 const parseLogsInternal = async (
@@ -194,7 +201,19 @@ const parseLogsInternal = async (
       break;
   }
 
-  const errorsWithSnippets = await addSnippets(errors, options.workspacePath);
+  // Step 1: Add snippets from local workspace (if available)
+  let errorsWithSnippets = await addSnippets(errors, options.workspacePath);
+
+  // Step 2: Enrich remaining errors via GitHub API (if context provided)
+  // Note: enrichErrorsWithFileContext handles its own logging
+  if (options.githubContext) {
+    const { errors: enrichedErrors } = await enrichErrorsWithFileContext(
+      errorsWithSnippets,
+      options.githubContext
+    );
+    errorsWithSnippets = enrichedErrors;
+  }
+
   const summary = summarizeErrors(errorsWithSnippets);
   const logBytes = new TextEncoder().encode(options.logs).length;
 
@@ -240,6 +259,8 @@ export const parseService = {
     source?: ParseSource | "auto";
     runId?: string;
     workspacePath?: string;
+    /** GitHub context for enriching errors with file snippets from remote repo */
+    githubContext?: GitHubContext;
   }): Promise<ParseResult> =>
     parseWithTimeout({
       logs: options.logs,
@@ -247,6 +268,7 @@ export const parseService = {
       source: options.source ?? "auto",
       runId: options.runId,
       workspacePath: options.workspacePath,
+      githubContext: options.githubContext,
     }),
 
   /**
@@ -267,6 +289,7 @@ export const parseService = {
       source: validated.source,
       runId: validated.runId,
       workspacePath: validated.workspacePath,
+      githubContext: request.githubContext,
     });
 
     // 3. Persist to database (returns persisted: false on failure)

@@ -16,6 +16,8 @@ export interface PreparedRunData {
   headBranch: string;
   runAttempt: number;
   runStartedAt: Date | null;
+  /** Project ID for occurrence tracking (optional, avoids extra DB query if provided) */
+  projectId?: string;
 }
 
 export interface RunIdentifier {

@@ -1,10 +1,29 @@
+import { generateFingerprints, sanitizeSensitiveData } from "@detent/lore";
+import type { ErrorCategory, ErrorSource } from "@detent/types";
 import { and, eq, inArray } from "drizzle-orm";
 import { createDb } from "../../db/client";
+import { bulkUpsertSignaturesAndOccurrences } from "../../db/operations/signatures";
+
+/**
+ * Cast a string to ErrorSource type for fingerprinting.
+ * If the source doesn't match a known value, returns undefined (safe fallback).
+ */
+const asSource = (s: string | undefined): ErrorSource | undefined =>
+  s as ErrorSource | undefined;
+
+/**
+ * Cast a string to ErrorCategory type for fingerprinting.
+ * If the category doesn't match a known value, returns undefined (safe fallback).
+ */
+const asCategory = (c: string | undefined): ErrorCategory | undefined =>
+  c as ErrorCategory | undefined;
+
 import {
   getOrgSettings,
   type OrganizationSettings,
   organizations,
   prComments,
+  projects,
   runErrors,
   runs,
 } from "../../db/schema";
@@ -165,90 +184,121 @@ export const bulkStoreRunsAndErrors = async (
         runCompletedAt: completedAt,
       }));
 
-      // Safety net: ON CONFLICT DO NOTHING handles rare race conditions
-      // where two webhooks both pass KV/DB checks due to eventual consistency
       await tx.insert(runs).values(runRows).onConflictDoNothing();
 
-      // Collect all errors from all runs into a single array for bulk insert
-      const allErrorRows: Array<{
-        id: string;
-        runId: string;
-        filePath: string | null;
-        line: number | null;
-        column: number | null;
-        message: string;
-        category: string | null;
-        severity: string | null;
-        ruleId: string | null;
-        source: string | null;
-        stackTrace: string | null;
-        suggestions: string[] | null;
-        hint: string | null;
-        codeSnippet: {
-          lines: string[];
-          startLine: number;
-          errorLine: number;
-          language: string;
-        } | null;
-        workflowJob: string | null;
-        workflowStep: string | null;
-        workflowAction: string | null;
-        unknownPattern: boolean | null;
-        lineKnown: boolean | null;
-        columnKnown: boolean | null;
-        messageTruncated: boolean | null;
-        stackTraceTruncated: boolean | null;
-        exitCode: number | null;
-        isInfrastructure: boolean | null;
-        possiblyTestOutput: boolean | null;
+      // Compute fingerprints for all errors and prepare for signature upsert
+      const errorsWithFingerprints: Array<{
+        error: ParsedError;
+        fingerprints: ReturnType<typeof generateFingerprints>;
+        runRecordId: string;
+        runName: string;
       }> = [];
 
       for (const data of preparedRuns) {
         for (const error of data.errors) {
-          allErrorRows.push({
-            id: crypto.randomUUID(),
-            runId: data.runRecordId,
-            filePath: truncateString(error.filePath, MAX_FILE_PATH_LENGTH),
-            line: validatePositiveInt(error.line, MAX_LINE_NUMBER),
-            column: validatePositiveInt(error.column, MAX_COLUMN_NUMBER),
-            message:
-              truncateString(error.message, MAX_ERROR_MESSAGE_LENGTH) ??
-              "Unknown error",
-            category: truncateString(error.category, 100),
-            severity: truncateString(error.severity, 50),
-            ruleId: truncateString(error.ruleId, 200),
-            source: truncateString(error.source, 100),
-            stackTrace: truncateString(
-              error.stackTrace,
-              MAX_STACK_TRACE_LENGTH
-            ),
-            suggestions: error.suggestions ?? null,
-            hint: truncateString(error.hint, MAX_ERROR_MESSAGE_LENGTH),
-            codeSnippet: error.codeSnippet ?? null,
-            workflowJob:
-              truncateString(error.workflowJob, MAX_WORKFLOW_NAME_LENGTH) ??
-              data.runName,
-            workflowStep: truncateString(
-              error.workflowStep,
-              MAX_WORKFLOW_NAME_LENGTH
-            ),
-            workflowAction: truncateString(
-              error.workflowAction,
-              MAX_WORKFLOW_NAME_LENGTH
-            ),
-            unknownPattern: error.unknownPattern ?? null,
-            lineKnown: error.lineKnown ?? null,
-            columnKnown: error.columnKnown ?? null,
-            messageTruncated: error.messageTruncated ?? null,
-            stackTraceTruncated: error.stackTraceTruncated ?? null,
-            exitCode: error.exitCode ?? null,
-            isInfrastructure: error.isInfrastructure ?? null,
-            possiblyTestOutput: error.possiblyTestOutput ?? null,
+          const fingerprints = generateFingerprints({
+            message: error.message,
+            filePath: error.filePath,
+            line: error.line,
+            column: error.column,
+            source: asSource(error.source),
+            ruleId: error.ruleId,
+            category: asCategory(error.category),
+          });
+          errorsWithFingerprints.push({
+            error,
+            fingerprints,
+            runRecordId: data.runRecordId,
+            runName: data.runName,
           });
         }
       }
 
-      // Bulk insert all errors in a single query
+      // Get projectId for occurrence tracking
+      // Prefer projectId from PreparedRunData to avoid extra DB query
+      const firstRun = preparedRuns[0];
+      let projectId: string | undefined;
+      let commitSha: string | undefined;
+
+      if (firstRun) {
+        commitSha = firstRun.headSha;
+        projectId = firstRun.projectId;
+
+        // Only query DB if projectId wasn't provided in PreparedRunData
+        if (!projectId) {
+          const projectResult = await tx
+            .select({ id: projects.id })
+            .from(projects)
+            .where(eq(projects.providerRepoFullName, firstRun.repository))
+            .limit(1);
+          projectId = projectResult[0]?.id;
+        }
+      }
+
+      // Upsert signatures and occurrences
+      let fingerprintToSignatureId = new Map<string, string>();
+
+      if (errorsWithFingerprints.length > 0 && projectId && commitSha) {
+        const signatureData = errorsWithFingerprints.map((e) => ({
+          fingerprint: e.fingerprints.lore,
+          source: e.error.source,
+          ruleId: e.error.ruleId,
+          category: e.error.category,
+          normalizedPattern: e.fingerprints.normalizedPattern,
+          // SECURITY: Sanitize sensitive data (secrets, PII) from example message
+          exampleMessage: sanitizeSensitiveData(e.error.message).slice(0, 500),
+          filePath: e.error.filePath,
+        }));
+
+        fingerprintToSignatureId = await bulkUpsertSignaturesAndOccurrences(
+          tx,
+          projectId,
+          commitSha,
+          signatureData
+        );
+      }
+
+      // Build error rows with signatureId
+      const allErrorRows = errorsWithFingerprints.map((e) => ({
+        id: crypto.randomUUID(),
+        runId: e.runRecordId,
+        signatureId: fingerprintToSignatureId.get(e.fingerprints.lore) ?? null,
+        filePath: truncateString(e.error.filePath, MAX_FILE_PATH_LENGTH),
+        line: validatePositiveInt(e.error.line, MAX_LINE_NUMBER),
+        column: validatePositiveInt(e.error.column, MAX_COLUMN_NUMBER),
+        message:
+          truncateString(e.error.message, MAX_ERROR_MESSAGE_LENGTH) ??
+          "Unknown error",
+        category: truncateString(e.error.category, 100),
+        severity: truncateString(e.error.severity, 50),
+        ruleId: truncateString(e.error.ruleId, 200),
+        source: truncateString(e.error.source, 100),
+        stackTrace: truncateString(e.error.stackTrace, MAX_STACK_TRACE_LENGTH),
+        suggestions: e.error.suggestions ?? null,
+        hint: truncateString(e.error.hint, MAX_ERROR_MESSAGE_LENGTH),
+        codeSnippet: e.error.codeSnippet ?? null,
+        workflowJob:
+          truncateString(e.error.workflowJob, MAX_WORKFLOW_NAME_LENGTH) ??
+          e.runName,
+        workflowStep: truncateString(
+          e.error.workflowStep,
+          MAX_WORKFLOW_NAME_LENGTH
+        ),
+        workflowAction: truncateString(
+          e.error.workflowAction,
+          MAX_WORKFLOW_NAME_LENGTH
+        ),
+        unknownPattern: e.error.unknownPattern ?? null,
+        lineKnown: e.error.lineKnown ?? null,
+        columnKnown: e.error.columnKnown ?? null,
+        messageTruncated: e.error.messageTruncated ?? null,
+        stackTraceTruncated: e.error.stackTraceTruncated ?? null,
+        exitCode: e.error.exitCode ?? null,
+        isInfrastructure: e.error.isInfrastructure ?? null,
+        possiblyTestOutput: e.error.possiblyTestOutput ?? null,
+        fixable: e.error.fixable ?? null,
+      }));
+
       if (allErrorRows.length > 0) {
         await tx.insert(runErrors).values(allErrorRows);
       }

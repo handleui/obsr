@@ -134,6 +134,13 @@
       "when": 1768631186220,
       "tag": "0018_good_screwball",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1768759958378,
+      "tag": "0019_curved_santa_claus",
+      "breakpoints": true
     }
   ]
 }

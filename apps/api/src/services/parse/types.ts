@@ -6,6 +6,28 @@ export type { ExtractedError } from "@detent/types";
 // API error type alias (maintains backwards compatibility with API consumers)
 export type ApiExtractedError = ExtractedError;
 
+/**
+ * Provider-agnostic context for remote file fetching (enrichment).
+ * Currently supports GitHub, designed to be extended for GitLab.
+ */
+export interface FileEnrichmentContext {
+  /** Repository owner (GitHub) or namespace (GitLab) */
+  owner: string;
+  /** Repository name */
+  repo: string;
+  /** Commit SHA to fetch files from */
+  commitSha: string;
+  /** Access token for API authentication */
+  token: string;
+  /** Provider type - defaults to 'github' for backwards compatibility */
+  provider?: "github" | "gitlab";
+}
+
+/**
+ * @deprecated Use FileEnrichmentContext instead. Kept for backwards compatibility.
+ */
+export type GitHubContext = FileEnrichmentContext;
+
 // Request types
 export interface ParseRequest {
   logs?: string;
@@ -18,6 +40,12 @@ export interface ParseRequest {
   provider?: string;
   projectId?: string;
   workspacePath?: string;
+  /** Context for enriching errors with file snippets from remote repo */
+  fileEnrichmentContext?: FileEnrichmentContext;
+  /**
+   * @deprecated Use fileEnrichmentContext instead
+   */
+  githubContext?: FileEnrichmentContext;
 }
 
 // Valid enum values

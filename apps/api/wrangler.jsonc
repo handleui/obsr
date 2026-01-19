@@ -20,13 +20,6 @@
       "id": "2d985751efe442fa84093f7e8ee656cf"
     }
   ],
-  "hyperdrive": [
-    {
-      "binding": "HYPERDRIVE",
-      "id": "8e731b514be34123b7398e7c08b0c3c2",
-      "localConnectionString": "postgresql://postgres:postgres@localhost:5432/detent"
-    }
-  ],
   "observability": {
     "logs": {
       "enabled": true,
@@ -35,5 +28,11 @@
   },
   "version_metadata": {
     "binding": "CF_VERSION_METADATA"
-  }
+  },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "17d47924cdc84681a0db34877d3e11e8"
+    }
+  ]
 }

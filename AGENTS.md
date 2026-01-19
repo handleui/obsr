@@ -29,7 +29,7 @@ bun run db:studio          # Open Drizzle Studio
 - **Runtime**: Bun, Node.js 22
 - **Monorepo**: Turborepo
 - **API**: Hono on Cloudflare Workers
-- **Database**: PlanetScale PostgreSQL, Drizzle ORM (`drizzle-orm/pg-core`)
+- **Database**: Neon PostgreSQL, Drizzle ORM (`drizzle-orm/pg-core`), Cloudflare Hyperdrive
 - **Web**: Next.js 16, React 19, Tailwind CSS
 - **CLI**: TypeScript, Citty, Ink
 - **Auth**: WorkOS, JWT (Jose)

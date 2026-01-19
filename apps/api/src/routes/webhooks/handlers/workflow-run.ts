@@ -1,5 +1,5 @@
 import type { ExecutionContext, KVNamespace } from "@cloudflare/workers-types";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { createDb } from "../../../db/client";
 import { runErrors, runs } from "../../../db/schema";
 import { captureWebhookError, type ParserContext } from "../../../lib/sentry";
@@ -229,6 +229,59 @@ const processAndStoreAllRuns = async (
     detectedUnsupportedTools: [...allUnsupportedTools].sort(),
     parserContext,
   };
+};
+
+// ============================================================================
+// Helper: Check for job-reported errors from POST /report
+// ============================================================================
+
+const checkForJobReportedErrors = async (
+  env: Env,
+  repository: string,
+  runsToProcess: WorkflowRunMeta[]
+): Promise<ParsedError[] | null> => {
+  const { db, client } = await createDb(env);
+  try {
+    const matchingRuns = await db.query.runs.findMany({
+      where: and(
+        eq(runs.repository, repository),
+        inArray(
+          runs.runId,
+          runsToProcess.map((r) => String(r.id))
+        )
+      ),
+      with: {
+        errors: true,
+      },
+    });
+
+    const jobReportedErrors: (typeof runErrors.$inferSelect)[] = [];
+    for (const run of matchingRuns) {
+      const jobErrors = run.errors.filter((e) => e.source === "job-report");
+      if (jobErrors.length > 0) {
+        jobReportedErrors.push(...jobErrors);
+      }
+    }
+
+    if (jobReportedErrors.length === 0) {
+      return null;
+    }
+
+    return jobReportedErrors.map((e) => ({
+      message: e.message,
+      filePath: e.filePath ?? undefined,
+      line: e.line ?? undefined,
+      column: e.column ?? undefined,
+      category: e.category ?? undefined,
+      severity: e.severity as "error" | "warning" | undefined,
+      ruleId: e.ruleId ?? undefined,
+      stackTrace: e.stackTrace ?? undefined,
+      workflowJob: e.workflowJob ?? undefined,
+      source: e.source ?? undefined,
+    }));
+  } finally {
+    await client.end();
+  }
 };
 
 // ============================================================================
@@ -938,6 +991,56 @@ export const handleWorkflowRunCompleted = async (
     // At this point checkRunId is guaranteed to be set
     const finalCheckRunId = checkRunId;
 
+    // Check if job already reported errors via POST /report
+    const jobReportedErrors = await checkForJobReportedErrors(
+      c.env,
+      repository.full_name,
+      runsToProcess
+    );
+
+    if (jobReportedErrors) {
+      console.log(
+        `[workflow_run] Found ${jobReportedErrors.length} job-reported errors, skipping log parsing`
+      );
+
+      const { totalErrors } = await finalizeAndPostResults(
+        c.env,
+        github,
+        token,
+        c.env["detent-idempotency"],
+        {
+          owner,
+          repo,
+          repository: repository.full_name,
+          executionCtx: c.executionCtx,
+          headSha,
+          headCommitMessage,
+          prNumber,
+          checkRunId: finalCheckRunId,
+          workflowRuns,
+          allErrors: jobReportedErrors,
+          detectedUnsupportedTools: [],
+          enableInlineAnnotations: orgSettings.enableInlineAnnotations,
+          enablePrComments: orgSettings.enablePrComments,
+          ciRelevantRunCount: evaluation.ciRelevantRuns.length,
+        }
+      );
+
+      await releaseCommitLock(
+        c.env["detent-idempotency"],
+        repository.full_name,
+        headSha
+      );
+
+      return c.json({
+        message: "workflow_run processed via job-report",
+        repository: repository.full_name,
+        prNumber,
+        source: "job-report",
+        totalErrors,
+        checkRunId: finalCheckRunId,
+      });
+    }
     // Process only NEW runs: fetch logs for failures, store with metadata
     // Re-runs (same runId, different runAttempt) will be in runsToProcess
     const {

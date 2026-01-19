@@ -681,6 +681,25 @@ export const heals = pgTable(
 );
 
 // ============================================================================
+// API Keys (Organization-scoped API tokens for external integrations)
+// ============================================================================
+
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    organizationId: varchar("organization_id", { length: 36 })
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    key: text("key").notNull().unique(), // "dtk_" + 32 char random
+    name: varchar("name", { length: 255 }).notNull(), // e.g. "GitHub Actions"
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    lastUsedAt: timestamp("last_used_at"),
+  },
+  (table) => [index("api_keys_org_idx").on(table.organizationId)]
+);
+
+// ============================================================================
 // Relations (for Drizzle relational query API)
 // ============================================================================
 
@@ -699,6 +718,7 @@ export const organizationsRelations = relations(
     invitations: many(invitations),
     projects: many(projects),
     usageEvents: many(usageEvents),
+    apiKeys: many(apiKeys),
   })
 );
 
@@ -787,6 +807,13 @@ export const healsRelations = relations(heals, ({ one }) => ({
   }),
 }));
 
+export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [apiKeys.organizationId],
+    references: [organizations.id],
+  }),
+}));
+
 // ============================================================================
 // Type Exports
 // ============================================================================
@@ -826,3 +853,6 @@ export type NewUsageEvent = typeof usageEvents.$inferInsert;
 
 export type Heal = typeof heals.$inferSelect;
 export type NewHeal = typeof heals.$inferInsert;
+
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type NewApiKey = typeof apiKeys.$inferInsert;

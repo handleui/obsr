@@ -1,0 +1,13 @@
+name: "Detent Report"
+description: "Report workflow outcomes and errors to Detent"
+inputs:
+  token:
+    description: "Detent API token"
+    required: true
+  api-url:
+    description: "Detent API URL"
+    required: false
+    default: "https://backend.detent.sh"
+runs:
+  using: "node20"
+  main: "dist/index.js"

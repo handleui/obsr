@@ -1,12 +1,23 @@
+import { seal } from "sealed-box";
+
 /**
- * GitHub Secrets Encryption
- *
- * Uses LibSodium sealed boxes to encrypt secrets for GitHub Actions.
- * GitHub provides a public key; we encrypt with it so only GitHub can decrypt.
- *
- * @see https://docs.github.com/en/rest/actions/secrets#create-or-update-an-organization-secret
+ * Decode a base64 string to Uint8Array
  */
-import sodium from "libsodium-wrappers";
+const base64ToUint8Array = (base64: string): Uint8Array => {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+};
+
+/**
+ * Encode a Uint8Array to base64 string
+ */
+const uint8ArrayToBase64 = (bytes: Uint8Array): string => {
+  return btoa(String.fromCharCode(...bytes));
+};
 
 /**
  * Encrypt a secret for GitHub using sealed boxes (crypto_box_seal)
@@ -15,21 +26,19 @@ import sodium from "libsodium-wrappers";
  * @param publicKey - Base64-encoded public key from GitHub's API
  * @returns Base64-encoded encrypted secret
  */
-export const encryptSecretForGitHub = async (
+export const encryptSecretForGitHub = (
   secret: string,
   publicKey: string
-): Promise<string> => {
-  await sodium.ready;
-
+): string => {
   // Decode GitHub's public key from base64
-  const binkey = sodium.from_base64(publicKey, sodium.base64_variants.ORIGINAL);
+  const binkey = base64ToUint8Array(publicKey);
 
-  // Convert secret to bytes
-  const binsec = sodium.from_string(secret);
+  // Convert secret to bytes using TextEncoder
+  const binsec = new TextEncoder().encode(secret);
 
   // Encrypt using sealed box (anonymous sender)
-  const encrypted = sodium.crypto_box_seal(binsec, binkey);
+  const encrypted = seal(binsec, binkey);
 
   // Return base64-encoded ciphertext
-  return sodium.to_base64(encrypted, sodium.base64_variants.ORIGINAL);
+  return uint8ArrayToBase64(encrypted);
 };

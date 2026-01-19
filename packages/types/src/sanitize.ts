@@ -1,9 +1,7 @@
 /**
  * PII and sensitive data redaction utilities.
- * Migrated from packages/core/extract/extractor.go
+ * Migrated from packages/parser/src/sanitize.ts
  */
-
-import type { ErrorReport, ExtractedError } from "./types.js";
 
 // ============================================================================
 // Constants
@@ -33,14 +31,6 @@ export interface RedactionPattern {
   /** RegExp pattern to match sensitive data. Must use global flag (g). */
   readonly pattern: RegExp;
   /** Replacement string. Can use capture groups like $1. */
-  readonly replacement: string;
-}
-
-/**
- * @deprecated Use RedactionPattern instead
- */
-interface Sanitizer {
-  readonly pattern: RegExp;
   readonly replacement: string;
 }
 
@@ -658,14 +648,6 @@ export const redactionPatterns: readonly RedactionPattern[] = [
 ];
 
 /**
- * Legacy sensitivePatterns array for backward compatibility.
- * @deprecated Use redactionPatterns instead.
- */
-const sensitivePatterns: readonly Sanitizer[] = redactionPatterns.map(
-  ({ pattern, replacement }) => ({ pattern, replacement })
-);
-
-/**
  * File extensions that should have their paths redacted while preserving structure.
  */
 const fileExtensions = [
@@ -712,8 +694,8 @@ const filePathPattern = new RegExp(
 export const redactSensitiveData = (text: string): string => {
   let result = text;
 
-  for (const sanitizer of sensitivePatterns) {
-    result = result.replace(sanitizer.pattern, sanitizer.replacement);
+  for (const { pattern, replacement } of redactionPatterns) {
+    result = result.replace(pattern, replacement);
   }
 
   return result;
@@ -748,91 +730,6 @@ export const redactPII = (text: string): string => {
 };
 
 /**
- * Redact sensitive data from an ExtractedError object.
- * Creates a new error with all string fields sanitized.
- *
- * Redacts PII from:
- * - message
- * - raw
- * - stackTrace
- * - filePath (user paths)
- * - suggestions
- * - codeSnippet lines
- *
- * @param error - The error to redact
- * @returns A new ExtractedError with sensitive data removed
- *
- * @example
- * ```typescript
- * const error: ExtractedError = {
- *   message: "Failed to connect to user@host.com",
- *   filePath: "/Users/johndoe/project/src/app.ts",
- *   line: 42,
- * };
- * const redacted = redactErrorMessage(error);
- * // redacted.message: "Failed to connect to [EMAIL]"
- * // redacted.filePath: "/Users/[USER]/project/src/app.ts"
- * ```
- */
-export const redactErrorMessage = (error: ExtractedError): ExtractedError => {
-  const redacted: ExtractedError = {
-    ...error,
-    message: redactPII(error.message),
-    raw: error.raw ? redactPII(error.raw) : undefined,
-    stackTrace: error.stackTrace ? redactPII(error.stackTrace) : undefined,
-    filePath: error.filePath ? redactPII(error.filePath) : undefined,
-    suggestions: error.suggestions
-      ? error.suggestions.map((s) => redactPII(s))
-      : undefined,
-    codeSnippet: error.codeSnippet
-      ? {
-          ...error.codeSnippet,
-          lines: error.codeSnippet.lines.map((line) => redactPII(line)),
-        }
-      : undefined,
-  };
-
-  return redacted;
-};
-
-/**
- * Redact sensitive data from an entire ErrorReport.
- * Creates a new report with all errors sanitized while preserving statistics.
- *
- * Note: Statistics (byFile counts, etc.) are NOT redacted as they may contain
- * file paths that users need for navigation. Use sanitizeForTelemetry if you
- * need to redact file paths for external transmission.
- *
- * @param report - The error report to redact
- * @returns A new ErrorReport with sensitive data removed from all errors
- *
- * @example
- * ```typescript
- * const report = createErrorReport(errors);
- * const redactedReport = redactReport(report);
- * // All error messages, stack traces, etc. are now redacted
- * ```
- */
-export const redactReport = (report: ErrorReport): ErrorReport => ({
-  ...report,
-  errors: report.errors.map(redactErrorMessage),
-  aiContext: report.aiContext
-    ? {
-        ...report.aiContext,
-        commitSha: report.aiContext.commitSha
-          ? redactPII(report.aiContext.commitSha)
-          : undefined,
-        treeHash: report.aiContext.treeHash
-          ? redactPII(report.aiContext.treeHash)
-          : undefined,
-        repoRoot: report.aiContext.repoRoot
-          ? redactPII(report.aiContext.repoRoot)
-          : undefined,
-      }
-    : undefined,
-});
-
-/**
  * Sanitize a pattern for telemetry by removing potentially sensitive information.
  * It preserves the structure of the error (file extensions, line/column numbers, keywords)
  * while removing actual file paths, credentials, and other PII.
@@ -848,8 +745,8 @@ export const sanitizeForTelemetry = (pattern: string): string => {
       : pattern;
 
   // Replace sensitive patterns using regex
-  for (const sanitizer of sensitivePatterns) {
-    result = result.replace(sanitizer.pattern, sanitizer.replacement);
+  for (const { pattern: p, replacement } of redactionPatterns) {
+    result = result.replace(p, replacement);
   }
 
   // Replace file paths with placeholders while keeping the extension

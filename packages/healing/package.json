@@ -22,7 +22,6 @@
   },
   "dependencies": {
     "@detent/lore": "workspace:*",
-    "@detent/parser": "workspace:*",
     "@detent/types": "workspace:*",
     "ai": "^5.0.0",
     "fast-glob": "^3.3.3",

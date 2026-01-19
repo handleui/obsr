@@ -29,8 +29,12 @@ import {
 } from "../../db/schema";
 import { CACHE_TTL, cacheKey, getFromCache, setInCache } from "../../lib/cache";
 import type { Env } from "../../types/env";
-import type { ParsedError } from "../error-parser";
-import type { DbClient, PreparedRunData, RunIdentifier } from "./types";
+import type {
+  DbClient,
+  ParsedError,
+  PreparedRunData,
+  RunIdentifier,
+} from "./types";
 
 // ============================================================================
 // Validation Constants
@@ -492,5 +496,88 @@ export const upsertCommentIdInDb = async (
       `[pr-comments] upsertCommentIdInDb failed for ${repository}#${prNumber}:`,
       error
     );
+  }
+};
+
+// ============================================================================
+// Helper: Check for job-reported errors from POST /report
+// ============================================================================
+// Looks up errors that were reported via the GitHub Action (POST /report)
+// rather than parsed from workflow logs. This allows skipping log fetching
+// when the action has already provided structured error data.
+//
+// Performance: Uses JOIN with WHERE filter at DB level instead of loading all
+// errors and filtering in JS. Also selects only needed columns to reduce data transfer.
+
+export interface JobReportedError {
+  message: string;
+  filePath?: string;
+  line?: number;
+  column?: number;
+  category?: string;
+  severity?: "error" | "warning";
+  ruleId?: string;
+  stackTrace?: string;
+  workflowJob?: string;
+  source?: string;
+}
+
+export const checkForJobReportedErrors = async (
+  env: Env,
+  repository: string,
+  runsToCheck: Array<{ id: number }>
+): Promise<JobReportedError[] | null> => {
+  if (runsToCheck.length === 0) {
+    return null;
+  }
+
+  const { db, client } = await createDb(env);
+  try {
+    // Optimized query: filter errors at DB level instead of loading all errors
+    // and filtering in JS. Also select only needed columns to reduce data transfer.
+    const jobReportedErrors = await db
+      .select({
+        message: runErrors.message,
+        filePath: runErrors.filePath,
+        line: runErrors.line,
+        column: runErrors.column,
+        category: runErrors.category,
+        severity: runErrors.severity,
+        ruleId: runErrors.ruleId,
+        stackTrace: runErrors.stackTrace,
+        workflowJob: runErrors.workflowJob,
+        source: runErrors.source,
+      })
+      .from(runErrors)
+      .innerJoin(runs, eq(runErrors.runId, runs.id))
+      .where(
+        and(
+          eq(runs.repository, repository),
+          inArray(
+            runs.runId,
+            runsToCheck.map((r) => String(r.id))
+          ),
+          eq(runErrors.source, "job-report")
+        )
+      );
+
+    if (jobReportedErrors.length === 0) {
+      return null;
+    }
+
+    return jobReportedErrors.map((e) => ({
+      message: e.message,
+      filePath: e.filePath ?? undefined,
+      line: e.line ?? undefined,
+      column: e.column ?? undefined,
+      category: e.category ?? undefined,
+      severity: e.severity as "error" | "warning" | undefined,
+      ruleId: e.ruleId ?? undefined,
+      stackTrace: e.stackTrace ?? undefined,
+      workflowJob: e.workflowJob ?? undefined,
+      source: e.source ?? undefined,
+    }));
+  } finally {
+    await client.end();
   }
 };

@@ -1,6 +1,8 @@
 // biome-ignore lint/performance/noNamespaceImport: GitHub Actions SDK official pattern
 import * as github from "@actions/github";
 
+const REF_PREFIX_REGEX = /^refs\/(heads|tags)\//;
+
 export interface StepOutcome {
   id: string;
   name?: string;
@@ -29,21 +31,43 @@ export interface ReportPayload {
     stackTrace?: string;
     stepId?: string;
     exitCode?: number;
+    codeSnippet?: {
+      lines: string[];
+      startLine: number;
+      /** 1-indexed position of the error line within the snippet (not the actual source line number) */
+      errorLineOffset: number;
+      language: string;
+    };
   }>;
 }
+
+/**
+ * Safely parse JSON from environment variable, returning fallback on failure.
+ */
+const safeJsonParse = <T>(json: string | undefined, fallback: T): T => {
+  if (!json) {
+    return fallback;
+  }
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    return fallback;
+  }
+};
 
 export const collect = (): ReportPayload => {
   const { context } = github;
 
-  const stepsJson = process.env.STEPS_CONTEXT || "{}";
-  const stepsData = JSON.parse(stepsJson) as Record<
-    string,
-    {
-      outcome?: string;
-      conclusion?: string;
-      outputs?: Record<string, string>;
-    }
-  >;
+  const stepsData = safeJsonParse<
+    Record<
+      string,
+      {
+        outcome?: string;
+        conclusion?: string;
+        outputs?: Record<string, string>;
+      }
+    >
+  >(process.env.STEPS_CONTEXT, {});
 
   const steps: StepOutcome[] = Object.entries(stepsData).map(([id, data]) => ({
     id,
@@ -51,14 +75,16 @@ export const collect = (): ReportPayload => {
     conclusion: (data.conclusion ?? "skipped") as StepOutcome["conclusion"],
   }));
 
-  const matrixJson = process.env.MATRIX_CONTEXT;
-  const matrix = matrixJson ? JSON.parse(matrixJson) : undefined;
+  const matrix = safeJsonParse<Record<string, string> | undefined>(
+    process.env.MATRIX_CONTEXT,
+    undefined
+  );
 
   return {
     runId: context.runId,
     repository: `${context.repo.owner}/${context.repo.repo}`,
     commitSha: context.sha,
-    headBranch: context.ref.replace("refs/heads/", ""),
+    headBranch: context.ref.replace(REF_PREFIX_REGEX, ""),
     workflowName: context.workflow,
     workflowJob: context.job,
     runAttempt: Number.parseInt(process.env.GITHUB_RUN_ATTEMPT || "1", 10),

@@ -1,16 +1,14 @@
 import type { ExecutionContext, KVNamespace } from "@cloudflare/workers-types";
-import { and, eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createDb } from "../../../db/client";
 import { runErrors, runs } from "../../../db/schema";
-import { captureWebhookError, type ParserContext } from "../../../lib/sentry";
+import { captureWebhookError } from "../../../lib/sentry";
 import { orchestrateHeals } from "../../../services/autofix/orchestrator";
 import {
   formatCheckRunOutput,
   formatResultsComment,
   formatWaitingCheckRunOutput,
 } from "../../../services/comment-formatter";
-import type { ParsedError } from "../../../services/error-parser";
-import { parseWorkflowLogsWithFallback } from "../../../services/error-parser";
 import { createGitHubService } from "../../../services/github";
 import {
   postOrUpdateComment,
@@ -25,18 +23,11 @@ import {
   storeCheckRunId,
 } from "../../../services/idempotency";
 import {
-  bulkStoreRunsAndErrors,
+  checkForJobReportedErrors,
   checkRunsAndLoadOrgSettings,
-  prepareRunData,
 } from "../../../services/webhooks/db-operations";
-import {
-  classifyError,
-  sanitizeErrorMessage,
-} from "../../../services/webhooks/error-classifier";
-import type {
-  PreparedRunData,
-  WorkflowRunMeta,
-} from "../../../services/webhooks/types";
+import { classifyError } from "../../../services/webhooks/error-classifier";
+import type { ParsedError } from "../../../services/webhooks/types";
 import type { Env } from "../../../types/env";
 import type { WebhookContext, WorkflowRunPayload } from "../types";
 import {
@@ -55,234 +46,6 @@ import { postWaitingComment } from "../waiting-comment";
 // Architecture:
 // - in_progress: Creates a "queued" check run so users see Detent is watching
 // - completed: Waits for ALL workflow runs for a commit, then posts analysis
-
-// ============================================================================
-// Helper: Process and store all workflow runs
-// ============================================================================
-// Strategy:
-// - Failed runs: fetch logs, parse errors, store with error details
-// - Other runs: store with metadata only (no errors)
-//
-// Performance optimizations (Cloudflare Workers - 128MB memory, 6 TCP connections):
-// - Fetches logs in parallel batches (MAX_CONCURRENT_FETCHES) to reduce latency
-// - Parses logs immediately after fetch to free memory before next batch
-// - BULK INSERTS: All runs stored in single transaction (1 connection, not N)
-// - Reduces DB round-trips from 2N to 2 (one INSERT for runs, one for errors)
-
-const processAndStoreAllRuns = async (
-  env: Env,
-  github: ReturnType<typeof createGitHubService>,
-  token: string,
-  allRuns: WorkflowRunMeta[],
-  context: {
-    owner: string;
-    repo: string;
-    prNumber: number;
-    headSha: string;
-    repository: string;
-    checkRunId: number;
-  }
-): Promise<{
-  errors: ParsedError[];
-  detectedUnsupportedTools: string[];
-  parserContext?: ParserContext;
-}> => {
-  // Limit concurrent fetches to avoid memory pressure from multiple ZIP files
-  // Each workflow log can be up to 30MB compressed, so we keep this conservative
-  const MAX_CONCURRENT_FETCHES = 3;
-
-  const allErrors: ParsedError[] = [];
-  const allUnsupportedTools = new Set<string>();
-  const failedRuns = allRuns.filter((r) => r.conclusion === "failure");
-  const passingRuns = allRuns.filter((r) => r.conclusion !== "failure");
-
-  // Map to store errors by run ID
-  const errorsByRunId = new Map<number, ParsedError[]>();
-
-  // Store passing runs with empty errors (no log fetching needed)
-  for (const run of passingRuns) {
-    errorsByRunId.set(run.id, []);
-  }
-
-  console.log(
-    `[workflow_run] Processing ${allRuns.length} runs: ${failedRuns.length} failed (fetching logs), ${passingRuns.length} passed (storing metadata only)`
-  );
-
-  // Track aggregated parser context for Sentry error reporting
-  let aggregatedLogBytes = 0;
-  let aggregatedJobCount = 0;
-  let aggregatedErrorCount = 0;
-  let parsersAvailable: string[] = [];
-
-  // Process a single failed run: fetch logs, parse, and return errors
-  const processFailedRun = async (run: WorkflowRunMeta): Promise<void> => {
-    try {
-      // Fetch logs from GitHub API
-      const logsResult = await github.fetchWorkflowLogs(
-        token,
-        context.owner,
-        context.repo,
-        run.id
-      );
-
-      // Parse logs and extract errors (with fallback if none found)
-      const parseResult = parseWorkflowLogsWithFallback(
-        logsResult.logs,
-        run.name,
-        {
-          totalBytes: logsResult.totalBytes,
-          jobCount: logsResult.jobCount,
-        }
-      );
-
-      // Attach workflow context to each error
-      const errorsWithContext = parseResult.errors.map((e) => ({
-        ...e,
-        workflowJob: e.workflowJob ?? run.name,
-      }));
-
-      // Collect unsupported tools
-      for (const tool of parseResult.detectedUnsupportedTools) {
-        allUnsupportedTools.add(tool);
-      }
-
-      // Aggregate parser context for Sentry error reporting
-      aggregatedLogBytes += parseResult.parserContext.logBytes;
-      aggregatedJobCount += parseResult.parserContext.jobCount;
-      aggregatedErrorCount += parseResult.parserContext.errorCount;
-      if (parsersAvailable.length === 0) {
-        parsersAvailable = parseResult.parserContext.parsersAvailable;
-      }
-
-      console.log(
-        `[workflow_run] Parsed ${errorsWithContext.length} errors from run ${run.id} (${run.name})`
-      );
-
-      errorsByRunId.set(run.id, errorsWithContext);
-      allErrors.push(...errorsWithContext);
-    } catch (error) {
-      // If log fetching/parsing fails, use a fallback error
-      console.error(
-        `[workflow_run] Failed to fetch/parse logs for run ${run.id}:`,
-        error
-      );
-
-      // Sanitize error message for user-facing output (avoid leaking internal details)
-      const sanitizedMessage = sanitizeErrorMessage(error);
-      const fallbackError: ParsedError = {
-        message: `Workflow "${run.name}" failed. Unable to fetch logs: ${sanitizedMessage}`,
-        category: "workflow",
-        severity: "error",
-        source: "github-actions",
-        workflowJob: run.name,
-      };
-
-      errorsByRunId.set(run.id, [fallbackError]);
-      allErrors.push(fallbackError);
-    }
-  };
-
-  // Fetch and parse logs for failed runs in parallel batches
-  for (let i = 0; i < failedRuns.length; i += MAX_CONCURRENT_FETCHES) {
-    const batch = failedRuns.slice(i, i + MAX_CONCURRENT_FETCHES);
-    await Promise.all(batch.map(processFailedRun));
-  }
-
-  // Prepare all runs for bulk storage (validates and sanitizes data)
-  const preparedRuns: PreparedRunData[] = [];
-  for (const run of allRuns) {
-    const prepared = prepareRunData({
-      runId: run.id,
-      runName: run.name,
-      prNumber: context.prNumber,
-      headSha: context.headSha,
-      errors: errorsByRunId.get(run.id) ?? [],
-      repository: context.repository,
-      checkRunId: context.checkRunId,
-      conclusion: run.conclusion,
-      headBranch: run.headBranch,
-      runAttempt: run.runAttempt,
-      runStartedAt: run.runStartedAt,
-    });
-    if (prepared) {
-      preparedRuns.push(prepared);
-    }
-  }
-
-  // Bulk store all runs in a single transaction for efficiency
-  await bulkStoreRunsAndErrors(env, preparedRuns);
-
-  // Build aggregated parser context if any runs were successfully parsed
-  const parserContext: ParserContext | undefined =
-    aggregatedLogBytes > 0
-      ? {
-          logBytes: aggregatedLogBytes,
-          jobCount: aggregatedJobCount,
-          errorCount: aggregatedErrorCount,
-          parsersAvailable,
-          detectedUnsupportedTools: [...allUnsupportedTools].sort(),
-        }
-      : undefined;
-
-  return {
-    errors: allErrors,
-    detectedUnsupportedTools: [...allUnsupportedTools].sort(),
-    parserContext,
-  };
-};
-
-// ============================================================================
-// Helper: Check for job-reported errors from POST /report
-// ============================================================================
-
-const checkForJobReportedErrors = async (
-  env: Env,
-  repository: string,
-  runsToProcess: WorkflowRunMeta[]
-): Promise<ParsedError[] | null> => {
-  const { db, client } = await createDb(env);
-  try {
-    const matchingRuns = await db.query.runs.findMany({
-      where: and(
-        eq(runs.repository, repository),
-        inArray(
-          runs.runId,
-          runsToProcess.map((r) => String(r.id))
-        )
-      ),
-      with: {
-        errors: true,
-      },
-    });
-
-    const jobReportedErrors: (typeof runErrors.$inferSelect)[] = [];
-    for (const run of matchingRuns) {
-      const jobErrors = run.errors.filter((e) => e.source === "job-report");
-      if (jobErrors.length > 0) {
-        jobReportedErrors.push(...jobErrors);
-      }
-    }
-
-    if (jobReportedErrors.length === 0) {
-      return null;
-    }
-
-    return jobReportedErrors.map((e) => ({
-      message: e.message,
-      filePath: e.filePath ?? undefined,
-      line: e.line ?? undefined,
-      column: e.column ?? undefined,
-      category: e.category ?? undefined,
-      severity: e.severity as "error" | "warning" | undefined,
-      ruleId: e.ruleId ?? undefined,
-      stackTrace: e.stackTrace ?? undefined,
-      workflowJob: e.workflowJob ?? undefined,
-      source: e.source ?? undefined,
-    }));
-  } finally {
-    await client.end();
-  }
-};
 
 // ============================================================================
 // Helper: Finalize check run and post PR comment with results
@@ -671,7 +434,7 @@ export const handleWorkflowRunInProgress = async (
       owner,
       repo,
       headSha,
-      name: "Detent Parser",
+      name: "Detent Heal",
       status: "queued",
       output: {
         title: "Waiting for CI to complete",
@@ -792,6 +555,7 @@ export const handleWorkflowRunInProgress = async (
 export const handleWorkflowRunCompleted = async (
   c: WebhookContext,
   payload: WorkflowRunPayload
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: webhook handler requires sequential orchestration
 ) => {
   const { workflow_run, repository, installation } = payload;
   const owner = repository.owner.login;
@@ -830,7 +594,6 @@ export const handleWorkflowRunCompleted = async (
   const github = createGitHubService(c.env);
   let checkRunId: number | undefined;
   let token: string | undefined;
-  let parserContext: ParserContext | undefined;
 
   // IMPORTANT: Retrieve stored check run ID early for error recovery
   // This ensures we can clean up the check run if errors occur before we
@@ -977,7 +740,7 @@ export const handleWorkflowRunCompleted = async (
         owner,
         repo,
         headSha,
-        name: "Detent Parser",
+        name: "Detent Heal",
         status: "in_progress",
         output: {
           title: "Analyzing CI results...",
@@ -998,33 +761,39 @@ export const handleWorkflowRunCompleted = async (
       runsToProcess
     );
 
+    // Check for failed workflows
+    const failedRuns = runsToProcess.filter((r) => r.conclusion === "failure");
+    const failedRunCount = failedRuns.length;
+    const hasFailed = failedRunCount > 0;
+
+    // Collect errors from job-reported errors only (no fallback log-parsing)
+    const allErrors: ParsedError[] = jobReportedErrors ?? [];
+
     if (jobReportedErrors) {
       console.log(
-        `[workflow_run] Found ${jobReportedErrors.length} job-reported errors, skipping log parsing`
+        `[workflow_run] Found ${jobReportedErrors.length} job-reported errors`
+      );
+    }
+
+    // If workflows failed but no errors reported, show warning
+    if (hasFailed && allErrors.length === 0) {
+      console.log(
+        `[workflow_run] ${failedRunCount} failed runs but no errors found`
       );
 
-      const { totalErrors } = await finalizeAndPostResults(
-        c.env,
-        github,
-        token,
-        c.env["detent-idempotency"],
-        {
-          owner,
-          repo,
-          repository: repository.full_name,
-          executionCtx: c.executionCtx,
-          headSha,
-          headCommitMessage,
-          prNumber,
-          checkRunId: finalCheckRunId,
-          workflowRuns,
-          allErrors: jobReportedErrors,
-          detectedUnsupportedTools: [],
-          enableInlineAnnotations: orgSettings.enableInlineAnnotations,
-          enablePrComments: orgSettings.enablePrComments,
-          ciRelevantRunCount: evaluation.ciRelevantRuns.length,
-        }
-      );
+      // Update check run with warning
+      await github.updateCheckRun(token, {
+        owner,
+        repo,
+        checkRunId: finalCheckRunId,
+        status: "completed",
+        conclusion: "failure",
+        output: {
+          title: "No errors found to heal",
+          summary:
+            "Workflow failed but no errors were reported. Ensure the Detent action is configured in your workflow.",
+        },
+      });
 
       await releaseCommitLock(
         c.env["detent-idempotency"],
@@ -1033,121 +802,109 @@ export const handleWorkflowRunCompleted = async (
       );
 
       return c.json({
-        message: "workflow_run processed via job-report",
+        message: "workflow_run processed - no errors found",
         repository: repository.full_name,
         prNumber,
-        source: "job-report",
-        totalErrors,
+        runsProcessed: runsToProcess.length,
+        failedRuns: failedRunCount,
+        totalErrors: 0,
         checkRunId: finalCheckRunId,
+        warning: "action_not_configured",
       });
     }
-    // Process only NEW runs: fetch logs for failures, store with metadata
-    // Re-runs (same runId, different runAttempt) will be in runsToProcess
-    const {
-      errors: allErrors,
-      detectedUnsupportedTools,
-      parserContext: processedParserContext,
-    } = await processAndStoreAllRuns(c.env, github, token, runsToProcess, {
-      owner,
-      repo,
-      prNumber,
-      headSha,
-      repository: repository.full_name,
-      checkRunId: finalCheckRunId,
-    });
-    parserContext = processedParserContext;
 
     // Trigger autofix orchestration for fixable errors
     // Run in background to not block webhook response
-    c.executionCtx.waitUntil(
-      (async () => {
-        // Guard: Skip if no new runs to process
-        if (runsToProcess.length === 0) {
-          return;
-        }
-
-        try {
-          const { db, client } = await createDb(c.env);
-          try {
-            // Get run database IDs directly from stored runs
-            // More efficient than joining - we know these runs were just stored
-            const runIds = runsToProcess.map((r) => r.id.toString());
-            const storedRuns = await db
-              .select({
-                id: runs.id,
-                projectId: runs.projectId,
-              })
-              .from(runs)
-              .where(inArray(runs.runId, runIds))
-              .limit(runIds.length);
-
-            if (storedRuns.length === 0) {
-              console.log(
-                "[workflow_run] No stored runs found for heal orchestration"
-              );
-              return;
-            }
-
-            // Query errors using run database IDs (not GitHub run IDs)
-            const runDbIds = storedRuns.map((r) => r.id);
-            const storedErrors = await db
-              .select({
-                id: runErrors.id,
-                source: runErrors.source,
-                signatureId: runErrors.signatureId,
-                fixable: runErrors.fixable,
-              })
-              .from(runErrors)
-              .where(inArray(runErrors.runId, runDbIds));
-
-            // Guard: Only orchestrate if we have fixable errors
-            if (!storedErrors.some((e) => e.fixable)) {
-              return;
-            }
-
-            // Guard: Ensure we have the required data
-            // Use first stored run's database ID (UUID), not GitHub run ID
-            const firstStoredRun = storedRuns[0];
-            const firstRunToProcess = runsToProcess[0];
-            if (!(firstStoredRun?.projectId && firstRunToProcess)) {
-              console.log(
-                "[workflow_run] Missing storedRun or firstRunToProcess for heal orchestration"
-              );
-              return;
-            }
-
-            const result = await orchestrateHeals({
-              env: c.env,
-              projectId: firstStoredRun.projectId,
-              runId: firstStoredRun.id,
-              commitSha: headSha,
-              prNumber,
-              branch: workflow_run.head_branch ?? "main",
-              repoFullName: repository.full_name,
-              installationId: installation.id,
-              errors: storedErrors.map((e) => ({
-                id: e.id,
-                source: e.source ?? undefined,
-                signatureId: e.signatureId ?? undefined,
-                fixable: e.fixable ?? false,
-              })),
-              orgSettings,
-            });
-
-            if (result.healsCreated > 0) {
-              console.log(
-                `[workflow_run] Orchestrated ${result.healsCreated} heals for ${repository.full_name}#${prNumber}`
-              );
-            }
-          } finally {
-            await client.end();
+    if (allErrors.length > 0) {
+      c.executionCtx.waitUntil(
+        // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: background task requires error handling
+        (async () => {
+          // Guard: Skip if no new runs to process
+          if (runsToProcess.length === 0) {
+            return;
           }
-        } catch (error) {
-          // Non-fatal: Don't fail the webhook if heal orchestration fails
-          console.error("[workflow_run] Heal orchestration error:", error);
-        }
-      })()
-    );
+
+          try {
+            const { db, client } = await createDb(c.env);
+            try {
+              // Get run database IDs directly from stored runs
+              const runIds = runsToProcess.map((r) => r.id.toString());
+              const storedRuns = await db
+                .select({
+                  id: runs.id,
+                  projectId: runs.projectId,
+                })
+                .from(runs)
+                .where(inArray(runs.runId, runIds))
+                .limit(runIds.length);
+
+              if (storedRuns.length === 0) {
+                console.log(
+                  "[workflow_run] No stored runs found for heal orchestration"
+                );
+                return;
+              }
+
+              // Query errors using run database IDs (not GitHub run IDs)
+              const runDbIds = storedRuns.map((r) => r.id);
+              const storedErrors = await db
+                .select({
+                  id: runErrors.id,
+                  source: runErrors.source,
+                  signatureId: runErrors.signatureId,
+                  fixable: runErrors.fixable,
+                })
+                .from(runErrors)
+                .where(inArray(runErrors.runId, runDbIds));
+
+              // Guard: Only orchestrate if we have fixable errors
+              if (!storedErrors.some((e) => e.fixable)) {
+                return;
+              }
+
+              // Guard: Ensure we have the required data
+              const firstStoredRun = storedRuns[0];
+              const firstRunToProcess = runsToProcess[0];
+              if (!(firstStoredRun?.projectId && firstRunToProcess)) {
+                console.log(
+                  "[workflow_run] Missing storedRun or firstRunToProcess for heal orchestration"
+                );
+                return;
+              }
+
+              const result = await orchestrateHeals({
+                env: c.env,
+                projectId: firstStoredRun.projectId,
+                runId: firstStoredRun.id,
+                commitSha: headSha,
+                prNumber,
+                branch: workflow_run.head_branch ?? "main",
+                repoFullName: repository.full_name,
+                installationId: installation.id,
+                errors: storedErrors.map((e) => ({
+                  id: e.id,
+                  source: e.source ?? undefined,
+                  signatureId: e.signatureId ?? undefined,
+                  fixable: e.fixable ?? false,
+                })),
+                orgSettings,
+              });
+
+              if (result.healsCreated > 0) {
+                console.log(
+                  `[workflow_run] Orchestrated ${result.healsCreated} heals for ${repository.full_name}#${prNumber}`
+                );
+              }
+            } finally {
+              await client.end();
+            }
+          } catch (error) {
+            // Non-fatal: Don't fail the webhook if heal orchestration fails
+            console.error("[workflow_run] Heal orchestration error:", error);
+          }
+        })()
+      );
+    }
 
     // Finalize: update check run and post PR comment (if failures)
     const { totalErrors } = await finalizeAndPostResults(
@@ -1166,23 +923,19 @@ export const handleWorkflowRunCompleted = async (
         checkRunId: finalCheckRunId,
         workflowRuns,
         allErrors,
-        detectedUnsupportedTools,
+        detectedUnsupportedTools: [],
         enableInlineAnnotations: orgSettings.enableInlineAnnotations,
         enablePrComments: orgSettings.enablePrComments,
         ciRelevantRunCount: evaluation.ciRelevantRuns.length,
       }
     );
 
-    // Release lock after successful processing (allows future re-runs to acquire)
+    // Release lock after successful processing
     await releaseCommitLock(
       c.env["detent-idempotency"],
       repository.full_name,
       headSha
     );
-
-    const failedRunCount = runsToProcess.filter(
-      (r) => r.conclusion === "failure"
-    ).length;
 
     return c.json({
       message: "workflow_run processed",
@@ -1222,19 +975,14 @@ export const handleWorkflowRunCompleted = async (
     );
 
     const classified = classifyError(error);
-    captureWebhookError(
-      error,
-      classified.code,
-      {
-        eventType: "workflow_run",
-        deliveryId,
-        repository: repository.full_name,
-        installationId: installation.id,
-        workflowName: workflow_run.name,
-        runId: workflow_run.id,
-      },
-      parserContext
-    );
+    captureWebhookError(error, classified.code, {
+      eventType: "workflow_run",
+      deliveryId,
+      repository: repository.full_name,
+      installationId: installation.id,
+      workflowName: workflow_run.name,
+      runId: workflow_run.id,
+    });
     return c.json(
       {
         message: "workflow_run error",

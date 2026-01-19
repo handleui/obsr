@@ -1,7 +1,45 @@
 import type { createDb } from "../../db/client";
-import type { ParsedError } from "../error-parser";
 
 export type DbClient = Awaited<ReturnType<typeof createDb>>["db"];
+
+export interface ParsedError {
+  filePath?: string;
+  line?: number;
+  column?: number;
+  message: string;
+  category?: string;
+  severity?: string;
+  ruleId?: string;
+  source?: string;
+  stackTrace?: string;
+  hint?: string;
+  workflowJob?: string;
+  workflowStep?: string;
+  workflowAction?: string;
+  /** True if matched by generic fallback parser */
+  unknownPattern?: boolean;
+  /** True if error may be test output noise (vitest/jest progress, etc.) */
+  possiblyTestOutput?: boolean;
+  /** Full suggestions array from parser */
+  suggestions?: string[];
+  /** Code snippet with surrounding context */
+  codeSnippet?: {
+    lines: string[];
+    startLine: number;
+    errorLine: number;
+    language: string;
+  };
+  /** Confidence flags */
+  lineKnown?: boolean;
+  columnKnown?: boolean;
+  messageTruncated?: boolean;
+  stackTraceTruncated?: boolean;
+  /** Infrastructure error context */
+  exitCode?: number;
+  isInfrastructure?: boolean;
+  /** True if error can be auto-fixed by the tool */
+  fixable?: boolean;
+}
 
 export interface PreparedRunData {
   runRecordId: string;

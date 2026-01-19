@@ -10,7 +10,6 @@
 import { extname } from "node:path";
 import type { CodeSnippet, ExtractedError } from "@detent/types";
 import { fetchFileContents } from "./github/file-content";
-import type { FileEnrichmentContext } from "./parse/types";
 
 // ============================================================================
 // Constants
@@ -47,13 +46,22 @@ export interface EnrichmentStats {
 }
 
 /**
- * Context required for file enrichment.
- * Re-exported from parse/types for convenience.
+ * Context required for file enrichment from GitHub.
  */
-export type { FileEnrichmentContext as EnrichmentContext } from "./parse/types";
+export interface FileEnrichmentContext {
+  token: string;
+  owner: string;
+  repo: string;
+  commitSha: string;
+}
+
+/**
+ * Alias for FileEnrichmentContext for convenience.
+ */
+export type EnrichmentContext = FileEnrichmentContext;
 
 // ============================================================================
-// Sensitive File Patterns (copied from packages/parser/src/snippet.ts)
+// Sensitive File Patterns
 // ============================================================================
 
 const sensitiveFilePatterns = new Set([
@@ -156,7 +164,7 @@ const sensitivePathSegments = new Set([
 ]);
 
 // ============================================================================
-// Language Detection (copied from packages/parser/src/snippet.ts)
+// Language Detection
 // ============================================================================
 
 const extensionToLanguage: Readonly<Record<string, string>> = {

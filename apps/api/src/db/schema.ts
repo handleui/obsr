@@ -691,12 +691,16 @@ export const apiKeys = pgTable(
     organizationId: varchar("organization_id", { length: 36 })
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    key: text("key").notNull().unique(), // "dtk_" + 32 char random
+    keyHash: varchar("key_hash", { length: 64 }).notNull().unique(), // SHA-256 hash (64 hex chars)
+    keyPrefix: varchar("key_prefix", { length: 8 }).notNull(), // "dtk_XXXX" for identification
     name: varchar("name", { length: 255 }).notNull(), // e.g. "GitHub Actions"
     createdAt: timestamp("created_at").defaultNow().notNull(),
     lastUsedAt: timestamp("last_used_at"),
   },
-  (table) => [index("api_keys_org_idx").on(table.organizationId)]
+  (table) => [
+    index("api_keys_org_idx").on(table.organizationId),
+    index("api_keys_hash_idx").on(table.keyHash), // Fast hash lookups
+  ]
 );
 
 // ============================================================================

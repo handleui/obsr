@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { createDb } from "../db/client";
 import { apiKeys } from "../db/schema";
+import { generateApiKey, hashApiKey } from "../lib/crypto";
 import { encryptSecretForGitHub } from "../lib/github-crypto";
 import {
   githubOrgAccessMiddleware,
@@ -35,19 +36,6 @@ interface GitHubPublicKeyResponse {
 }
 
 const app = new Hono<{ Bindings: Env }>();
-
-/**
- * Generate a secure API key with "dtk_" prefix
- */
-const generateApiKey = (): string => {
-  const bytes = new Uint8Array(24);
-  crypto.getRandomValues(bytes);
-  const encoded = btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=/g, "");
-  return `dtk_${encoded}`;
-};
 
 /**
  * POST /:orgId/github-secrets
@@ -103,11 +91,14 @@ app.post(
       // Create a new API key for this injection
       const keyId = crypto.randomUUID();
       const apiKey = generateApiKey();
+      const keyHash = await hashApiKey(apiKey);
+      const keyPrefix = apiKey.substring(0, 8); // "dtk_XXXX"
 
       await db.insert(apiKeys).values({
         id: keyId,
         organizationId: organization.id,
-        key: apiKey,
+        keyHash,
+        keyPrefix,
         name: `GitHub Actions (${secretName})`,
       });
 
@@ -125,13 +116,28 @@ app.post(
       );
 
       if (!publicKeyResponse.ok) {
-        const error = await publicKeyResponse.text();
+        // Log full error for debugging but don't expose to client
+        const errorDetails = await publicKeyResponse.text();
+        console.error(
+          `[github-secrets] Failed to get public key: ${publicKeyResponse.status}`,
+          errorDetails
+        );
         // Clean up the API key we created
-        await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
+        try {
+          await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
+        } catch (deleteError) {
+          // CRITICAL: Orphaned API key - key exists in DB but no corresponding GitHub secret
+          console.error(
+            "[github-secrets] ORPHAN_KEY: Failed to delete API key after public key fetch failure. " +
+              `keyId=${keyId}, orgId=${organization.id}, org=${organization.providerAccountLogin}`,
+            deleteError
+          );
+        }
         return c.json(
           {
             error: "Failed to get GitHub public key",
-            details: error,
+            // Only expose status code, not raw error details
+            status: publicKeyResponse.status,
           },
           publicKeyResponse.status as 400 | 403 | 404 | 500
         );
@@ -173,13 +179,28 @@ app.post(
       );
 
       if (!createSecretResponse.ok) {
-        const error = await createSecretResponse.text();
+        // Log full error for debugging but don't expose to client
+        const errorDetails = await createSecretResponse.text();
+        console.error(
+          `[github-secrets] Failed to create secret: ${createSecretResponse.status}`,
+          errorDetails
+        );
         // Clean up the API key we created
-        await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
+        try {
+          await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
+        } catch (deleteError) {
+          // CRITICAL: Orphaned API key - key exists in DB but no corresponding GitHub secret
+          console.error(
+            "[github-secrets] ORPHAN_KEY: Failed to delete API key after secret creation failure. " +
+              `keyId=${keyId}, orgId=${organization.id}, org=${organization.providerAccountLogin}, secretName=${secretName}`,
+            deleteError
+          );
+        }
         return c.json(
           {
             error: "Failed to create GitHub secret",
-            details: error,
+            // Only expose status code, not raw error details
+            status: createSecretResponse.status,
           },
           createSecretResponse.status as 400 | 403 | 404 | 500
         );

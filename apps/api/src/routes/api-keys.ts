@@ -8,6 +8,7 @@ import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { createDb } from "../db/client";
 import { apiKeys } from "../db/schema";
+import { generateApiKey, hashApiKey } from "../lib/crypto";
 import {
   githubOrgAccessMiddleware,
   type OrgAccessContext,
@@ -16,21 +17,6 @@ import {
 import type { Env } from "../types/env";
 
 const app = new Hono<{ Bindings: Env }>();
-
-/**
- * Generate a secure API key with "dtk_" prefix
- * Uses 24 bytes (192 bits) of randomness, base64url encoded
- */
-const generateApiKey = (): string => {
-  const bytes = new Uint8Array(24);
-  crypto.getRandomValues(bytes);
-  // Base64url encode (URL-safe, no padding)
-  const encoded = btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=/g, "");
-  return `dtk_${encoded}`;
-};
 
 /**
  * POST /:orgId/api-keys
@@ -60,19 +46,23 @@ app.post(
     try {
       const keyId = crypto.randomUUID();
       const key = generateApiKey();
+      const keyHash = await hashApiKey(key);
+      const keyPrefix = key.substring(0, 8); // "dtk_XXXX"
 
       await db.insert(apiKeys).values({
         id: keyId,
         organizationId: organization.id,
-        key,
+        keyHash,
+        keyPrefix,
         name: name.trim(),
       });
 
-      // Return the key only on creation - it won't be retrievable later
+      // Return the key only on creation - it cannot be retrieved later
       return c.json(
         {
           id: keyId,
-          key, // Only returned on creation
+          key, // Full key returned ONLY on creation
+          key_prefix: keyPrefix,
           name: name.trim(),
           created_at: new Date().toISOString(),
         },
@@ -101,6 +91,7 @@ app.get(
       const keys = await db
         .select({
           id: apiKeys.id,
+          keyPrefix: apiKeys.keyPrefix,
           name: apiKeys.name,
           createdAt: apiKeys.createdAt,
           lastUsedAt: apiKeys.lastUsedAt,
@@ -111,6 +102,7 @@ app.get(
       return c.json({
         api_keys: keys.map((k) => ({
           id: k.id,
+          key_prefix: k.keyPrefix,
           name: k.name,
           created_at: k.createdAt.toISOString(),
           last_used_at: k.lastUsedAt?.toISOString() ?? null,
@@ -131,25 +123,48 @@ app.delete(
   githubOrgAccessMiddleware,
   requireRole("owner", "admin"),
   async (c) => {
+    const { validateUUID } = await import("../lib/validation");
+    const { invalidateApiKeyCache } = await import(
+      "../middleware/api-key-auth"
+    );
+
     const orgAccess = c.get("orgAccess") as OrgAccessContext;
     const { organization } = orgAccess;
     const keyId = c.req.param("keyId");
+    const kv = c.env["detent-idempotency"];
+
+    // Validate keyId format to prevent injection attacks
+    const validation = validateUUID(keyId, "keyId");
+    if (!validation.valid) {
+      return c.json({ error: validation.error }, 400);
+    }
 
     const { db, client } = await createDb(c.env);
     try {
-      const result = await db
+      // First get the key hash for cache invalidation
+      const existing = await db.query.apiKeys.findFirst({
+        where: and(
+          eq(apiKeys.id, keyId),
+          eq(apiKeys.organizationId, organization.id)
+        ),
+        columns: { keyHash: true },
+      });
+
+      if (!existing) {
+        return c.json({ error: "API key not found" }, 404);
+      }
+
+      await db
         .delete(apiKeys)
         .where(
           and(
             eq(apiKeys.id, keyId),
             eq(apiKeys.organizationId, organization.id)
           )
-        )
-        .returning({ id: apiKeys.id });
+        );
 
-      if (result.length === 0) {
-        return c.json({ error: "API key not found" }, 404);
-      }
+      // Invalidate the cache in background (uses hash-based key)
+      c.executionCtx.waitUntil(invalidateApiKeyCache(existing.keyHash, kv));
 
       return c.json({ success: true, deleted_id: keyId });
     } finally {

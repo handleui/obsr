@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { ExtractedError } from "@detent/parser";
+import type { ExtractedError } from "@detent/types";
 
 import type { PreflightResult, StaleError, ValidationReason } from "./types.js";
 

@@ -26,6 +26,37 @@ import type { Env } from "../types/env";
 // GitHub secret names must be uppercase with underscores only, starting with a letter
 const SECRET_NAME_PATTERN = /^[A-Z][A-Z0-9_]*$/;
 
+/**
+ * Classify error for HTTP response.
+ * Returns appropriate status code and client-safe message.
+ */
+const classifySecretCreationError = (
+  error: unknown
+): { statusCode: 500 | 502 | 503; message: string } => {
+  const errorMessage = error instanceof Error ? error.message : "";
+
+  if (
+    errorMessage.includes("GitHub API") ||
+    errorMessage.includes("api.github.com")
+  ) {
+    return { statusCode: 502, message: "GitHub API request failed" };
+  }
+
+  if (
+    errorMessage.includes("rate limit") ||
+    errorMessage.includes("timeout") ||
+    errorMessage.includes("ETIMEDOUT") ||
+    errorMessage.includes("ECONNRESET")
+  ) {
+    return {
+      statusCode: 503,
+      message: "Service temporarily unavailable, please retry",
+    };
+  }
+
+  return { statusCode: 500, message: "Failed to create GitHub secret" };
+};
+
 interface InjectSecretRequest {
   secret_name?: string; // Default: "DETENT_TOKEN"
   visibility?: "all" | "private" | "selected";
@@ -150,14 +181,9 @@ app.post(
         `[github-secrets] Failed to inject secret: ${fullErrorMessage}`
       );
 
-      // Return sanitized error message to client to prevent information leakage
-      // Don't expose GitHub API response details or internal error info
-      return c.json(
-        {
-          error: "Failed to create GitHub secret",
-        },
-        500
-      );
+      // Classify error for appropriate HTTP status code
+      const { statusCode, message } = classifySecretCreationError(error);
+      return c.json({ error: message }, statusCode);
     } finally {
       await client.end();
     }

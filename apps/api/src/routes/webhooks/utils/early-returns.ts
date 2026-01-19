@@ -216,7 +216,7 @@ export const attemptCheckRunCleanup = async (
     );
 
     // If we have both original and cleanup errors, create an aggregated error
-    // for potential upstream error tracking (e.g., Sentry)
+    // and capture in Sentry for searchability
     if (originalError && cleanupErrors.length > 0) {
       const aggregated = new AggregatedCleanupError(
         `Cleanup failed after original error (delivery: ${deliveryId})`,
@@ -228,6 +228,16 @@ export const attemptCheckRunCleanup = async (
         message: aggregated.message,
         originalError: serializeError(aggregated.originalError),
         cleanupErrors: aggregated.cleanupErrors.map(serializeError),
+      });
+
+      // Capture in Sentry with full context for debugging
+      captureWebhookError(aggregated, ERROR_CODES.CLEANUP_AGGREGATED, {
+        eventType: "workflow_run.cleanup_aggregated",
+        deliveryId,
+        checkRunId,
+        repository: `${owner}/${repo}`,
+        installationId,
+        cleanupErrorCount: cleanupErrors.length,
       });
     }
   }

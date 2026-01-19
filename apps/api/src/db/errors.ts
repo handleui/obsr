@@ -237,8 +237,11 @@ const TRANSIENT_ERROR_MESSAGES: Record<
 // Error Detection Patterns
 // ============================================================================
 
-/** Detect transient errors from error messages when code is unavailable */
-const TRANSIENT_MESSAGE_PATTERNS = [
+/**
+ * Detect transient errors from error messages when code is unavailable.
+ * Exported for reuse in other error classification contexts (e.g., autofix orchestrator).
+ */
+export const TRANSIENT_MESSAGE_PATTERNS = [
   /connection.*(?:refused|reset|closed|timeout|timed out)/i,
   /ECONNREFUSED/,
   /ETIMEDOUT/,

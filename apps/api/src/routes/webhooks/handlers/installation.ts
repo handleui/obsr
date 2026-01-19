@@ -1,18 +1,13 @@
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { createDb } from "../../../db/client";
 import {
-  apiKeys,
   createProviderSlug,
   organizationMembers,
   organizations,
   projects,
 } from "../../../db/schema";
-import { generateApiKey, hashApiKey } from "../../../lib/crypto";
 import { verifyGitHubMembership } from "../../../lib/github-membership";
-import {
-  createOrgSecret,
-  createRepoSecretsBatched,
-} from "../../../lib/github-secrets-helper";
+import { createTokenSecretWithCleanup } from "../../../lib/github-secrets-helper";
 import { captureWebhookError } from "../../../lib/sentry";
 import { createGitHubService } from "../../../services/github";
 import { classifyError } from "../../../services/webhooks/error-classifier";
@@ -119,9 +114,7 @@ interface AutoCreateSecretParams {
  * - For organizations: creates org-level secret (accessible to all repos)
  * - For personal accounts: creates repo-level secret for each repository
  *
- * Note: This operation is idempotent at the GitHub level (PUT creates or updates),
- * but we create a new API key each time. For duplicate webhook deliveries,
- * use delivery ID deduplication at the caller level.
+ * Uses shared helper for API key lifecycle management.
  */
 const autoCreateSecret = async ({
   db,
@@ -132,82 +125,33 @@ const autoCreateSecret = async ({
   repositories,
   env,
 }: AutoCreateSecretParams): Promise<void> => {
-  // Generate a new API key for this installation
-  const keyId = crypto.randomUUID();
-  const apiKey = generateApiKey();
-  const keyHash = await hashApiKey(apiKey);
-  const keyPrefix = apiKey.substring(0, 8);
+  const github = createGitHubService(env);
+  const token = await github.getInstallationToken(Number(installationId));
 
-  await db.insert(apiKeys).values({
-    id: keyId,
+  const result = await createTokenSecretWithCleanup({
+    db,
     organizationId,
-    keyHash,
-    keyPrefix,
-    name: "GitHub Actions (auto)",
+    providerAccountLogin,
+    providerAccountType,
+    token,
+    repositories,
+    keyName: "GitHub Actions (auto)",
   });
 
-  // Track whether any secrets were created to avoid deleting keys with active secrets
-  let secretsCreated = false;
-
-  try {
-    // Get installation token to authenticate with GitHub API
-    const github = createGitHubService(env);
-    const token = await github.getInstallationToken(Number(installationId));
-
-    if (providerAccountType === "organization") {
-      // Organization: single org-level secret covers all repos
-      await createOrgSecret(providerAccountLogin, apiKey, token);
-      secretsCreated = true;
-      console.log(
-        `[installation] Created org secret DETENT_TOKEN for ${providerAccountLogin}`
-      );
-    } else {
-      // Personal account: must create repo-level secret for each repo
-      // Uses batched execution with concurrency limits to avoid GitHub rate limits
-      const results = await createRepoSecretsBatched(
-        repositories,
-        apiKey,
-        token
-      );
-
-      secretsCreated = results.succeeded > 0;
-
-      if (results.failed > 0) {
-        console.error(
-          `[installation] Failed to create ${results.failed}/${repositories.length} repo secrets for ${providerAccountLogin}:`,
-          results.errors
-        );
-      }
-
-      // If ALL repos failed, clean up the orphaned API key
-      if (results.succeeded === 0 && repositories.length > 0) {
-        await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
-        throw new Error(
-          `All ${repositories.length} repo secret creations failed for ${providerAccountLogin}`
-        );
-      }
-
-      console.log(
-        `[installation] Created repo secrets DETENT_TOKEN for ${results.succeeded}/${repositories.length} repos in ${providerAccountLogin}`
+  if (providerAccountType === "organization") {
+    console.log(
+      `[installation] Created org secret DETENT_TOKEN for ${providerAccountLogin}`
+    );
+  } else {
+    if (result.batchResult?.failed) {
+      console.error(
+        `[installation] Failed to create ${result.batchResult.failed}/${repositories.length} repo secrets for ${providerAccountLogin}:`,
+        result.batchResult.errors
       );
     }
-  } catch (error) {
-    // Only clean up API key if no secrets were created
-    // If partial success occurred, keep the key so existing secrets remain valid
-    if (!secretsCreated) {
-      try {
-        await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
-        console.log(
-          `[installation] Cleaned up orphaned API key ${keyId} after secret creation failure`
-        );
-      } catch (deleteError) {
-        console.error(
-          `[installation] ORPHAN_KEY: Failed to delete API key ${keyId} for org ${organizationId}:`,
-          deleteError
-        );
-      }
-    }
-    throw error;
+    console.log(
+      `[installation] Created repo secrets DETENT_TOKEN for ${result.batchResult?.succeeded ?? 0}/${repositories.length} repos in ${providerAccountLogin}`
+    );
   }
 };
 

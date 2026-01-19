@@ -347,10 +347,19 @@ const classifyError = (
 
 /**
  * Sanitizes error messages to remove potential API keys or sensitive data.
- * Patterns checked:
- * - API keys (sk-ant-*, x-api-key, Bearer tokens)
- * - GitHub tokens (ghp_*, gho_*, ghu_*, ghs_*, ghr_*)
- * - Generic secrets (long hex/base64 strings in key contexts)
+ *
+ * NOTE: This is the canonical credential sanitization function for the healing package.
+ * If adding new credential patterns, consider if similar logic is needed in:
+ * - Sentry error reporting (apps/api/src/lib/sentry.ts)
+ * - GitHub secrets helper (apps/api/src/lib/github-secrets-helper.ts)
+ *
+ * Patterns covered:
+ * - Anthropic API keys (sk-ant-*)
+ * - OpenAI API keys (sk-*)
+ * - GitHub tokens (ghp_*, gho_*, ghu_*, ghs_*, ghr_*, github_pat_*)
+ * - Detent tokens (dtk_*)
+ * - Bearer tokens
+ * - Generic secrets in key/token/secret/password contexts
  */
 const sanitizeErrorMessage = (message: string): string => {
   // Anthropic API key patterns
@@ -358,6 +367,9 @@ const sanitizeErrorMessage = (message: string): string => {
     /sk-ant-[a-zA-Z0-9_-]{20,}/gi,
     "[REDACTED_API_KEY]"
   );
+
+  // OpenAI API key patterns
+  sanitized = sanitized.replace(/sk-[a-zA-Z0-9]{20,}/gi, "[REDACTED_API_KEY]");
 
   // Generic Bearer tokens
   sanitized = sanitized.replace(
@@ -375,6 +387,12 @@ const sanitizeErrorMessage = (message: string): string => {
   sanitized = sanitized.replace(
     /github_pat_[a-zA-Z0-9_]{20,}/gi,
     "[REDACTED_GITHUB_PAT]"
+  );
+
+  // Detent tokens
+  sanitized = sanitized.replace(
+    /dtk_[a-zA-Z0-9_-]{20,}/gi,
+    "[REDACTED_DETENT_TOKEN]"
   );
 
   // x-api-key header values

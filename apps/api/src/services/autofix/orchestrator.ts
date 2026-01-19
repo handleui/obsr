@@ -1,6 +1,7 @@
 import type { KVNamespace } from "@cloudflare/workers-types";
 import { and, eq } from "drizzle-orm";
 import { createDb } from "../../db/client";
+import { TRANSIENT_MESSAGE_PATTERNS as DB_TRANSIENT_PATTERNS } from "../../db/errors";
 import { createHeal, updateHealStatus } from "../../db/operations/heals";
 import { heals, type OrganizationSettings } from "../../db/schema";
 import type { Env } from "../../types/env";
@@ -59,8 +60,11 @@ interface OrchestrationResult {
  * - 404: not_found_error
  * - 413: request_too_large
  * - billing_error
+ *
+ * NOTE: Connection/database patterns are shared with TRANSIENT_MESSAGE_PATTERNS
+ * in db/errors.ts for consistency. API-specific patterns are defined here.
  */
-const RETRYABLE_ERROR_PATTERNS = [
+const API_RETRYABLE_PATTERNS = [
   // Rate limiting
   /rate.?limit/i,
   /too.?many.?requests/i,
@@ -78,27 +82,20 @@ const RETRYABLE_ERROR_PATTERNS = [
   /bad.?gateway/i,
   /service.?unavailable/i,
   /temporarily.?unavailable/i,
-  // Timeouts
+  // Timeouts (also in DB patterns but included for API completeness)
   /timeout/i,
   /timed.?out/i,
-  /etimedout/i,
-  // Connection errors
-  /connection.?refused/i,
-  /econnreset/i,
-  /econnrefused/i,
-  /socket.?hang.?up/i,
   /network.?error/i,
-  /connection.?closed/i,
-  /connection.?terminated/i,
 ];
 
 const classifyError = (
   error: unknown
 ): { message: string; retryable: boolean } => {
   const message = error instanceof Error ? error.message : String(error);
-  const retryable = RETRYABLE_ERROR_PATTERNS.some((pattern) =>
-    pattern.test(message)
-  );
+  // Check both API-specific and shared database transient patterns
+  const retryable =
+    API_RETRYABLE_PATTERNS.some((pattern) => pattern.test(message)) ||
+    DB_TRANSIENT_PATTERNS.some((pattern) => pattern.test(message));
   return { message, retryable };
 };
 

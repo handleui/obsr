@@ -76,6 +76,9 @@ export const ERROR_CODES = {
   // Background task errors
   BACKGROUND_TASK: "WEBHOOK_BACKGROUND_TASK_FAILED",
 
+  // Cleanup errors
+  CLEANUP_AGGREGATED: "WEBHOOK_CLEANUP_AGGREGATED",
+
   // Generic errors
   UNKNOWN: "WEBHOOK_UNKNOWN_ERROR",
 } as const;

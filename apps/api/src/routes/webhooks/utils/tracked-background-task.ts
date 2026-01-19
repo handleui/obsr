@@ -30,8 +30,6 @@ export interface TrackedTask {
   task: Promise<unknown>;
   /** Context for error reporting */
   context: BackgroundTaskContext;
-  /** Whether this task failure is critical (affects user experience) */
-  critical?: boolean;
 }
 
 /**

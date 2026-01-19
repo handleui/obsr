@@ -154,6 +154,12 @@ const sleep = (ms: number): Promise<void> =>
 
 /**
  * Calculate retry delay with exponential backoff and jitter
+ *
+ * NOTE: Uses Math.random() for jitter which makes tests non-deterministic.
+ * This is an acceptable trade-off because:
+ * 1. Jitter is only used for rate limit avoidance (non-critical timing)
+ * 2. The retry logic is well-tested via integration tests
+ * 3. Injecting a random source adds complexity for minimal benefit
  */
 const getRetryDelay = (attempt: number): number => {
   const baseDelay = INITIAL_RETRY_DELAY_MS * 2 ** attempt;
@@ -635,6 +641,115 @@ export const createRepoSecretsBatched = async (
   }
 
   return results;
+};
+
+/**
+ * Result of creating a DETENT_TOKEN with API key management
+ */
+export interface CreateTokenSecretResult {
+  /** API key ID stored in database */
+  keyId: string;
+  /** Whether any secrets were successfully created */
+  secretsCreated: boolean;
+  /** Batch results for repo-level secrets (undefined for org-level) */
+  batchResult?: BatchSecretResult;
+}
+
+// Import DbClient type for proper typing
+import type { DbClient } from "../services/webhooks/types";
+
+/**
+ * Create DETENT_TOKEN secrets with API key lifecycle management.
+ *
+ * This is the canonical helper for creating GitHub secrets with proper cleanup:
+ * - Generates and stores API key in database
+ * - Creates org-level or repo-level secrets based on account type
+ * - Cleans up orphaned API keys if ALL secret creations fail
+ * - Preserves API key on partial success (some secrets created)
+ *
+ * Used by both installation handlers and the manual injection endpoint.
+ */
+export const createTokenSecretWithCleanup = async ({
+  db,
+  organizationId,
+  providerAccountLogin,
+  providerAccountType,
+  token,
+  repositories,
+  keyName,
+}: {
+  /** Drizzle database client */
+  db: DbClient;
+  /** Detent organization ID */
+  organizationId: string;
+  /** GitHub account login (username or org name) */
+  providerAccountLogin: string;
+  /** Account type determines org-level vs repo-level secrets */
+  providerAccountType: "organization" | "user";
+  /** GitHub installation token */
+  token: string;
+  /** Repositories for repo-level secrets (required for user accounts) */
+  repositories: Array<{ full_name: string }>;
+  /** Name for the API key record */
+  keyName: string;
+}): Promise<CreateTokenSecretResult> => {
+  // Import crypto functions here to avoid circular dependencies
+  const { generateApiKey, hashApiKey } = await import("./crypto");
+  const { apiKeys } = await import("../db/schema");
+  const { eq } = await import("drizzle-orm");
+
+  const keyId = crypto.randomUUID();
+  const apiKey = generateApiKey();
+  const keyHash = await hashApiKey(apiKey);
+  const keyPrefix = apiKey.substring(0, 8);
+
+  await db.insert(apiKeys).values({
+    id: keyId,
+    organizationId,
+    keyHash,
+    keyPrefix,
+    name: keyName,
+  });
+
+  let secretsCreated = false;
+  let batchResult: BatchSecretResult | undefined;
+
+  try {
+    if (providerAccountType === "organization") {
+      // Organization: single org-level secret covers all repos
+      await createOrgSecret(providerAccountLogin, apiKey, token);
+      secretsCreated = true;
+    } else {
+      // Personal account: must create repo-level secret for each repo
+      batchResult = await createRepoSecretsBatched(repositories, apiKey, token);
+      secretsCreated = batchResult.succeeded > 0;
+
+      // If ALL repos failed, clean up the orphaned API key
+      if (batchResult.succeeded === 0 && repositories.length > 0) {
+        await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
+        throw new Error(
+          `All ${repositories.length} repo secret creations failed for ${providerAccountLogin}`
+        );
+      }
+    }
+
+    return { keyId, secretsCreated, batchResult };
+  } catch (error) {
+    // Only clean up API key if no secrets were created
+    if (!secretsCreated) {
+      try {
+        const { eq } = await import("drizzle-orm");
+        const { apiKeys } = await import("../db/schema");
+        await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
+      } catch (deleteError) {
+        console.error(
+          `[github-secrets] ORPHAN_KEY: Failed to delete API key ${keyId} for org ${organizationId}:`,
+          deleteError
+        );
+      }
+    }
+    throw error;
+  }
 };
 
 // Export sanitizeErrorMessage for use in handlers

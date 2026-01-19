@@ -76,6 +76,10 @@ export interface WebhookErrorContext {
   prNumber?: number;
   workflowName?: string;
   runId?: number;
+  /** Check run ID for cleanup error context */
+  checkRunId?: number;
+  /** Number of cleanup errors in aggregated error */
+  cleanupErrorCount?: number;
 }
 
 export interface LockConflictContext {

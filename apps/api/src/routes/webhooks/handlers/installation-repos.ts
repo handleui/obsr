@@ -1,8 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { createDb } from "../../../db/client";
-import { apiKeys, organizations, projects } from "../../../db/schema";
-import { generateApiKey, hashApiKey } from "../../../lib/crypto";
-import { createRepoSecretsBatched } from "../../../lib/github-secrets-helper";
+import { organizations, projects } from "../../../db/schema";
+import { createTokenSecretWithCleanup } from "../../../lib/github-secrets-helper";
 import { captureWebhookError } from "../../../lib/sentry";
 import { createGitHubService } from "../../../services/github";
 import { classifyError } from "../../../services/webhooks/error-classifier";
@@ -15,7 +14,7 @@ import { createTrackedWaitUntil } from "../utils/tracked-background-task";
  * Auto-create DETENT_TOKEN secrets for newly added repos (personal accounts only)
  * Creates a new API key and repo secrets for the added repositories
  *
- * Note: Cleans up API key if all secret creations fail to prevent orphaned keys.
+ * Uses shared helper for API key lifecycle management.
  */
 const autoCreateSecretsForNewRepos = async (
   db: DbClient,
@@ -25,69 +24,29 @@ const autoCreateSecretsForNewRepos = async (
   repositories: Array<{ full_name: string }>,
   env: Env
 ): Promise<void> => {
-  // Generate a new API key for these repos
-  const keyId = crypto.randomUUID();
-  const apiKey = generateApiKey();
-  const keyHash = await hashApiKey(apiKey);
-  const keyPrefix = apiKey.substring(0, 8);
+  const github = createGitHubService(env);
+  const token = await github.getInstallationToken(Number(installationId));
 
-  await db.insert(apiKeys).values({
-    id: keyId,
+  const result = await createTokenSecretWithCleanup({
+    db,
     organizationId,
-    keyHash,
-    keyPrefix,
-    name: `GitHub Actions (auto - ${repositories.length} repos)`,
+    providerAccountLogin,
+    providerAccountType: "user",
+    token,
+    repositories,
+    keyName: `GitHub Actions (auto - ${repositories.length} repos)`,
   });
 
-  // Track whether any secrets were created to avoid deleting keys with active secrets
-  let secretsCreated = false;
-
-  try {
-    // Get installation token to authenticate with GitHub API
-    const github = createGitHubService(env);
-    const token = await github.getInstallationToken(Number(installationId));
-
-    // Create repo secrets with batched execution and concurrency control
-    const results = await createRepoSecretsBatched(repositories, apiKey, token);
-
-    secretsCreated = results.succeeded > 0;
-
-    if (results.failed > 0) {
-      console.error(
-        `[installation_repositories] Failed to create ${results.failed}/${repositories.length} repo secrets for ${providerAccountLogin}:`,
-        results.errors
-      );
-    }
-
-    // If ALL repos failed, clean up the orphaned API key
-    if (results.succeeded === 0 && repositories.length > 0) {
-      await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
-      throw new Error(
-        `All ${repositories.length} repo secret creations failed for ${providerAccountLogin}`
-      );
-    }
-
-    console.log(
-      `[installation_repositories] Created repo secrets DETENT_TOKEN for ${results.succeeded}/${repositories.length} new repos in ${providerAccountLogin}`
+  if (result.batchResult?.failed) {
+    console.error(
+      `[installation_repositories] Failed to create ${result.batchResult.failed}/${repositories.length} repo secrets for ${providerAccountLogin}:`,
+      result.batchResult.errors
     );
-  } catch (error) {
-    // Only clean up API key if no secrets were created
-    // If partial success occurred, keep the key so existing secrets remain valid
-    if (!secretsCreated) {
-      try {
-        await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
-        console.log(
-          `[installation_repositories] Cleaned up orphaned API key ${keyId} after secret creation failure`
-        );
-      } catch (deleteError) {
-        console.error(
-          `[installation_repositories] ORPHAN_KEY: Failed to delete API key ${keyId} for org ${organizationId}:`,
-          deleteError
-        );
-      }
-    }
-    throw error;
   }
+
+  console.log(
+    `[installation_repositories] Created repo secrets DETENT_TOKEN for ${result.batchResult?.succeeded ?? 0}/${repositories.length} new repos in ${providerAccountLogin}`
+  );
 };
 
 // Handle installation_repositories events (repos added/removed from installation)

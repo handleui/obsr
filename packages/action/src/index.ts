@@ -17,6 +17,7 @@ const PARSERS = {
   vitest: parseVitest,
   golangci: parseGolangci,
   cargo: parseCargo,
+  typescript: parseTypeScript,
 } as const;
 
 /**

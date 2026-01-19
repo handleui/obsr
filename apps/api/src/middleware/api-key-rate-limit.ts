@@ -14,7 +14,10 @@ import { Redis } from "@upstash/redis";
 import type { Context, Next } from "hono";
 import type { Env } from "../types/env";
 
-// Ephemeral cache to reduce Redis calls (persists across invocations)
+// Ephemeral cache to reduce Redis calls
+// Note: Module-level state persists within a Cloudflare Workers isolate but not
+// across isolates. Different requests may hit different isolates with different
+// cache states. This is acceptable for ephemeral caching purposes.
 const cache = new Map<string, number>();
 
 // Cache Ratelimit instances per environment (keyed by Redis URL)

@@ -60,6 +60,11 @@
         ]
       },
       {
+        "group": "Action",
+        "icon": "github",
+        "pages": ["action/index"]
+      },
+      {
         "group": "Self-Hosting",
         "icon": "server",
         "pages": [

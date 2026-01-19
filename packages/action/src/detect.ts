@@ -9,7 +9,8 @@ export interface DetectedOutput {
 const OUTPUT_PATTERNS: Record<string, string[]> = {
   eslint: ["eslint-report.json", "eslint.json"],
   vitest: ["vitest.json", "test-results.json"],
-  "golangci-lint": ["golangci-lint.json", "lint-report.json"],
+  golangci: ["golangci-lint.json", "lint-report.json"],
+  typescript: ["tsc-output.txt", "typescript-errors.txt"],
 };
 
 /** Common output directories to check in addition to current directory */

@@ -598,45 +598,47 @@ app.post("/", async (c) => {
     const hasFailure = payload.steps.some((s) => s.conclusion === "failure");
     const conclusion = hasFailure ? "failure" : "success";
 
-    // Use RETURNING to get the ID in a single query instead of separate upsert + find
-    const [upsertedRun] = await db
-      .insert(runs)
-      .values({
-        id: runRecordId,
-        projectId: project.id,
-        provider: "github",
-        source: "job-report",
-        runId: runIdStr,
-        repository: payload.repository,
-        commitSha: payload.commitSha,
-        headBranch: payload.headBranch,
-        workflowName: payload.workflowName,
-        runAttempt: payload.runAttempt,
-        errorCount: payload.errors.length,
-        conclusion,
-      })
-      .onConflictDoUpdate({
-        target: [runs.repository, runs.runId, runs.runAttempt],
-        set: {
+    const result = await db.transaction(async (tx) => {
+      const [upsertedRun] = await tx
+        .insert(runs)
+        .values({
+          id: runRecordId,
+          projectId: project.id,
+          provider: "github",
+          source: "job-report",
+          runId: runIdStr,
+          repository: payload.repository,
+          commitSha: payload.commitSha,
+          headBranch: payload.headBranch,
+          workflowName: payload.workflowName,
+          runAttempt: payload.runAttempt,
           errorCount: payload.errors.length,
           conclusion,
-        },
-      })
-      .returning({ id: runs.id });
+        })
+        .onConflictDoUpdate({
+          target: [runs.repository, runs.runId, runs.runAttempt],
+          set: {
+            errorCount: payload.errors.length,
+            conclusion,
+          },
+        })
+        .returning({ id: runs.id });
 
-    const finalRunId = upsertedRun?.id ?? runRecordId;
+      if (!upsertedRun?.id) {
+        throw new Error("Failed to upsert run");
+      }
 
-    if (payload.errors.length > 0) {
-      const errorRows = payload.errors.map((error) =>
-        toErrorRow(error, finalRunId, payload.workflowJob)
-      );
-      await db.insert(runErrors).values(errorRows);
-    }
+      if (payload.errors.length > 0) {
+        const errorRows = payload.errors.map((error) =>
+          toErrorRow(error, upsertedRun.id, payload.workflowJob)
+        );
+        await tx.insert(runErrors).values(errorRows);
+      }
 
-    return c.json({
-      stored: payload.errors.length,
-      runId: finalRunId,
+      return { stored: payload.errors.length, runId: upsertedRun.id };
     });
+
+    return c.json(result);
   } finally {
     await client.end();
   }

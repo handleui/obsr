@@ -21,6 +21,7 @@ import { eq } from "drizzle-orm";
 import type { Context, Next } from "hono";
 import { createDb } from "../db/client";
 import { apiKeys } from "../db/schema";
+import { hashApiKey } from "../lib/crypto";
 import type { Env } from "../types/env";
 
 interface ApiKeyAuthContext {
@@ -103,8 +104,6 @@ export const apiKeyAuthMiddleware = async (
   c: Context<{ Bindings: Env }>,
   next: Next
 ): Promise<Response | undefined> => {
-  const { hashApiKey } = await import("../lib/crypto");
-
   const token = c.req.header("X-Detent-Token");
 
   // Validate token presence - use generic error to avoid info leakage

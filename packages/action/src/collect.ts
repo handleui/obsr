@@ -35,7 +35,7 @@ export interface ReportPayload {
       lines: string[];
       startLine: number;
       /** 1-indexed position of the error line within the snippet (not the actual source line number) */
-      errorLineOffset: number;
+      errorLine: number;
       language: string;
     };
   }>;

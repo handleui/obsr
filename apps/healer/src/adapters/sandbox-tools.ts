@@ -451,13 +451,23 @@ export const createSandboxGlobTool = (sandbox: Sandbox): Tool => ({
       return patternError;
     }
 
+    // SECURITY: Block patterns with potentially dangerous characters
+    if (hasBlockedBytes(pattern)) {
+      return errorResult("pattern contains invalid characters");
+    }
+
     const searchPathOrError = getSearchPath(ctx, searchDir);
     if (typeof searchPathOrError !== "string") {
       return searchPathOrError;
     }
 
     try {
-      const findCmd = `find ${searchPathOrError} -type f -name "${pattern.replace(/\*\*/g, "*")}" 2>/dev/null | head -${MAX_GLOB_RESULTS + 1}`;
+      // SECURITY: Use single quotes and escape embedded single quotes to prevent command injection
+      // Double quotes allow command substitution via $() and backticks
+      const escapedPattern = pattern
+        .replace(/\*\*/g, "*")
+        .replace(/'/g, "'\\''");
+      const findCmd = `find ${searchPathOrError} -type f -name '${escapedPattern}' 2>/dev/null | head -${MAX_GLOB_RESULTS + 1}`;
       const result = await sandbox.commands.run(findCmd, {
         cwd: searchPathOrError,
         timeoutMs: 30_000,
@@ -563,6 +573,11 @@ export const createSandboxGrepTool = (sandbox: Sandbox): Tool => ({
       return patternError;
     }
 
+    // SECURITY: Block patterns with null bytes or newlines that could bypass shell escaping
+    if (hasBlockedBytes(pattern)) {
+      return errorResult("pattern contains invalid characters");
+    }
+
     const searchPathOrError = getSearchPath(ctx, searchDir);
     if (typeof searchPathOrError !== "string") {
       return searchPathOrError;
@@ -574,6 +589,7 @@ export const createSandboxGrepTool = (sandbox: Sandbox): Tool => ({
     }
 
     try {
+      // SECURITY: Single-quote escaping prevents command substitution; hasBlockedBytes prevents newline bypass
       const escapedPattern = pattern.replace(/'/g, "'\\''");
       const grepCmd = `grep -rn ${includeArgOrError} -m ${MAX_GREP_MATCHES} -E '${escapedPattern}' ${searchPathOrError} 2>/dev/null | head -c ${MAX_GREP_OUTPUT}`;
 

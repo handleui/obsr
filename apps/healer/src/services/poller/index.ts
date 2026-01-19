@@ -54,13 +54,13 @@ type Database = NodePgDatabase<Record<string, never>>;
 
 interface PollerState {
   isRunning: boolean;
-  activeHeals: number;
+  activeHealIds: Set<string>;
   dbPool: Pool | null;
 }
 
 const state: PollerState = {
   isRunning: false,
-  activeHeals: 0,
+  activeHealIds: new Set(),
   dbPool: null,
 };
 
@@ -85,7 +85,7 @@ const createDatabase = (): Database => {
 };
 
 const fetchPendingHeals = async (db: Database): Promise<HealRow[]> => {
-  const limit = MAX_CONCURRENT_HEALS - state.activeHeals;
+  const limit = MAX_CONCURRENT_HEALS - state.activeHealIds.size;
   if (limit <= 0) {
     return [];
   }
@@ -348,16 +348,25 @@ const pollLoop = async (db: Database, appEnv: Env): Promise<void> => {
           break;
         }
 
-        state.activeHeals++;
+        // Skip if already being processed (prevents double-processing on fast polls)
+        if (state.activeHealIds.has(heal.id)) {
+          continue;
+        }
 
+        // Track the heal ID before starting (atomic add)
+        state.activeHealIds.add(heal.id);
+
+        // Process asynchronously with proper cleanup
         processHeal(db, heal, appEnv)
-          .finally(() => {
-            state.activeHeals--;
-          })
           .catch((err) => {
+            // Log unhandled errors from processHeal (shouldn't happen as it has its own try/catch)
             console.error(
               `[poller] Unhandled error in processHeal: ${err instanceof Error ? err.message : String(err)}`
             );
+          })
+          .finally(() => {
+            // Always remove from active set when done
+            state.activeHealIds.delete(heal.id);
           });
       }
     } catch (error) {
@@ -433,9 +442,9 @@ export const stopPoller = async (): Promise<void> => {
   console.log("[poller] Stopping...");
   state.isRunning = false;
 
-  while (state.activeHeals > 0) {
+  while (state.activeHealIds.size > 0) {
     console.log(
-      `[poller] Waiting for ${state.activeHeals} active heals to complete`
+      `[poller] Waiting for ${state.activeHealIds.size} active heals to complete`
     );
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }

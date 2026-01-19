@@ -563,10 +563,22 @@ app.post("/", async (c) => {
     const github = createGitHubService(c.env);
     const installationId = project.organization.providerInstallationId;
 
-    const [owner, repo] = project.providerRepoFullName.split("/");
-    if (!(owner && repo)) {
+    // Validate repo format is exactly "owner/repo" (no extra slashes)
+    const repoFullName = project.providerRepoFullName;
+    const slashIndex = repoFullName.indexOf("/");
+    if (
+      slashIndex === -1 ||
+      slashIndex === 0 ||
+      slashIndex === repoFullName.length - 1 ||
+      repoFullName.indexOf("/", slashIndex + 1) !== -1
+    ) {
+      console.error(
+        `[autofix-result] Invalid repository format: ${repoFullName}`
+      );
       return c.json({ error: "Invalid repository format" }, 500);
     }
+    const owner = repoFullName.slice(0, slashIndex);
+    const repo = repoFullName.slice(slashIndex + 1);
 
     // Build auto-commit context if installation is available
     const autoCommitCtx: AutoCommitContext | null = installationId

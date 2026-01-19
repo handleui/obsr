@@ -150,7 +150,12 @@ describe("orchestrateHeals", () => {
         })
       );
 
-      expect(result).toEqual({ healsCreated: 0, healIds: [], autofixes: [] });
+      expect(result).toEqual({
+        healsCreated: 0,
+        healIds: [],
+        autofixes: [],
+        partialFailures: [],
+      });
       expect(mockCreateHeal).not.toHaveBeenCalled();
     });
 
@@ -166,7 +171,12 @@ describe("orchestrateHeals", () => {
         })
       );
 
-      expect(result).toEqual({ healsCreated: 0, healIds: [], autofixes: [] });
+      expect(result).toEqual({
+        healsCreated: 0,
+        healIds: [],
+        autofixes: [],
+        partialFailures: [],
+      });
       expect(mockCreateHeal).not.toHaveBeenCalled();
     });
 
@@ -183,7 +193,12 @@ describe("orchestrateHeals", () => {
         })
       );
 
-      expect(result).toEqual({ healsCreated: 0, healIds: [], autofixes: [] });
+      expect(result).toEqual({
+        healsCreated: 0,
+        healIds: [],
+        autofixes: [],
+        partialFailures: [],
+      });
       expect(mockCreateHeal).not.toHaveBeenCalled();
     });
 
@@ -199,7 +214,12 @@ describe("orchestrateHeals", () => {
         })
       );
 
-      expect(result).toEqual({ healsCreated: 0, healIds: [], autofixes: [] });
+      expect(result).toEqual({
+        healsCreated: 0,
+        healIds: [],
+        autofixes: [],
+        partialFailures: [],
+      });
       expect(mockCreateHeal).not.toHaveBeenCalled();
     });
 
@@ -721,7 +741,12 @@ describe("orchestrateHeals", () => {
         })
       );
 
-      expect(result).toEqual({ healsCreated: 0, healIds: [], autofixes: [] });
+      expect(result).toEqual({
+        healsCreated: 0,
+        healIds: [],
+        autofixes: [],
+        partialFailures: [],
+      });
     });
 
     it("closes database connection in finally block", async () => {

@@ -200,6 +200,10 @@ export const executeHeal = async (
       `[heal-executor] Sandbox ${sandbox.sandboxId} created, cloning repo`
     );
 
+    // SECURITY: Shell injection is prevented by strict regex validation:
+    // - branch: SAFE_STRING_PATTERN allows only [a-zA-Z0-9_\-./]
+    // - repoUrl: GITHUB_REPO_URL_PATTERN requires exact GitHub URL format
+    // These patterns explicitly disallow shell metacharacters ($, `, ;, |, &, etc.)
     const cloneCmd = `git clone --depth 1 --branch ${request.branch} ${request.repoUrl} ${WORKTREE_PATH}`;
     const cloneResult = await sandbox.commands.run(cloneCmd, {
       timeoutMs: CLONE_TIMEOUT_MS,

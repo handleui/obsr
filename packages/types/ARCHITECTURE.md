@@ -1,6 +1,6 @@
 # @detent/types Architecture
 
-Shared type definitions for the Detent platform. Zero runtime dependencies, pure TypeScript interfaces.
+Shared type definitions for the Detent platform. Primarily TypeScript interfaces with some utility functions.
 
 ---
 
@@ -9,29 +9,32 @@ Shared type definitions for the Detent platform. Zero runtime dependencies, pure
 ```
                           index.ts (barrel)
                                │
-        ┌──────────┬───────────┼───────────┬──────────┬──────────┐
-        ▼          ▼           ▼           ▼          ▼          ▼
-   category.ts  severity.ts  source.ts  context.ts  events.ts  context-parser.ts
-        │          │           │           │
-        └──────────┴───────────┴───────────┘
-                          │
-                          ▼
-                      error.ts
-                   (core type)
+   ┌──────────┬───────────┬────┼────┬──────────┬──────────┬─────────────┬──────────┐
+   ▼          ▼           ▼    ▼    ▼          ▼          ▼             ▼          ▼
+category  severity    source context events context-parser fingerprint sanitize error
+   .ts       .ts        .ts    .ts    .ts        .ts          .ts        .ts      .ts
+   │          │           │      │
+   └──────────┴───────────┴──────┘
+                    │
+                    ▼
+                error.ts
+             (core type)
 ```
 
 ---
 
 ## File Responsibilities
 
-| File | Types | Purpose |
-|------|-------|---------|
-| `category.ts` | ErrorCategory | Classification (lint, type-check, test, compile...) |
+| File | Types/Exports | Purpose |
+|------|---------------|---------|
+| `category.ts` | ErrorCategory, AllCategories, isValidCategory | Classification (lint, type-check, test, compile...) |
 | `severity.ts` | ErrorSeverity | error \| warning |
-| `source.ts` | ErrorSource | Tool attribution (biome, typescript, go...) |
-| `context.ts` | CodeSnippet, WorkflowContext | Source context + CI job/step info |
-| `context-parser.ts` | ContextParser, LineContext | CI log format parsing interface |
-| `events.ts` | JobEvent, StepEvent, ManifestInfo | CI lifecycle events |
+| `source.ts` | ErrorSource, ErrorSources | Tool attribution (biome, typescript, go...) |
+| `context.ts` | CodeSnippet, WorkflowContext, cloneWorkflowContext | Source context + CI job/step info |
+| `context-parser.ts` | ContextParser, LineContext, CIProvider, CIProviderID | CI log format parsing interface |
+| `events.ts` | JobEvent, StepEvent, ManifestInfo, JobStatuses, StepStatuses | CI lifecycle events |
+| `fingerprint.ts` | ErrorFingerprints, ErrorSignature, ErrorOccurrence | Error deduplication and tracking |
+| `sanitize.ts` | RedactionPattern, redactPII, redactSensitiveData, sanitizeForTelemetry | PII/secret redaction utilities |
 | `error.ts` | ExtractedError, MutableExtractedError | Core error representation |
 | `index.ts` | — | Barrel exports |
 
@@ -64,7 +67,8 @@ ExtractedError
 │
 ├── AI Hints
 │   ├── suggestions (fix hints from tools)
-│   └── hint (actionable guidance)
+│   ├── hint (actionable guidance)
+│   └── fixable (auto-fixable by tool)
 │
 └── Metadata
     ├── unknownPattern (fallback parser match)
@@ -130,18 +134,18 @@ readonly filePath?: string;
 
 | Package | Usage |
 |---------|-------|
-| `@detent/parser` | Creates ExtractedError, implements ContextParser |
-| `@detent/healing` | Reads ExtractedError for AI prompt generation |
-| `apps/api` | Stores/retrieves errors, orchestrates healing |
+| `@detent/healing` | Reads ExtractedError for AI prompt generation, validation |
+| `@detent/lore` | Uses ErrorFingerprints, ErrorSource for error signature tracking |
+| `apps/api` | Stores/retrieves errors, uses ErrorCategory, ErrorSource, CodeSnippet |
+| `apps/cli` | Uses redactSensitiveData for config sanitization |
 
 ---
 
 ## Scalability
 
 ### Current Strengths
-- **Pure types** — No runtime code, tree-shakes completely
+- **Mostly types** — Minimal runtime code (sanitize utilities), tree-shakes well
 - **Single responsibility** — One concept per file
-- **Backward compat** — parser/types.ts re-exports all types
 - **Zero deps** — Only devDep on typescript
 
 ### Growth Strategies
@@ -177,5 +181,5 @@ interface ExtractedError extends ErrorLocation, ErrorClassification { ... }
 
 - **Interfaces over type aliases** — Except for union types
 - **Readonly by default** — Mutable variants explicit
-- **No runtime code** — Utility functions go in consuming packages
+- **Minimal runtime code** — Only security utilities (redaction) live here
 - **JSDoc all public types** — Especially security-sensitive fields

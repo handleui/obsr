@@ -475,6 +475,9 @@ export const runErrors = pgTable(
     index("run_errors_source_idx").on(table.source),
     index("run_errors_rule_id_idx").on(table.ruleId),
     index("run_errors_signature_idx").on(table.signatureId),
+    // Composite index for queries joining with runs and filtering by source
+    // Optimizes: SELECT ... FROM run_errors JOIN runs WHERE source = 'job-report'
+    index("run_errors_run_id_source_idx").on(table.runId, table.source),
   ]
 );
 

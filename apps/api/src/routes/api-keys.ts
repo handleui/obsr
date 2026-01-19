@@ -31,7 +31,12 @@ app.post(
     const orgAccess = c.get("orgAccess") as OrgAccessContext;
     const { organization } = orgAccess;
 
-    const body = await c.req.json<{ name: string }>();
+    let body: { name: string };
+    try {
+      body = await c.req.json<{ name: string }>();
+    } catch {
+      return c.json({ error: "Invalid JSON" }, 400);
+    }
     const { name } = body;
 
     if (!name || name.trim().length === 0) {

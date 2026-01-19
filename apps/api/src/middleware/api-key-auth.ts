@@ -91,10 +91,13 @@ const lookupApiKey = async (
     keyHash: apiKey.keyHash,
   };
 
-  // Cache the result (don't await - fire and forget)
+  // Cache the result (don't await - fire and forget for performance)
   // KV put is fast and eventually consistent anyway
+  // Wrap in try-catch for observability without blocking
   kv.put(cacheKey, JSON.stringify(result), {
     expirationTtl: API_KEY_CACHE_TTL_SECONDS,
+  }).catch((err) => {
+    console.error("[api-key-auth] KV cache write failed:", err);
   });
 
   return result;

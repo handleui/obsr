@@ -43,7 +43,7 @@ const isNetworkError = (error: unknown): boolean => {
 
 const logRetry = (reason: string, attempt: number, backoffMs: number): void => {
   core.warning(
-    `${reason}, retrying in ${Math.round(backoffMs)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`
+    `${reason}, retrying in ${Math.round(backoffMs)}ms (retry ${attempt + 1}/${MAX_RETRIES})`
   );
 };
 

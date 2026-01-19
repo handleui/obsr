@@ -66,6 +66,13 @@ const mapSeverity = (severity: string | undefined): "error" | "warning" =>
   severity?.toLowerCase() === "warning" ? "warning" : "error";
 
 /**
+ * Maximum line length to process.
+ * Lines longer than this are skipped to prevent ReDoS attacks.
+ * TypeScript error lines are typically short; 2000 chars is very generous.
+ */
+const MAX_LINE_LENGTH = 2000;
+
+/**
  * Parse TypeScript compiler text output and extract errors.
  *
  * @param content - Raw tsc output text
@@ -76,6 +83,11 @@ export const parseTypeScript = (content: string): ParsedError[] => {
   const lines = content.split("\n");
 
   for (const line of lines) {
+    // Skip overly long lines to prevent ReDoS on malformed input
+    if (line.length > MAX_LINE_LENGTH) {
+      continue;
+    }
+
     const stripped = stripAnsi(line.trim());
     if (!stripped) {
       continue;

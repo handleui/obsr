@@ -24,6 +24,25 @@ const GITHUB_API = "https://api.github.com";
 // GitHub secret names must be uppercase with underscores only, starting with a letter
 const SECRET_NAME_PATTERN = /^[A-Z][A-Z0-9_]*$/;
 
+// Map GitHub API errors to safe HTTP status codes for client response
+const mapGitHubErrorStatus = (status: number): 400 | 403 | 404 | 500 | 502 => {
+  if (status === 403) {
+    return 403;
+  }
+  if (status === 404) {
+    return 404;
+  }
+  if (status === 502) {
+    return 502;
+  }
+  // Map 4xx errors (400, 401, 422, etc.) to 400
+  if (status >= 400 && status < 500) {
+    return 400;
+  }
+  // Map all 5xx errors to 500
+  return 500;
+};
+
 interface InjectSecretRequest {
   secret_name?: string; // Default: "DETENT_TOKEN"
   visibility?: "all" | "private" | "selected";
@@ -139,7 +158,7 @@ app.post(
             // Only expose status code, not raw error details
             status: publicKeyResponse.status,
           },
-          publicKeyResponse.status as 400 | 403 | 404 | 500
+          mapGitHubErrorStatus(publicKeyResponse.status)
         );
       }
 
@@ -202,7 +221,7 @@ app.post(
             // Only expose status code, not raw error details
             status: createSecretResponse.status,
           },
-          createSecretResponse.status as 400 | 403 | 404 | 500
+          mapGitHubErrorStatus(createSecretResponse.status)
         );
       }
 

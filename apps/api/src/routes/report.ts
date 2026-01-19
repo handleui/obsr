@@ -629,6 +629,17 @@ app.post("/", async (c) => {
       }
 
       if (payload.errors.length > 0) {
+        // Delete existing errors for this run/job to avoid duplicates on retry
+        await tx
+          .delete(runErrors)
+          .where(
+            and(
+              eq(runErrors.runId, upsertedRun.id),
+              eq(runErrors.workflowJob, payload.workflowJob),
+              eq(runErrors.source, "job-report")
+            )
+          );
+
         const errorRows = payload.errors.map((error) =>
           toErrorRow(error, upsertedRun.id, payload.workflowJob)
         );

@@ -9,7 +9,12 @@ export interface DetectedOutput {
 const OUTPUT_PATTERNS: Record<string, string[]> = {
   eslint: ["eslint-report.json", "eslint.json"],
   vitest: ["vitest.json", "test-results.json"],
-  golangci: ["golangci-lint.json", "lint-report.json"],
+  golangci: [
+    "golangci-lint.json",
+    "golangci-lint-report.json",
+    "lint-report.json",
+    "report.json",
+  ],
   typescript: ["tsc-output.txt", "typescript-errors.txt"],
 };
 

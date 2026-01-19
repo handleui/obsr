@@ -20,10 +20,18 @@ import type { Env } from "../types/env";
 // cache states. This is acceptable for ephemeral caching purposes.
 const cache = new Map<string, number>();
 
+// Max cache entries before clearing to prevent unbounded memory growth
+const MAX_CACHE_ENTRIES = 10_000;
+
 // Cache Ratelimit instances per environment (keyed by Redis URL)
 const ratelimitInstances = new Map<string, Ratelimit>();
 
 const getRatelimit = (env: Env): Ratelimit => {
+  // Clear ephemeral cache if it grows too large to prevent unbounded memory growth
+  if (cache.size > MAX_CACHE_ENTRIES) {
+    cache.clear();
+  }
+
   const cacheKey = `apikey:${env.UPSTASH_REDIS_REST_URL}`;
 
   const existing = ratelimitInstances.get(cacheKey);

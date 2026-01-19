@@ -15,9 +15,9 @@ GITHUB_WEBHOOK_SECRET=your_webhook_secret
 WORKOS_CLIENT_ID=your_workos_client_id
 WORKOS_API_KEY=your_workos_api_key
 
-# Local Postgres for development (run: docker compose up -d)
-# For production migrations, override: DATABASE_URL="postgresql://..." bun run db:push
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/detent
+# Neon database (dev branch, direct connection)
+DATABASE_URL=postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/dbname?sslmode=require
+WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/dbname?sslmode=require
 
 # Upstash Redis for rate limiting
 UPSTASH_REDIS_REST_URL=your_upstash_url

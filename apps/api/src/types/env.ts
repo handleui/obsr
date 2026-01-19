@@ -69,4 +69,11 @@ export interface Env {
   POLAR_ACCESS_TOKEN?: string;
   POLAR_ORGANIZATION_ID?: string;
   POLAR_WEBHOOK_SECRET?: string;
+
+  // Modal executor webhook authentication
+  MODAL_WEBHOOK_SECRET?: string;
+
+  // Modal executor URL for triggering autofix jobs
+  // e.g., https://xxx--detent-executor-run-autofix.modal.run
+  MODAL_EXECUTOR_URL?: string;
 }

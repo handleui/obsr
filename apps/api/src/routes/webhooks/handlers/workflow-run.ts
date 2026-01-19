@@ -1,6 +1,9 @@
 import type { ExecutionContext, KVNamespace } from "@cloudflare/workers-types";
+import { inArray } from "drizzle-orm";
 import { createDb } from "../../../db/client";
+import { runErrors, runs } from "../../../db/schema";
 import { captureWebhookError, type ParserContext } from "../../../lib/sentry";
+import { orchestrateHeals } from "../../../services/autofix/orchestrator";
 import {
   formatCheckRunOutput,
   formatResultsComment,
@@ -950,6 +953,98 @@ export const handleWorkflowRunCompleted = async (
       checkRunId: finalCheckRunId,
     });
     parserContext = processedParserContext;
+
+    // Trigger autofix orchestration for fixable errors
+    // Run in background to not block webhook response
+    c.executionCtx.waitUntil(
+      (async () => {
+        // Guard: Skip if no new runs to process
+        if (runsToProcess.length === 0) {
+          return;
+        }
+
+        try {
+          const { db, client } = await createDb(c.env);
+          try {
+            // Get run database IDs directly from stored runs
+            // More efficient than joining - we know these runs were just stored
+            const runIds = runsToProcess.map((r) => r.id.toString());
+            const storedRuns = await db
+              .select({
+                id: runs.id,
+                projectId: runs.projectId,
+              })
+              .from(runs)
+              .where(inArray(runs.runId, runIds))
+              .limit(runIds.length);
+
+            if (storedRuns.length === 0) {
+              console.log(
+                "[workflow_run] No stored runs found for heal orchestration"
+              );
+              return;
+            }
+
+            // Query errors using run database IDs (not GitHub run IDs)
+            const runDbIds = storedRuns.map((r) => r.id);
+            const storedErrors = await db
+              .select({
+                id: runErrors.id,
+                source: runErrors.source,
+                signatureId: runErrors.signatureId,
+                fixable: runErrors.fixable,
+              })
+              .from(runErrors)
+              .where(inArray(runErrors.runId, runDbIds));
+
+            // Guard: Only orchestrate if we have fixable errors
+            if (!storedErrors.some((e) => e.fixable)) {
+              return;
+            }
+
+            // Guard: Ensure we have the required data
+            // Use first stored run's database ID (UUID), not GitHub run ID
+            const firstStoredRun = storedRuns[0];
+            const firstRunToProcess = runsToProcess[0];
+            if (!(firstStoredRun?.projectId && firstRunToProcess)) {
+              console.log(
+                "[workflow_run] Missing storedRun or firstRunToProcess for heal orchestration"
+              );
+              return;
+            }
+
+            const result = await orchestrateHeals({
+              env: c.env,
+              projectId: firstStoredRun.projectId,
+              runId: firstStoredRun.id,
+              commitSha: headSha,
+              prNumber,
+              branch: workflow_run.head_branch ?? "main",
+              repoFullName: repository.full_name,
+              installationId: installation.id,
+              errors: storedErrors.map((e) => ({
+                id: e.id,
+                source: e.source ?? undefined,
+                signatureId: e.signatureId ?? undefined,
+                fixable: e.fixable ?? false,
+              })),
+              orgSettings,
+            });
+
+            if (result.healsCreated > 0) {
+              console.log(
+                `[workflow_run] Orchestrated ${result.healsCreated} heals for ${repository.full_name}#${prNumber}`
+              );
+            }
+          } finally {
+            await client.end();
+          }
+        } catch (error) {
+          // Non-fatal: Don't fail the webhook if heal orchestration fails
+          console.error("[workflow_run] Heal orchestration error:", error);
+        }
+      })()
+    );
 
     // Finalize: update check run and post PR comment (if failures)
     const { totalErrors } = await finalizeAndPostResults(

@@ -756,6 +756,7 @@ app.post("/", async (c) => {
       return {
         stored: payload.errors.length,
         runId: upsertedRun.id,
+        projectId: project.id,
         warnings: allWarnings,
       };
     });

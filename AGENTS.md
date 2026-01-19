@@ -33,7 +33,8 @@ bun run db:studio          # Open Drizzle Studio
 - **Web**: Next.js 16, React 19, Tailwind CSS
 - **CLI**: TypeScript, Citty, Ink
 - **Auth**: WorkOS, JWT (Jose)
-- **AI**: Anthropic Claude API
+- **AI**: Codex 5.2 via Vercel AI Gateway
+- **Sandboxes**: E2B (fresh per heal)
 - **Linting**: Biome via Ultracite (handles all style rules automatically)
 
 ## Project Structure
@@ -41,6 +42,7 @@ bun run db:studio          # Open Drizzle Studio
 ```
 apps/
 ├── api/       # Cloudflare Workers API (Hono)
+├── healer/    # AI healing service (Railway)
 ├── cli/       # Command-line interface
 ├── navigator/ # Auth portal (Next.js)
 ├── web/       # Landing page (Next.js)
@@ -104,3 +106,10 @@ Biome handles all standard linting. These are project-specific deviations:
 - **URL**: `detent.sh`
 - **API**: `backend.detent.sh`
 - **Auth**: `navigator.detent.sh`
+
+## Healing Architecture
+
+- **Autofix (deterministic)**: Runs in GitHub Action, no sandbox
+- **AI Healing (agentic)**: Separate Healer service on Railway
+- **Sandbox**: Fresh E2B sandbox per heal (not persistent)
+- **Flow**: API stores heal → Healer runs in E2B → patches to API → user reviews

@@ -15,6 +15,16 @@ export {
   validatePath,
 } from "./context.js";
 export { editFileTool } from "./edit-file.js";
+export {
+  BLOCKED_COMMANDS,
+  BLOCKED_PATTERNS,
+  extractBaseCommand,
+  hasBlockedBytes,
+  hasBlockedPattern,
+  normalizeCommand,
+  parseCommand,
+  validateCommand,
+} from "./execute.js";
 export { globTool } from "./glob.js";
 export { grepTool } from "./grep.js";
 export { readFileTool } from "./read-file.js";

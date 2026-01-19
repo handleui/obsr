@@ -311,6 +311,41 @@ export const healExistsForPrAndSource = async (
 };
 
 /**
+ * Find pending or running heal for a specific PR and autofix source.
+ * Used by autofix-result endpoint to update the correct heal record.
+ *
+ * Security: Validates UUID.
+ */
+export const getHealByPrAndSource = async (
+  db: DbOrTx,
+  projectId: string,
+  prNumber: number,
+  autofixSource: string
+): Promise<Heal | null> => {
+  // SECURITY: Validate UUID
+  if (!isValidUUID(projectId)) {
+    throw new Error("Invalid projectId format: expected UUID");
+  }
+
+  const result = await db
+    .select()
+    .from(heals)
+    .where(
+      and(
+        eq(heals.projectId, projectId),
+        eq(heals.prNumber, prNumber),
+        eq(heals.autofixSource, autofixSource),
+        // Only consider active heals (pending or running)
+        inArray(heals.status, ["pending", "running"])
+      )
+    )
+    .orderBy(desc(heals.createdAt))
+    .limit(1);
+
+  return result[0] ?? null;
+};
+
+/**
  * Mark stale heals as failed after a timeout period.
  * Returns the count of heals that were marked as failed.
  *

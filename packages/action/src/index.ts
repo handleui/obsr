@@ -1,6 +1,8 @@
 // biome-ignore lint/performance/noNamespaceImport: GitHub Actions SDK official pattern
 import * as core from "@actions/core";
-
+import type { AutofixResult } from "./autofix/executor";
+import { runAutofix } from "./autofix/executor";
+import { getAutofixesForSources } from "./autofix/registry";
 import type { ReportPayload } from "./collect";
 import { collect } from "./collect";
 import { detectOutputs } from "./detect";
@@ -12,7 +14,9 @@ import { parseGolangci } from "./parsers/json/golangci";
 import { parseVitest } from "./parsers/json/vitest";
 import { parseTypeScript } from "./parsers/text/typescript";
 import type { ParsedError } from "./parsers/types";
-import { ReportApiError, report } from "./report";
+
+import { ReportApiError, report, reportAutofixResults } from "./report";
+
 import { readSnippet } from "./snippet";
 
 /**
@@ -211,6 +215,94 @@ const validateApiUrl = (url: string): boolean => {
   }
 };
 
+/**
+ * Extract PR number from GitHub context.
+ * Returns the PR number if running in a pull_request event, otherwise undefined.
+ */
+const getPrNumber = (): number | undefined => {
+  const { context } = require("@actions/github");
+  // PR number is available in pull_request event payload
+  if (context.payload.pull_request?.number) {
+    return context.payload.pull_request.number;
+  }
+  // Also check issue_comment events (for PR comments)
+  if (context.payload.issue?.pull_request && context.payload.issue?.number) {
+    return context.payload.issue.number;
+  }
+  return undefined;
+};
+
+/**
+ * Run autofixes for detected errors and report results to API.
+ * Only runs fixes for errors from sources with autofix support.
+ */
+const runAutofixes = async (
+  payload: ReportPayload,
+  projectId: string,
+  runId: string,
+  prNumber: number | undefined,
+  token: string,
+  apiUrl: string
+): Promise<void> => {
+  // Autofix requires a PR context to push changes
+  if (!prNumber) {
+    core.debug("Skipping autofix: not running in a pull request context");
+    return;
+  }
+
+  // Get unique sources from errors that have category (tool source)
+  const sources = payload.errors
+    .map((e) => e.category)
+    .filter((c): c is string => c !== undefined);
+
+  // Get autofix configs for sources with autofix support, sorted by priority
+  const autofixConfigs = getAutofixesForSources(sources);
+
+  if (autofixConfigs.length === 0) {
+    core.debug("No autofixes available for detected errors");
+    return;
+  }
+
+  core.info(`Running ${autofixConfigs.length} autofix(es)...`);
+
+  const results: AutofixResult[] = [];
+
+  for (const config of autofixConfigs) {
+    try {
+      const result = runAutofix(config.source);
+      results.push(result);
+    } catch (err) {
+      core.warning(
+        `Autofix for ${config.source} failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+      results.push({
+        source: config.source,
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Report results if any fixes were attempted
+  if (results.length > 0) {
+    try {
+      const autofixResult = await reportAutofixResults(
+        projectId,
+        runId,
+        prNumber,
+        results,
+        token,
+        apiUrl
+      );
+      core.info(`Reported ${autofixResult.received} autofix result(s)`);
+    } catch (err) {
+      core.warning(
+        `Failed to report autofix results: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+};
+
 const run = async (): Promise<void> => {
   try {
     const token = core.getInput("token", { required: true });
@@ -246,6 +338,18 @@ const run = async (): Promise<void> => {
     core.info(`Stored ${result.stored} items, run ID: ${result.runId}`);
     core.setOutput("stored", result.stored);
     core.setOutput("run-id", result.runId);
+    core.setOutput("project-id", result.projectId);
+
+    // Run autofixes for fixable errors (only in PR context)
+    const prNumber = getPrNumber();
+    await runAutofixes(
+      payload,
+      result.projectId,
+      result.runId,
+      prNumber,
+      token,
+      apiUrl
+    );
   } catch (error) {
     // Classify the error and provide actionable guidance
     const statusCode =

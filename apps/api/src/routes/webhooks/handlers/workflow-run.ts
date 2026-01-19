@@ -2,7 +2,7 @@ import type { ExecutionContext, KVNamespace } from "@cloudflare/workers-types";
 import { inArray } from "drizzle-orm";
 import { createDb } from "../../../db/client";
 import { runErrors, runs } from "../../../db/schema";
-import { captureWebhookError } from "../../../lib/sentry";
+import { captureLockConflict, captureWebhookError } from "../../../lib/sentry";
 import { orchestrateHeals } from "../../../services/autofix/orchestrator";
 import {
   formatCheckRunOutput,
@@ -37,6 +37,7 @@ import {
   handleWaitingForRunsEarlyReturn,
 } from "../utils/early-returns";
 import { fetchJobDetailsWithRateLimit } from "../utils/job-fetcher";
+import { createTrackedWaitUntil } from "../utils/tracked-background-task";
 import { postWaitingComment } from "../waiting-comment";
 
 // ============================================================================
@@ -79,6 +80,8 @@ const finalizeAndPostResults = async (
     enablePrComments: boolean;
     // Workflow evaluation for determining skip status
     ciRelevantRunCount: number;
+    // Observability
+    deliveryId: string;
   }
 ): Promise<{
   runResults: Array<{
@@ -104,6 +107,7 @@ const finalizeAndPostResults = async (
     enableInlineAnnotations,
     enablePrComments,
     ciRelevantRunCount,
+    deliveryId,
   } = context;
 
   // Prepare run results for formatting
@@ -190,9 +194,26 @@ const finalizeAndPostResults = async (
     if (!hasFailed) {
       const prLock = await acquirePrCommentLock(kv, repository, prNumber);
       if (!prLock.acquired) {
+        // Structured logging for lock conflict observability
+        const holderAgeSeconds = prLock.holderInfo
+          ? Math.round(prLock.holderInfo.ageMs / 1000)
+          : "unknown";
         console.log(
-          `[workflow_run] PR comment lock not acquired for ${repository}#${prNumber}, skipping passing comment update`
+          `[workflow_run] PR comment lock not acquired for ${repository}#${prNumber} ` +
+            `[delivery: ${deliveryId}] [holder_age: ${holderAgeSeconds}s] ` +
+            "[operation: passing_comment_update]"
         );
+
+        // Track in Sentry for monitoring lock contention patterns
+        captureLockConflict({
+          lockType: "pr_comment",
+          repository,
+          prNumber,
+          deliveryId,
+          operation: "passing_comment_update",
+          holderInfo: prLock.holderInfo,
+        });
+
         return { runResults, totalErrors };
       }
       lockAcquired = true;
@@ -220,9 +241,27 @@ const finalizeAndPostResults = async (
     // The DB unique constraint on prComments table is the ultimate safety net.
     const prLock = await acquirePrCommentLock(kv, repository, prNumber);
     if (!prLock.acquired) {
+      // Structured logging for lock conflict observability
+      const holderAgeSeconds = prLock.holderInfo
+        ? Math.round(prLock.holderInfo.ageMs / 1000)
+        : "unknown";
       console.log(
-        `[workflow_run] PR comment lock not acquired for ${repository}#${prNumber}, skipping comment`
+        `[workflow_run] PR comment lock not acquired for ${repository}#${prNumber} ` +
+          `[delivery: ${deliveryId}] [holder_age: ${holderAgeSeconds}s] ` +
+          `[operation: failure_comment_update] [errors: ${totalErrors}]`
       );
+
+      // Track in Sentry for monitoring lock contention patterns
+      // This is more critical than passing comment update since users won't see error details
+      captureLockConflict({
+        lockType: "pr_comment",
+        repository,
+        prNumber,
+        deliveryId,
+        operation: "failure_comment_update",
+        holderInfo: prLock.holderInfo,
+      });
+
       return { runResults, totalErrors };
     }
     lockAcquired = true;
@@ -376,7 +415,12 @@ export const handleWorkflowRunInProgress = async (
       // Post/update waiting comment in background (non-blocking)
       // This ensures the PR comment shows "waiting" even if check_suite.requested failed
       if (prNumber) {
-        c.executionCtx.waitUntil(
+        const waitUntilTracked = createTrackedWaitUntil(c.executionCtx, {
+          deliveryId,
+          repository: repository.full_name,
+          installationId: installation.id,
+        });
+        waitUntilTracked(
           postWaitingComment({
             env: c.env,
             token,
@@ -386,7 +430,9 @@ export const handleWorkflowRunInProgress = async (
             prNumber,
             headSha,
             headCommitMessage: workflow_run.head_commit?.message,
-          })
+            deliveryId,
+          }),
+          { operation: "post_waiting_comment", prNumber }
         );
       }
     } catch (error) {
@@ -457,48 +503,48 @@ export const handleWorkflowRunInProgress = async (
     // Background tasks (non-blocking for faster webhook response):
     // 1. Fetch workflow list and job details, update check run with detailed status
     // 2. Post waiting comment to PR
-    c.executionCtx.waitUntil(
-      Promise.all([
-        (async () => {
-          try {
-            // Fetch all workflows for this commit to show detailed status
-            const { evaluation } = await github.listWorkflowRunsForCommit(
-              token,
-              owner,
-              repo,
-              headSha
-            );
+    const waitUntilTracked = createTrackedWaitUntil(c.executionCtx, {
+      deliveryId,
+      repository: repository.full_name,
+      installationId: installation.id,
+    });
+    waitUntilTracked([
+      {
+        task: (async () => {
+          // Fetch all workflows for this commit to show detailed status
+          const { evaluation } = await github.listWorkflowRunsForCommit(
+            token,
+            owner,
+            repo,
+            headSha
+          );
 
-            const jobsByRunId = await fetchJobDetailsWithRateLimit(
-              github,
-              token,
-              owner,
-              repo,
-              evaluation,
-              `workflow_run:${checkRun.id}`
-            );
+          const jobsByRunId = await fetchJobDetailsWithRateLimit(
+            github,
+            token,
+            owner,
+            repo,
+            evaluation,
+            `workflow_run:${checkRun.id}`
+          );
 
-            // Update check run with workflow and job visibility
-            const { title, summary } = formatWaitingCheckRunOutput({
-              evaluation,
-              jobsByRunId: jobsByRunId.size > 0 ? jobsByRunId : undefined,
-            });
-            await github.updateCheckRun(token, {
-              owner,
-              repo,
-              checkRunId: checkRun.id,
-              status: "in_progress",
-              output: { title, summary },
-            });
-          } catch (error) {
-            // Non-fatal: check run was created, just missing detailed status
-            console.error(
-              `[workflow_run] Background update failed for check run ${checkRun.id}:`,
-              error
-            );
-          }
+          // Update check run with workflow and job visibility
+          const { title, summary } = formatWaitingCheckRunOutput({
+            evaluation,
+            jobsByRunId: jobsByRunId.size > 0 ? jobsByRunId : undefined,
+          });
+          await github.updateCheckRun(token, {
+            owner,
+            repo,
+            checkRunId: checkRun.id,
+            status: "in_progress",
+            output: { title, summary },
+          });
         })(),
-        postWaitingComment({
+        context: { operation: "update_check_run_status" },
+      },
+      {
+        task: postWaitingComment({
           env: c.env,
           token,
           owner,
@@ -507,9 +553,11 @@ export const handleWorkflowRunInProgress = async (
           prNumber,
           headSha,
           headCommitMessage: workflow_run.head_commit?.message,
+          deliveryId,
         }),
-      ])
-    );
+        context: { operation: "post_waiting_comment", prNumber },
+      },
+    ]);
 
     return c.json({
       message: "check run created",
@@ -815,94 +863,89 @@ export const handleWorkflowRunCompleted = async (
 
     // Trigger autofix orchestration for fixable errors
     // Run in background to not block webhook response
-    if (allErrors.length > 0) {
-      c.executionCtx.waitUntil(
-        // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: background task requires error handling
+    if (allErrors.length > 0 && runsToProcess.length > 0) {
+      const waitUntilTracked = createTrackedWaitUntil(c.executionCtx, {
+        deliveryId,
+        repository: repository.full_name,
+        installationId: installation.id,
+      });
+      waitUntilTracked(
         (async () => {
-          // Guard: Skip if no new runs to process
-          if (runsToProcess.length === 0) {
-            return;
-          }
-
+          const { db, client } = await createDb(c.env);
           try {
-            const { db, client } = await createDb(c.env);
-            try {
-              // Get run database IDs directly from stored runs
-              const runIds = runsToProcess.map((r) => r.id.toString());
-              const storedRuns = await db
-                .select({
-                  id: runs.id,
-                  projectId: runs.projectId,
-                })
-                .from(runs)
-                .where(inArray(runs.runId, runIds))
-                .limit(runIds.length);
+            // Get run database IDs directly from stored runs
+            const runIds = runsToProcess.map((r) => r.id.toString());
+            const storedRuns = await db
+              .select({
+                id: runs.id,
+                projectId: runs.projectId,
+              })
+              .from(runs)
+              .where(inArray(runs.runId, runIds))
+              .limit(runIds.length);
 
-              if (storedRuns.length === 0) {
-                console.log(
-                  "[workflow_run] No stored runs found for heal orchestration"
-                );
-                return;
-              }
-
-              // Query errors using run database IDs (not GitHub run IDs)
-              const runDbIds = storedRuns.map((r) => r.id);
-              const storedErrors = await db
-                .select({
-                  id: runErrors.id,
-                  source: runErrors.source,
-                  signatureId: runErrors.signatureId,
-                  fixable: runErrors.fixable,
-                })
-                .from(runErrors)
-                .where(inArray(runErrors.runId, runDbIds));
-
-              // Guard: Only orchestrate if we have fixable errors
-              if (!storedErrors.some((e) => e.fixable)) {
-                return;
-              }
-
-              // Guard: Ensure we have the required data
-              const firstStoredRun = storedRuns[0];
-              const firstRunToProcess = runsToProcess[0];
-              if (!(firstStoredRun?.projectId && firstRunToProcess)) {
-                console.log(
-                  "[workflow_run] Missing storedRun or firstRunToProcess for heal orchestration"
-                );
-                return;
-              }
-
-              const result = await orchestrateHeals({
-                env: c.env,
-                projectId: firstStoredRun.projectId,
-                runId: firstStoredRun.id,
-                commitSha: headSha,
-                prNumber,
-                branch: workflow_run.head_branch ?? "main",
-                repoFullName: repository.full_name,
-                installationId: installation.id,
-                errors: storedErrors.map((e) => ({
-                  id: e.id,
-                  source: e.source ?? undefined,
-                  signatureId: e.signatureId ?? undefined,
-                  fixable: e.fixable ?? false,
-                })),
-                orgSettings,
-              });
-
-              if (result.healsCreated > 0) {
-                console.log(
-                  `[workflow_run] Orchestrated ${result.healsCreated} heals for ${repository.full_name}#${prNumber}`
-                );
-              }
-            } finally {
-              await client.end();
+            if (storedRuns.length === 0) {
+              console.log(
+                "[workflow_run] No stored runs found for heal orchestration"
+              );
+              return;
             }
-          } catch (error) {
-            // Non-fatal: Don't fail the webhook if heal orchestration fails
-            console.error("[workflow_run] Heal orchestration error:", error);
+
+            // Query errors using run database IDs (not GitHub run IDs)
+            const runDbIds = storedRuns.map((r) => r.id);
+            const storedErrors = await db
+              .select({
+                id: runErrors.id,
+                source: runErrors.source,
+                signatureId: runErrors.signatureId,
+                fixable: runErrors.fixable,
+              })
+              .from(runErrors)
+              .where(inArray(runErrors.runId, runDbIds));
+
+            // Guard: Only orchestrate if we have fixable errors
+            if (!storedErrors.some((e) => e.fixable)) {
+              return;
+            }
+
+            // Guard: Ensure we have the required data
+            const firstStoredRun = storedRuns[0];
+            const firstRunToProcess = runsToProcess[0];
+            if (!(firstStoredRun?.projectId && firstRunToProcess)) {
+              console.log(
+                "[workflow_run] Missing storedRun or firstRunToProcess for heal orchestration"
+              );
+              return;
+            }
+
+            const result = await orchestrateHeals({
+              env: c.env,
+              projectId: firstStoredRun.projectId,
+              runId: firstStoredRun.id,
+              commitSha: headSha,
+              prNumber,
+              branch: workflow_run.head_branch ?? "main",
+              repoFullName: repository.full_name,
+              installationId: installation.id,
+              errors: storedErrors.map((e) => ({
+                id: e.id,
+                source: e.source ?? undefined,
+                signatureId: e.signatureId ?? undefined,
+                fixable: e.fixable ?? false,
+              })),
+              orgSettings,
+            });
+
+            if (result.healsCreated > 0) {
+              console.log(
+                `[workflow_run] Orchestrated ${result.healsCreated} heals for ${repository.full_name}#${prNumber}`
+              );
+            }
+          } finally {
+            await client.end();
           }
-        })()
+        })(),
+        { operation: "heal_orchestration", prNumber }
       );
     }
 
@@ -927,6 +970,7 @@ export const handleWorkflowRunCompleted = async (
         enableInlineAnnotations: orgSettings.enableInlineAnnotations,
         enablePrComments: orgSettings.enablePrComments,
         ciRelevantRunCount: evaluation.ciRelevantRuns.length,
+        deliveryId,
       }
     );
 

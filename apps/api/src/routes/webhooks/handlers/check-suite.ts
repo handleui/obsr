@@ -1,11 +1,6 @@
 import { sleep } from "../../../lib/async";
 import { captureWebhookError } from "../../../lib/sentry";
 import { formatWaitingCheckRunOutput } from "../../../services/comment-formatter";
-
-// Delay before fetching workflows to allow GitHub to start them
-// Workflows may not be visible immediately after check_suite.requested fires
-const WORKFLOW_VISIBILITY_DELAY_MS = 3000;
-
 import { createGitHubService } from "../../../services/github";
 import {
   getStoredCheckRunId,
@@ -14,7 +9,12 @@ import {
 import { classifyError } from "../../../services/webhooks/error-classifier";
 import type { CheckSuitePayload, WebhookContext } from "../types";
 import { fetchJobDetailsWithRateLimit } from "../utils/job-fetcher";
+import { createTrackedWaitUntil } from "../utils/tracked-background-task";
 import { postWaitingComment } from "../waiting-comment";
+
+// Delay before fetching workflows to allow GitHub to start them
+// Workflows may not be visible immediately after check_suite.requested fires
+const WORKFLOW_VISIBILITY_DELAY_MS = 3000;
 
 // Handle check_suite.requested - create a "queued" check run immediately
 //
@@ -105,49 +105,53 @@ export const handleCheckSuiteRequested = async (
     // 1. Store check run ID for later retrieval
     // 2. Fetch workflow list and update check run with detailed status
     // 3. Post waiting comment to PR
-    c.executionCtx.waitUntil(
-      Promise.all([
-        storeCheckRunId(kv, repository.full_name, headSha, checkRun.id),
+    const waitUntilTracked = createTrackedWaitUntil(c.executionCtx, {
+      deliveryId,
+      repository: repository.full_name,
+      installationId: installation.id,
+    });
+    waitUntilTracked([
+      {
+        // Store check run ID - critical for later updates
+        task: storeCheckRunId(kv, repository.full_name, headSha, checkRun.id),
+        context: { operation: "store_check_run_id" },
+      },
+      {
         // Fetch workflow list and job details, update check run with detailed status
-        (async () => {
-          try {
-            await sleep(WORKFLOW_VISIBILITY_DELAY_MS);
-            const { evaluation } = await github.listWorkflowRunsForCommit(
-              token,
-              owner,
-              repo,
-              headSha
-            );
+        task: (async () => {
+          await sleep(WORKFLOW_VISIBILITY_DELAY_MS);
+          const { evaluation } = await github.listWorkflowRunsForCommit(
+            token,
+            owner,
+            repo,
+            headSha
+          );
 
-            const jobsByRunId = await fetchJobDetailsWithRateLimit(
-              github,
-              token,
-              owner,
-              repo,
-              evaluation,
-              `check_suite:${checkRun.id}`
-            );
+          const jobsByRunId = await fetchJobDetailsWithRateLimit(
+            github,
+            token,
+            owner,
+            repo,
+            evaluation,
+            `check_suite:${checkRun.id}`
+          );
 
-            const { title, summary } = formatWaitingCheckRunOutput({
-              evaluation,
-              jobsByRunId: jobsByRunId.size > 0 ? jobsByRunId : undefined,
-            });
-            await github.updateCheckRun(token, {
-              owner,
-              repo,
-              checkRunId: checkRun.id,
-              status: "in_progress",
-              output: { title, summary },
-            });
-          } catch (error) {
-            // Non-fatal: check run was created, just missing detailed status
-            console.error(
-              `[check_suite] Background update failed for check run ${checkRun.id}:`,
-              error
-            );
-          }
+          const { title, summary } = formatWaitingCheckRunOutput({
+            evaluation,
+            jobsByRunId: jobsByRunId.size > 0 ? jobsByRunId : undefined,
+          });
+          await github.updateCheckRun(token, {
+            owner,
+            repo,
+            checkRunId: checkRun.id,
+            status: "in_progress",
+            output: { title, summary },
+          });
         })(),
-        postWaitingComment({
+        context: { operation: "update_check_run_status" },
+      },
+      {
+        task: postWaitingComment({
           env: c.env,
           token,
           owner,
@@ -157,8 +161,9 @@ export const handleCheckSuiteRequested = async (
           headSha,
           headCommitMessage: check_suite.head_commit?.message,
         }),
-      ])
-    );
+        context: { operation: "post_waiting_comment", prNumber },
+      },
+    ]);
 
     return c.json({
       message: "check run created",

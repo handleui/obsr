@@ -31,10 +31,76 @@ interface OrchestrationContext {
   orgSettings: OrganizationSettings;
 }
 
+interface PartialFailure {
+  source: string;
+  error: string;
+  retryable: boolean;
+}
+
 interface OrchestrationResult {
   healsCreated: number;
   healIds: string[];
+  partialFailures: PartialFailure[];
 }
+
+/**
+ * Error patterns that indicate transient failures safe to retry.
+ *
+ * Anthropic API retryable errors (per SDK docs):
+ * - 429: rate_limit_error
+ * - 529: overloaded_error
+ * - 500+: api_error, internal server errors
+ * - Connection errors (timeout, reset, refused)
+ *
+ * NOT retryable (permanent failures):
+ * - 400: invalid_request_error
+ * - 401: authentication_error
+ * - 403: permission_error
+ * - 404: not_found_error
+ * - 413: request_too_large
+ * - billing_error
+ */
+const RETRYABLE_ERROR_PATTERNS = [
+  // Rate limiting
+  /rate.?limit/i,
+  /too.?many.?requests/i,
+  /429/,
+  // Overload (Anthropic 529)
+  /overloaded/i,
+  /529/,
+  // Server errors (500+)
+  /internal.?(?:server.?)?error/i,
+  /api.?error/i,
+  /500/,
+  /502/,
+  /503/,
+  /504/,
+  /bad.?gateway/i,
+  /service.?unavailable/i,
+  /temporarily.?unavailable/i,
+  // Timeouts
+  /timeout/i,
+  /timed.?out/i,
+  /etimedout/i,
+  // Connection errors
+  /connection.?refused/i,
+  /econnreset/i,
+  /econnrefused/i,
+  /socket.?hang.?up/i,
+  /network.?error/i,
+  /connection.?closed/i,
+  /connection.?terminated/i,
+];
+
+const classifyError = (
+  error: unknown
+): { message: string; retryable: boolean } => {
+  const message = error instanceof Error ? error.message : String(error);
+  const retryable = RETRYABLE_ERROR_PATTERNS.some((pattern) =>
+    pattern.test(message)
+  );
+  return { message, retryable };
+};
 
 // Type for database operations
 type DbOrTx = Parameters<typeof createHeal>[0];
@@ -120,14 +186,14 @@ export const orchestrateHeals = async (
   // Check if autofix is enabled
   if (!orgSettings.autofixEnabled) {
     console.log(`[autofix] Autofix disabled for project ${projectId}`);
-    return { healsCreated: 0, healIds: [] };
+    return { healsCreated: 0, healIds: [], partialFailures: [] };
   }
 
   // Filter to fixable errors
   const fixableErrors = errors.filter((e) => e.fixable && e.source);
   if (fixableErrors.length === 0) {
     console.log(`[autofix] No fixable errors for project ${projectId}`);
-    return { healsCreated: 0, healIds: [] };
+    return { healsCreated: 0, healIds: [], partialFailures: [] };
   }
 
   // Group errors by source
@@ -147,7 +213,7 @@ export const orchestrateHeals = async (
     console.log(
       `[autofix] No sources with autofix available for project ${projectId}`
     );
-    return { healsCreated: 0, healIds: [] };
+    return { healsCreated: 0, healIds: [], partialFailures: [] };
   }
 
   // Graceful degradation: if DB connection fails, return empty result
@@ -157,14 +223,14 @@ export const orchestrateHeals = async (
   });
 
   if (!dbResult) {
-    return { healsCreated: 0, healIds: [] };
+    return { healsCreated: 0, healIds: [], partialFailures: [] };
   }
 
   const { db, client } = dbResult;
   const kv = env["detent-idempotency"] as KVNamespace;
 
   const healIds: string[] = [];
-  const failedSources: string[] = [];
+  const partialFailures: PartialFailure[] = [];
 
   try {
     // Check for existing pending/running heals for this PR to avoid duplicates
@@ -274,25 +340,42 @@ export const orchestrateHeals = async (
             releaseHealCreationLock(kv, projectId, prNumber, config.source);
           });
       } catch (error) {
-        // Error recovery: Log and continue with other sources
+        // Error recovery: Classify error, log, and continue with other sources
+        const classified = classifyError(error);
         console.error(
           `[autofix] Failed to create heal for ${config.source}:`,
           error
         );
-        failedSources.push(config.source);
+        partialFailures.push({
+          source: config.source,
+          error: classified.message,
+          retryable: classified.retryable,
+        });
 
         // Release lock on error
         await releaseHealCreationLock(kv, projectId, prNumber, config.source);
       }
     }
 
-    if (failedSources.length > 0) {
+    // Log structured summary
+    const totalSources = configs.length;
+    const succeeded = healIds.length;
+    const failed = partialFailures.length;
+
+    if (failed > 0) {
+      const failureSummary = partialFailures
+        .map((f) => `${f.source}: ${f.retryable ? "TRANSIENT" : "PERMANENT"}`)
+        .join(", ");
       console.log(
-        `[autofix] Failed to create heals for sources: ${failedSources.join(", ")}`
+        `[autofix] Orchestration complete: ${succeeded}/${totalSources} succeeded, ${failed} failed (${failureSummary})`
+      );
+    } else if (succeeded > 0) {
+      console.log(
+        `[autofix] Orchestration complete: ${succeeded}/${totalSources} heals created`
       );
     }
 
-    return { healsCreated: healIds.length, healIds };
+    return { healsCreated: healIds.length, healIds, partialFailures };
   } finally {
     await client.end();
   }

@@ -2,8 +2,23 @@ import { generateText, stepCountIs } from "ai";
 import type { Client } from "./client.js";
 import { calculateCost } from "./pricing.js";
 import type { ToolRegistry } from "./tools/registry.js";
-import type { HealConfig, HealResult, TokenUsage } from "./types.js";
-import { DEFAULT_CONFIG } from "./types.js";
+import {
+  DEFAULT_CONFIG,
+  type HealConfig,
+  type HealErrorContext,
+  type HealErrorType,
+  type HealResult,
+  type TokenUsage,
+} from "./types.js";
+
+/**
+ * Mutable execution context for tracking state during the healing loop.
+ */
+interface ExecutionContext {
+  iteration: number;
+  lastTool: string | null;
+  lastToolInput: string | null;
+}
 
 /**
  * Maximum number of tool call rounds (not user-configurable).
@@ -175,6 +190,286 @@ const checkBudgetLimits = (
 };
 
 /**
+ * Extracts HTTP status code from error object if available.
+ */
+const getErrorStatus = (error: unknown): number | undefined => {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+  const status = (error as { status?: unknown }).status;
+  return typeof status === "number" ? status : undefined;
+};
+
+/**
+ * Maps HTTP status codes to HealErrorType.
+ * Based on Anthropic API error codes.
+ */
+const classifyByStatusCode = (status: number): HealErrorType | null => {
+  if (status === 429) {
+    return "RATE_LIMIT";
+  }
+  if (status === 529) {
+    return "OVERLOADED";
+  }
+  if (status === 401 || status === 403) {
+    return "AUTH_ERROR";
+  }
+  if (status >= 500) {
+    return "API_ERROR";
+  }
+  if (status === 400 || status === 413 || status === 422) {
+    return "VALIDATION_ERROR";
+  }
+  return null;
+};
+
+/**
+ * Patterns for classifying errors by message content.
+ * Order matters: more specific patterns should come first.
+ */
+const ERROR_MESSAGE_PATTERNS: Array<{
+  type: HealErrorType;
+  patterns: string[];
+}> = [
+  {
+    type: "RATE_LIMIT",
+    patterns: ["rate limit", "rate_limit", "too many requests", "429"],
+  },
+  {
+    type: "OVERLOADED",
+    patterns: ["overloaded", "529"],
+  },
+  {
+    type: "AUTH_ERROR",
+    patterns: [
+      "authentication",
+      "unauthorized",
+      "invalid_api_key",
+      "invalid api key",
+      "permission denied",
+      "permission_error",
+      "forbidden",
+      "401",
+      "403",
+    ],
+  },
+  {
+    type: "API_ERROR",
+    patterns: [
+      "internal server",
+      "internal_error",
+      "api_error",
+      "service unavailable",
+      "bad gateway",
+      "500",
+      "502",
+      "503",
+      "504",
+    ],
+  },
+  {
+    type: "VALIDATION_ERROR",
+    patterns: [
+      "validation",
+      "invalid",
+      "schema",
+      "parse",
+      "request_too_large",
+      "too large",
+      "400",
+      "413",
+      "422",
+    ],
+  },
+];
+
+/**
+ * Classifies error by message content using pattern matching.
+ */
+const classifyByMessage = (msg: string): HealErrorType | null => {
+  for (const { type, patterns } of ERROR_MESSAGE_PATTERNS) {
+    if (patterns.some((pattern) => msg.includes(pattern))) {
+      return type;
+    }
+  }
+  return null;
+};
+
+/**
+ * Classifies an error into a HealErrorType.
+ *
+ * Classification follows Anthropic API error types:
+ * - 429: rate_limit_error -> RATE_LIMIT
+ * - 529: overloaded_error -> OVERLOADED
+ * - 401/403: authentication_error, permission_error -> AUTH_ERROR
+ * - 500+: api_error, internal errors -> API_ERROR
+ * - 400/413/422: invalid_request_error, request_too_large -> VALIDATION_ERROR
+ * - Timeout/abort -> TIMEOUT
+ * - Tool failures -> TOOL_ERROR
+ */
+const classifyError = (
+  error: unknown,
+  isAborted: boolean,
+  lastTool: string | null
+): HealErrorType => {
+  if (isAborted) {
+    return "TIMEOUT";
+  }
+
+  // Check HTTP status code first (most reliable)
+  const status = getErrorStatus(error);
+  if (status !== undefined) {
+    const statusType = classifyByStatusCode(status);
+    if (statusType) {
+      return statusType;
+    }
+  }
+
+  if (!(error instanceof Error)) {
+    return "UNKNOWN";
+  }
+
+  const msg = error.message.toLowerCase();
+
+  // Try message pattern matching
+  const messageType = classifyByMessage(msg);
+  if (messageType) {
+    return messageType;
+  }
+
+  // Tool execution errors (check after other patterns to avoid false positives)
+  if (lastTool || msg.includes("tool")) {
+    return "TOOL_ERROR";
+  }
+
+  return "UNKNOWN";
+};
+
+/**
+ * Sanitizes error messages to remove potential API keys or sensitive data.
+ * Patterns checked:
+ * - API keys (sk-ant-*, x-api-key, Bearer tokens)
+ * - GitHub tokens (ghp_*, gho_*, ghu_*, ghs_*, ghr_*)
+ * - Generic secrets (long hex/base64 strings in key contexts)
+ */
+const sanitizeErrorMessage = (message: string): string => {
+  // Anthropic API key patterns
+  let sanitized = message.replace(
+    /sk-ant-[a-zA-Z0-9_-]{20,}/gi,
+    "[REDACTED_API_KEY]"
+  );
+
+  // Generic Bearer tokens
+  sanitized = sanitized.replace(
+    /Bearer\s+[a-zA-Z0-9_-]{20,}/gi,
+    "Bearer [REDACTED_TOKEN]"
+  );
+
+  // GitHub classic tokens (ghp_, gho_, ghu_, ghs_, ghr_)
+  sanitized = sanitized.replace(
+    /gh[pousr]_[a-zA-Z0-9_]{20,}/gi,
+    "[REDACTED_GITHUB_TOKEN]"
+  );
+
+  // GitHub fine-grained PATs
+  sanitized = sanitized.replace(
+    /github_pat_[a-zA-Z0-9_]{20,}/gi,
+    "[REDACTED_GITHUB_PAT]"
+  );
+
+  // x-api-key header values
+  sanitized = sanitized.replace(
+    /x-api-key[:\s]+[a-zA-Z0-9_-]{20,}/gi,
+    "x-api-key: [REDACTED]"
+  );
+
+  // Generic long secrets in key/token/secret/password contexts
+  sanitized = sanitized.replace(
+    /(api[_-]?key|token|secret|password|credential)[:\s=]+['"]?[a-zA-Z0-9_-]{20,}['"]?/gi,
+    "$1: [REDACTED]"
+  );
+
+  return sanitized;
+};
+
+/**
+ * Formats an error message with execution context.
+ */
+const formatErrorMessage = (
+  errorType: HealErrorType,
+  rawError: string,
+  execCtx: ExecutionContext
+): string => {
+  const iterationInfo = `iteration ${execCtx.iteration}/${MAX_ITERATIONS}`;
+  const safeError = sanitizeErrorMessage(rawError);
+
+  switch (errorType) {
+    case "TIMEOUT":
+      if (execCtx.lastTool) {
+        return `[${execCtx.lastTool}] Timeout exceeded at ${iterationInfo}`;
+      }
+      return `Timeout exceeded at ${iterationInfo}`;
+
+    case "RATE_LIMIT":
+      return `Rate limited at ${iterationInfo}: ${safeError}`;
+
+    case "OVERLOADED":
+      return `API overloaded at ${iterationInfo}: ${safeError}`;
+
+    case "AUTH_ERROR":
+      return `Authentication failed at ${iterationInfo}: ${safeError}`;
+
+    case "TOOL_ERROR":
+      if (execCtx.lastTool) {
+        const toolInput = execCtx.lastToolInput
+          ? ` on ${execCtx.lastToolInput}`
+          : "";
+        return `[${execCtx.lastTool}] Tool execution failed at ${iterationInfo}: ${safeError}${toolInput}`;
+      }
+      return `Tool execution failed at ${iterationInfo}: ${safeError}`;
+
+    case "API_ERROR":
+      return `API error at ${iterationInfo}: ${safeError}`;
+
+    case "VALIDATION_ERROR":
+      if (execCtx.lastTool) {
+        return `[${execCtx.lastTool}] Validation error at ${iterationInfo}: ${safeError}`;
+      }
+      return `Validation error at ${iterationInfo}: ${safeError}`;
+
+    default:
+      if (execCtx.lastTool) {
+        return `[${execCtx.lastTool}] Error at ${iterationInfo}: ${safeError}`;
+      }
+      return `Error at ${iterationInfo}: ${safeError}`;
+  }
+};
+
+/**
+ * Builds error context from execution state.
+ * Note: rawError is sanitized to prevent API key leakage in logs/storage.
+ */
+const buildErrorContext = (
+  errorType: HealErrorType,
+  rawError: string,
+  execCtx: ExecutionContext,
+  result: HealResult
+): HealErrorContext => ({
+  errorType,
+  iteration: execCtx.iteration,
+  maxIterations: MAX_ITERATIONS,
+  lastTool: execCtx.lastTool ?? undefined,
+  lastToolInput: execCtx.lastToolInput ?? undefined,
+  tokensAtFailure: {
+    inputTokens: result.inputTokens,
+    outputTokens: result.outputTokens,
+    cacheCreationInputTokens: result.cacheCreationInputTokens,
+    cacheReadInputTokens: result.cacheReadInputTokens,
+  },
+  rawError: sanitizeErrorMessage(rawError),
+});
+
+/**
  * HealLoop orchestrates the agentic healing process.
  */
 export class HealLoop {
@@ -182,6 +477,7 @@ export class HealLoop {
   private readonly registry: ToolRegistry;
   private readonly config: HealConfig;
   private readonly verboseWriter: ((msg: string) => void) | null;
+  private readonly execCtx: ExecutionContext;
 
   constructor(
     client: Client,
@@ -194,6 +490,7 @@ export class HealLoop {
     this.verboseWriter = this.config.verbose
       ? (msg: string) => process.stderr.write(msg)
       : null;
+    this.execCtx = { iteration: 0, lastTool: null, lastToolInput: null };
   }
 
   /**
@@ -212,12 +509,21 @@ export class HealLoop {
       this.config.timeout
     );
 
+    // Reset execution context for this run
+    this.execCtx.iteration = 1;
+    this.execCtx.lastTool = null;
+    this.execCtx.lastToolInput = null;
+
     try {
+      // Set up tool call listener that tracks context and optionally logs
       this.registry.setToolCallListener(
-        this.verboseWriter
-          ? (toolName: string, input: Record<string, unknown>) =>
-              this.logToolCall(toolName, input)
-          : null
+        (toolName: string, input: Record<string, unknown>) => {
+          this.execCtx.lastTool = toolName;
+          this.execCtx.lastToolInput = extractKeyParam(toolName, input) || null;
+          if (this.verboseWriter) {
+            this.logToolCall(toolName, input);
+          }
+        }
       );
 
       const budgetStopCondition = createBudgetStopCondition(
@@ -252,6 +558,8 @@ export class HealLoop {
 
       this.updateTokenUsage(result, response.usage ?? {}, modelName);
       result.iterations = response.steps?.length ?? 1;
+      // Update execution context with final iteration count
+      this.execCtx.iteration = result.iterations;
       result.toolCalls =
         response.steps?.flatMap((step) => step.toolCalls ?? []).length ?? 0;
       result.finalMessage = response.text ?? "";
@@ -278,13 +586,33 @@ export class HealLoop {
     } catch (error) {
       result.duration = Date.now() - startTime;
       result.costUSD = calculateCost(modelName, getUsageFromResult(result));
-      if (abortController.signal.aborted) {
-        result.finalMessage = "Healing loop timeout exceeded";
-      } else if (error instanceof Error) {
-        result.finalMessage = error.message;
-      } else {
-        result.finalMessage = "Unknown error occurred";
-      }
+
+      // Extract raw error message
+      const rawError =
+        error instanceof Error ? error.message : "Unknown error occurred";
+
+      // Classify the error
+      const errorType = classifyError(
+        error,
+        abortController.signal.aborted,
+        this.execCtx.lastTool
+      );
+
+      // Build error context for debugging
+      result.errorContext = buildErrorContext(
+        errorType,
+        rawError,
+        this.execCtx,
+        result
+      );
+
+      // Format user-friendly error message with context
+      result.finalMessage = formatErrorMessage(
+        errorType,
+        rawError,
+        this.execCtx
+      );
+
       return result;
     } finally {
       clearTimeout(timeoutId);

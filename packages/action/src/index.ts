@@ -4,14 +4,42 @@ import * as core from "@actions/core";
 import type { ReportPayload } from "./collect";
 import { collect } from "./collect";
 import { detectOutputs } from "./detect";
+import type { ClassifiedReportError } from "./errors";
+import { classifyReportError } from "./errors";
 import { parseCargo } from "./parsers/json/cargo";
 import { parseEslint } from "./parsers/json/eslint";
 import { parseGolangci } from "./parsers/json/golangci";
 import { parseVitest } from "./parsers/json/vitest";
 import { parseTypeScript } from "./parsers/text/typescript";
 import type { ParsedError } from "./parsers/types";
-import { report } from "./report";
+import { ReportApiError, report } from "./report";
 import { readSnippet } from "./snippet";
+
+/**
+ * Write a job summary with troubleshooting information.
+ */
+const writeTroubleshootingSummary = async (
+  classified: ClassifiedReportError
+): Promise<void> => {
+  const links = [
+    "[Documentation](https://detent.sh/docs/action)",
+    "[Status Page](https://status.detent.sh)",
+  ];
+  if (classified.docsUrl) {
+    links.push(`[Specific Guide](${classified.docsUrl})`);
+  }
+
+  await core.summary
+    .addHeading("Detent Report Failed", 2)
+    .addRaw(`**Error:** ${classified.title}`)
+    .addBreak()
+    .addRaw(classified.message)
+    .addHeading("Suggested Fixes", 3)
+    .addList(classified.suggestions)
+    .addHeading("Need Help?", 3)
+    .addList(links)
+    .write();
+};
 
 const PARSERS = {
   eslint: parseEslint,
@@ -219,8 +247,27 @@ const run = async (): Promise<void> => {
     core.setOutput("stored", result.stored);
     core.setOutput("run-id", result.runId);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    core.setFailed(message);
+    // Classify the error and provide actionable guidance
+    const statusCode =
+      error instanceof ReportApiError ? error.statusCode : undefined;
+    const responseBody =
+      error instanceof ReportApiError ? error.responseBody : undefined;
+
+    const classified = classifyReportError(error, statusCode, responseBody);
+
+    // Primary error annotation (visible in PR checks UI)
+    core.error(classified.message, { title: classified.title });
+
+    // Suggestions as warnings (visible but non-blocking)
+    for (const suggestion of classified.suggestions) {
+      core.warning(suggestion);
+    }
+
+    // Write job summary with detailed troubleshooting
+    await writeTroubleshootingSummary(classified);
+
+    // Set failed with concise title
+    core.setFailed(classified.title);
   }
 };
 

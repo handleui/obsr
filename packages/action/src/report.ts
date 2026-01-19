@@ -2,6 +2,23 @@
 import * as core from "@actions/core";
 
 import type { ReportPayload } from "./collect";
+import { isNetworkError } from "./errors";
+
+/**
+ * Structured error for report API failures.
+ * Includes status code and response body for classification.
+ */
+export class ReportApiError extends Error {
+  readonly statusCode: number;
+  readonly responseBody: string;
+
+  constructor(message: string, statusCode: number, responseBody: string) {
+    super(message);
+    this.name = "ReportApiError";
+    this.statusCode = statusCode;
+    this.responseBody = responseBody;
+  }
+}
 
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
@@ -20,26 +37,6 @@ const isTransientError = (status: number): boolean => status >= 500;
 
 const isClientError = (status: number): boolean =>
   status >= 400 && status < 500;
-
-const isNetworkError = (error: unknown): boolean => {
-  // Fetch throws TypeError for network failures
-  if (error instanceof TypeError) {
-    return true;
-  }
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  const message = error.message.toLowerCase();
-  const networkIndicators = [
-    "network",
-    "fetch",
-    "econnrefused",
-    "econnreset",
-    "etimedout",
-  ];
-  return networkIndicators.some((indicator) => message.includes(indicator));
-};
 
 const logRetry = (reason: string, attempt: number, backoffMs: number): void => {
   core.warning(
@@ -67,13 +64,17 @@ const makeRequest = async (
 const handleResponse = async (
   response: Response,
   attempt: number
-): Promise<{ stored: number; runId: string } | "retry" | Error> => {
+): Promise<{ stored: number; runId: string } | "retry" | ReportApiError> => {
   if (response.ok) {
     return response.json() as Promise<{ stored: number; runId: string }>;
   }
 
   const errorText = await response.text();
-  const error = new Error(`Failed to report: ${response.status} ${errorText}`);
+  const error = new ReportApiError(
+    `Failed to report: ${response.status} ${response.statusText}`,
+    response.status,
+    errorText
+  );
 
   if (isClientError(response.status)) {
     return error;
@@ -107,7 +108,7 @@ export const report = async (
   token: string,
   apiUrl: string
 ): Promise<{ stored: number; runId: string }> => {
-  let lastError: Error | undefined;
+  let lastError: ReportApiError | Error | undefined;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -115,10 +116,14 @@ export const report = async (
       const result = await handleResponse(response, attempt);
 
       if (result === "retry") {
-        lastError = new Error(`Failed with status ${response.status}`);
+        lastError = new ReportApiError(
+          `Failed with status ${response.status}`,
+          response.status,
+          ""
+        );
         continue;
       }
-      if (result instanceof Error) {
+      if (result instanceof ReportApiError) {
         throw result;
       }
       return result;

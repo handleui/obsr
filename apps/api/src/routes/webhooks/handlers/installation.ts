@@ -1,17 +1,25 @@
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { createDb } from "../../../db/client";
 import {
+  apiKeys,
   createProviderSlug,
   organizationMembers,
   organizations,
   projects,
 } from "../../../db/schema";
+import { generateApiKey, hashApiKey } from "../../../lib/crypto";
 import { verifyGitHubMembership } from "../../../lib/github-membership";
+import {
+  createOrgSecret,
+  createRepoSecretsBatched,
+} from "../../../lib/github-secrets-helper";
 import { captureWebhookError } from "../../../lib/sentry";
+import { createGitHubService } from "../../../services/github";
 import { classifyError } from "../../../services/webhooks/error-classifier";
 import type { DbClient } from "../../../services/webhooks/types";
 import type { Env } from "../../../types/env";
 import type { InstallationPayload, WebhookContext } from "../types";
+import { createTrackedWaitUntil } from "../utils/tracked-background-task";
 
 const autoLinkInstaller = async (
   db: DbClient,
@@ -94,6 +102,141 @@ const autoLinkInstaller = async (
     `[webhook] Auto-linked installer ${installerGithubId} (${installerUsername}) as owner to org ${organizationId}`
   );
   return true;
+};
+
+interface AutoCreateSecretParams {
+  db: DbClient;
+  organizationId: string;
+  providerAccountLogin: string;
+  providerAccountType: "organization" | "user";
+  installationId: string;
+  repositories: Array<{ full_name: string }>;
+  env: Env;
+}
+
+/**
+ * Auto-create DETENT_TOKEN secret in GitHub after installation
+ * - For organizations: creates org-level secret (accessible to all repos)
+ * - For personal accounts: creates repo-level secret for each repository
+ *
+ * Note: This operation is idempotent at the GitHub level (PUT creates or updates),
+ * but we create a new API key each time. For duplicate webhook deliveries,
+ * use delivery ID deduplication at the caller level.
+ */
+const autoCreateSecret = async ({
+  db,
+  organizationId,
+  providerAccountLogin,
+  providerAccountType,
+  installationId,
+  repositories,
+  env,
+}: AutoCreateSecretParams): Promise<void> => {
+  // Generate a new API key for this installation
+  const keyId = crypto.randomUUID();
+  const apiKey = generateApiKey();
+  const keyHash = await hashApiKey(apiKey);
+  const keyPrefix = apiKey.substring(0, 8);
+
+  await db.insert(apiKeys).values({
+    id: keyId,
+    organizationId,
+    keyHash,
+    keyPrefix,
+    name: "GitHub Actions (auto)",
+  });
+
+  // Track whether any secrets were created to avoid deleting keys with active secrets
+  let secretsCreated = false;
+
+  try {
+    // Get installation token to authenticate with GitHub API
+    const github = createGitHubService(env);
+    const token = await github.getInstallationToken(Number(installationId));
+
+    if (providerAccountType === "organization") {
+      // Organization: single org-level secret covers all repos
+      await createOrgSecret(providerAccountLogin, apiKey, token);
+      secretsCreated = true;
+      console.log(
+        `[installation] Created org secret DETENT_TOKEN for ${providerAccountLogin}`
+      );
+    } else {
+      // Personal account: must create repo-level secret for each repo
+      // Uses batched execution with concurrency limits to avoid GitHub rate limits
+      const results = await createRepoSecretsBatched(
+        repositories,
+        apiKey,
+        token
+      );
+
+      secretsCreated = results.succeeded > 0;
+
+      if (results.failed > 0) {
+        console.error(
+          `[installation] Failed to create ${results.failed}/${repositories.length} repo secrets for ${providerAccountLogin}:`,
+          results.errors
+        );
+      }
+
+      // If ALL repos failed, clean up the orphaned API key
+      if (results.succeeded === 0 && repositories.length > 0) {
+        await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
+        throw new Error(
+          `All ${repositories.length} repo secret creations failed for ${providerAccountLogin}`
+        );
+      }
+
+      console.log(
+        `[installation] Created repo secrets DETENT_TOKEN for ${results.succeeded}/${repositories.length} repos in ${providerAccountLogin}`
+      );
+    }
+  } catch (error) {
+    // Only clean up API key if no secrets were created
+    // If partial success occurred, keep the key so existing secrets remain valid
+    if (!secretsCreated) {
+      try {
+        await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
+        console.log(
+          `[installation] Cleaned up orphaned API key ${keyId} after secret creation failure`
+        );
+      } catch (deleteError) {
+        console.error(
+          `[installation] ORPHAN_KEY: Failed to delete API key ${keyId} for org ${organizationId}:`,
+          deleteError
+        );
+      }
+    }
+    throw error;
+  }
+};
+
+/**
+ * Trigger async secret creation with proper DB connection management
+ * Returns a promise that can be passed to waitUntil
+ */
+const triggerSecretCreation = async (
+  orgId: string,
+  providerAccountLogin: string,
+  providerAccountType: "organization" | "user",
+  installationId: string,
+  repositories: Array<{ full_name: string }>,
+  env: Env
+): Promise<void> => {
+  const { db, client } = await createDb(env);
+  try {
+    await autoCreateSecret({
+      db,
+      organizationId: orgId,
+      providerAccountLogin,
+      providerAccountType,
+      installationId,
+      repositories,
+      env,
+    });
+  } finally {
+    await client.end();
+  }
 };
 
 const generateUniqueSlug = async (
@@ -323,6 +466,72 @@ const handleInstallationCreated = async (
   return { organizationId, slug };
 };
 
+// Handle the "created" action for installation events
+const handleCreatedAction = async (
+  c: WebhookContext,
+  db: DbClient,
+  installation: InstallationPayload["installation"],
+  repositories: InstallationPayload["repositories"],
+  sender: InstallationPayload["sender"]
+) => {
+  const { account } = installation;
+  const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
+
+  const result = await handleInstallationCreated(
+    db,
+    installation,
+    repositories,
+    sender,
+    c.env
+  );
+
+  // Auto-create DETENT_TOKEN secret (fire-and-forget)
+  // For new and reactivated installations - old key may be compromised
+  const shouldCreateSecret = !("existing" in result) || result.reactivated;
+  if (shouldCreateSecret && repositories?.length) {
+    const orgId = "existing" in result ? result.id : result.organizationId;
+
+    // Use tracked waitUntil for proper error capture and Sentry reporting
+    const waitUntilTracked = createTrackedWaitUntil(c.executionCtx, {
+      deliveryId,
+      repository: account.login, // Use account login as repository context
+      installationId: installation.id,
+    });
+
+    waitUntilTracked(
+      triggerSecretCreation(
+        orgId,
+        account.login,
+        account.type === "Organization" ? "organization" : "user",
+        String(installation.id),
+        repositories,
+        c.env
+      ),
+      { operation: "auto_create_secret" }
+    );
+  }
+
+  if ("existing" in result) {
+    return c.json({
+      message: result.reactivated
+        ? "installation reactivated"
+        : "installation already exists",
+      organization_id: result.id,
+      organization_slug: result.slug,
+      account: account.login,
+      reactivated: result.reactivated ?? false,
+    });
+  }
+
+  return c.json({
+    message: "installation created",
+    organization_id: result.organizationId,
+    organization_slug: result.slug,
+    account: account.login,
+    projects_created: repositories?.length ?? 0,
+  });
+};
+
 // Handle installation events (GitHub App installed/uninstalled)
 export const handleInstallationEvent = async (
   c: WebhookContext,
@@ -340,35 +549,14 @@ export const handleInstallationEvent = async (
 
   try {
     switch (action) {
-      case "created": {
-        const result = await handleInstallationCreated(
+      case "created":
+        return handleCreatedAction(
+          c,
           db,
           installation,
           repositories,
-          payload.sender,
-          c.env
+          payload.sender
         );
-
-        if ("existing" in result) {
-          return c.json({
-            message: result.reactivated
-              ? "installation reactivated"
-              : "installation already exists",
-            organization_id: result.id,
-            organization_slug: result.slug,
-            account: account.login,
-            reactivated: result.reactivated ?? false,
-          });
-        }
-
-        return c.json({
-          message: "installation created",
-          organization_id: result.organizationId,
-          organization_slug: result.slug,
-          account: account.login,
-          projects_created: repositories?.length ?? 0,
-        });
-      }
 
       case "deleted": {
         // Get org with polarCustomerId before soft-deleting

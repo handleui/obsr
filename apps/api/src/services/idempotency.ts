@@ -31,6 +31,12 @@ interface PrCommentLockResult {
   lockId?: string;
   kvError?: boolean;
   validationError?: boolean;
+  /** Lock holder info when acquisition fails (for observability) */
+  holderInfo?: {
+    lockId: string;
+    timestamp: number;
+    ageMs: number;
+  };
 }
 
 interface PrCommentLockState {
@@ -548,15 +554,30 @@ export const acquirePrCommentLock = async (
       console.log(
         `[pr-comment-lock] Acquired lock for ${repository}#${prNumber}`
       );
-    } else {
-      console.log(
-        `[pr-comment-lock] Lock held for ${repository}#${prNumber}, skipping comment`
-      );
+      return {
+        acquired: true,
+        lockId: result.lockId,
+      };
     }
 
+    // Lock not acquired - return holder info for observability
+    const holderState = result.state;
+    const holderInfo = holderState
+      ? {
+          lockId: holderState.lockId,
+          timestamp: holderState.timestamp,
+          ageMs: Date.now() - holderState.timestamp,
+        }
+      : undefined;
+
+    console.log(
+      `[pr-comment-lock] Lock held for ${repository}#${prNumber}` +
+        (holderInfo ? ` (age: ${Math.round(holderInfo.ageMs / 1000)}s)` : "")
+    );
+
     return {
-      acquired: result.acquired,
-      lockId: result.lockId,
+      acquired: false,
+      holderInfo,
     };
   } catch (error) {
     // Fail-open: DB unique constraint on pr_comments is safety net

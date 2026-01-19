@@ -1,6 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { createDb } from "../db/client";
+import { DatabaseError } from "../db/errors";
 import { projects, runErrors, runs } from "../db/schema";
 import { apiKeyAuthMiddleware } from "../middleware/api-key-auth";
 import { apiKeyRateLimitMiddleware } from "../middleware/api-key-rate-limit";
@@ -79,6 +80,15 @@ const SCHEMA_RULE_ID_LENGTH = 255; // run_errors.rule_id varchar(255)
 const SCHEMA_WORKFLOW_JOB_LENGTH = 255; // run_errors.workflow_job varchar(255)
 const SCHEMA_WORKFLOW_STEP_LENGTH = 255; // run_errors.workflow_step varchar(255)
 
+/**
+ * Truncation warning for fields that were cut to fit schema constraints
+ */
+interface TruncationWarning {
+  field: string;
+  originalLength: number;
+  truncatedTo: number;
+}
+
 // Repository format: owner/repo (GitHub format)
 const REPOSITORY_PATTERN = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
 // Commit SHA: 40 hex characters
@@ -94,44 +104,132 @@ const isValidLength = (val: string, maxLen: number): boolean =>
   val.length <= maxLen;
 
 /**
- * Truncate a string to a maximum length (for storage safety)
+ * Truncate a string and track if truncation occurred
  */
-const truncate = (val: string, maxLen: number): string =>
-  val.length > maxLen ? val.slice(0, maxLen) : val;
+const truncateWithTracking = (
+  val: string,
+  maxLen: number,
+  fieldPath: string,
+  warnings: TruncationWarning[]
+): string => {
+  if (val.length > maxLen) {
+    warnings.push({
+      field: fieldPath,
+      originalLength: val.length,
+      truncatedTo: maxLen,
+    });
+    return val.slice(0, maxLen);
+  }
+  return val;
+};
 
 /**
- * Truncate an optional string field, returning null if undefined
+ * Truncate an optional string field with tracking, returning null if undefined
  */
-const truncateOptional = (
+const truncateOptionalWithTracking = (
   val: string | undefined,
-  maxLen: number
-): string | null => (val ? truncate(val, maxLen) : null);
+  maxLen: number,
+  fieldPath: string,
+  warnings: TruncationWarning[]
+): string | null => {
+  if (!val) {
+    return null;
+  }
+  return truncateWithTracking(val, maxLen, fieldPath, warnings);
+};
 
 /**
  * Convert a ReportError to a database row for run_errors table.
  * Uses schema-aligned truncation limits for all string fields.
+ * Returns both the row and any truncation warnings that occurred.
  */
 const toErrorRow = (
   error: ReportError,
   runId: string,
-  workflowJob: string
+  workflowJob: string,
+  errorIndex: number
+): {
+  row: ReturnType<typeof createErrorRow>;
+  warnings: TruncationWarning[];
+} => {
+  const warnings: TruncationWarning[] = [];
+  const prefix = `errors[${errorIndex}]`;
+
+  const row = createErrorRow(error, runId, workflowJob, prefix, warnings);
+  return { row, warnings };
+};
+
+/**
+ * Internal helper to create the error row with truncation tracking
+ */
+const createErrorRow = (
+  error: ReportError,
+  runId: string,
+  workflowJob: string,
+  prefix: string,
+  warnings: TruncationWarning[]
 ) => ({
   id: crypto.randomUUID(),
   runId,
-  message: truncate(error.message, MAX_LONG_STRING_LENGTH),
-  filePath: truncateOptional(error.filePath, SCHEMA_FILE_PATH_LENGTH),
+  message: truncateWithTracking(
+    error.message,
+    MAX_LONG_STRING_LENGTH,
+    `${prefix}.message`,
+    warnings
+  ),
+  filePath: truncateOptionalWithTracking(
+    error.filePath,
+    SCHEMA_FILE_PATH_LENGTH,
+    `${prefix}.filePath`,
+    warnings
+  ),
   line: error.line ?? null,
   column: error.column ?? null,
-  category: truncateOptional(error.category, SCHEMA_CATEGORY_LENGTH),
-  severity: truncateOptional(error.severity, SCHEMA_SEVERITY_LENGTH),
-  ruleId: truncateOptional(error.ruleId, SCHEMA_RULE_ID_LENGTH),
-  stackTrace: truncateOptional(error.stackTrace, MAX_LONG_STRING_LENGTH),
-  workflowJob: truncate(workflowJob, SCHEMA_WORKFLOW_JOB_LENGTH),
-  workflowStep: truncateOptional(error.stepId, SCHEMA_WORKFLOW_STEP_LENGTH),
+  category: truncateOptionalWithTracking(
+    error.category,
+    SCHEMA_CATEGORY_LENGTH,
+    `${prefix}.category`,
+    warnings
+  ),
+  severity: truncateOptionalWithTracking(
+    error.severity,
+    SCHEMA_SEVERITY_LENGTH,
+    `${prefix}.severity`,
+    warnings
+  ),
+  ruleId: truncateOptionalWithTracking(
+    error.ruleId,
+    SCHEMA_RULE_ID_LENGTH,
+    `${prefix}.ruleId`,
+    warnings
+  ),
+  stackTrace: truncateOptionalWithTracking(
+    error.stackTrace,
+    MAX_LONG_STRING_LENGTH,
+    `${prefix}.stackTrace`,
+    warnings
+  ),
+  workflowJob: truncateWithTracking(
+    workflowJob,
+    SCHEMA_WORKFLOW_JOB_LENGTH,
+    "workflowJob",
+    warnings
+  ),
+  workflowStep: truncateOptionalWithTracking(
+    error.stepId,
+    SCHEMA_WORKFLOW_STEP_LENGTH,
+    `${prefix}.stepId`,
+    warnings
+  ),
   source: "job-report" as const,
   exitCode: error.exitCode ?? null,
   codeSnippet: error.codeSnippet ?? null,
-  hint: truncateOptional(error.hint, MAX_LONG_STRING_LENGTH),
+  hint: truncateOptionalWithTracking(
+    error.hint,
+    MAX_LONG_STRING_LENGTH,
+    `${prefix}.hint`,
+    warnings
+  ),
   isInfrastructure: error.isInfrastructure ?? null,
   possiblyTestOutput: error.possiblyTestOutput ?? null,
   fixable: error.fixable ?? null,
@@ -628,6 +726,8 @@ app.post("/", async (c) => {
         throw new Error("Failed to upsert run");
       }
 
+      const allWarnings: TruncationWarning[] = [];
+
       if (payload.errors.length > 0) {
         // Delete existing errors for this run/job to avoid duplicates on retry
         await tx
@@ -640,16 +740,68 @@ app.post("/", async (c) => {
             )
           );
 
-        const errorRows = payload.errors.map((error) =>
-          toErrorRow(error, upsertedRun.id, payload.workflowJob)
-        );
+        const errorRows = payload.errors.map((error, index) => {
+          const { row, warnings } = toErrorRow(
+            error,
+            upsertedRun.id,
+            payload.workflowJob,
+            index
+          );
+          allWarnings.push(...warnings);
+          return row;
+        });
         await tx.insert(runErrors).values(errorRows);
       }
 
-      return { stored: payload.errors.length, runId: upsertedRun.id };
+      return {
+        stored: payload.errors.length,
+        runId: upsertedRun.id,
+        warnings: allWarnings,
+      };
     });
 
-    return c.json(result);
+    // Log truncation warnings for monitoring
+    if (result.warnings.length > 0) {
+      console.warn(
+        `[report] Truncation occurred for run ${result.runId}:`,
+        JSON.stringify(result.warnings)
+      );
+    }
+
+    // Only include warnings in response if there are any
+    const response: {
+      stored: number;
+      runId: string;
+      warnings?: TruncationWarning[];
+    } = {
+      stored: result.stored,
+      runId: result.runId,
+    };
+    if (result.warnings.length > 0) {
+      response.warnings = result.warnings;
+    }
+
+    return c.json(response);
+  } catch (error) {
+    // Classify the error for actionable messages
+    const dbError = new DatabaseError(error, "transaction", "runs");
+
+    // Log full details for debugging
+    console.error("[report] Database error:", dbError.toLogEntry());
+
+    // Return appropriate status code based on error type
+    if (dbError.isPermanent) {
+      // 400 for constraint violations, bad data, etc.
+      return c.json(dbError.toApiResponse(), 400);
+    }
+
+    if (dbError.isTransient) {
+      // 503 for transient errors - client should retry
+      return c.json(dbError.toApiResponse(), 503);
+    }
+
+    // 500 for unknown errors
+    return c.json(dbError.toApiResponse(), 500);
   } finally {
     await client.end();
   }

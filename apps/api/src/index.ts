@@ -15,6 +15,7 @@ import { rateLimitMiddleware } from "./middleware/rate-limit";
 import { sentryContextMiddleware } from "./middleware/sentry-context";
 import apiKeysRoutes from "./routes/api-keys";
 import authRoutes from "./routes/auth";
+import autofixResultRoutes from "./routes/autofix-result";
 import billingRoutes from "./routes/billing";
 import errorsRoutes from "./routes/errors";
 import githubSecretsRoutes from "./routes/github-secrets";
@@ -181,6 +182,7 @@ app.route("/webhooks/polar", polarWebhookRoutes);
 
 // API key authenticated routes (X-Detent-Token header)
 app.route("/report", reportRoutes);
+app.route("/v1/heal/autofix-result", autofixResultRoutes);
 
 // Protected routes (require JWT auth + rate limiting)
 const api = new Hono<{ Bindings: Env }>();

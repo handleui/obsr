@@ -2,15 +2,13 @@ import type { KVNamespace } from "@cloudflare/workers-types";
 import { and, eq } from "drizzle-orm";
 import { createDb } from "../../db/client";
 import { TRANSIENT_MESSAGE_PATTERNS as DB_TRANSIENT_PATTERNS } from "../../db/errors";
-import { createHeal, updateHealStatus } from "../../db/operations/heals";
+import { createHeal } from "../../db/operations/heals";
 import { heals, type OrganizationSettings } from "../../db/schema";
 import type { Env } from "../../types/env";
-import { createGitHubService } from "../github";
 import {
   acquireHealCreationLock,
   releaseHealCreationLock,
 } from "../idempotency";
-import { buildGitHubRepoUrl, triggerModalAutofix } from "../modal/trigger";
 import { generateAutofixCommitMessage } from "./commit-message";
 import { getAutofixesForSources, hasAutofix } from "./registry";
 
@@ -42,6 +40,12 @@ interface OrchestrationResult {
   healsCreated: number;
   healIds: string[];
   partialFailures: PartialFailure[];
+  // Configs for action to execute
+  autofixes: Array<{
+    healId: string;
+    source: string;
+    command: string;
+  }>;
 }
 
 /**
@@ -99,66 +103,6 @@ const classifyError = (
   return { message, retryable };
 };
 
-// Type for database operations
-type DbOrTx = Parameters<typeof createHeal>[0];
-
-/**
- * Trigger Modal executor for an autofix job.
- *
- * This function:
- * 1. Gets a GitHub installation token
- * 2. Triggers the Modal executor
- * 3. Updates heal status to 'running' or 'failed'
- */
-const triggerModalExecutor = async (
-  env: Env,
-  db: DbOrTx,
-  healId: string,
-  command: string,
-  repoFullName: string,
-  branch: string,
-  commitSha: string,
-  installationId: number
-): Promise<void> => {
-  const github = createGitHubService(env);
-
-  try {
-    // Get installation token for repo access
-    const token = await github.getInstallationToken(installationId);
-
-    // Trigger Modal executor
-    const result = await triggerModalAutofix(env, {
-      healId,
-      repoUrl: buildGitHubRepoUrl(repoFullName),
-      commitSha,
-      branch,
-      command,
-      githubToken: token,
-    });
-
-    if (result.success) {
-      // Modal accepted the job - mark as running
-      await updateHealStatus(db, healId, "running");
-      console.log(`[autofix] Heal ${healId} is now running on Modal`);
-    } else {
-      // Modal rejected the job - mark as failed
-      await updateHealStatus(db, healId, "failed", {
-        failedReason: result.error || "Modal executor rejected job",
-      });
-      console.error(
-        `[autofix] Heal ${healId} failed to start: ${result.error}`
-      );
-    }
-  } catch (error) {
-    // Failed to trigger - mark as failed
-    const message = error instanceof Error ? error.message : String(error);
-    await updateHealStatus(db, healId, "failed", {
-      failedReason: `Trigger failed: ${message}`,
-    });
-    console.error(`[autofix] Heal ${healId} trigger error: ${message}`);
-  }
-};
-
 /**
  * Create heal records for fixable errors after a CI run.
  *
@@ -183,14 +127,14 @@ export const orchestrateHeals = async (
   // Check if autofix is enabled
   if (!orgSettings.autofixEnabled) {
     console.log(`[autofix] Autofix disabled for project ${projectId}`);
-    return { healsCreated: 0, healIds: [], partialFailures: [] };
+    return { healsCreated: 0, healIds: [], partialFailures: [], autofixes: [] };
   }
 
   // Filter to fixable errors
   const fixableErrors = errors.filter((e) => e.fixable && e.source);
   if (fixableErrors.length === 0) {
     console.log(`[autofix] No fixable errors for project ${projectId}`);
-    return { healsCreated: 0, healIds: [], partialFailures: [] };
+    return { healsCreated: 0, healIds: [], partialFailures: [], autofixes: [] };
   }
 
   // Group errors by source
@@ -210,7 +154,7 @@ export const orchestrateHeals = async (
     console.log(
       `[autofix] No sources with autofix available for project ${projectId}`
     );
-    return { healsCreated: 0, healIds: [], partialFailures: [] };
+    return { healsCreated: 0, healIds: [], partialFailures: [], autofixes: [] };
   }
 
   // Graceful degradation: if DB connection fails, return empty result
@@ -220,7 +164,7 @@ export const orchestrateHeals = async (
   });
 
   if (!dbResult) {
-    return { healsCreated: 0, healIds: [], partialFailures: [] };
+    return { healsCreated: 0, healIds: [], partialFailures: [], autofixes: [] };
   }
 
   const { db, client } = dbResult;
@@ -228,6 +172,7 @@ export const orchestrateHeals = async (
 
   const healIds: string[] = [];
   const partialFailures: PartialFailure[] = [];
+  const autofixes: OrchestrationResult["autofixes"] = [];
 
   try {
     // Check for existing pending/running heals for this PR to avoid duplicates
@@ -310,32 +255,17 @@ export const orchestrateHeals = async (
         });
 
         healIds.push(healId);
+        autofixes.push({
+          healId,
+          source: config.source,
+          command: config.command,
+        });
         console.log(
           `[autofix] Created heal ${healId} for ${config.source} (${errorIds.length} errors)`
         );
 
-        // Trigger Modal executor and release lock when done
-        // Wrap in Promise.resolve() to ensure .finally() runs even if the function
-        // throws synchronously before returning a promise
-        Promise.resolve(
-          triggerModalExecutor(
-            env,
-            db,
-            healId,
-            config.command,
-            ctx.repoFullName,
-            ctx.branch,
-            commitSha,
-            ctx.installationId
-          )
-        )
-          .catch((err) => {
-            console.error(`[autofix] Modal trigger failed for ${healId}:`, err);
-          })
-          .finally(() => {
-            // Release lock after Modal trigger completes (or fails)
-            releaseHealCreationLock(kv, projectId, prNumber, config.source);
-          });
+        // Release lock now since action will execute the autofix
+        await releaseHealCreationLock(kv, projectId, prNumber, config.source);
       } catch (error) {
         // Error recovery: Classify error, log, and continue with other sources
         const classified = classifyError(error);
@@ -372,7 +302,12 @@ export const orchestrateHeals = async (
       );
     }
 
-    return { healsCreated: healIds.length, healIds, partialFailures };
+    return {
+      healsCreated: healIds.length,
+      healIds,
+      partialFailures,
+      autofixes,
+    };
   } finally {
     await client.end();
   }

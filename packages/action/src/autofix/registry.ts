@@ -1,9 +1,9 @@
 /**
- * Autofix command registry for the API.
+ * Autofix command registry for the GitHub Action.
  *
- * NOTE: This registry is intentionally duplicated in packages/action/src/autofix/registry.ts.
- * This API registry is used by the orchestrator to create heal records with the command.
- * The action registry includes a security allowlist for command validation at execution time.
+ * NOTE: This registry is intentionally duplicated in apps/api/src/services/autofix/registry.ts.
+ * The API registry is used by the orchestrator to create heal records with the command,
+ * while this action registry includes a security allowlist for command validation.
  * Both registries must be kept in sync when adding new autofix sources.
  *
  * TODO: Consider extracting to a shared package when the monorepo supports it.
@@ -15,6 +15,17 @@ export interface AutofixConfig {
   installCommand?: string; // Optional install command
   priority: number; // Higher = run first
 }
+
+// Allowlist of commands that can be executed for security validation
+export const COMMAND_ALLOWLIST = [
+  "biome check --write .",
+  "eslint --fix .",
+  "prettier --write .",
+  "cargo clippy --fix --allow-dirty --allow-staged",
+  "golangci-lint run --fix",
+  "bun run fix",
+  "npm run fix",
+] as const;
 
 // Registry of known autofix commands
 export const AUTOFIX_REGISTRY: Record<string, AutofixConfig> = {
@@ -58,6 +69,11 @@ export const AUTOFIX_REGISTRY: Record<string, AutofixConfig> = {
     command: "", // No autofix, but could add tsc suggestions
     priority: 0,
   },
+};
+
+// Check if a command is in the allowlist
+export const isCommandAllowed = (command: string): boolean => {
+  return (COMMAND_ALLOWLIST as readonly string[]).includes(command);
 };
 
 // Get autofix config for a source

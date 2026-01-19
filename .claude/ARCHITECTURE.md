@@ -30,7 +30,7 @@ A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to autom
 │  ┌──────────────────────────────────────────────────────────────────────────┐   │
 │  │                           API (apps/api)                                  │   │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │   │
-│  │  │   Webhooks   │  │    Auth      │  │   Parser     │  │   Healer     │  │   │
+│  │  │   Webhooks   │  │    Auth      │  │   Autofix    │  │   Billing    │  │   │
 │  │  │   Handler    │  │   Routes     │  │   Service    │  │   Service    │  │   │
 │  │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘  │   │
 │  └──────────────────────────────────────────────────────────────────────────┘   │
@@ -45,7 +45,7 @@ A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to autom
                                    │
                                    ▼
                     ┌──────────────────────────────┐
-                    │    PlanetScale PostgreSQL    │
+                    │      Neon PostgreSQL         │
                     │         (Database)           │
                     │  ┌────────┐ ┌─────────────┐  │
                     │  │  Runs  │ │ RunErrors   │  │
@@ -70,6 +70,18 @@ A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to autom
 └─────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           HEALER SERVICE (Railway)                               │
+│                                                                                  │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │                         Healer (apps/healer)                              │   │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                    │   │
+│  │  │   Poller     │  │  E2B Client  │  │   Healing    │                    │   │
+│  │  │   Service    │  │  (Sandbox)   │  │   Package    │                    │   │
+│  │  └──────────────┘  └──────────────┘  └──────────────┘                    │   │
+│  └──────────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
 │                           USER'S MACHINE (Local)                                 │
 │                                                                                  │
 │  ┌──────────────────────────────────────────────────────────────────────────┐   │
@@ -83,14 +95,14 @@ A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to autom
 │  │   ┌─────────────────────────────────────────────────────────────────┐   │   │
 │  │   │                    Core Libraries                                │   │   │
 │  │   │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │   │   │
-│  │   │  │ @detent/git │  │@detent/parser│ │   @detent/healing       │  │   │   │
-│  │   │  │ clone/push  │  │ extract errs │ │   ┌─────────────────┐   │  │   │   │
-│  │   │  │ branches    │  │ TypeScript   │ │   │  Claude API     │   │  │   │   │
-│  │   │  │ diff/commit │  │ Golang       │ │   │  (Anthropic)    │   │  │   │   │
-│  │   │  └─────────────┘  │ Python       │ │   │  ┌───────────┐  │   │  │   │   │
-│  │   │                   │ ESLint       │ │   │  │   Tools   │  │   │  │   │   │
-│  │   │                   │ Vitest       │ │   │  │ read_file │  │   │  │   │   │
-│  │   │                   └─────────────┘ │   │  │ edit_file │  │   │  │   │   │
+│  │   │  │ @detent/git │  │ @detent/lore│ │   @detent/healing       │  │   │   │
+│  │   │  │ clone/push  │  │ hints/sigs  │ │   ┌─────────────────┐   │  │   │   │
+│  │   │  │ branches    │  ├─────────────┤ │   │  Codex 5.2      │   │  │   │   │
+│  │   │  │ diff/commit │  │@detent/types│ │   │  (AI Gateway)   │   │  │   │   │
+│  │   │  └─────────────┘  │ shared types│ │   │  ┌───────────┐  │   │  │   │   │
+│  │   │                   └─────────────┘ │   │  │   Tools   │  │   │  │   │   │
+│  │   │                                   │   │  │ read_file │  │   │  │   │   │
+│  │   │                                   │   │  │ edit_file │  │   │  │   │   │
 │  │   │                                   │   │  │ glob/grep │  │   │  │   │   │
 │  │   │                                   │   │  │ execute   │  │   │  │   │   │
 │  │   │                                   │   │  └───────────┘  │   │  │   │   │
@@ -130,8 +142,9 @@ A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to autom
                                              │
                                              ▼
                                     ┌──────────────────┐
-                                    │  @detent/parser  │
-                                    │  extract errors  │
+                                    │  @detent/action  │
+                                    │  (GitHub Action) │
+                                    │  parse errors    │
                                     └────────┬─────────┘
                                              │
                                              ▼
@@ -140,30 +153,30 @@ A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to autom
                                     │   (RunErrors)    │
                                     └────────┬─────────┘
                                              │
-                            ┌────────────────┴────────────────┐
-                            ▼                                 ▼
-                    ┌───────────────┐                 ┌───────────────┐
-                    │  PR Comment   │                 │ Healing Loop  │
-                    │  (summary)    │                 │ (if enabled)  │
-                    └───────────────┘                 └───────┬───────┘
+                            ┌────────────────┼────────────────┐
+                            ▼                ▼                ▼
+                    ┌───────────────┐ ┌────────────┐ ┌───────────────┐
+                    │  PR Comment   │ │  Autofix   │ │  AI Healing   │
+                    │  (summary)    │ │(deterministic)│(if enabled)  │
+                    └───────────────┘ └────────────┘ └───────┬───────┘
                                                               │
                                                               ▼
                                          ┌────────────────────────────────────┐
-                                         │        Claude AI (50 rounds)       │
+                                         │     Healer Service (Railway)       │
                                          │  ┌─────────────────────────────┐   │
-                                         │  │ 1. Analyze error context    │   │
-                                         │  │ 2. Read source files        │   │
-                                         │  │ 3. Generate fix             │   │
-                                         │  │ 4. Apply edit               │   │
-                                         │  │ 5. Run verification check   │   │
-                                         │  │ 6. Iterate until fixed      │   │
+                                         │  │ 1. Poll for pending heals   │   │
+                                         │  │ 2. Spin up E2B sandbox      │   │
+                                         │  │ 3. Run Codex 5.2 via AI SDK │   │
+                                         │  │ 4. Apply fixes in sandbox   │   │
+                                         │  │ 5. Verify and iterate       │   │
+                                         │  │ 6. POST patches to API      │   │
                                          │  └─────────────────────────────┘   │
                                          └────────────────┬───────────────────┘
                                                           │
                                                           ▼
                                                   ┌───────────────┐
-                                                  │  Post Result  │
-                                                  │  to PR        │
+                                                  │  User Reviews │
+                                                  │  Patches      │
                                                   └───────────────┘
 ```
 
@@ -185,10 +198,10 @@ detent/
 │   │   │   │   ├── webhooks.ts       # /webhooks/* - GitHub/GitLab handlers
 │   │   │   │   └── health.ts         # /health - status check
 │   │   │   ├── services/
-│   │   │   │   ├── github.ts         # GitHub App API, checks, installs
-│   │   │   │   ├── gitlab.ts         # GitLab integration
-│   │   │   │   ├── healer.ts         # Orchestrate AI healing
-│   │   │   │   ├── error-parser.ts   # Parse logs → structured errors
+│   │   │   │   ├── github/           # GitHub App API, checks, installs
+│   │   │   │   ├── autofix/          # Deterministic autofix orchestration
+│   │   │   │   ├── healer.ts         # Request AI healing (stores in DB)
+│   │   │   │   ├── billing.ts        # Subscription/usage billing
 │   │   │   │   ├── log-extractor.ts  # Fetch CI logs from providers
 │   │   │   │   └── idempotency.ts    # Webhook deduplication (KV + DB)
 │   │   │   ├── middleware/
@@ -230,36 +243,40 @@ detent/
 │   │   └── src/app/
 │   │       └── page.tsx              # Landing page
 │   │
+│   ├── healer/                       # AI Healing Service (Railway)
+│   │   └── src/
+│   │       ├── index.ts              # Hono app, graceful shutdown
+│   │       ├── services/
+│   │       │   └── poller/           # Poll DB for pending heals
+│   │       ├── adapters/             # E2B sandbox adapter
+│   │       └── routes/               # Health check routes
+│   │
 │   └── docs/                         # Documentation site
 │
 ├── packages/
-│   ├── parser/                       # CI log parsing
+│   ├── action/                       # GitHub Action for parsing
+│   │   └── src/                      # Runs client-side in CI
+│   │
+│   ├── lore/                         # Error hints and signatures
 │   │   └── src/
-│   │       ├── context/              # CI format parsers
-│   │       │   ├── github-parser.ts  # GitHub Actions format
-│   │       │   ├── gitlab-parser.ts  # GitLab CI format
-│   │       │   └── act-parser.ts     # Local act runner format
-│   │       ├── parsers/              # Tool-specific error extraction
-│   │       │   ├── typescript.ts     # tsc errors
-│   │       │   ├── golang.ts         # go build/test errors
-│   │       │   ├── python.ts         # Python traceback parsing
-│   │       │   ├── eslint.ts         # ESLint output
-│   │       │   ├── vitest.ts         # Vitest test failures
-│   │       │   └── generic.ts        # Fallback patterns
-│   │       └── registry.ts           # Parser selection logic
+│   │       ├── hints/                # Context-aware error hints
+│   │       └── signatures/           # Error pattern signatures
+│   │
+│   ├── types/                        # Shared TypeScript types
+│   │   └── src/                      # Common interfaces and enums
 │   │
 │   ├── healing/                      # AI-powered error fixing
 │   │   └── src/
-│   │       ├── client.ts             # Anthropic API client (AI Gateway)
-│   │       ├── loop.ts               # Multi-turn Claude conversation
-│   │       ├── tools/                # Claude tool implementations
+│   │       ├── client.ts             # Codex 5.2 via Vercel AI Gateway
+│   │       ├── loop.ts               # Multi-turn conversation loop
+│   │       ├── tools/                # AI tool implementations
 │   │       │   ├── read-file.ts      # Read source files
 │   │       │   ├── edit-file.ts      # Apply code edits
 │   │       │   ├── glob.ts           # Find files by pattern
 │   │       │   ├── grep.ts           # Search file contents
 │   │       │   ├── execute.ts        # Run shell commands
 │   │       │   └── run-check.ts      # Run linting/tests
-│   │       └── prompt/               # System prompts for Claude
+│   │       └── prompt/               # System prompts
 │   │
 │   ├── git/                          # Git operations
 │   │   └── src/
@@ -409,14 +426,16 @@ dt org                    # Organization management
 
 ## Tech Stack Summary
 
-| Layer       | Technology                         |
-|-------------|-----------------------------------|
-| CLI         | TypeScript, Citty, Ink (React)    |
-| API         | Hono, Cloudflare Workers          |
-| Database    | PlanetScale PostgreSQL, Drizzle   |
-| Web Apps    | Next.js 16, React 19, Tailwind    |
-| Auth        | WorkOS, JWT (Jose), OAuth 2.0     |
-| AI          | Anthropic Claude API, AI SDK      |
-| Monorepo    | Turborepo, Bun                    |
-| Lint/Format | Ultracite (Biome)                 |
-| Monitoring  | Sentry, Logtail                   |
+| Layer       | Technology                             |
+|-------------|---------------------------------------|
+| CLI         | TypeScript, Citty, Ink (React)        |
+| API         | Hono, Cloudflare Workers              |
+| Healer      | Hono, Bun, Railway                    |
+| Database    | Neon PostgreSQL, Drizzle, Hyperdrive  |
+| Web Apps    | Next.js 16, React 19, Tailwind        |
+| Auth        | WorkOS, JWT (Jose), OAuth 2.0         |
+| AI          | Codex 5.2 via Vercel AI Gateway       |
+| Sandboxes   | E2B (fresh per heal)                  |
+| Monorepo    | Turborepo, Bun                        |
+| Lint/Format | Ultracite (Biome)                     |
+| Monitoring  | Sentry, Logtail                       |

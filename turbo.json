@@ -22,6 +22,11 @@
       "inputs": ["src/**", "wrangler.jsonc", "tsconfig.json", "package.json"],
       "outputs": ["dist/**"]
     },
+    "@detent/healer#build": {
+      "dependsOn": ["@detent/healing#build"],
+      "inputs": ["src/**/*.ts", "tsconfig.json", "package.json"],
+      "outputs": ["dist/**"]
+    },
     "@detent/navigator#build": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$", ".env", ".env.local"],

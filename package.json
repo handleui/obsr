@@ -11,7 +11,7 @@
     "fix": "ultracite fix",
     "check-types": "turbo run check-types",
     "test": "turbo run test",
-    "prepare": "lefthook install",
+    "prepare": "[ -d .git ] && lefthook install || true",
     "tag": "bash scripts/tag.sh",
     "dt": "bun run apps/cli/dist/index.js"
   },

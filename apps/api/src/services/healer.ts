@@ -1,66 +1,61 @@
-import type { ExtractedError } from "@detent/types";
+import type { Database } from "../db/client";
+import { createHeal } from "../db/operations/heals";
 import type { Env } from "../types/env";
 import { canRunHeal } from "./billing";
 
-interface HealOptions {
+interface RequestHealOptions {
+  db: Database;
   env: Env;
-  orgId: string;
-  errors: ExtractedError[];
-  repoUrl: string;
-  branch: string;
-  byok?: boolean;
+  projectId: string;
+  organizationId: string;
   runId?: string;
+  commitSha?: string;
+  prNumber?: number;
+  errorIds?: string[];
+  signatureIds?: string[];
 }
 
-interface HealEvent {
-  type: "status" | "tool_call" | "message" | "patch" | "complete" | "error";
-  data: unknown;
+interface RequestHealResult {
+  success: boolean;
+  healId?: string;
+  error?: string;
+  code?: "BILLING_REQUIRED" | "INSERT_FAILED";
 }
 
 export const healerService = {
-  async *heal(options: HealOptions): AsyncGenerator<HealEvent> {
-    // Check billing before running
-    const billingCheck = await canRunHeal(options.env, options.orgId);
+  async requestHeal(options: RequestHealOptions): Promise<RequestHealResult> {
+    const billingCheck = await canRunHeal(options.env, options.organizationId);
     if (!billingCheck.allowed) {
-      yield {
-        type: "error",
-        data: { code: "BILLING_REQUIRED", reason: billingCheck.reason },
+      return {
+        success: false,
+        error: billingCheck.reason,
+        code: "BILLING_REQUIRED",
       };
-      return;
     }
 
-    yield {
-      type: "status",
-      data: { phase: "initializing" },
-    };
+    try {
+      const healId = await createHeal(options.db, {
+        type: "heal",
+        projectId: options.projectId,
+        runId: options.runId,
+        commitSha: options.commitSha,
+        prNumber: options.prNumber,
+        errorIds: options.errorIds,
+        signatureIds: options.signatureIds,
+      });
 
-    // Stub implementation - healing will be wired up when the API is ready.
-    // The actual healing will:
-    // 1. Clone repo to workspace
-    // 2. Initialize HealLoop with tools from @detent/healing
-    // 3. Stream Claude responses
-    // 4. Apply patches and verify fixes
-    // 5. Record usage via recordAIUsage(env, orgId, runId, healResult, byok)
-
-    yield {
-      type: "status",
-      data: { phase: "stub", message: "Healing not yet implemented" },
-    };
-
-    // When actual healing is implemented, record usage:
-    // const healResult = await healLoop.run();
-    // await recordAIUsage(options.env, options.orgId, options.runId, {
-    //   model: healResult.model,
-    //   inputTokens: healResult.inputTokens,
-    //   outputTokens: healResult.outputTokens,
-    //   cacheCreationInputTokens: healResult.cacheCreationInputTokens,
-    //   cacheReadInputTokens: healResult.cacheReadInputTokens,
-    //   costUSD: healResult.costUSD,
-    // }, options.byok ?? false);
-
-    yield {
-      type: "complete",
-      data: { success: false, reason: "stub" },
-    };
+      return {
+        success: true,
+        healId,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[healer] Failed to create heal record: ${message}`);
+      return {
+        success: false,
+        error: message,
+        code: "INSERT_FAILED",
+      };
+    }
   },
 };

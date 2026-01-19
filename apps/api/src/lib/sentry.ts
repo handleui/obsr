@@ -76,6 +76,23 @@ export interface WebhookErrorContext {
   prNumber?: number;
   workflowName?: string;
   runId?: number;
+  /** Check run ID for cleanup error context */
+  checkRunId?: number;
+  /** Number of cleanup errors in aggregated error */
+  cleanupErrorCount?: number;
+}
+
+export interface LockConflictContext {
+  lockType: "pr_comment" | "commit" | "heal_creation";
+  repository: string;
+  prNumber?: number;
+  deliveryId: string;
+  operation: string;
+  holderInfo?: {
+    lockId: string;
+    timestamp: number;
+    ageMs: number;
+  };
 }
 
 export interface ParserContext {
@@ -137,6 +154,58 @@ export const captureWebhookError = (
     }
 
     Sentry.captureException(error);
+  });
+};
+
+/**
+ * Capture a lock conflict event for observability.
+ * These are not errors per se, but indicate potential race conditions or
+ * contention that may lead to inconsistent state (e.g., PR comment not updated).
+ *
+ * Uses warning level since the system is still functional, but the user
+ * may see inconsistent state (check run shows results but comment doesn't).
+ *
+ * @param context - Lock conflict context for debugging
+ */
+export const captureLockConflict = (context: LockConflictContext): void => {
+  Sentry.withScope((scope) => {
+    // Group by lock type, operation, and repository
+    scope.setFingerprint([
+      "lock_conflict",
+      context.lockType,
+      context.operation,
+      context.repository,
+    ]);
+
+    scope.setLevel("warning");
+
+    // Tags for searching/filtering
+    scope.setTag("lock.type", context.lockType);
+    scope.setTag("lock.operation", context.operation);
+    scope.setTag("github.repository", context.repository);
+    scope.setTag("github.delivery_id", context.deliveryId);
+    if (context.prNumber) {
+      scope.setTag("github.pr_number", String(context.prNumber));
+    }
+
+    // Context for debugging
+    scope.setContext("lock_conflict", {
+      lockType: context.lockType,
+      operation: context.operation,
+      repository: context.repository,
+      prNumber: context.prNumber,
+      deliveryId: context.deliveryId,
+      holderLockId: context.holderInfo?.lockId,
+      holderAgeMs: context.holderInfo?.ageMs,
+      holderTimestamp: context.holderInfo?.timestamp
+        ? new Date(context.holderInfo.timestamp).toISOString()
+        : undefined,
+    });
+
+    Sentry.captureMessage(
+      `Lock conflict: ${context.lockType} lock not acquired for ${context.operation}`,
+      { level: "warning" }
+    );
   });
 };
 

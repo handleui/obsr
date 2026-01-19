@@ -2,6 +2,7 @@ import { generateFingerprints, sanitizeSensitiveData } from "@detent/lore";
 import type { ErrorCategory, ErrorSource } from "@detent/types";
 import { and, eq, inArray } from "drizzle-orm";
 import { createDb } from "../../db/client";
+import { DatabaseError } from "../../db/errors";
 import { bulkUpsertSignaturesAndOccurrences } from "../../db/operations/signatures";
 
 /**
@@ -315,6 +316,11 @@ export const bulkStoreRunsAndErrors = async (
     console.log(
       `[workflow_run] Bulk stored ${preparedRuns.length} runs with ${totalErrors} total errors in single transaction`
     );
+  } catch (error) {
+    // Classify and re-throw with actionable error message
+    const dbError = new DatabaseError(error, "transaction", "runs");
+    console.error("[workflow_run] Database error:", dbError.toLogEntry());
+    throw dbError;
   } finally {
     await client.end();
   }
@@ -444,9 +450,11 @@ export const getCommentIdFromDb = async (
       .limit(1);
     return result[0]?.commentId ?? null;
   } catch (error) {
+    // Classify error for actionable logging
+    const dbError = new DatabaseError(error, "select", "pr_comments");
     console.error(
       `[pr-comments] getCommentIdFromDb failed for ${repository}#${prNumber}:`,
-      error
+      dbError.toLogEntry()
     );
     return null;
   }
@@ -492,9 +500,11 @@ export const upsertCommentIdInDb = async (
     );
   } catch (error) {
     // Non-critical: KV is also storing this, and we have the unique constraint as safety
+    // Classify error for actionable logging
+    const dbError = new DatabaseError(error, "upsert", "pr_comments");
     console.error(
       `[pr-comments] upsertCommentIdInDb failed for ${repository}#${prNumber}:`,
-      error
+      dbError.toLogEntry()
     );
   }
 };

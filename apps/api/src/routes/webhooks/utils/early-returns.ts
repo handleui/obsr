@@ -1,4 +1,5 @@
 import type { ExecutionContext, KVNamespace } from "@cloudflare/workers-types";
+import { captureWebhookError } from "../../../lib/sentry";
 import { formatWaitingCheckRunOutput } from "../../../services/comment-formatter";
 import type { createGitHubService } from "../../../services/github";
 import type { WorkflowRunEvaluation } from "../../../services/github/workflow-runs";
@@ -7,6 +8,72 @@ import {
   classifyError,
   ERROR_CODES,
 } from "../../../services/webhooks/error-classifier";
+
+// ============================================================================
+// Error Chain Utilities
+// ============================================================================
+// Helpers for preserving error context through cascading failures
+
+interface ErrorContext {
+  deliveryId: string;
+  checkRunId?: number;
+  owner?: string;
+  repo?: string;
+  operation: string;
+}
+
+/**
+ * Extracts a serializable error representation for logging.
+ * Preserves message, stack, and cause chain.
+ */
+export const serializeError = (
+  error: unknown
+): { message: string; stack?: string; cause?: unknown } => {
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      stack: error.stack,
+      cause: error.cause ? serializeError(error.cause) : undefined,
+    };
+  }
+  return { message: String(error) };
+};
+
+/**
+ * Logs an error with full context at the point of failure.
+ * This ensures the original error is captured before any recovery attempts.
+ */
+const logOriginalError = (
+  prefix: string,
+  error: unknown,
+  context: ErrorContext
+): void => {
+  const serialized = serializeError(error);
+  console.error(`${prefix} Original failure:`, {
+    error: serialized,
+    context,
+  });
+};
+
+/**
+ * Creates an aggregated error when multiple operations fail.
+ * The original error is preserved as the cause, with cleanup errors attached.
+ */
+export class AggregatedCleanupError extends Error {
+  readonly originalError: unknown;
+  readonly cleanupErrors: unknown[];
+
+  constructor(
+    message: string,
+    originalError: unknown,
+    cleanupErrors: unknown[]
+  ) {
+    super(message, { cause: originalError });
+    this.name = "AggregatedCleanupError";
+    this.originalError = originalError;
+    this.cleanupErrors = cleanupErrors;
+  }
+}
 
 // ============================================================================
 // Helper: Clean up check run on error (prevents stale "in progress" state)
@@ -52,9 +119,17 @@ export const cleanupCheckRunOnError = async (
       `[workflow_run] Cleaned up check run ${checkRunId} after error [delivery: ${deliveryId}]`
     );
   } catch (cleanupError) {
+    // Log cleanup failure with reference to the original error context
     console.error(
-      `[workflow_run] Failed to clean up check run ${checkRunId}:`,
-      cleanupError
+      `[workflow_run] Cleanup failed for check run ${checkRunId}:`,
+      {
+        cleanupError: serializeError(cleanupError),
+        originalErrorContext: {
+          deliveryId,
+          errorCode: classified.code,
+          errorMessage: classified.message,
+        },
+      }
     );
   }
 };
@@ -64,6 +139,11 @@ export const cleanupCheckRunOnError = async (
 // ============================================================================
 // When errors occur, try to clean up the check run to avoid orphaned "queued" state.
 // If token isn't available, attempt to recover it first.
+//
+// Error preservation strategy:
+// 1. Log the original error immediately with full context (before any recovery)
+// 2. If token recovery or cleanup fails, log with reference to original error
+// 3. Aggregate all errors for complete debugging context
 export const attemptCheckRunCleanup = async (
   github: ReturnType<typeof createGitHubService>,
   token: string | undefined,
@@ -75,6 +155,19 @@ export const attemptCheckRunCleanup = async (
   originalError?: unknown
 ): Promise<void> => {
   const errorContext = { deliveryId, error: originalError };
+  const cleanupErrors: unknown[] = [];
+
+  // Log the original error immediately with full context
+  // This ensures the root cause is captured before any recovery attempts
+  if (originalError) {
+    logOriginalError("[workflow_run]", originalError, {
+      deliveryId,
+      checkRunId,
+      owner,
+      repo,
+      operation: "check_run_cleanup",
+    });
+  }
 
   if (token) {
     await cleanupCheckRunOnError(
@@ -92,6 +185,7 @@ export const attemptCheckRunCleanup = async (
   console.log(
     `[workflow_run] Attempting token recovery for check run cleanup [delivery: ${deliveryId}]`
   );
+
   try {
     const recoveryToken = await github.getInstallationToken(installationId);
     await cleanupCheckRunOnError(
@@ -103,10 +197,49 @@ export const attemptCheckRunCleanup = async (
       errorContext
     );
   } catch (tokenError) {
+    cleanupErrors.push(tokenError);
+
+    // Log token recovery failure with full context including original error
     console.error(
-      `[workflow_run] Failed to recover token for cleanup, check run ${checkRunId} may be orphaned [delivery: ${deliveryId}]:`,
-      tokenError
+      `[workflow_run] Token recovery failed, check run ${checkRunId} may be orphaned:`,
+      {
+        tokenError: serializeError(tokenError),
+        originalError: originalError ? serializeError(originalError) : null,
+        context: {
+          deliveryId,
+          checkRunId,
+          owner,
+          repo,
+          installationId,
+        },
+      }
     );
+
+    // If we have both original and cleanup errors, create an aggregated error
+    // and capture in Sentry for searchability
+    if (originalError && cleanupErrors.length > 0) {
+      const aggregated = new AggregatedCleanupError(
+        `Cleanup failed after original error (delivery: ${deliveryId})`,
+        originalError,
+        cleanupErrors
+      );
+      // Log the aggregated error for complete traceability
+      console.error("[workflow_run] Aggregated cleanup failure:", {
+        message: aggregated.message,
+        originalError: serializeError(aggregated.originalError),
+        cleanupErrors: aggregated.cleanupErrors.map(serializeError),
+      });
+
+      // Capture in Sentry with full context for debugging
+      captureWebhookError(aggregated, ERROR_CODES.CLEANUP_AGGREGATED, {
+        eventType: "workflow_run.cleanup_aggregated",
+        deliveryId,
+        checkRunId,
+        repository: `${owner}/${repo}`,
+        installationId,
+        cleanupErrorCount: cleanupErrors.length,
+      });
+    }
   }
 };
 
@@ -237,10 +370,18 @@ export const handleWaitingForRunsEarlyReturn = async (
           );
         } catch (error) {
           // Non-fatal: check run update failure shouldn't block processing
+          // but capture to Sentry for observability
           console.error(
             `[workflow_run] Failed to update check run ${storedCheckRunId} with status:`,
             error
           );
+
+          captureWebhookError(error, ERROR_CODES.BACKGROUND_TASK, {
+            eventType: "background.update_check_run_waiting",
+            deliveryId: context.deliveryId,
+            repository,
+            installationId: context.installationId,
+          });
         }
       })()
     );

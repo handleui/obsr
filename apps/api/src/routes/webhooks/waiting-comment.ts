@@ -1,4 +1,5 @@
 import { createDb } from "../../db/client";
+import { captureLockConflict } from "../../lib/sentry";
 import { formatWaitingComment } from "../../services/comment-formatter";
 import { createGitHubService } from "../../services/github";
 import {
@@ -26,6 +27,8 @@ export interface PostWaitingCommentContext {
   headSha: string;
   /** First line of the commit message from check_suite.head_commit.message */
   headCommitMessage?: string;
+  /** Webhook delivery ID for observability/correlation */
+  deliveryId?: string;
 }
 
 export const postWaitingComment = async (
@@ -40,15 +43,36 @@ export const postWaitingComment = async (
     prNumber,
     headSha,
     headCommitMessage,
+    deliveryId,
   } = ctx;
   const kv = env["detent-idempotency"];
 
   // Acquire lock to prevent race conditions when multiple workflows trigger simultaneously
   const lock = await acquirePrCommentLock(kv, repository, prNumber);
   if (!lock.acquired) {
+    // Structured logging for lock conflict observability
+    const holderAgeSeconds = lock.holderInfo
+      ? Math.round(lock.holderInfo.ageMs / 1000)
+      : "unknown";
     console.log(
-      `[webhook] PR comment lock not acquired for ${repository}#${prNumber}, skipping waiting comment`
+      `[webhook] PR comment lock not acquired for ${repository}#${prNumber} ` +
+        `[delivery: ${deliveryId ?? "unknown"}] [holder_age: ${holderAgeSeconds}s] ` +
+        "[operation: waiting_comment]"
     );
+
+    // Track in Sentry for monitoring lock contention patterns
+    // Waiting comments are lower priority but still worth tracking
+    if (deliveryId) {
+      captureLockConflict({
+        lockType: "pr_comment",
+        repository,
+        prNumber,
+        deliveryId,
+        operation: "waiting_comment",
+        holderInfo: lock.holderInfo,
+      });
+    }
+
     return;
   }
 

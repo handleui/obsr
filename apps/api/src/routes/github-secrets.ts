@@ -1,8 +1,11 @@
 /**
  * GitHub Secrets Management
  *
- * Injects DETENT_TOKEN as an organization secret in GitHub.
+ * Injects DETENT_TOKEN as a secret in GitHub (org-level or repo-level).
  * This enables the Detent GitHub Action to authenticate with the API.
+ *
+ * - Organizations: Creates org-level secret (accessible to all/private/selected repos)
+ * - Personal accounts: Must use repo-level secrets via separate endpoint
  */
 
 import { eq } from "drizzle-orm";
@@ -11,6 +14,7 @@ import { createDb } from "../db/client";
 import { apiKeys } from "../db/schema";
 import { generateApiKey, hashApiKey } from "../lib/crypto";
 import { encryptSecretForGitHub } from "../lib/github-crypto";
+import { getOrgPublicKey, putOrgSecret } from "../lib/github-secrets-helper";
 import {
   githubOrgAccessMiddleware,
   type OrgAccessContext,
@@ -19,39 +23,44 @@ import {
 import { createGitHubService } from "../services/github";
 import type { Env } from "../types/env";
 
-const GITHUB_API = "https://api.github.com";
-
 // GitHub secret names must be uppercase with underscores only, starting with a letter
 const SECRET_NAME_PATTERN = /^[A-Z][A-Z0-9_]*$/;
 
-// Map GitHub API errors to safe HTTP status codes for client response
-const mapGitHubErrorStatus = (status: number): 400 | 403 | 404 | 500 | 502 => {
-  if (status === 403) {
-    return 403;
+/**
+ * Classify error for HTTP response.
+ * Returns appropriate status code and client-safe message.
+ */
+const classifySecretCreationError = (
+  error: unknown
+): { statusCode: 500 | 502 | 503; message: string } => {
+  const errorMessage = error instanceof Error ? error.message : "";
+
+  if (
+    errorMessage.includes("GitHub API") ||
+    errorMessage.includes("api.github.com")
+  ) {
+    return { statusCode: 502, message: "GitHub API request failed" };
   }
-  if (status === 404) {
-    return 404;
+
+  if (
+    errorMessage.includes("rate limit") ||
+    errorMessage.includes("timeout") ||
+    errorMessage.includes("ETIMEDOUT") ||
+    errorMessage.includes("ECONNRESET")
+  ) {
+    return {
+      statusCode: 503,
+      message: "Service temporarily unavailable, please retry",
+    };
   }
-  if (status === 502) {
-    return 502;
-  }
-  // Map 4xx errors (400, 401, 422, etc.) to 400
-  if (status >= 400 && status < 500) {
-    return 400;
-  }
-  // Map all 5xx errors to 500
-  return 500;
+
+  return { statusCode: 500, message: "Failed to create GitHub secret" };
 };
 
 interface InjectSecretRequest {
   secret_name?: string; // Default: "DETENT_TOKEN"
   visibility?: "all" | "private" | "selected";
   repository_ids?: number[]; // Required if visibility = "selected"
-}
-
-interface GitHubPublicKeyResponse {
-  key_id: string;
-  key: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -106,9 +115,11 @@ app.post(
     const token = await github.getInstallationToken(installationId);
 
     const { db, client } = await createDb(c.env);
+    let keyId: string | undefined;
+
     try {
       // Create a new API key for this injection
-      const keyId = crypto.randomUUID();
+      keyId = crypto.randomUUID();
       const apiKey = generateApiKey();
       const keyHash = await hashApiKey(apiKey);
       const keyPrefix = apiKey.substring(0, 8); // "dtk_XXXX"
@@ -121,109 +132,23 @@ app.post(
         name: `GitHub Actions (${secretName})`,
       });
 
-      // Step 1: Get GitHub's public key for this org
-      const publicKeyResponse = await fetch(
-        `${GITHUB_API}/orgs/${organization.providerAccountLogin}/actions/secrets/public-key`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "Detent-App",
-          },
-        }
+      // Get GitHub's public key and encrypt the API key
+      const publicKey = await getOrgPublicKey(
+        organization.providerAccountLogin as string,
+        token
       );
+      const encryptedValue = encryptSecretForGitHub(apiKey, publicKey.key);
 
-      if (!publicKeyResponse.ok) {
-        // Log full error for debugging but don't expose to client
-        const errorDetails = await publicKeyResponse.text();
-        console.error(
-          `[github-secrets] Failed to get public key: ${publicKeyResponse.status}`,
-          errorDetails
-        );
-        // Clean up the API key we created
-        try {
-          await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
-        } catch (deleteError) {
-          // CRITICAL: Orphaned API key - key exists in DB but no corresponding GitHub secret
-          console.error(
-            "[github-secrets] ORPHAN_KEY: Failed to delete API key after public key fetch failure. " +
-              `keyId=${keyId}, orgId=${organization.id}, org=${organization.providerAccountLogin}`,
-            deleteError
-          );
-        }
-        return c.json(
-          {
-            error: "Failed to get GitHub public key",
-            // Only expose status code, not raw error details
-            status: publicKeyResponse.status,
-          },
-          mapGitHubErrorStatus(publicKeyResponse.status)
-        );
-      }
-
-      const publicKeyData =
-        (await publicKeyResponse.json()) as GitHubPublicKeyResponse;
-
-      // Step 2: Encrypt the API key using GitHub's public key
-      const encryptedValue = await encryptSecretForGitHub(
-        apiKey,
-        publicKeyData.key
-      );
-
-      // Step 3: Create/update the org secret
-      const secretBody: Record<string, unknown> = {
-        encrypted_value: encryptedValue,
-        key_id: publicKeyData.key_id,
+      // Create/update the org secret
+      await putOrgSecret(
+        organization.providerAccountLogin as string,
+        secretName,
+        encryptedValue,
+        publicKey.key_id,
         visibility,
-      };
-
-      if (visibility === "selected" && body.repository_ids) {
-        secretBody.selected_repository_ids = body.repository_ids;
-      }
-
-      const createSecretResponse = await fetch(
-        `${GITHUB_API}/orgs/${organization.providerAccountLogin}/actions/secrets/${secretName}`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "Detent-App",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(secretBody),
-        }
+        token,
+        body.repository_ids
       );
-
-      if (!createSecretResponse.ok) {
-        // Log full error for debugging but don't expose to client
-        const errorDetails = await createSecretResponse.text();
-        console.error(
-          `[github-secrets] Failed to create secret: ${createSecretResponse.status}`,
-          errorDetails
-        );
-        // Clean up the API key we created
-        try {
-          await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
-        } catch (deleteError) {
-          // CRITICAL: Orphaned API key - key exists in DB but no corresponding GitHub secret
-          console.error(
-            "[github-secrets] ORPHAN_KEY: Failed to delete API key after secret creation failure. " +
-              `keyId=${keyId}, orgId=${organization.id}, org=${organization.providerAccountLogin}, secretName=${secretName}`,
-            deleteError
-          );
-        }
-        return c.json(
-          {
-            error: "Failed to create GitHub secret",
-            // Only expose status code, not raw error details
-            status: createSecretResponse.status,
-          },
-          mapGitHubErrorStatus(createSecretResponse.status)
-        );
-      }
 
       console.log(
         `[github-secrets] Injected ${secretName} into ${organization.providerAccountLogin}`
@@ -235,6 +160,30 @@ app.post(
         visibility,
         api_key_id: keyId,
       });
+    } catch (error) {
+      // Clean up the API key if creation failed
+      if (keyId) {
+        try {
+          await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
+        } catch (deleteError) {
+          // CRITICAL: Orphaned API key - key exists in DB but no corresponding GitHub secret
+          console.error(
+            `[github-secrets] ORPHAN_KEY: Failed to delete API key after error. keyId=${keyId}, orgId=${organization.id}`,
+            deleteError
+          );
+        }
+      }
+
+      // Log full error details server-side for debugging
+      const fullErrorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      console.error(
+        `[github-secrets] Failed to inject secret: ${fullErrorMessage}`
+      );
+
+      // Classify error for appropriate HTTP status code
+      const { statusCode, message } = classifySecretCreationError(error);
+      return c.json({ error: message }, statusCode);
     } finally {
       await client.end();
     }

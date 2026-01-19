@@ -1,0 +1,209 @@
+---
+title: GitHub Action
+description: Collect errors and enable AI healing in your workflows
+---
+
+The Detent action runs at the end of your CI job to collect structured error data and send it for AI-powered healing.
+
+## What It Does
+
+<CardGroup cols={2}>
+  <Card title="Detects Errors" icon="magnifying-glass">
+    Finds JSON outputs from ESLint, Vitest, golangci-lint, Cargo
+  </Card>
+  <Card title="Extracts Context" icon="code">
+    Reads source code around each error for AI context
+  </Card>
+  <Card title="Reports to API" icon="paper-plane">
+    Sends structured data (not logs) to Detent backend
+  </Card>
+  <Card title="Enables Healing" icon="wand-magic-sparkles">
+    Powers automatic fix suggestions and PR comments
+  </Card>
+</CardGroup>
+
+## Installation
+
+Add the action as the final step in your workflow jobs:
+
+```yaml .github/workflows/ci.yml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm run lint -- --format json --output-file eslint-report.json
+      - run: npm test
+
+      - uses: detent/action@v1
+        with:
+          token: ${{ secrets.DETENT_TOKEN }}
+        if: always()
+```
+
+<Warning>
+The action must run with `if: always()` to capture errors from failed steps.
+</Warning>
+
+## Performance Impact
+
+The action adds **0.5-3 seconds** to your job runtime:
+
+| Project Size | Errors | Overhead |
+|--------------|--------|----------|
+| Small | ~10 | ~400ms |
+| Medium | ~50 | ~700ms |
+| Large | ~500 | ~2.5s |
+
+For typical projects, this is **less than 1% of job duration**.
+
+### What Happens
+
+1. **File detection** (10-50ms) - Scans for tool output files
+2. **JSON parsing** (20-500ms) - Parses error data from each tool
+3. **Snippet extraction** (30-1500ms) - Reads source code context
+4. **API report** (100-500ms) - Sends structured data to Detent
+
+## Supported Tools
+
+The action auto-detects JSON outputs from these tools:
+
+<Tabs>
+  <Tab title="ESLint">
+    Enable JSON output in your lint command:
+
+    ```bash
+    eslint . --format json --output-file eslint-report.json
+    ```
+
+    Or in your workflow:
+
+    ```yaml
+    - run: npm run lint -- --format json --output-file eslint-report.json
+    ```
+  </Tab>
+  <Tab title="Vitest">
+    Enable the JSON reporter in your config:
+
+    ```typescript vitest.config.ts
+    import { defineConfig } from 'vitest/config'
+
+    export default defineConfig({
+      test: {
+        reporters: ['default', 'json'],
+        outputFile: 'vitest.json'
+      }
+    })
+    ```
+  </Tab>
+  <Tab title="golangci-lint">
+    Output to JSON format:
+
+    ```bash
+    golangci-lint run --out-format json > golangci-lint.json
+    ```
+  </Tab>
+  <Tab title="Cargo">
+    Use JSON message format:
+
+    ```bash
+    cargo build --message-format=json 2>&1 | tee cargo-output.json
+    ```
+
+    Or set the `CARGO_STDOUT` environment variable with the JSON output.
+  </Tab>
+</Tabs>
+
+### Detection Locations
+
+The action searches these directories for output files:
+
+- `.` (repository root)
+- `./reports`
+- `./test-results`
+- `./coverage`
+- `./.nyc_output`
+
+## Data Collected
+
+The action sends **only structured error data**, never raw logs:
+
+| Field | Example | Purpose |
+|-------|---------|---------|
+| `repository` | `acme/app` | Identify project |
+| `commitSha` | `a1b2c3d4...` | Link to code version |
+| `workflowName` | `CI` | Workflow identification |
+| `errors[]` | See below | Parsed error details |
+| `codeSnippet` | 7 lines | Context for AI healing |
+
+<Accordion title="Full error structure">
+```json
+{
+  "message": "Type 'string' is not assignable to type 'number'",
+  "filePath": "src/utils.ts",
+  "line": 42,
+  "column": 5,
+  "severity": "error",
+  "ruleId": "TS2322",
+  "codeSnippet": {
+    "lines": [
+      "  return value",
+      "}",
+      "",
+      "const x: number = 'hello'",
+      "",
+      "export const helper = () => {"
+    ],
+    "startLine": 39,
+    "errorLine": 3,
+    "language": "typescript"
+  }
+}
+```
+</Accordion>
+
+## Configuration
+
+### Required Inputs
+
+| Input | Description |
+|-------|-------------|
+| `token` | Your Detent API token (from `secrets.DETENT_TOKEN`) |
+
+### Optional Inputs
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `api-url` | `https://backend.detent.sh` | API endpoint (for self-hosted) |
+
+### Full Example
+
+```yaml .github/workflows/ci.yml
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+      - run: npm run lint -- --format json --output-file eslint-report.json
+        continue-on-error: true
+      - run: npm test
+        continue-on-error: true
+
+      - uses: detent/action@v1
+        with:
+          token: ${{ secrets.DETENT_TOKEN }}
+        if: always()
+```
+
+<Info>
+Using `continue-on-error: true` on lint/test steps ensures the Detent action runs even when checks fail, which is when you need error collection most.
+</Info>

@@ -19,7 +19,7 @@
   "dependencies": {
     "@detent/git": "*",
     "@detent/healing": "*",
-    "@detent/parser": "*",
+    "@detent/types": "*",
     "@handleui/shimmer": "^0.1.0",
     "@sentry/node": "^9.0.0",
     "@inkjs/ui": "^2.0.0",

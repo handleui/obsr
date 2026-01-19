@@ -1,12 +1,12 @@
 // Comment formatter for GitHub PR comments
 // Formats error summaries in a clean, scannable format
 
-import type { ParsedError } from "./error-parser";
 import type { JobEvaluation, JobSummary } from "./github/workflow-jobs";
 import type {
   WorkflowRunEvaluation,
   WorkflowRunSummary,
 } from "./github/workflow-runs";
+import type { ParsedError } from "./webhooks/types";
 
 export interface WorkflowRunResult {
   name: string;

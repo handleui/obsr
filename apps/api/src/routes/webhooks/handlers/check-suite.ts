@@ -89,7 +89,7 @@ export const handleCheckSuiteRequested = async (
       owner,
       repo,
       headSha,
-      name: "Detent Parser",
+      name: "Detent Heal",
       status: "queued",
       output: {
         title: "Waiting for CI to complete",

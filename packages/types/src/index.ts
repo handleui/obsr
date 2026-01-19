@@ -26,6 +26,13 @@ export type {
   ErrorOccurrence,
   ErrorSignature,
 } from "./fingerprint.js";
+export type { RedactionPattern } from "./sanitize.js";
+export {
+  redactionPatterns,
+  redactPII,
+  redactSensitiveData,
+  sanitizeForTelemetry,
+} from "./sanitize.js";
 export type { ErrorSeverity } from "./severity.js";
 export type { ErrorSource } from "./source.js";
 export { ErrorSources } from "./source.js";

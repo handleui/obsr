@@ -21,7 +21,6 @@
   "dependencies": {
     "@detent/healing": "*",
     "@detent/lore": "*",
-    "@detent/parser": "*",
     "@detent/types": "*",
     "@e2b/code-interpreter": "^2.3.3",
     "@polar-sh/sdk": "^0.42.2",
@@ -35,6 +34,8 @@
     "fflate": "^0.8.2",
     "hono": "^4.11.3",
     "jose": "^6.0.10",
+    "sealed-box": "^0.1.0",
+    "tweetnacl": "^1.0.3",
     "pg": "^8.16.3",
     "resend": "^6.7.0"
   },

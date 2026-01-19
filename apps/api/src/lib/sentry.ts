@@ -11,7 +11,8 @@
 // - Aggregate errors: Group by [errorCode, eventType] only to see system-wide impact
 // - Repo-specific errors: Group by [errorCode, eventType, repository] for per-repo debugging
 
-import type { UnknownPatternReporter } from "@detent/parser";
+type UnknownPatternReporter = (patterns: string[]) => void;
+
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK official pattern
 import * as Sentry from "@sentry/cloudflare";
 
@@ -130,7 +131,7 @@ export const captureWebhookError = (
       runId: context.runId,
     });
 
-    // Include parser context if available (set by error-parser.ts)
+    // Include parser context if available
     if (parserContext) {
       scope.setContext("parser", parserContext);
     }

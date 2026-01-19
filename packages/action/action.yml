@@ -1,0 +1,22 @@
+name: "Detent Report"
+description: "Report workflow outcomes and errors to Detent"
+author: "Detent"
+branding:
+  icon: "check-circle"
+  color: "green"
+inputs:
+  token:
+    description: "Detent API token"
+    required: true
+  api-url:
+    description: "Detent API URL"
+    required: false
+    default: "https://backend.detent.sh"
+outputs:
+  stored:
+    description: "Number of errors stored"
+  run-id:
+    description: "The Detent run ID"
+runs:
+  using: "node20"
+  main: "dist/index.js"

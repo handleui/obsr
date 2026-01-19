@@ -475,6 +475,9 @@ export const runErrors = pgTable(
     index("run_errors_source_idx").on(table.source),
     index("run_errors_rule_id_idx").on(table.ruleId),
     index("run_errors_signature_idx").on(table.signatureId),
+    // Composite index for queries joining with runs and filtering by source
+    // Optimizes: SELECT ... FROM run_errors JOIN runs WHERE source = 'job-report'
+    index("run_errors_run_id_source_idx").on(table.runId, table.source),
   ]
 );
 
@@ -681,6 +684,29 @@ export const heals = pgTable(
 );
 
 // ============================================================================
+// API Keys (Organization-scoped API tokens for external integrations)
+// ============================================================================
+
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+    organizationId: varchar("organization_id", { length: 36 })
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    keyHash: varchar("key_hash", { length: 64 }).notNull().unique(), // SHA-256 hash (64 hex chars)
+    keyPrefix: varchar("key_prefix", { length: 8 }).notNull(), // "dtk_XXXX" for identification
+    name: varchar("name", { length: 255 }).notNull(), // e.g. "GitHub Actions"
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    lastUsedAt: timestamp("last_used_at"),
+  },
+  (table) => [
+    index("api_keys_org_idx").on(table.organizationId),
+    index("api_keys_hash_idx").on(table.keyHash), // Fast hash lookups
+  ]
+);
+
+// ============================================================================
 // Relations (for Drizzle relational query API)
 // ============================================================================
 
@@ -699,6 +725,7 @@ export const organizationsRelations = relations(
     invitations: many(invitations),
     projects: many(projects),
     usageEvents: many(usageEvents),
+    apiKeys: many(apiKeys),
   })
 );
 
@@ -787,6 +814,13 @@ export const healsRelations = relations(heals, ({ one }) => ({
   }),
 }));
 
+export const apiKeysRelations = relations(apiKeys, ({ one }) => ({
+  organization: one(organizations, {
+    fields: [apiKeys.organizationId],
+    references: [organizations.id],
+  }),
+}));
+
 // ============================================================================
 // Type Exports
 // ============================================================================
@@ -826,3 +860,6 @@ export type NewUsageEvent = typeof usageEvents.$inferInsert;
 
 export type Heal = typeof heals.$inferSelect;
 export type NewHeal = typeof heals.$inferInsert;
+
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type NewApiKey = typeof apiKeys.$inferInsert;

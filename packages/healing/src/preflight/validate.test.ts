@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ExtractedError } from "@detent/parser";
+import type { ExtractedError } from "@detent/types";
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { validateErrors } from "./validate.js";

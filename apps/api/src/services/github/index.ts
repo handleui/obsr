@@ -119,6 +119,8 @@ const createGitHubServiceInternal = (env: Env) => {
     return data.token;
   };
 
+  // DEPRECATED: Log fetching is no longer used - errors come from job-reported action.
+  // Keeping for potential rollback. Remove once action-first approach is validated.
   const fetchWorkflowLogs = async (
     token: string,
     owner: string,

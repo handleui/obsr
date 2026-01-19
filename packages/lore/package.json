@@ -16,7 +16,6 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@detent/parser": "workspace:*",
     "@detent/types": "workspace:*"
   },
   "devDependencies": {

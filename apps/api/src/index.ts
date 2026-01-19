@@ -13,16 +13,18 @@ import { secureHeaders } from "hono/secure-headers";
 import { authMiddleware } from "./middleware/auth";
 import { rateLimitMiddleware } from "./middleware/rate-limit";
 import { sentryContextMiddleware } from "./middleware/sentry-context";
+import apiKeysRoutes from "./routes/api-keys";
 import authRoutes from "./routes/auth";
 import billingRoutes from "./routes/billing";
 import errorsRoutes from "./routes/errors";
+import githubSecretsRoutes from "./routes/github-secrets";
 import healRoutes from "./routes/heal";
 import healthRoutes from "./routes/health";
 import { invitationRoutes, orgInvitationsRoutes } from "./routes/invitations";
 import organizationMembersRoutes from "./routes/organization-members";
 import organizationsRoutes from "./routes/organizations";
-import parseRoutes from "./routes/parse";
 import projectsRoutes from "./routes/projects";
+import reportRoutes from "./routes/report";
 import webhookRoutes from "./routes/webhooks";
 import polarWebhookRoutes from "./routes/webhooks/polar";
 import type { Env } from "./types/env";
@@ -154,7 +156,7 @@ app.use(
       return null;
     },
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization"],
+    allowHeaders: ["Content-Type", "Authorization", "X-Detent-Token"],
     exposeHeaders: [
       "Content-Length",
       "X-RateLimit-Limit",
@@ -177,19 +179,23 @@ app.route("/health", healthRoutes);
 app.route("/webhooks", webhookRoutes);
 app.route("/webhooks/polar", polarWebhookRoutes);
 
+// API key authenticated routes (X-Detent-Token header)
+app.route("/report", reportRoutes);
+
 // Protected routes (require JWT auth + rate limiting)
 const api = new Hono<{ Bindings: Env }>();
 api.use("*", authMiddleware);
 api.use("*", rateLimitMiddleware);
 api.route("/auth", authRoutes);
 api.route("/errors", errorsRoutes);
-api.route("/parse", parseRoutes);
 api.route("/heal", healRoutes);
 api.route("/projects", projectsRoutes);
 api.route("/organization-members", organizationMembersRoutes);
 api.route("/organizations", organizationsRoutes);
 api.route("/invitations", invitationRoutes);
 api.route("/orgs/:orgId/invitations", orgInvitationsRoutes);
+api.route("/orgs", apiKeysRoutes);
+api.route("/orgs", githubSecretsRoutes);
 api.route("/billing", billingRoutes);
 
 app.route("/v1", api);

@@ -1,4 +1,4 @@
-import type { ExtractedError } from "@detent/parser";
+import type { ExtractedError } from "@detent/types";
 
 export type ValidationReason =
   | "file_missing"

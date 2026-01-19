@@ -1,5 +1,5 @@
 import { findGitRoot } from "@detent/git";
-import { redactSensitiveData } from "@detent/parser";
+import { redactSensitiveData } from "@detent/types";
 import { defineCommand } from "citty";
 import {
   ensureRepoDetentDir,

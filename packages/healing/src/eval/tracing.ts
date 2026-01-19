@@ -19,14 +19,13 @@ import type { HealResult } from "../types.js";
  * Factory functions that create fresh regex instances for sensitive patterns.
  * These are redacted before sending to Braintrust.
  *
+ * TODO: Consider using @detent/types/sanitize.ts (redactSensitiveData) instead.
+ * That shared utility has 50+ patterns and is the canonical source.
+ *
  * IMPORTANT: We use factory functions instead of regex literals because the
  * global flag (`g`) makes regexes stateful via `lastIndex`. While `String.replace`
  * doesn't persist this state, using factories prevents subtle bugs if patterns
  * are ever used with `test()` or `exec()`, and makes the code more maintainable.
- *
- * Note: Patterns are designed to avoid false positives on known-safe values
- * like git SHAs (40-char lowercase hex), UUIDs (36-char with dashes), and
- * content hashes commonly used in build tools.
  */
 const SENSITIVE_PATTERN_FACTORIES: Array<() => RegExp> = [
   // API keys and tokens (common formats with explicit key/token indicators)

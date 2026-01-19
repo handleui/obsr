@@ -348,18 +348,12 @@ const classifyError = (
 /**
  * Sanitizes error messages to remove potential API keys or sensitive data.
  *
- * NOTE: This is the canonical credential sanitization function for the healing package.
- * If adding new credential patterns, consider if similar logic is needed in:
- * - Sentry error reporting (apps/api/src/lib/sentry.ts)
- * - GitHub secrets helper (apps/api/src/lib/github-secrets-helper.ts)
+ * NOTE: A comprehensive shared utility exists at @detent/types (redactSensitiveData).
+ * This local version is kept for now to preserve specific replacement labels
+ * (e.g., [REDACTED_GITHUB_TOKEN] vs [GITHUB_CLASSIC_TOKEN]).
  *
- * Patterns covered:
- * - Anthropic API keys (sk-ant-*)
- * - OpenAI API keys (sk-*)
- * - GitHub tokens (ghp_*, gho_*, ghu_*, ghs_*, ghr_*, github_pat_*)
- * - Detent tokens (dtk_*)
- * - Bearer tokens
- * - Generic secrets in key/token/secret/password contexts
+ * TODO: Consider consolidating with @detent/types/sanitize.ts which has 50+ patterns.
+ * See also: packages/healing/src/eval/tracing.ts (redactSensitive)
  */
 const sanitizeErrorMessage = (message: string): string => {
   // Anthropic API key patterns

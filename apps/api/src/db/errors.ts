@@ -93,8 +93,12 @@ const TRANSIENT_ERROR_CODES = new Set([
   "55006", // object_in_use
   "55P03", // lock_not_available
 
-  // Connection pool errors (Neon/Hyperdrive specific patterns)
-  "XX000", // internal_error (often transient in pooled connections)
+  // Connection pool errors (Neon/Hyperdrive specific)
+  // XX000 in direct PostgreSQL usually indicates bugs, but in pooled environments
+  // (Neon serverless + Cloudflare Hyperdrive) it often signals transient pool
+  // state issues that resolve on retry. Safe to retry here; permanent failures
+  // will fail again and be reclassified.
+  "XX000", // internal_error
 ]);
 
 /**

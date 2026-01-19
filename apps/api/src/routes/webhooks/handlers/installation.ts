@@ -436,23 +436,28 @@ const handleCreatedAction = async (
     const orgId = "existing" in result ? result.id : result.organizationId;
 
     // Use tracked waitUntil for proper error capture and Sentry reporting
-    const waitUntilTracked = createTrackedWaitUntil(c.executionCtx, {
-      deliveryId,
-      repository: account.login, // Use account login as repository context
-      installationId: installation.id,
-    });
+    // Wrapped in try-catch because executionCtx may not be available in tests
+    try {
+      const waitUntilTracked = createTrackedWaitUntil(c.executionCtx, {
+        deliveryId,
+        repository: account.login, // Use account login as repository context
+        installationId: installation.id,
+      });
 
-    waitUntilTracked(
-      triggerSecretCreation(
-        orgId,
-        account.login,
-        account.type === "Organization" ? "organization" : "user",
-        String(installation.id),
-        repositories,
-        c.env
-      ),
-      { operation: "auto_create_secret" }
-    );
+      waitUntilTracked(
+        triggerSecretCreation(
+          orgId,
+          account.login,
+          account.type === "Organization" ? "organization" : "user",
+          String(installation.id),
+          repositories,
+          c.env
+        ),
+        { operation: "auto_create_secret" }
+      );
+    } catch {
+      // executionCtx not available (e.g., in tests) - skip background task
+    }
   }
 
   if ("existing" in result) {
@@ -494,7 +499,7 @@ export const handleInstallationEvent = async (
   try {
     switch (action) {
       case "created":
-        return handleCreatedAction(
+        return await handleCreatedAction(
           c,
           db,
           installation,

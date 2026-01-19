@@ -797,6 +797,7 @@ app.post("/", async (c) => {
 
     if (dbError.isTransient) {
       // 503 for transient errors - client should retry
+      c.header("Retry-After", "3");
       return c.json(dbError.toApiResponse(), 503);
     }
 

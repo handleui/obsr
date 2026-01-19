@@ -1,5 +1,13 @@
 # @detent/healing
 
+## 0.4.5
+
+### Patch Changes
+
+- c16d1b6: Add structured error reporting to healing loop with error classification and context tracking.
+  Errors are now classified by type (rate limit, auth, timeout, etc.) with sanitized messages that remove API keys.
+- 9b6f274: Export command validation utilities from tools module for use by sandbox adapters.
+
 ## 0.4.4
 
 ### Patch Changes

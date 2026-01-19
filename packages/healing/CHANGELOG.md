@@ -1,5 +1,15 @@
 # @detent/healing
 
+## 0.4.4
+
+### Patch Changes
+
+- e1cb50b: Migrate from @detent/parser to @detent/types for shared type imports.
+- Updated dependencies [e1cb50b]
+- Updated dependencies [e1cb50b]
+  - @detent/lore@0.2.1
+  - @detent/types@0.5.0
+
 ## 0.4.3
 
 ### Patch Changes

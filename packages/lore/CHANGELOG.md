@@ -1,5 +1,13 @@
 # @detent/lore
 
+## 0.2.1
+
+### Patch Changes
+
+- e1cb50b: Migrate from @detent/parser to @detent/types for shared type imports.
+- Updated dependencies [e1cb50b]
+  - @detent/types@0.5.0
+
 ## 0.2.0
 
 ### Minor Changes

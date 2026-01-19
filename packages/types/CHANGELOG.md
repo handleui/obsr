@@ -1,5 +1,12 @@
 # @detent/types
 
+## 0.5.0
+
+### Minor Changes
+
+- e1cb50b: Add PII and sensitive data redaction utilities.
+  Exports redactPII, redactSensitiveData, and sanitizeForTelemetry functions with patterns for API keys, tokens, and credentials.
+
 ## 0.4.0
 
 ### Minor Changes

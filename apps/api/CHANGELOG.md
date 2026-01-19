@@ -1,5 +1,31 @@
 # @detent/api
 
+## 1.0.0
+
+### Major Changes
+
+- e1cb50b: Replace log-based parsing with JSON-based error collection.
+
+  Removes @detent/parser dependency entirely. Error parsing now happens at the source via the new GitHub Action, which sends structured JSON to the /report endpoint. This eliminates regex-based log parsing in favor of consuming native JSON output from CI tools (ESLint, Vitest, golangci-lint, Cargo, TypeScript).
+
+  Adds API key authentication (X-Detent-Token) for machine-to-machine communication and GitHub secrets encryption for automated token provisioning.
+
+### Minor Changes
+
+- 3855800: Add heals layer for autofix orchestration with Modal executor integration.
+
+  Introduces the `heals` table to track autofix and AI heal operations, organization settings for auto-commit behavior, KV-based deduplication locks, and a webhook endpoint for executor callbacks. Includes GitHub Data API integration for pushing commits directly to PR branches.
+
+### Patch Changes
+
+- bc8a964: Migrate from local PostgreSQL/Docker to Neon for development.
+  Remove docker-compose.yml and local database setup scripts in favor of direct Neon connection via Hyperdrive.
+- Updated dependencies [e1cb50b]
+- Updated dependencies [e1cb50b]
+  - @detent/healing@0.4.4
+  - @detent/lore@0.2.1
+  - @detent/types@0.5.0
+
 ## 0.21.0
 
 ### Minor Changes

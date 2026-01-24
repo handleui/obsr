@@ -34,6 +34,7 @@ export const invitationStatusEnum = pgEnum("invitation_status", [
 
 export const healTypeEnum = pgEnum("heal_type", ["autofix", "heal"]);
 export const healStatusEnum = pgEnum("heal_status", [
+  "found",
   "pending",
   "running",
   "completed",
@@ -59,6 +60,7 @@ export interface OrganizationSettings {
   autofixAutoCommit?: boolean; // default: false - auto-push to PR
   healEnabled?: boolean; // default: false - enable AI heals
   healAutoCommit?: boolean; // default: false - auto-push AI heals
+  healAutoTrigger?: boolean;
   healBudgetPerRunUsd?: number; // default: 100 (cents) - per-run limit
 }
 
@@ -69,6 +71,7 @@ export const DEFAULT_ORG_SETTINGS: Required<OrganizationSettings> = {
   autofixAutoCommit: false,
   healEnabled: false,
   healAutoCommit: false,
+  healAutoTrigger: false,
   healBudgetPerRunUsd: 100,
 };
 
@@ -87,6 +90,8 @@ export const getOrgSettings = (
   healEnabled: settings?.healEnabled ?? DEFAULT_ORG_SETTINGS.healEnabled,
   healAutoCommit:
     settings?.healAutoCommit ?? DEFAULT_ORG_SETTINGS.healAutoCommit,
+  healAutoTrigger:
+    settings?.healAutoTrigger ?? DEFAULT_ORG_SETTINGS.healAutoTrigger,
   healBudgetPerRunUsd:
     settings?.healBudgetPerRunUsd ?? DEFAULT_ORG_SETTINGS.healBudgetPerRunUsd,
 });

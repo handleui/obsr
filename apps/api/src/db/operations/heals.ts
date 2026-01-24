@@ -61,6 +61,7 @@ export const createHeal = async (
   data: {
     type: "autofix" | "heal";
     projectId: string;
+    status?: "found" | "pending";
     runId?: string;
     commitSha?: string;
     prNumber?: number;
@@ -86,7 +87,7 @@ export const createHeal = async (
   const sanitizedData = {
     id,
     type: data.type,
-    status: "pending" as const,
+    status: data.status ?? "pending",
     projectId: data.projectId,
     runId: data.runId,
     commitSha: truncate(data.commitSha, MAX_COMMIT_LENGTH),
@@ -103,6 +104,29 @@ export const createHeal = async (
   await db.insert(heals).values(sanitizedData);
 
   return id;
+};
+
+/**
+ * Trigger a heal by moving it from found to pending.
+ *
+ * Security: Validates UUID.
+ */
+export const triggerHeal = async (
+  db: DbOrTx,
+  healId: string
+): Promise<void> => {
+  // SECURITY: Validate UUID
+  if (!isValidUUID(healId)) {
+    throw new Error("Invalid healId format: expected UUID");
+  }
+
+  await db
+    .update(heals)
+    .set({
+      status: "pending",
+      updatedAt: new Date(),
+    })
+    .where(and(eq(heals.id, healId), eq(heals.status, "found")));
 };
 
 /**

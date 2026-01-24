@@ -168,7 +168,7 @@
     },
     "packages/action": {
       "name": "@detent/action",
-      "version": "0.0.1",
+      "version": "0.1.0",
       "dependencies": {
         "@actions/core": "^1.10.0",
         "@actions/github": "^6.0.0",
@@ -191,7 +191,7 @@
     },
     "packages/healing": {
       "name": "@detent/healing",
-      "version": "0.4.4",
+      "version": "0.4.5",
       "dependencies": {
         "@detent/lore": "workspace:*",
         "@detent/types": "workspace:*",

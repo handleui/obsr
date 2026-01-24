@@ -231,7 +231,7 @@ export const executeHeal = async (
     const client = new Client(appEnv.AI_GATEWAY_API_KEY);
 
     const config = createConfig(
-      "claude-sonnet-4-20250514",
+      "openai/gpt-5.2-codex",
       10,
       request.budgetPerRunUSD ?? 1.0,
       request.remainingMonthlyUSD ?? -1

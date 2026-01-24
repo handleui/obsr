@@ -16,6 +16,10 @@ interface ModelPricing {
  * Order matters: more specific prefixes should come before less specific ones.
  */
 const MODEL_PREFIXES: Array<{ prefix: string; pricing: ModelPricing }> = [
+  {
+    prefix: "gpt-5.2-codex",
+    pricing: { inputPerMillion: 1.75, outputPerMillion: 14.0 },
+  },
   // Claude 4.5 models
   {
     prefix: "claude-opus-4-5",

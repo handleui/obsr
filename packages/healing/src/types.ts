@@ -104,7 +104,7 @@ export interface TokenUsage {
  */
 export const DEFAULT_CONFIG: HealConfig = {
   timeout: 600_000, // 10 minutes
-  model: "claude-sonnet-4-20250514",
+  model: "openai/gpt-5.2-codex",
   budgetPerRunUSD: 1.0,
   remainingMonthlyUSD: -1, // unlimited by default
   verbose: false,

@@ -2,6 +2,7 @@ import type { Database } from "../db/client";
 import { createHeal } from "../db/operations/heals";
 import type { OrganizationSettings } from "../db/schema";
 import type { Env } from "../types/env";
+import { canRunHeal } from "./billing";
 
 interface RequestHealOptions {
   db: Database;
@@ -9,6 +10,7 @@ interface RequestHealOptions {
   projectId: string;
   organizationId: string;
   orgSettings: Required<OrganizationSettings>;
+  enforceBilling?: boolean;
   runId?: string;
   commitSha?: string;
   prNumber?: number;
@@ -27,6 +29,21 @@ interface RequestHealResult {
 export const healerService = {
   async requestHeal(options: RequestHealOptions): Promise<RequestHealResult> {
     try {
+      const requireBillingCheck = options.enforceBilling ?? true;
+      if (requireBillingCheck) {
+        const billingCheck = await canRunHeal(
+          options.env,
+          options.organizationId
+        );
+        if (!billingCheck.allowed) {
+          return {
+            success: false,
+            error: billingCheck.reason ?? "Billing required",
+            code: "BILLING_REQUIRED",
+          };
+        }
+      }
+
       const status = options.orgSettings.healAutoTrigger ? "pending" : "found";
       const healId = await createHeal(options.db, {
         type: "heal",

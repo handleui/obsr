@@ -162,6 +162,13 @@
       "when": 1768786854481,
       "tag": "0022_safe_whirlwind",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1769248141918,
+      "tag": "0023_nifty_morlun",
+      "breakpoints": true
     }
   ]
 }

@@ -13,12 +13,14 @@ import {
   getHealsByPr,
   getPendingHeals,
   rejectHeal,
+  triggerHeal,
 } from "../db/operations/heals";
 import { getOrgSettings, projects, runErrors, runs } from "../db/schema";
 import { verifyOrgAccess } from "../lib/org-access";
 import { validateUUID } from "../lib/validation";
 import { generateAutofixCommitMessage } from "../services/autofix/commit-message";
 import { orchestrateHeals } from "../services/autofix/orchestrator";
+import { canRunHeal } from "../services/billing";
 import { createGitHubService } from "../services/github";
 import { getBranchHead, pushHealCommit } from "../services/github/commit-push";
 import type { Env } from "../types/env";
@@ -444,6 +446,68 @@ app.post("/:id/reject", async (c) => {
     await rejectHeal(db, id, auth.userId, body.reason);
 
     return c.json({ success: true, message: "Heal rejected" });
+  } finally {
+    await client.end();
+  }
+});
+
+/**
+ * POST /:id/trigger
+ * Trigger a heal
+ */
+app.post("/:id/trigger", async (c) => {
+  const auth = c.get("auth");
+  const { id } = c.req.param();
+
+  const validation = validateUUID(id, "id");
+  if (!validation.valid) {
+    return c.json({ error: validation.error }, 400);
+  }
+
+  const { db, client } = await createDb(c.env);
+  try {
+    const heal = await getHealById(db, id);
+    if (!heal) {
+      return c.json({ error: "Heal not found" }, 404);
+    }
+
+    if (heal.status !== "found") {
+      return c.json(
+        { error: `Cannot trigger heal with status: ${heal.status}` },
+        400
+      );
+    }
+
+    const project = await db.query.projects.findFirst({
+      where: and(eq(projects.id, heal.projectId), isNull(projects.removedAt)),
+      with: { organization: true },
+    });
+
+    if (!project) {
+      return c.json({ error: "Project not found" }, 404);
+    }
+
+    const access = await verifyOrgAccess(
+      db,
+      auth.userId,
+      project.organization,
+      c.env
+    );
+    if (!access.allowed) {
+      return c.json({ error: access.error }, 403);
+    }
+
+    const billingCheck = await canRunHeal(c.env, project.organization.id);
+    if (!billingCheck.allowed) {
+      return c.json(
+        { error: billingCheck.reason, code: "BILLING_REQUIRED" },
+        402
+      );
+    }
+
+    await triggerHeal(db, id);
+
+    return c.json({ success: true, status: "pending" });
   } finally {
     await client.end();
   }

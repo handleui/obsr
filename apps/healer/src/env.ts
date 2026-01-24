@@ -15,7 +15,7 @@ const validateRequired = (name: string, value: string | undefined): string => {
 };
 
 const loadEnv = (): Env => ({
-  PORT: process.env.PORT ?? "3000",
+  PORT: process.env.PORT ?? "8080",
   E2B_API_KEY: validateRequired("E2B_API_KEY", process.env.E2B_API_KEY),
   AI_GATEWAY_API_KEY: validateRequired(
     "AI_GATEWAY_API_KEY",

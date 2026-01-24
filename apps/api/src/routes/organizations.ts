@@ -544,6 +544,7 @@ app.get("/:organizationId/status", githubOrgAccessMiddleware, async (c) => {
       settings: {
         enable_inline_annotations: settings.enableInlineAnnotations,
         enable_pr_comments: settings.enablePrComments,
+        heal_auto_trigger: settings.healAutoTrigger,
       },
     });
   } finally {
@@ -778,6 +779,7 @@ app.patch(
     const validKeys = [
       "enable_inline_annotations",
       "enable_pr_comments",
+      "heal_auto_trigger",
     ] as const;
     type ValidKey = (typeof validKeys)[number];
     const validKeySet = new Set<string>(validKeys);
@@ -843,6 +845,9 @@ app.patch(
           enablePrComments: providedSettings.enable_pr_comments,
         }),
       };
+      if ("heal_auto_trigger" in providedSettings) {
+        newSettings.healAutoTrigger = providedSettings.heal_auto_trigger;
+      }
 
       await db
         .update(organizations)
@@ -866,6 +871,7 @@ app.patch(
         settings: {
           enable_inline_annotations: finalSettings.enableInlineAnnotations,
           enable_pr_comments: finalSettings.enablePrComments,
+          heal_auto_trigger: finalSettings.healAutoTrigger,
         },
       });
     } finally {

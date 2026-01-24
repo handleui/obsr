@@ -1,5 +1,6 @@
 import type { Database } from "../db/client";
 import { createHeal } from "../db/operations/heals";
+import type { OrganizationSettings } from "../db/schema";
 import type { Env } from "../types/env";
 import { canRunHeal } from "./billing";
 
@@ -8,6 +9,8 @@ interface RequestHealOptions {
   env: Env;
   projectId: string;
   organizationId: string;
+  orgSettings: Required<OrganizationSettings>;
+  enforceBilling?: boolean;
   runId?: string;
   commitSha?: string;
   prNumber?: number;
@@ -20,22 +23,31 @@ interface RequestHealResult {
   healId?: string;
   error?: string;
   code?: "BILLING_REQUIRED" | "INSERT_FAILED";
+  status?: "found" | "pending";
 }
 
 export const healerService = {
   async requestHeal(options: RequestHealOptions): Promise<RequestHealResult> {
-    const billingCheck = await canRunHeal(options.env, options.organizationId);
-    if (!billingCheck.allowed) {
-      return {
-        success: false,
-        error: billingCheck.reason,
-        code: "BILLING_REQUIRED",
-      };
-    }
-
     try {
+      const requireBillingCheck = options.enforceBilling ?? true;
+      if (requireBillingCheck) {
+        const billingCheck = await canRunHeal(
+          options.env,
+          options.organizationId
+        );
+        if (!billingCheck.allowed) {
+          return {
+            success: false,
+            error: billingCheck.reason ?? "Billing required",
+            code: "BILLING_REQUIRED",
+          };
+        }
+      }
+
+      const status = options.orgSettings.healAutoTrigger ? "pending" : "found";
       const healId = await createHeal(options.db, {
         type: "heal",
+        status,
         projectId: options.projectId,
         runId: options.runId,
         commitSha: options.commitSha,
@@ -47,6 +59,7 @@ export const healerService = {
       return {
         success: true,
         healId,
+        status,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

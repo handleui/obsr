@@ -116,6 +116,7 @@ const markHealCompleted = async (
     patch: string | null;
     filesChanged: string[];
     result: {
+      model: string;
       iterations: number;
       costUSD: number;
       inputTokens: number;
@@ -125,7 +126,7 @@ const markHealCompleted = async (
   }
 ): Promise<void> => {
   const healResult = {
-    model: "claude-sonnet-4-20250514",
+    model: data.result.model,
     patchApplied: false,
     verificationPassed: data.patch !== null,
     toolCalls: 0,

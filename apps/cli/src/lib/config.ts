@@ -73,7 +73,7 @@ const PROJECT_CONFIG_FILE = "project.json";
 const GLOBAL_CONFIG_FILE = "detent.json";
 const SCHEMA_URL = "./schema.json";
 
-const DEFAULT_MODEL = "claude-sonnet-4-5";
+const DEFAULT_MODEL = "openai/gpt-5.2-codex";
 const DEFAULT_BUDGET_PER_RUN_USD = 1.0;
 const DEFAULT_TIMEOUT_MINS = 10;
 
@@ -82,17 +82,15 @@ const MAX_TIMEOUT_MINS = 60;
 const MIN_BUDGET_USD = 0.0;
 const MAX_BUDGET_USD = 100.0;
 const MAX_BUDGET_MONTHLY_USD = 1000.0;
-const MODEL_PREFIX = "claude-";
 
-const API_KEY_PREFIXES = ["sk-ant-"] as const;
 const API_KEY_MIN_LENGTH = 20;
 const API_KEY_MAX_LENGTH = 200;
 
-const ALLOWED_MODELS = [
-  "claude-opus-4-5",
-  "claude-sonnet-4-5",
-  "claude-haiku-4-5",
-] as const;
+const ALLOWED_MODELS = ["openai/gpt-5.2-codex"] as const;
+
+const MODEL_ALIASES: Record<string, (typeof ALLOWED_MODELS)[number]> = {
+  "gpt-5.2-codex": "openai/gpt-5.2-codex",
+};
 
 // ============================================================================
 // Path Helpers
@@ -268,11 +266,16 @@ const mergeConfig = (global: GlobalConfig): Config => {
   }
 
   if (global.model) {
-    if (global.model.startsWith(MODEL_PREFIX)) {
-      config.model = global.model;
+    const normalizedModel = MODEL_ALIASES[global.model] ?? global.model;
+    if (
+      ALLOWED_MODELS.includes(
+        normalizedModel as (typeof ALLOWED_MODELS)[number]
+      )
+    ) {
+      config.model = normalizedModel;
     } else {
       console.error(
-        `warning: ignoring invalid model "${global.model}" (must start with "${MODEL_PREFIX}")`
+        `warning: ignoring invalid model "${global.model}" (allowed: ${ALLOWED_MODELS.join(", ")})`
       );
     }
   }
@@ -289,7 +292,7 @@ const mergeConfig = (global: GlobalConfig): Config => {
     config.timeoutMins = clampTimeout(global.timeoutMins);
   }
 
-  const envKey = process.env.ANTHROPIC_API_KEY;
+  const envKey = process.env.AI_GATEWAY_API_KEY;
   if (envKey) {
     config.apiKey = envKey;
   }
@@ -381,7 +384,7 @@ export const validateApiKey = (key: string): ValidationResult => {
     return {
       valid: false,
       error:
-        "API key is too short. Expected format: sk-ant-api03-... (get yours from console.anthropic.com)",
+        "API key is too short. Expected an AI Gateway key (set AI_GATEWAY_API_KEY or detent config)",
     };
   }
 
@@ -389,17 +392,7 @@ export const validateApiKey = (key: string): ValidationResult => {
     return {
       valid: false,
       error:
-        "API key is too long. Expected format: sk-ant-api03-... (get yours from console.anthropic.com)",
-    };
-  }
-
-  const hasValidPrefix = API_KEY_PREFIXES.some((prefix) =>
-    trimmed.startsWith(prefix)
-  );
-  if (!hasValidPrefix) {
-    return {
-      valid: false,
-      error: `Invalid API key format. Must start with ${API_KEY_PREFIXES.join(" or ")} (e.g., sk-ant-api03-...). Get your key from console.anthropic.com`,
+        "API key is too long. Expected an AI Gateway key (set AI_GATEWAY_API_KEY or detent config)",
     };
   }
 
@@ -408,7 +401,7 @@ export const validateApiKey = (key: string): ValidationResult => {
 
 /**
  * Validates a model name.
- * Must be in the allowed models list or start with claude- prefix.
+ * Must be one of the allowed models.
  */
 export const validateModel = (model: string): ValidationResult => {
   if (!model || model.trim() === "") {
@@ -416,19 +409,18 @@ export const validateModel = (model: string): ValidationResult => {
   }
 
   const trimmed = model.trim();
+  const normalizedModel = MODEL_ALIASES[trimmed] ?? trimmed;
 
-  if (ALLOWED_MODELS.includes(trimmed as (typeof ALLOWED_MODELS)[number])) {
+  if (
+    ALLOWED_MODELS.includes(normalizedModel as (typeof ALLOWED_MODELS)[number])
+  ) {
     return { valid: true };
   }
 
-  if (!trimmed.startsWith(MODEL_PREFIX)) {
-    return {
-      valid: false,
-      error: `Model must start with "${MODEL_PREFIX}" or be one of: ${ALLOWED_MODELS.join(", ")}`,
-    };
-  }
-
-  return { valid: true };
+  return {
+    valid: false,
+    error: `Model must be one of: ${ALLOWED_MODELS.join(", ")}`,
+  };
 };
 
 /**

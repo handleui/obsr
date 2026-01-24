@@ -19,6 +19,7 @@ const SANDBOX_TIMEOUT_SEC = 600;
 const WORKTREE_PATH = "/home/user/repo";
 const CLONE_TIMEOUT_MS = 120_000;
 const INSTALL_TIMEOUT_MS = 300_000;
+const DEFAULT_MODEL = "openai/gpt-5.2-codex";
 
 const MAX_HEAL_ID_LENGTH = 64;
 const MAX_BRANCH_LENGTH = 256;
@@ -58,6 +59,7 @@ interface HealResponse {
   patch: string | null;
   filesChanged: string[];
   result: {
+    model: string;
     iterations: number;
     costUSD: number;
     inputTokens: number;
@@ -164,6 +166,7 @@ export const executeHeal = async (
   appEnv: Env,
   rawRequest: unknown
 ): Promise<HealResponse> => {
+  let resolvedModel = DEFAULT_MODEL;
   const parseResult = healRequestSchema.safeParse(rawRequest);
   if (!parseResult.success) {
     const errors = parseResult.error.errors
@@ -174,6 +177,7 @@ export const executeHeal = async (
       patch: null,
       filesChanged: [],
       result: {
+        model: resolvedModel,
         iterations: 0,
         costUSD: 0,
         inputTokens: 0,
@@ -231,11 +235,12 @@ export const executeHeal = async (
     const client = new Client(appEnv.AI_GATEWAY_API_KEY);
 
     const config = createConfig(
-      "openai/gpt-5.2-codex",
+      DEFAULT_MODEL,
       10,
       request.budgetPerRunUSD ?? 1.0,
       request.remainingMonthlyUSD ?? -1
     );
+    resolvedModel = client.normalizeModel(config.model);
 
     const loop = new HealLoop(client, registry, config);
 
@@ -267,6 +272,7 @@ export const executeHeal = async (
       patch,
       filesChanged,
       result: {
+        model: resolvedModel,
         iterations: healResult.iterations,
         costUSD: healResult.costUSD,
         inputTokens: healResult.inputTokens,
@@ -284,6 +290,7 @@ export const executeHeal = async (
       patch: null,
       filesChanged: [],
       result: {
+        model: resolvedModel,
         iterations: 0,
         costUSD: 0,
         inputTokens: 0,

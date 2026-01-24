@@ -1,7 +1,7 @@
 /**
  * Error types for classifying healing loop failures.
  *
- * Classification reference (Anthropic API):
+ * Classification reference (AI Gateway/provider errors):
  * - RATE_LIMIT: 429 rate_limit_error (retryable with backoff)
  * - OVERLOADED: 529 overloaded_error (retryable with backoff)
  * - AUTH_ERROR: 401 authentication_error, 403 permission_error (not retryable)

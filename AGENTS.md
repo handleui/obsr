@@ -67,7 +67,7 @@ Source of truth: `apps/api/src/db/schema.ts`
 ## Boundaries
 
 ### Always Do
-- Use NIA MCP for library docs without being asked
+- Use NIA MCP for any external tooling docs without being asked
 - Run `bun run fix` before committing
 - Use `bun run dt` for local CLI testing
 - Edit `schema.ts` then run `db:generate` for DB changes

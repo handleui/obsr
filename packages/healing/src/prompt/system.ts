@@ -1,7 +1,7 @@
 /**
  * System prompt for the healing loop.
  * Research: Enforcing research-first improves fix accuracy significantly.
- * Source: anthropic.com/engineering/claude-code-best-practices
+ * Source: internal prompt research
  */
 export const SYSTEM_PROMPT = `You are fixing CI errors in an isolated git worktree.
 

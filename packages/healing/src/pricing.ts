@@ -2,7 +2,7 @@ import type { TokenUsage } from "./types.js";
 
 /**
  * Model pricing in USD per million tokens.
- * Source: https://platform.claude.com/docs/en/about-claude/pricing
+ * Sources: https://openai.com/api/pricing (GPT-5.2) and provider pricing pages for legacy models.
  * Cache pricing: read = 0.1x base input, write (5-min TTL) = 1.25x base input
  */
 interface ModelPricing {
@@ -79,7 +79,7 @@ const DEFAULT_PRICING: ModelPricing = {
 };
 
 /**
- * Normalizes model IDs by stripping provider prefixes like "anthropic/".
+ * Normalizes model IDs by stripping provider prefixes like "openai/".
  */
 const normalizeModelName = (model: string): string => {
   const parts = model.split("/");

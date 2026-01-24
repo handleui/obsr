@@ -543,22 +543,13 @@ export class HealLoop {
         modelName
       );
 
+      const userContent = [{ type: "text", text: userPrompt }];
+
       const response = await generateText({
         model: modelName,
         messages: [
           { role: "system", content: systemPrompt },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: userPrompt,
-                providerOptions: {
-                  anthropic: { cacheControl: { type: "ephemeral" } },
-                },
-              },
-            ],
-          },
+          { role: "user", content: userContent },
         ],
         maxOutputTokens: MAX_TOKENS_PER_RESPONSE,
         maxRetries: 5,

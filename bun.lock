@@ -118,6 +118,7 @@
       },
       "devDependencies": {
         "@detent/typescript-config": "*",
+        "@e2b/code-interpreter": "^2.3.3",
         "@types/node": "^25.0.3",
         "@types/pg": "^8.11.6",
         "typescript": "^5.9.3",

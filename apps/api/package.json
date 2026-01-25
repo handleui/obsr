@@ -21,6 +21,7 @@
   "dependencies": {
     "@detent/healing": "*",
     "@detent/lore": "*",
+    "@detent/diagnostics": "*",
     "@detent/sandbox": "*",
     "@detent/types": "*",
     "@polar-sh/sdk": "^0.42.2",
@@ -41,6 +42,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250106.0",
+    "@e2b/code-interpreter": "^2.3.3",
     "@types/node": "^25.0.3",
     "@types/pg": "^8.16.0",
     "@types/react": "^18.3.3",

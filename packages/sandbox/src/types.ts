@@ -3,7 +3,6 @@ export type SandboxProviderName = "vercel" | "e2b";
 export interface SandboxEnv {
   SANDBOX_PROVIDER?: string;
   E2B_API_KEY?: string;
-  VERCEL_OIDC_TOKEN?: string;
   VERCEL_TOKEN?: string;
   VERCEL_TEAM_ID?: string;
   VERCEL_PROJECT_ID?: string;

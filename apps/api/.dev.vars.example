@@ -27,9 +27,7 @@ UPSTASH_REDIS_REST_TOKEN=your_upstash_token
 SANDBOX_PROVIDER=vercel
 # E2B sandbox API key (required when SANDBOX_PROVIDER=e2b)
 E2B_API_KEY=
-# Vercel Sandbox auth (use OIDC when deployed on Vercel)
-VERCEL_OIDC_TOKEN=
-# Or use access token + team/project IDs when OIDC is unavailable
+# Vercel Sandbox auth (access token + team/project IDs)
 VERCEL_TOKEN=
 VERCEL_TEAM_ID=
 VERCEL_PROJECT_ID=

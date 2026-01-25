@@ -65,18 +65,6 @@
         "pages": ["action/index"]
       },
       {
-        "group": "Self-Hosting",
-        "icon": "server",
-        "pages": [
-          "self-hosting/overview",
-          "self-hosting/architecture",
-          "self-hosting/docker-compose",
-          "self-hosting/kubernetes",
-          "self-hosting/configuration",
-          "self-hosting/security"
-        ]
-      },
-      {
         "group": "API Reference",
         "icon": "code",
         "pages": [

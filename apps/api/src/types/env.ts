@@ -60,7 +60,6 @@ export interface Env {
   // E2B sandbox for AI code execution
   E2B_API_KEY?: string;
   // Vercel Sandboxes authentication
-  VERCEL_OIDC_TOKEN?: string;
   VERCEL_TOKEN?: string;
   VERCEL_TEAM_ID?: string;
   VERCEL_PROJECT_ID?: string;

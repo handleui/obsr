@@ -144,18 +144,13 @@ const resolveVercelAuth = (env: SandboxEnv) => {
   const token = env.VERCEL_TOKEN;
   const teamId = env.VERCEL_TEAM_ID;
   const projectId = env.VERCEL_PROJECT_ID;
-  const hasOidcToken = Boolean(env.VERCEL_OIDC_TOKEN);
-
-  if (hasOidcToken) {
-    return { token: undefined, teamId: undefined, projectId: undefined };
-  }
 
   if (token && teamId && projectId) {
     return { token, teamId, projectId };
   }
 
   throw new Error(
-    "Vercel sandbox auth requires VERCEL_OIDC_TOKEN or VERCEL_TOKEN + VERCEL_TEAM_ID + VERCEL_PROJECT_ID"
+    "Vercel sandbox auth requires VERCEL_TOKEN + VERCEL_TEAM_ID + VERCEL_PROJECT_ID"
   );
 };
 

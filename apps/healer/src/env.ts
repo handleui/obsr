@@ -2,7 +2,6 @@ export interface Env {
   PORT: string;
   SANDBOX_PROVIDER?: string;
   E2B_API_KEY?: string;
-  VERCEL_OIDC_TOKEN?: string;
   VERCEL_TOKEN?: string;
   VERCEL_TEAM_ID?: string;
   VERCEL_PROJECT_ID?: string;
@@ -23,7 +22,6 @@ const loadEnv = (): Env => {
   const sandboxProvider =
     process.env.SANDBOX_PROVIDER?.toLowerCase() ?? "vercel";
   const e2bApiKey = process.env.E2B_API_KEY;
-  const vercelOidcToken = process.env.VERCEL_OIDC_TOKEN;
   const vercelToken = process.env.VERCEL_TOKEN;
   const vercelTeamId = process.env.VERCEL_TEAM_ID;
   const vercelProjectId = process.env.VERCEL_PROJECT_ID;
@@ -34,10 +32,10 @@ const loadEnv = (): Env => {
 
   if (
     sandboxProvider === "vercel" &&
-    !(vercelOidcToken || (vercelToken && vercelTeamId && vercelProjectId))
+    !(vercelToken && vercelTeamId && vercelProjectId)
   ) {
     throw new Error(
-      "Vercel sandbox auth requires VERCEL_OIDC_TOKEN or VERCEL_TOKEN + VERCEL_TEAM_ID + VERCEL_PROJECT_ID"
+      "Vercel sandbox auth requires VERCEL_TOKEN + VERCEL_TEAM_ID + VERCEL_PROJECT_ID"
     );
   }
 
@@ -45,7 +43,6 @@ const loadEnv = (): Env => {
     PORT: process.env.PORT ?? "8080",
     SANDBOX_PROVIDER: sandboxProvider,
     E2B_API_KEY: e2bApiKey,
-    VERCEL_OIDC_TOKEN: vercelOidcToken,
     VERCEL_TOKEN: vercelToken,
     VERCEL_TEAM_ID: vercelTeamId,
     VERCEL_PROJECT_ID: vercelProjectId,

@@ -1,5 +1,11 @@
 # @detent/docs
 
+## 0.1.3
+
+### Patch Changes
+
+- 00c1fe2: Remove self-hosting documentation section and update webhook and quickstart guides.
+
 ## 0.1.2
 
 ### Patch Changes

@@ -1,5 +1,12 @@
-import { DEFAULTS, type SandboxHandle, TEMPLATES } from "@detent/sandbox";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  DEFAULTS,
+  type SandboxCodeExecution,
+  type SandboxCommandExecution,
+  type SandboxFileInfo,
+  type SandboxHandle,
+  TEMPLATES,
+} from "@detent/sandbox";
+import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { createSandboxService as createBaseSandboxService } from "./index.js";
 
 // Mock E2B SDK - must mock the module path that @detent/sandbox imports from
@@ -24,20 +31,58 @@ vi.mock("@e2b/code-interpreter", () => {
 // Import from mocked module for vi.mocked() type inference
 import { RateLimitError, Sandbox } from "@e2b/code-interpreter";
 
-// Type-safe mock sandbox matching SandboxHandle interface
-const createMockSandbox = (): SandboxHandle => ({
-  sandboxId: "test-sandbox-123",
-  runCode: vi.fn(),
-  commands: { run: vi.fn() },
+// Mock sandbox type with vitest Mock types for proper type inference
+interface MockSandboxHandle {
+  sandboxId: string;
+  runCode: Mock<SandboxHandle["runCode"]>;
+  commands: { run: Mock<SandboxHandle["commands"]["run"]> };
   files: {
-    write: vi.fn(),
-    read: vi.fn(),
-    exists: vi.fn(),
-    getInfo: vi.fn(),
+    write: Mock<SandboxHandle["files"]["write"]>;
+    read: Mock<SandboxHandle["files"]["read"]>;
+    exists: Mock<(path: string) => Promise<boolean>>;
+    getInfo: Mock<(path: string) => Promise<SandboxFileInfo>>;
+  };
+  kill: Mock<SandboxHandle["kill"]>;
+  setTimeout: Mock<SandboxHandle["setTimeout"]>;
+  isRunning: Mock<SandboxHandle["isRunning"]>;
+}
+
+// Type-safe mock sandbox with vitest mock methods
+const createMockSandbox = (): MockSandboxHandle => ({
+  sandboxId: "test-sandbox-123",
+  runCode:
+    vi.fn<
+      (
+        code: string,
+        opts?: { language?: string; timeoutMs?: number }
+      ) => Promise<SandboxCodeExecution>
+    >(),
+  commands: {
+    run: vi.fn<
+      (
+        command: string,
+        opts?: {
+          cwd?: string;
+          envs?: Record<string, string>;
+          timeoutMs?: number;
+        }
+      ) => Promise<SandboxCommandExecution>
+    >(),
   },
-  kill: vi.fn(),
-  setTimeout: vi.fn(),
-  isRunning: vi.fn(),
+  files: {
+    write: vi.fn<(path: string, content: string) => Promise<void>>(),
+    read: vi.fn<
+      (
+        path: string,
+        opts?: { format?: "text" | "binary" }
+      ) => Promise<string | Uint8Array>
+    >(),
+    exists: vi.fn<(path: string) => Promise<boolean>>(),
+    getInfo: vi.fn<(path: string) => Promise<SandboxFileInfo>>(),
+  },
+  kill: vi.fn<() => Promise<void>>(),
+  setTimeout: vi.fn<(timeoutMs: number) => Promise<void>>(),
+  isRunning: vi.fn<() => Promise<boolean>>(),
 });
 
 const mockSandbox = createMockSandbox();
@@ -48,6 +93,12 @@ interface E2BListItem {
   templateId?: string | null;
   metadata?: Record<string, string> | null;
   startedAt?: Date | string | null;
+}
+
+// Interface for E2B SDK paginator response
+interface E2BPaginator {
+  hasNext: boolean;
+  nextItems: () => Promise<E2BListItem[]>;
 }
 
 const mockSandboxCreate = vi.mocked(Sandbox.create);
@@ -100,7 +151,7 @@ describe("create", () => {
       metadata: undefined,
       envs: undefined,
     });
-    expect(result).toBe(mockSandbox);
+    expect(result.sandboxId).toBe(mockSandbox.sandboxId);
   });
 
   it("passes custom template, timeout, metadata, and envs", async () => {
@@ -140,7 +191,7 @@ describe("create", () => {
   it("rejects timeout above maximum", async () => {
     const svc = createSandboxService("test-api-key");
 
-    await expect(svc.create({ timeout: 4000 })).rejects.toThrow(
+    await expect(svc.create({ timeout: 18_001 })).rejects.toThrow(
       "Timeout must be between 1 and 18000 seconds"
     );
   });
@@ -173,7 +224,7 @@ describe("connect", () => {
     expect(mockSandboxConnect).toHaveBeenCalledWith("abc-123_xyz", {
       apiKey: "test-api-key",
     });
-    expect(result).toBe(mockSandbox);
+    expect(result.sandboxId).toBe(mockSandbox.sandboxId);
   });
 
   it("validates sandbox ID format - rejects empty", async () => {
@@ -221,7 +272,7 @@ describe("runCode", () => {
     });
     const svc = createSandboxService("test-api-key");
 
-    await svc.runCode(mockSandbox as unknown as Sandbox, 'print("hello")', {
+    await svc.runCode(mockSandbox, 'print("hello")', {
       language: "python",
       timeout: 60,
     });
@@ -240,7 +291,7 @@ describe("runCode", () => {
     });
     const svc = createSandboxService("test-api-key");
 
-    await svc.runCode(mockSandbox as unknown as Sandbox, "x = 1");
+    await svc.runCode(mockSandbox, "x = 1");
 
     expect(mockSandbox.runCode).toHaveBeenCalledWith("x = 1", {
       language: "python",
@@ -256,7 +307,7 @@ describe("runCode", () => {
     });
     const svc = createSandboxService("test-api-key");
 
-    const result = await svc.runCode(mockSandbox as unknown as Sandbox, "1+1");
+    const result = await svc.runCode(mockSandbox, "1+1");
 
     expect(result).toEqual({
       logs: "line1\nline2\nwarn",
@@ -273,10 +324,7 @@ describe("runCode", () => {
     });
     const svc = createSandboxService("test-api-key");
 
-    const result = await svc.runCode(
-      mockSandbox as unknown as Sandbox,
-      "print(x)"
-    );
+    const result = await svc.runCode(mockSandbox, "print(x)");
 
     expect(result.error).toBe("NameError: name 'x' is not defined");
   });
@@ -285,9 +333,9 @@ describe("runCode", () => {
     const svc = createSandboxService("test-api-key");
     const longCode = "x".repeat(100 * 1024 + 1);
 
-    await expect(
-      svc.runCode(mockSandbox as unknown as Sandbox, longCode)
-    ).rejects.toThrow("Code exceeds maximum length");
+    await expect(svc.runCode(mockSandbox, longCode)).rejects.toThrow(
+      "Code exceeds maximum length"
+    );
     expect(mockSandbox.runCode).not.toHaveBeenCalled();
   });
 
@@ -295,9 +343,9 @@ describe("runCode", () => {
     mockSandbox.runCode.mockRejectedValueOnce(new Error("Kernel died"));
     const svc = createSandboxService("test-api-key");
 
-    await expect(
-      svc.runCode(mockSandbox as unknown as Sandbox, "code")
-    ).rejects.toThrow("Code execution failed: Kernel died");
+    await expect(svc.runCode(mockSandbox, "code")).rejects.toThrow(
+      "Code execution failed: Kernel died"
+    );
   });
 });
 
@@ -310,7 +358,7 @@ describe("runCommand", () => {
     });
     const svc = createSandboxService("test-api-key");
 
-    await svc.runCommand(mockSandbox as unknown as Sandbox, "ls -la", {
+    await svc.runCommand(mockSandbox, "ls -la", {
       cwd: "/home/user",
       envs: { PATH: "/usr/bin" },
       timeout: 120,
@@ -331,7 +379,7 @@ describe("runCommand", () => {
     });
     const svc = createSandboxService("test-api-key");
 
-    await svc.runCommand(mockSandbox as unknown as Sandbox, "pwd");
+    await svc.runCommand(mockSandbox, "pwd");
 
     expect(mockSandbox.commands.run).toHaveBeenCalledWith("pwd", {
       cwd: undefined,
@@ -348,10 +396,7 @@ describe("runCommand", () => {
     });
     const svc = createSandboxService("test-api-key");
 
-    const result = await svc.runCommand(
-      mockSandbox as unknown as Sandbox,
-      "cat missing.txt"
-    );
+    const result = await svc.runCommand(mockSandbox, "cat missing.txt");
 
     expect(result).toEqual({
       stdout: "file.txt",
@@ -364,9 +409,9 @@ describe("runCommand", () => {
     const svc = createSandboxService("test-api-key");
     const longCommand = "x".repeat(10 * 1024 + 1);
 
-    await expect(
-      svc.runCommand(mockSandbox as unknown as Sandbox, longCommand)
-    ).rejects.toThrow("Command exceeds maximum length");
+    await expect(svc.runCommand(mockSandbox, longCommand)).rejects.toThrow(
+      "Command exceeds maximum length"
+    );
     expect(mockSandbox.commands.run).not.toHaveBeenCalled();
   });
 
@@ -376,9 +421,9 @@ describe("runCommand", () => {
     );
     const svc = createSandboxService("test-api-key");
 
-    await expect(
-      svc.runCommand(mockSandbox as unknown as Sandbox, "sleep 1000")
-    ).rejects.toThrow("Command execution failed: Command timeout");
+    await expect(svc.runCommand(mockSandbox, "sleep 1000")).rejects.toThrow(
+      "Command execution failed: Command timeout"
+    );
   });
 });
 
@@ -387,11 +432,7 @@ describe("writeFile", () => {
     mockSandbox.files.write.mockResolvedValueOnce(undefined);
     const svc = createSandboxService("test-api-key");
 
-    await svc.writeFile(
-      mockSandbox as unknown as Sandbox,
-      "/home/user/test.py",
-      "print(1)"
-    );
+    await svc.writeFile(mockSandbox, "/home/user/test.py", "print(1)");
 
     expect(mockSandbox.files.write).toHaveBeenCalledWith(
       "/home/user/test.py",
@@ -403,11 +444,7 @@ describe("writeFile", () => {
     const svc = createSandboxService("test-api-key");
 
     await expect(
-      svc.writeFile(
-        mockSandbox as unknown as Sandbox,
-        "../../../etc/passwd",
-        "hacked"
-      )
+      svc.writeFile(mockSandbox, "../../../etc/passwd", "hacked")
     ).rejects.toThrow("Path cannot contain '..'");
     expect(mockSandbox.files.write).not.toHaveBeenCalled();
   });
@@ -417,11 +454,7 @@ describe("writeFile", () => {
     const svc = createSandboxService("test-api-key");
 
     await expect(
-      svc.writeFile(
-        mockSandbox as unknown as Sandbox,
-        "/home/user/test.txt",
-        "content"
-      )
+      svc.writeFile(mockSandbox, "/home/user/test.txt", "content")
     ).rejects.toThrow("Failed to write file: Disk full");
   });
 });
@@ -431,10 +464,7 @@ describe("readFile", () => {
     mockSandbox.files.read.mockResolvedValueOnce("file content");
     const svc = createSandboxService("test-api-key");
 
-    const result = await svc.readFile(
-      mockSandbox as unknown as Sandbox,
-      "/home/user/file.txt"
-    );
+    const result = await svc.readFile(mockSandbox, "/home/user/file.txt");
 
     expect(mockSandbox.files.read).toHaveBeenCalledWith("/home/user/file.txt");
     expect(result).toBe("file content");
@@ -445,10 +475,7 @@ describe("readFile", () => {
     mockSandbox.files.read.mockResolvedValueOnce(content);
     const svc = createSandboxService("test-api-key");
 
-    const result = await svc.readFile(
-      mockSandbox as unknown as Sandbox,
-      "/home/user/binary.dat"
-    );
+    const result = await svc.readFile(mockSandbox, "/home/user/binary.dat");
 
     expect(result).toBe("binary content");
   });
@@ -457,10 +484,7 @@ describe("readFile", () => {
     const svc = createSandboxService("test-api-key");
 
     await expect(
-      svc.readFile(
-        mockSandbox as unknown as Sandbox,
-        "/home/../../../etc/shadow"
-      )
+      svc.readFile(mockSandbox, "/home/../../../etc/shadow")
     ).rejects.toThrow("Path cannot contain '..'");
     expect(mockSandbox.files.read).not.toHaveBeenCalled();
   });
@@ -470,7 +494,7 @@ describe("readFile", () => {
     const svc = createSandboxService("test-api-key");
 
     await expect(
-      svc.readFile(mockSandbox as unknown as Sandbox, "/home/user/missing.txt")
+      svc.readFile(mockSandbox, "/home/user/missing.txt")
     ).rejects.toThrow("Failed to read file: File not found");
   });
 });
@@ -480,7 +504,7 @@ describe("kill", () => {
     mockSandbox.kill.mockResolvedValueOnce(undefined);
     const svc = createSandboxService("test-api-key");
 
-    await svc.kill(mockSandbox as unknown as Sandbox);
+    await svc.kill(mockSandbox);
 
     expect(mockSandbox.kill).toHaveBeenCalled();
   });
@@ -489,7 +513,7 @@ describe("kill", () => {
     mockSandbox.kill.mockRejectedValueOnce(new Error("Already terminated"));
     const svc = createSandboxService("test-api-key");
 
-    await expect(svc.kill(mockSandbox as unknown as Sandbox)).rejects.toThrow(
+    await expect(svc.kill(mockSandbox)).rejects.toThrow(
       "Failed to kill sandbox: Already terminated"
     );
   });
@@ -500,7 +524,7 @@ describe("setTimeout", () => {
     mockSandbox.setTimeout.mockResolvedValueOnce(undefined);
     const svc = createSandboxService("test-api-key");
 
-    await svc.setTimeout(mockSandbox as unknown as Sandbox, 60);
+    await svc.setTimeout(mockSandbox, 60);
 
     expect(mockSandbox.setTimeout).toHaveBeenCalledWith(60_000);
   });
@@ -508,18 +532,18 @@ describe("setTimeout", () => {
   it("rejects timeout below minimum (1 second)", async () => {
     const svc = createSandboxService("test-api-key");
 
-    await expect(
-      svc.setTimeout(mockSandbox as unknown as Sandbox, 0.5)
-    ).rejects.toThrow("Timeout must be between 1 and 18000 seconds");
+    await expect(svc.setTimeout(mockSandbox, 0.5)).rejects.toThrow(
+      "Timeout must be between 1 and 18000 seconds"
+    );
     expect(mockSandbox.setTimeout).not.toHaveBeenCalled();
   });
 
   it("rejects timeout above maximum (18000 seconds)", async () => {
     const svc = createSandboxService("test-api-key");
 
-    await expect(
-      svc.setTimeout(mockSandbox as unknown as Sandbox, 3601)
-    ).rejects.toThrow("Timeout must be between 1 and 18000 seconds");
+    await expect(svc.setTimeout(mockSandbox, 18_001)).rejects.toThrow(
+      "Timeout must be between 1 and 18000 seconds"
+    );
     expect(mockSandbox.setTimeout).not.toHaveBeenCalled();
   });
 
@@ -529,9 +553,9 @@ describe("setTimeout", () => {
     );
     const svc = createSandboxService("test-api-key");
 
-    await expect(
-      svc.setTimeout(mockSandbox as unknown as Sandbox, 5)
-    ).rejects.toThrow("Failed to set timeout: Invalid operation");
+    await expect(svc.setTimeout(mockSandbox, 5)).rejects.toThrow(
+      "Failed to set timeout: Invalid operation"
+    );
   });
 });
 
@@ -540,7 +564,7 @@ describe("isRunning", () => {
     mockSandbox.isRunning.mockResolvedValueOnce(true);
     const svc = createSandboxService("test-api-key");
 
-    const result = await svc.isRunning(mockSandbox as unknown as Sandbox);
+    const result = await svc.isRunning(mockSandbox);
 
     expect(result).toBe(true);
     expect(mockSandbox.isRunning).toHaveBeenCalled();
@@ -550,7 +574,7 @@ describe("isRunning", () => {
     mockSandbox.isRunning.mockResolvedValueOnce(false);
     const svc = createSandboxService("test-api-key");
 
-    const result = await svc.isRunning(mockSandbox as unknown as Sandbox);
+    const result = await svc.isRunning(mockSandbox);
 
     expect(result).toBe(false);
   });
@@ -559,28 +583,40 @@ describe("isRunning", () => {
     mockSandbox.isRunning.mockRejectedValueOnce(new Error("Connection lost"));
     const svc = createSandboxService("test-api-key");
 
-    const result = await svc.isRunning(mockSandbox as unknown as Sandbox);
+    const result = await svc.isRunning(mockSandbox);
 
     expect(result).toBe(false);
   });
 });
 
 describe("list", () => {
-  it("maps results to SandboxInfo[]", async () => {
-    mockSandboxList.mockResolvedValueOnce([
-      {
-        sandboxId: "sbx-1",
-        templateId: "python-3.11",
-        metadata: { taskId: "t1" },
-        startedAt: new Date("2024-01-15T10:00:00Z"),
+  it("maps paginator results to SandboxInfo[]", async () => {
+    let hasNextCalls = 0;
+    const mockPaginator = {
+      get hasNext() {
+        hasNextCalls++;
+        return hasNextCalls === 1; // true first time, false after
       },
-      {
-        sandboxId: "sbx-2",
-        templateId: null,
-        metadata: null,
-        startedAt: null,
-      },
-    ] as E2BListItem[] as unknown as Sandbox[]);
+      nextItems: vi.fn().mockResolvedValueOnce([
+        {
+          sandboxId: "sbx-1",
+          templateId: "python-3.11",
+          metadata: { taskId: "t1" },
+          startedAt: "2024-01-15T10:00:00Z",
+        },
+        {
+          sandboxId: "sbx-2",
+          templateId: null,
+          metadata: null,
+          startedAt: null,
+        },
+      ]),
+    };
+    mockSandboxList.mockReturnValueOnce(
+      mockPaginator as E2BPaginator as unknown as ReturnType<
+        typeof Sandbox.list
+      >
+    );
     const svc = createSandboxService("test-api-key");
 
     const result = await svc.list();
@@ -606,8 +642,14 @@ describe("list", () => {
   });
 
   it("returns empty array when no sandboxes", async () => {
-    mockSandboxList.mockResolvedValueOnce(
-      [] as E2BListItem[] as unknown as Sandbox[]
+    const mockPaginator = {
+      hasNext: false,
+      nextItems: vi.fn().mockResolvedValueOnce([]),
+    };
+    mockSandboxList.mockReturnValueOnce(
+      mockPaginator as E2BPaginator as unknown as ReturnType<
+        typeof Sandbox.list
+      >
     );
     const svc = createSandboxService("test-api-key");
 
@@ -617,7 +659,15 @@ describe("list", () => {
   });
 
   it("wraps SDK errors with context", async () => {
-    mockSandboxList.mockRejectedValueOnce(new Error("API error"));
+    const mockPaginator = {
+      hasNext: true,
+      nextItems: vi.fn().mockRejectedValueOnce(new Error("API error")),
+    };
+    mockSandboxList.mockReturnValueOnce(
+      mockPaginator as E2BPaginator as unknown as ReturnType<
+        typeof Sandbox.list
+      >
+    );
     const svc = createSandboxService("test-api-key");
 
     await expect(svc.list()).rejects.toThrow(

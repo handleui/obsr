@@ -1,7 +1,7 @@
 /**
  * Error types for classifying healing loop failures.
  *
- * Classification reference (Anthropic API):
+ * Classification reference (AI Gateway/provider errors):
  * - RATE_LIMIT: 429 rate_limit_error (retryable with backoff)
  * - OVERLOADED: 529 overloaded_error (retryable with backoff)
  * - AUTH_ERROR: 401 authentication_error, 403 permission_error (not retryable)
@@ -104,7 +104,7 @@ export interface TokenUsage {
  */
 export const DEFAULT_CONFIG: HealConfig = {
   timeout: 600_000, // 10 minutes
-  model: "claude-sonnet-4-20250514",
+  model: "openai/gpt-5.2-codex",
   budgetPerRunUSD: 1.0,
   remainingMonthlyUSD: -1, // unlimited by default
   verbose: false,

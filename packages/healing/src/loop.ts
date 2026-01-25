@@ -547,18 +547,7 @@ export class HealLoop {
         model: modelName,
         messages: [
           { role: "system", content: systemPrompt },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: userPrompt,
-                providerOptions: {
-                  anthropic: { cacheControl: { type: "ephemeral" } },
-                },
-              },
-            ],
-          },
+          { role: "user", content: userPrompt },
         ],
         maxOutputTokens: MAX_TOKENS_PER_RESPONSE,
         maxRetries: 5,

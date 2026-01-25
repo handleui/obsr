@@ -7,14 +7,14 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
  * Normalizes model IDs for the AI Gateway.
- * Adds a provider prefix for legacy Claude model names.
+ * Adds a provider prefix for unqualified model names.
  */
 const normalizeModelId = (model: string): string => {
   if (model.includes("/")) {
     return model;
   }
-  if (model.startsWith("claude-")) {
-    return `anthropic/${model}`;
+  if (model.startsWith("gpt-")) {
+    return `openai/${model}`;
   }
   return model;
 };
@@ -23,8 +23,6 @@ const normalizeModelId = (model: string): string => {
  * Client wraps AI Gateway access for healing operations.
  */
 export class Client {
-  private readonly byokAnthropicApiKey?: string;
-
   /**
    * Creates a new Client instance.
    *
@@ -32,7 +30,7 @@ export class Client {
    * Only one Client instance with a given API key should be used per process.
    * Creating multiple instances with different keys will use the first key set.
    */
-  constructor(apiKey?: string, options?: { anthropicApiKey?: string }) {
+  constructor(apiKey?: string) {
     const resolvedKey = apiKey ?? process.env.AI_GATEWAY_API_KEY ?? "";
     if (!resolvedKey) {
       throw new Error("No API key provided");
@@ -41,11 +39,6 @@ export class Client {
     // Always set the env var - the AI SDK reads it at provider creation time.
     // Warning: Multiple Client instances with different keys are not supported.
     process.env.AI_GATEWAY_API_KEY = resolvedKey;
-
-    const byokKey = options?.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY;
-    if (byokKey) {
-      this.byokAnthropicApiKey = byokKey;
-    }
   }
 
   /**
@@ -56,33 +49,8 @@ export class Client {
   /**
    * Returns provider options for request-scoped BYOK, if configured.
    */
-  providerOptions = (
-    model: string
-  ): {
-    gateway: {
-      byok: {
-        anthropic: Array<{
-          apiKey: string;
-        }>;
-      };
-    };
-  } | null => {
-    if (!this.byokAnthropicApiKey) {
-      return null;
-    }
-
-    const normalized = normalizeModelId(model);
-    if (!normalized.startsWith("anthropic/")) {
-      return null;
-    }
-
-    return {
-      gateway: {
-        byok: {
-          anthropic: [{ apiKey: this.byokAnthropicApiKey }],
-        },
-      },
-    };
+  providerOptions = (_model: string): null => {
+    return null;
   };
 
   /**
@@ -98,12 +66,10 @@ export class Client {
 
     try {
       const response = await generateText({
-        model: normalizeModelId("claude-3-5-haiku-latest"),
+        model: normalizeModelId("gpt-5.2-codex"),
         maxOutputTokens: 100,
         prompt: "Say 'Hello from the AI Gateway!' in exactly 5 words.",
         abortSignal: abortController.signal,
-        providerOptions:
-          this.providerOptions("claude-3-5-haiku-latest") ?? undefined,
       });
 
       if (response.text) {

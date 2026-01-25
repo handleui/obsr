@@ -27,7 +27,7 @@ export const configListCommand = defineCommand({
     const config = loadConfig(repoRoot);
     const prefs = loadPreferences();
     const configPath = getRepoConfigPath(repoRoot);
-    const hasEnvApiKey = Boolean(process.env.ANTHROPIC_API_KEY);
+    const hasEnvApiKey = Boolean(process.env.AI_GATEWAY_API_KEY);
 
     printHeader();
 

@@ -6,7 +6,6 @@
  * Environment variables:
  * - BRAINTRUST_API_KEY: Required for logging to Braintrust
  * - AI_GATEWAY_API_KEY: Required for running actual healing loops (live mode)
- * - ANTHROPIC_API_KEY: Optional BYOK key for Anthropic via the AI Gateway
  * - EVAL_MODE: "mock" (default) or "live" - controls whether to use real API calls
  */
 
@@ -92,7 +91,7 @@ const mockTask = (input: HealingTestCase): HealingEvalResult => {
 
 /**
  * Live task that runs the actual HealLoop.
- * Uses real API calls to Claude for authentic evaluation.
+ * Uses real API calls to the configured model for authentic evaluation.
  */
 const liveTask = async (input: HealingTestCase): Promise<HealingEvalResult> => {
   const startTime = Date.now();

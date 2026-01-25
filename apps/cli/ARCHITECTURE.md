@@ -137,8 +137,8 @@ Per-repo healing configuration:
 ```typescript
 interface GlobalConfig {
   $schema?: string;
-  apiKey?: string;             // Anthropic API key (sk-ant-...)
-  model?: string;              // claude-sonnet-4-5, etc.
+  apiKey?: string;             // AI Gateway API key
+  model?: string;              // openai/gpt-5.2-codex
   budgetPerRunUsd?: number;    // 0-100
   budgetMonthlyUsd?: number;   // 0-1000
   timeoutMins?: number;        // 1-60

@@ -1,7 +1,7 @@
 /**
  * LLM-as-Judge scorers using autoevals.
  *
- * These scorers use Claude Haiku for cost optimization (~$0.80/M input vs $3/M for Sonnet).
+ * These scorers use the default healing model for consistency with production behavior.
  * Each scorer evaluates a different aspect of the healing quality.
  *
  * SECURITY NOTE: Inputs are sanitized to prevent prompt injection attacks.
@@ -29,9 +29,8 @@ const sanitizeInput = (input: string, maxLength = 5000): string => {
 
 /**
  * Model to use for LLM judge calls.
- * Haiku is ~4x cheaper than Sonnet while still providing good judgment.
  */
-const JUDGE_MODEL = "claude-3-5-haiku-latest";
+const JUDGE_MODEL = "openai/gpt-5.2-codex";
 
 /**
  * Whether to use Chain of Thought reasoning.

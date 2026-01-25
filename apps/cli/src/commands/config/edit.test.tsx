@@ -26,7 +26,7 @@ const setupMockFS = (config: GlobalConfig = {}) => {
     [MOCK_CONFIG_PATH]: JSON.stringify(config, null, 2),
   });
 
-  process.env.ANTHROPIC_API_KEY = undefined;
+  process.env.AI_GATEWAY_API_KEY = undefined;
 };
 
 const cleanupMockFS = () => {
@@ -48,8 +48,8 @@ describe("ConfigEditor", () => {
   describe("Config loading", () => {
     it("should load and display complete config from file system", () => {
       setupMockFS({
-        apiKey: "sk-ant-api03-test-key-1234567890",
-        model: "claude-sonnet-4-5",
+        apiKey: "sk-test-key-1234567890",
+        model: "openai/gpt-5.2-codex",
         budgetPerRunUsd: 5,
         budgetMonthlyUsd: 100,
         timeoutMins: 15,
@@ -60,7 +60,7 @@ describe("ConfigEditor", () => {
 
       expect(output).toContain("API Key");
       expect(output).toContain("****7890");
-      expect(output).toContain("claude-sonnet-4-5");
+      expect(output).toContain("openai/gpt-5.2-codex");
       expect(output).toContain("$5.00");
       expect(output).toContain("$100.00");
       expect(output).toContain("15 min");
@@ -68,15 +68,15 @@ describe("ConfigEditor", () => {
 
     it("should load partial config and show defaults for missing values", () => {
       setupMockFS({
-        apiKey: "sk-ant-api03-partial-config-key",
-        model: "claude-opus-4-5",
+        apiKey: "sk-test-partial-config-key",
+        model: "openai/gpt-5.2-codex",
       });
 
       const { lastFrame } = render(<ConfigEditor repoRoot={MOCK_REPO_ROOT} />);
       const output = lastFrame() ?? "";
 
       expect(output).toContain("****-key");
-      expect(output).toContain("claude-opus-4-5");
+      expect(output).toContain("openai/gpt-5.2-codex");
       expect(output).toContain("unlimited");
       expect(output).toContain("none");
     });
@@ -160,7 +160,7 @@ describe("ConfigEditor", () => {
   describe("API key masking", () => {
     it("should mask API key showing only last 4 characters", () => {
       setupMockFS({
-        apiKey: "sk-ant-api03-secret-key-abcdef1234",
+        apiKey: "sk-test-secret-key-abcdef1234",
       });
 
       const { lastFrame } = render(<ConfigEditor repoRoot={MOCK_REPO_ROOT} />);
@@ -258,8 +258,8 @@ describe("ConfigEditor", () => {
   describe("Edge cases", () => {
     it("should handle all fields at maximum values", () => {
       setupMockFS({
-        apiKey: "sk-ant-api03-max-config-test",
-        model: "claude-opus-4-5",
+        apiKey: "sk-test-max-config-test",
+        model: "openai/gpt-5.2-codex",
         budgetPerRunUsd: 100,
         budgetMonthlyUsd: 1000,
         timeoutMins: 60,
@@ -269,18 +269,14 @@ describe("ConfigEditor", () => {
       const output = lastFrame() ?? "";
 
       expect(output).toContain("****test");
-      expect(output).toContain("claude-opus-4-5");
+      expect(output).toContain("openai/gpt-5.2-codex");
       expect(output).toContain("$100.00");
       expect(output).toContain("$1000.00");
       expect(output).toContain("60 min");
     });
 
     it("should handle all model options correctly", () => {
-      const models = [
-        "claude-opus-4-5",
-        "claude-sonnet-4-5",
-        "claude-haiku-4-5",
-      ];
+      const models = ["openai/gpt-5.2-codex"];
 
       for (const model of models) {
         setupMockFS({ model });

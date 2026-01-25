@@ -159,7 +159,7 @@ interface SandboxService {
 
 ```typescript
 const config = createConfig(
-  "claude-sonnet-4-20250514",  // model
+  "openai/gpt-5.2-codex",  // model
   10,                           // timeout (minutes)
   1.0,                          // budget per run (USD)
   -1                            // monthly budget (-1 = unlimited)

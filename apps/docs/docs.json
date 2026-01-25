@@ -35,45 +35,28 @@
       {
         "group": "Getting Started",
         "icon": "rocket",
-        "pages": ["introduction", "quickstart", "key-features"]
+        "pages": ["introduction", "quickstart", "pricing", "faq"]
       },
       {
         "group": "CLI",
         "icon": "terminal",
+        "pages": ["cli/installation", "cli/heal", "cli/settings"]
+      },
+      {
+        "group": "How It Works",
+        "icon": "wand-magic-sparkles",
         "pages": [
-          "cli/installation",
-          "cli/concepts",
-          "cli/heal",
-          {
-            "group": "Healing",
-            "pages": [
-              "cli/how-healing-works",
-              "cli/error-hints",
-              "cli/budget",
-              "cli/tools"
-            ]
-          },
-          {
-            "group": "Configuration",
-            "pages": ["cli/settings", "cli/workflows", "cli/trust"]
-          }
+          "cli/how-healing-works",
+          "cli/tools",
+          "cli/error-hints",
+          "cli/budget",
+          "cli/trust"
         ]
       },
       {
-        "group": "Action",
+        "group": "CI Integration",
         "icon": "github",
-        "pages": ["action/index"]
-      },
-      {
-        "group": "API Reference",
-        "icon": "code",
-        "pages": [
-          "api/introduction",
-          "api/authentication",
-          "api/webhooks",
-          "api/repositories",
-          "api/checks"
-        ]
+        "pages": ["action/index", "cli/workflows"]
       }
     ]
   },

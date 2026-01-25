@@ -1,4 +1,65 @@
 ---
-title: Trust
-description: Repository trust and security model
+title: Security & Trust
+description: What Detent can access and how we protect your code
 ---
+
+## What We Access
+
+When you install Detent, we get access to:
+
+| Data | Why | Stored? |
+|------|-----|---------|
+| Error output (JSON) | Parse and fix errors | Yes, for 30 days |
+| Code snippets (7 lines per error) | Context for AI | Yes, during heal |
+| File paths | Locate errors | Yes |
+| Commit SHA | Track which commit had errors | Yes |
+
+We **don't** access:
+
+- Your full codebase (unless you grant repo access)
+- Environment variables or secrets
+- Private dependencies
+- Git history
+
+## Where Your Code Runs
+
+AI healing runs in an isolated sandbox. Each heal gets a fresh environment that:
+
+- Clones your repo (the specific commit)
+- Runs commands to test fixes
+- Submits patches back to Detent
+- Gets destroyed after the heal
+
+Nothing persists. No shared state between heals.
+
+## API Keys
+
+Your `DETENT_TOKEN` is a project-scoped API key. It can:
+
+- Submit error reports from CI
+- Trigger heals
+- Apply fixes to your repo
+
+It **cannot**:
+
+- Access other projects
+- Read your billing info
+- Manage your organization
+
+Rotate it anytime from [Navigator](https://navigator.detent.sh).
+
+## Data Retention
+
+- Error data: 30 days
+- Heal logs: 7 days
+- Applied patches: Permanent (in your git history)
+
+## Compliance
+
+We're SOC 2 Type II compliant. All data is encrypted at rest and in transit.
+
+For enterprise requirements (SSO, audit logs, self-hosted), contact us.
+
+## Questions?
+
+Email [security@detent.sh](mailto:security@detent.sh) or see our [Privacy Policy](https://detent.sh/privacy).

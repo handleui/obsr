@@ -1,46 +1,60 @@
 ---
 title: Introduction
-description: Run CI locally and fix errors with AI
+description: AI fixes your CI before you have to
 ---
 
-Detent is an AI-powered CI tool that helps you catch and fix errors before pushing to remote. Run your CI pipelines locally, get instant feedback, and let AI automatically heal failing checks.
+Your CI breaks. You dig through logs. You fix a typo. You push again. You wait.
 
-## What is Detent?
+**Detent stops the cycle.** When your build fails, Detent reads the errors, writes a fix, and opens a PR. You review, merge, done.
 
-Detent bridges the gap between local development and CI/CD pipelines. Instead of waiting for remote CI to fail, Detent runs your workflows locally and uses AI to fix issues automatically.
-
-<CardGroup cols={2}>
-  <Card title="Fast Feedback" icon="bolt">
-    Run CI checks locally in seconds, not minutes
-  </Card>
-  <Card title="AI Healing" icon="wand-magic-sparkles">
-    Automatically fix linting, type errors, and test failures
-  </Card>
-  <Card title="Git-Aware" icon="code-branch">
-    Only checks files that changed in your current branch
-  </Card>
-  <Card title="Security-First" icon="shield">
-    Run checks locally and keep sensitive data in your control
-  </Card>
-</CardGroup>
+<Frame>
+  <img src="/images/healing-demo.gif" alt="Detent healing a failing CI run" />
+</Frame>
 
 ## How It Works
 
-1. **Parse** - Detent reads your CI configuration (GitHub Actions, GitLab CI)
-2. **Check** - Runs workflows locally against your changed files
-3. **Heal** - AI analyzes failures and applies fixes automatically
-4. **Verify** - Re-runs checks to confirm the fix worked
+<Steps>
+  <Step title="CI fails">
+    Your GitHub Action runs. ESLint, TypeScript, tests — something breaks.
+  </Step>
+  <Step title="Detent parses the errors">
+    Our action extracts structured error data from your tools — not raw logs.
+  </Step>
+  <Step title="AI writes the fix">
+    Claude reads your code, understands the error, and writes a patch.
+  </Step>
+  <Step title="You approve">
+    Review the fix in a PR comment or Navigator. One click to apply.
+  </Step>
+</Steps>
 
 ## Get Started
 
 <CardGroup cols={2}>
-  <Card title="Quickstart" icon="rocket" href="/quickstart">
-    Get up and running in 5 minutes
+  <Card title="Add to Your Repo" icon="plus" href="/quickstart">
+    5 minutes to your first heal
   </Card>
-  <Card title="CLI Reference" icon="terminal" href="/cli/installation">
-    Install and configure the CLI
+  <Card title="See Pricing" icon="credit-card" href="/pricing">
+    Pay per fix, not per seat
   </Card>
-  <Card title="API Reference" icon="code" href="/api/introduction">
-    Integrate with the Detent API
+</CardGroup>
+
+## What Can Detent Fix?
+
+- **Linting errors** — ESLint, Biome, golangci-lint
+- **Type errors** — TypeScript, Flow
+- **Test failures** — Vitest, Jest, Go tests
+- **Build errors** — Cargo, webpack, Next.js
+
+Not magic. Detent fixes the errors that waste your time — the typos, the missing imports, the type mismatches. The stuff that's obvious once you see it.
+
+## Questions?
+
+<CardGroup cols={2}>
+  <Card title="How Healing Works" icon="wand-magic-sparkles" href="/cli/how-healing-works">
+    The technical details
+  </Card>
+  <Card title="Security & Trust" icon="shield" href="/cli/trust">
+    What Detent can access
   </Card>
 </CardGroup>

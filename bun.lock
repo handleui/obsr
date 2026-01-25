@@ -21,8 +21,9 @@
     },
     "apps/api": {
       "name": "@detent/api",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "dependencies": {
+        "@detent/diagnostics": "*",
         "@detent/healing": "*",
         "@detent/lore": "*",
         "@detent/sandbox": "*",
@@ -45,6 +46,7 @@
       },
       "devDependencies": {
         "@cloudflare/workers-types": "^4.20250106.0",
+        "@e2b/code-interpreter": "^2.3.3",
         "@types/node": "^25.0.3",
         "@types/pg": "^8.16.0",
         "@types/react": "^18.3.3",
@@ -98,14 +100,14 @@
     },
     "apps/docs": {
       "name": "@detent/docs",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "devDependencies": {
         "mintlify": "^4.0.0",
       },
     },
     "apps/healer": {
       "name": "@detent/healer",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@detent/healing": "*",
         "@detent/sandbox": "*",
@@ -118,6 +120,7 @@
       },
       "devDependencies": {
         "@detent/typescript-config": "*",
+        "@e2b/code-interpreter": "^2.3.3",
         "@types/node": "^25.0.3",
         "@types/pg": "^8.11.6",
         "typescript": "5.9.2",
@@ -173,10 +176,19 @@
       "dependencies": {
         "@actions/core": "^1.10.0",
         "@actions/github": "^6.0.0",
+        "@detent/diagnostics": "*",
       },
       "devDependencies": {
         "@types/node": "^22.0.0",
         "@vercel/ncc": "^0.38.0",
+        "typescript": "5.9.2",
+      },
+    },
+    "packages/diagnostics": {
+      "name": "@detent/diagnostics",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@detent/typescript-config": "*",
         "typescript": "5.9.2",
       },
     },
@@ -223,7 +235,7 @@
     },
     "packages/sandbox": {
       "name": "@detent/sandbox",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@e2b/code-interpreter": "^2.3.3",
         "@vercel/sandbox": "^1.3.1",
@@ -429,6 +441,8 @@
     "@detent/api": ["@detent/api@workspace:apps/api"],
 
     "@detent/cli": ["@detent/cli@workspace:apps/cli"],
+
+    "@detent/diagnostics": ["@detent/diagnostics@workspace:packages/diagnostics"],
 
     "@detent/docs": ["@detent/docs@workspace:apps/docs"],
 

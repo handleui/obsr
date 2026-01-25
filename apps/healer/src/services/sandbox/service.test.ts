@@ -569,7 +569,7 @@ describe("list", () => {
   });
 
   it("returns empty array when no sandboxes", async () => {
-    mockSandboxList.mockResolvedValueOnce([]);
+    mockSandboxList.mockResolvedValueOnce([] as never);
     const svc = createSandboxService("test-api-key");
 
     const result = await svc.list();

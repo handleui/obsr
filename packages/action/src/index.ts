@@ -1,5 +1,13 @@
 // biome-ignore lint/performance/noNamespaceImport: GitHub Actions SDK official pattern
 import * as core from "@actions/core";
+import type { Diagnostic } from "@detent/diagnostics";
+import {
+  parseCargo,
+  parseEslint,
+  parseGolangci,
+  parseTypeScript,
+  parseVitest,
+} from "@detent/diagnostics";
 import type { AutofixResult } from "./autofix/executor";
 import { runAutofix } from "./autofix/executor";
 import { getAutofixesForSources } from "./autofix/registry";
@@ -8,12 +16,6 @@ import { collect } from "./collect";
 import { detectOutputs } from "./detect";
 import type { ClassifiedReportError } from "./errors";
 import { classifyReportError } from "./errors";
-import { parseCargo } from "./parsers/json/cargo";
-import { parseEslint } from "./parsers/json/eslint";
-import { parseGolangci } from "./parsers/json/golangci";
-import { parseVitest } from "./parsers/json/vitest";
-import { parseTypeScript } from "./parsers/text/typescript";
-import type { ParsedError } from "./parsers/types";
 
 import { ReportApiError, report, reportAutofixResults } from "./report";
 
@@ -60,14 +62,14 @@ const OCTAL_IP_PATTERN =
   /^0\d+\.\d+\.\d+\.\d+$|^\d+\.0\d+\.\d+\.\d+$|^\d+\.\d+\.0\d+\.\d+$|^\d+\.\d+\.\d+\.0\d+$/;
 
 /**
- * Enrich a parsed error with a code snippet from the source file.
+ * Enrich a diagnostic with a code snippet from the source file.
  */
 const enrichWithSnippet = (
-  error: ParsedError
+  diagnostic: Diagnostic
 ): ReportPayload["errors"][number] => {
-  const enriched: ReportPayload["errors"][number] = { ...error };
-  if (error.filePath && error.line) {
-    const snippet = readSnippet(error.filePath, error.line);
+  const enriched: ReportPayload["errors"][number] = { ...diagnostic };
+  if (diagnostic.filePath && diagnostic.line) {
+    const snippet = readSnippet(diagnostic.filePath, diagnostic.line);
     if (snippet) {
       enriched.codeSnippet = snippet;
     }

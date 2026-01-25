@@ -1,4 +1,4 @@
-import type { ParsedError } from "../types";
+import type { Diagnostic } from "../types.js";
 
 interface VitestLocation {
   line: number;
@@ -64,7 +64,7 @@ const extractStackTrace = (failureMessages: string[]): string | undefined => {
 const parseAssertion = (
   filePath: string,
   assertion: VitestAssertionResult
-): ParsedError => {
+): Diagnostic => {
   const testTitle = formatTestTitle(assertion);
   const firstMessage = assertion.failureMessages?.[0] ?? "Test failed";
 
@@ -80,7 +80,7 @@ const parseAssertion = (
   };
 };
 
-export const parseVitest = (content: string): ParsedError[] => {
+export const parseVitest = (content: string): Diagnostic[] => {
   let data: VitestJsonOutput;
   try {
     data = JSON.parse(content) as VitestJsonOutput;
@@ -92,10 +92,14 @@ export const parseVitest = (content: string): ParsedError[] => {
     return [];
   }
 
-  return data.testResults.flatMap((result) =>
-    result.assertionResults
-      .filter(isFailedAssertion)
-      .filter(hasFailureMessages)
-      .map((assertion) => parseAssertion(result.name, assertion))
-  );
+  // Direct iteration avoids intermediate arrays from flatMap/filter/filter/map
+  const diagnostics: Diagnostic[] = [];
+  for (const result of data.testResults) {
+    for (const assertion of result.assertionResults) {
+      if (isFailedAssertion(assertion) && hasFailureMessages(assertion)) {
+        diagnostics.push(parseAssertion(result.name, assertion));
+      }
+    }
+  }
+  return diagnostics;
 };

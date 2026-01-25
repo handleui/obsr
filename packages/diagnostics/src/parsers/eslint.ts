@@ -1,4 +1,4 @@
-import type { ParsedError } from "../types";
+import type { Diagnostic } from "../types.js";
 
 interface ESLintSuggestion {
   desc?: string;
@@ -60,7 +60,7 @@ const extractSuggestions = (message: ESLintMessage): string[] | undefined => {
 const parseMessage = (
   filePath: string,
   message: ESLintMessage
-): ParsedError => ({
+): Diagnostic => ({
   message: message.message,
   filePath,
   line: message.line,
@@ -71,7 +71,7 @@ const parseMessage = (
   fixable: message.fix !== undefined,
 });
 
-export const parseEslint = (content: string): ParsedError[] => {
+export const parseEslint = (content: string): Diagnostic[] => {
   let data: ESLintOutput;
   try {
     data = JSON.parse(content) as ESLintOutput;
@@ -84,9 +84,14 @@ export const parseEslint = (content: string): ParsedError[] => {
     return [];
   }
 
-  return results.flatMap((result) =>
-    result.messages
-      .filter((message) => message.severity !== 0)
-      .map((message) => parseMessage(result.filePath, message))
-  );
+  // Direct iteration avoids intermediate arrays from flatMap/filter/map
+  const diagnostics: Diagnostic[] = [];
+  for (const result of results) {
+    for (const message of result.messages) {
+      if (message.severity !== 0) {
+        diagnostics.push(parseMessage(result.filePath, message));
+      }
+    }
+  }
+  return diagnostics;
 };

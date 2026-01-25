@@ -29,7 +29,7 @@
  * }
  */
 
-import type { ParsedError } from "../types";
+import type { Diagnostic } from "../types.js";
 
 interface CargoSpan {
   file_name: string;
@@ -163,9 +163,9 @@ const tryParseJson = (line: string): CargoMessage | null => {
 };
 
 /**
- * Convert a diagnostic to a ParsedError.
+ * Convert a diagnostic to a Diagnostic.
  */
-const diagnosticToError = (diagnostic: CargoDiagnostic): ParsedError => {
+const diagnosticToError = (diagnostic: CargoDiagnostic): Diagnostic => {
   const primarySpan = findPrimarySpan(diagnostic.spans);
   const suggestions = extractSuggestions(diagnostic.children);
   const fixable = hasMachineApplicableFix(
@@ -199,9 +199,9 @@ const isCompilerMessage = (msg: CargoMessage): msg is CargoCompilerMessage =>
   msg.reason === "compiler-message" && "message" in msg;
 
 /**
- * Parse a single NDJSON line into a ParsedError if it's a compiler message.
+ * Parse a single NDJSON line into a Diagnostic if it's a compiler message.
  */
-const parseCargoLine = (line: string): ParsedError | null => {
+const parseCargoLine = (line: string): Diagnostic | null => {
   const parsed = tryParseJson(line);
 
   if (!(parsed && isCompilerMessage(parsed))) {
@@ -219,13 +219,13 @@ const parseCargoLine = (line: string): ParsedError | null => {
 };
 
 /**
- * Parse Cargo NDJSON output into ParsedError array.
+ * Parse Cargo NDJSON output into Diagnostic array.
  *
  * @param content - Raw NDJSON string from cargo --message-format=json
  * @returns Array of parsed errors
  */
-export const parseCargo = (content: string): ParsedError[] => {
-  const errors: ParsedError[] = [];
+export const parseCargo = (content: string): Diagnostic[] => {
+  const errors: Diagnostic[] = [];
   const lines = content.split("\n");
 
   for (const line of lines) {

@@ -15,7 +15,7 @@
  * }
  */
 
-import type { ParsedError } from "../types";
+import type { Diagnostic } from "../types.js";
 
 interface GolangciPosition {
   Filename: string;
@@ -97,9 +97,9 @@ const hasFixAvailable = (issue: GolangciIssue): boolean =>
   (issue.SuggestedFixes != null && issue.SuggestedFixes.length > 0);
 
 /**
- * Convert a single golangci-lint issue to a ParsedError.
+ * Convert a single golangci-lint issue to a Diagnostic.
  */
-const issueToError = (issue: GolangciIssue): ParsedError | null => {
+const issueToError = (issue: GolangciIssue): Diagnostic | null => {
   if (!(issue.Pos?.Filename && issue.Text)) {
     return null;
   }
@@ -112,7 +112,7 @@ const issueToError = (issue: GolangciIssue): ParsedError | null => {
     issue.SuggestedFixes
   );
 
-  const error: ParsedError = {
+  const error: Diagnostic = {
     message: issue.Text,
     filePath: issue.Pos.Filename,
     line: issue.Pos.Line,
@@ -131,12 +131,12 @@ const issueToError = (issue: GolangciIssue): ParsedError | null => {
 };
 
 /**
- * Parse golangci-lint JSON output into ParsedError array.
+ * Parse golangci-lint JSON output into Diagnostic array.
  *
  * @param content - Raw JSON string from golangci-lint --out-format=json
  * @returns Array of parsed errors
  */
-export const parseGolangci = (content: string): ParsedError[] => {
+export const parseGolangci = (content: string): Diagnostic[] => {
   let parsed: GolangciOutput;
   try {
     parsed = JSON.parse(content) as GolangciOutput;
@@ -148,7 +148,7 @@ export const parseGolangci = (content: string): ParsedError[] => {
     return [];
   }
 
-  const errors: ParsedError[] = [];
+  const errors: Diagnostic[] = [];
 
   for (const issue of parsed.Issues) {
     const error = issueToError(issue);

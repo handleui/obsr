@@ -40,6 +40,7 @@
     ]
   },
   "dependencies": {
-    "@handleui/shimmer": "0.1.0"
+    "@handleui/shimmer": "0.1.0",
+    "tar": "^7.5.6"
   }
 }

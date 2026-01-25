@@ -82,6 +82,7 @@ Source of truth: `apps/api/src/db/schema.ts`
 - Use `db:push` in production (causes data loss on renames)
 - Run `./dist/dt` directly (use `bun run dt` instead)
 - Commit without running `bun run fix`
+- Create markdown files when closing tasks (no summaries or reports needed)
 
 ## Style (Project-Specific Only)
 

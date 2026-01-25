@@ -21,9 +21,9 @@
     "lefthook": "^2.0.13",
     "lint-staged": "^16.2.7",
     "turbo": "^2.7.4",
-    "typescript": "5.9.2",
+    "typescript": "^5.9.3",
     "ultracite": "7.0.11",
-    "wrangler": "^4.54.0"
+    "wrangler": "^4.60.0"
   },
   "engines": {
     "node": ">=18"

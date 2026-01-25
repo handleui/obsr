@@ -23,7 +23,7 @@
       "outputs": ["dist/**"]
     },
     "@detent/healer#build": {
-      "dependsOn": ["@detent/healing#build"],
+      "dependsOn": ["@detent/healing#build", "@detent/sandbox#build"],
       "inputs": ["src/**/*.ts", "tsconfig.json", "package.json"],
       "outputs": ["dist/**"]
     },

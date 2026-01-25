@@ -23,6 +23,17 @@ WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://user:pass@ep
 UPSTASH_REDIS_REST_URL=your_upstash_url
 UPSTASH_REDIS_REST_TOKEN=your_upstash_token
 
+# Sandbox provider (vercel | e2b)
+SANDBOX_PROVIDER=vercel
+# E2B sandbox API key (required when SANDBOX_PROVIDER=e2b)
+E2B_API_KEY=
+# Vercel Sandbox auth (use OIDC when deployed on Vercel)
+VERCEL_OIDC_TOKEN=
+# Or use access token + team/project IDs when OIDC is unavailable
+VERCEL_TOKEN=
+VERCEL_TEAM_ID=
+VERCEL_PROJECT_ID=
+
 # Email (Resend) configuration
 RESEND_API_KEY=your_resend_api_key
 RESEND_EMAIL_FROM="Detent <noreply@detent.dev>"

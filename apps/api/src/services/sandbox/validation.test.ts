@@ -24,6 +24,7 @@ vi.mock("@e2b/code-interpreter", () => ({
 }));
 
 const mockEnv = {
+  SANDBOX_PROVIDER: "e2b",
   E2B_API_KEY: "test-api-key",
 } as Parameters<typeof createSandboxService>[0];
 
@@ -34,7 +35,9 @@ beforeEach(() => {
 describe("sandbox validation", () => {
   describe("API key validation", () => {
     it("throws when E2B_API_KEY is missing", () => {
-      const envWithoutKey = {} as Parameters<typeof createSandboxService>[0];
+      const envWithoutKey = {
+        SANDBOX_PROVIDER: "e2b",
+      } as Parameters<typeof createSandboxService>[0];
 
       expect(() => createSandboxService(envWithoutKey)).toThrow(
         "E2B_API_KEY environment variable is not configured"
@@ -56,8 +59,8 @@ describe("sandbox validation", () => {
         await expect(svc.create({ timeout: 1 })).resolves.toBeDefined();
       });
 
-      it("accepts maximum timeout (3600 seconds)", async () => {
-        await expect(svc.create({ timeout: 3600 })).resolves.toBeDefined();
+      it("accepts maximum timeout (18000 seconds)", async () => {
+        await expect(svc.create({ timeout: 18_000 })).resolves.toBeDefined();
       });
 
       it("accepts mid-range timeout", async () => {
@@ -72,37 +75,37 @@ describe("sandbox validation", () => {
     describe("invalid timeouts", () => {
       it("rejects timeout below minimum (0)", async () => {
         await expect(svc.create({ timeout: 0 })).rejects.toThrow(
-          "Timeout must be between 1 and 3600 seconds"
+          "Timeout must be between 1 and 18000 seconds"
         );
       });
 
       it("rejects negative timeout", async () => {
         await expect(svc.create({ timeout: -1 })).rejects.toThrow(
-          "Timeout must be between 1 and 3600 seconds"
+          "Timeout must be between 1 and 18000 seconds"
         );
       });
 
-      it("rejects timeout above maximum (3601)", async () => {
-        await expect(svc.create({ timeout: 3601 })).rejects.toThrow(
-          "Timeout must be between 1 and 3600 seconds"
+      it("rejects timeout above maximum (18001)", async () => {
+        await expect(svc.create({ timeout: 18_001 })).rejects.toThrow(
+          "Timeout must be between 1 and 18000 seconds"
         );
       });
 
       it("rejects Infinity", async () => {
         await expect(
           svc.create({ timeout: Number.POSITIVE_INFINITY })
-        ).rejects.toThrow("Timeout must be between 1 and 3600 seconds");
+        ).rejects.toThrow("Timeout must be between 1 and 18000 seconds");
       });
 
       it("rejects -Infinity", async () => {
         await expect(
           svc.create({ timeout: Number.NEGATIVE_INFINITY })
-        ).rejects.toThrow("Timeout must be between 1 and 3600 seconds");
+        ).rejects.toThrow("Timeout must be between 1 and 18000 seconds");
       });
 
       it("rejects NaN", async () => {
         await expect(svc.create({ timeout: Number.NaN })).rejects.toThrow(
-          "Timeout must be between 1 and 3600 seconds"
+          "Timeout must be between 1 and 18000 seconds"
         );
       });
     });
@@ -113,18 +116,18 @@ describe("sandbox validation", () => {
       });
 
       it("accepts exactly at maximum boundary", async () => {
-        await expect(svc.create({ timeout: 3600 })).resolves.toBeDefined();
+        await expect(svc.create({ timeout: 18_000 })).resolves.toBeDefined();
       });
 
       it("rejects just below minimum (0.9)", async () => {
         await expect(svc.create({ timeout: 0.9 })).rejects.toThrow(
-          "Timeout must be between 1 and 3600 seconds"
+          "Timeout must be between 1 and 18000 seconds"
         );
       });
 
-      it("rejects just above maximum (3600.1)", async () => {
-        await expect(svc.create({ timeout: 3600.1 })).rejects.toThrow(
-          "Timeout must be between 1 and 3600 seconds"
+      it("rejects just above maximum (18000.1)", async () => {
+        await expect(svc.create({ timeout: 18_000.1 })).rejects.toThrow(
+          "Timeout must be between 1 and 18000 seconds"
         );
       });
     });
@@ -453,10 +456,10 @@ describe("sandbox validation", () => {
         await expect(svc.setTimeout(sbx as never, 1)).resolves.toBeUndefined();
       });
 
-      it("accepts maximum timeout (3600 seconds = 1 hour)", async () => {
+      it("accepts maximum timeout (18000 seconds = 5 hours)", async () => {
         const sbx = createMockSandbox();
         await expect(
-          svc.setTimeout(sbx as never, 3600)
+          svc.setTimeout(sbx as never, 18_000)
         ).resolves.toBeUndefined();
       });
 
@@ -470,28 +473,28 @@ describe("sandbox validation", () => {
       it("rejects timeout below minimum (0.5 seconds)", async () => {
         const sbx = createMockSandbox();
         await expect(svc.setTimeout(sbx as never, 0.5)).rejects.toThrow(
-          "Timeout must be between 1 and 3600 seconds"
+          "Timeout must be between 1 and 18000 seconds"
         );
       });
 
-      it("rejects timeout above maximum (3601 seconds)", async () => {
+      it("rejects timeout above maximum (18001 seconds)", async () => {
         const sbx = createMockSandbox();
-        await expect(svc.setTimeout(sbx as never, 3601)).rejects.toThrow(
-          "Timeout must be between 1 and 3600 seconds"
+        await expect(svc.setTimeout(sbx as never, 18_001)).rejects.toThrow(
+          "Timeout must be between 1 and 18000 seconds"
         );
       });
 
       it("rejects zero timeout", async () => {
         const sbx = createMockSandbox();
         await expect(svc.setTimeout(sbx as never, 0)).rejects.toThrow(
-          "Timeout must be between 1 and 3600 seconds"
+          "Timeout must be between 1 and 18000 seconds"
         );
       });
 
       it("rejects negative timeout", async () => {
         const sbx = createMockSandbox();
         await expect(svc.setTimeout(sbx as never, -1)).rejects.toThrow(
-          "Timeout must be between 1 and 3600 seconds"
+          "Timeout must be between 1 and 18000 seconds"
         );
       });
 
@@ -499,13 +502,13 @@ describe("sandbox validation", () => {
         const sbx = createMockSandbox();
         await expect(
           svc.setTimeout(sbx as never, Number.POSITIVE_INFINITY)
-        ).rejects.toThrow("Timeout must be between 1 and 3600 seconds");
+        ).rejects.toThrow("Timeout must be between 1 and 18000 seconds");
       });
 
       it("rejects NaN", async () => {
         const sbx = createMockSandbox();
         await expect(svc.setTimeout(sbx as never, Number.NaN)).rejects.toThrow(
-          "Timeout must be between 1 and 3600 seconds"
+          "Timeout must be between 1 and 18000 seconds"
         );
       });
     });

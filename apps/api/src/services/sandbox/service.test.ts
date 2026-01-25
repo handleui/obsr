@@ -1,5 +1,5 @@
+import { DEFAULTS, TEMPLATES } from "@detent/sandbox";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULTS, TEMPLATES } from "./config";
 import { createSandboxService } from "./index";
 
 const mockSandbox = {
@@ -39,6 +39,7 @@ const mockSandboxList = vi.mocked(Sandbox.list);
 
 const createEnv = (apiKey = "test-api-key") =>
   ({
+    SANDBOX_PROVIDER: "e2b",
     E2B_API_KEY: apiKey,
   }) as Parameters<typeof createSandboxService>[0];
 
@@ -50,7 +51,7 @@ beforeEach(() => {
 
 describe("createSandboxService", () => {
   it("throws if E2B_API_KEY is missing", () => {
-    expect(() => createSandboxService({ E2B_API_KEY: "" } as never)).toThrow(
+    expect(() => createSandboxService(createEnv(""))).toThrow(
       "E2B_API_KEY environment variable is not configured"
     );
   });
@@ -114,7 +115,7 @@ describe("create", () => {
     const svc = createSandboxService(createEnv());
 
     await expect(svc.create({ timeout: 0 })).rejects.toThrow(
-      "Timeout must be between 1 and 3600 seconds"
+      "Timeout must be between 1 and 18000 seconds"
     );
   });
 
@@ -122,7 +123,7 @@ describe("create", () => {
     const svc = createSandboxService(createEnv());
 
     await expect(svc.create({ timeout: 4000 })).rejects.toThrow(
-      "Timeout must be between 1 and 3600 seconds"
+      "Timeout must be between 1 and 18000 seconds"
     );
   });
 
@@ -133,7 +134,7 @@ describe("create", () => {
     const svc = createSandboxService(createEnv());
 
     await expect(svc.create()).rejects.toThrow(
-      "E2B rate limit exceeded. Please try again later."
+      "Sandbox rate limit exceeded. Please try again later."
     );
   });
 
@@ -388,7 +389,7 @@ describe("writeFile", () => {
     const svc = createSandboxService(createEnv());
 
     await expect(
-      svc.writeFile(mockSandbox as never, "/test.txt", "content")
+      svc.writeFile(mockSandbox as never, "/home/user/test.txt", "content")
     ).rejects.toThrow("Failed to write file: Disk full");
   });
 });
@@ -412,7 +413,10 @@ describe("readFile", () => {
     mockSandbox.files.read.mockResolvedValueOnce(content);
     const svc = createSandboxService(createEnv());
 
-    const result = await svc.readFile(mockSandbox as never, "/binary.dat");
+    const result = await svc.readFile(
+      mockSandbox as never,
+      "/home/user/binary.dat"
+    );
 
     expect(result).toBe("binary content");
   });
@@ -431,7 +435,7 @@ describe("readFile", () => {
     const svc = createSandboxService(createEnv());
 
     await expect(
-      svc.readFile(mockSandbox as never, "/missing.txt")
+      svc.readFile(mockSandbox as never, "/home/user/missing.txt")
     ).rejects.toThrow("Failed to read file: File not found");
   });
 });
@@ -470,16 +474,16 @@ describe("setTimeout", () => {
     const svc = createSandboxService(createEnv());
 
     await expect(svc.setTimeout(mockSandbox as never, 0.5)).rejects.toThrow(
-      "Timeout must be between 1 and 3600 seconds"
+      "Timeout must be between 1 and 18000 seconds"
     );
     expect(mockSandbox.setTimeout).not.toHaveBeenCalled();
   });
 
-  it("rejects timeout above maximum (3600 seconds)", async () => {
+  it("rejects timeout above maximum (18000 seconds)", async () => {
     const svc = createSandboxService(createEnv());
 
     await expect(svc.setTimeout(mockSandbox as never, 3601)).rejects.toThrow(
-      "Timeout must be between 1 and 3600 seconds"
+      "Timeout must be between 1 and 18000 seconds"
     );
     expect(mockSandbox.setTimeout).not.toHaveBeenCalled();
   });

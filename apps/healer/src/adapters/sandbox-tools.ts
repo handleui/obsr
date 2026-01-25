@@ -13,7 +13,7 @@ import {
   type ToolContext,
   type ToolResult,
 } from "@detent/healing/tools";
-import type { Sandbox } from "@e2b/code-interpreter";
+import type { SandboxHandle } from "../services/sandbox/index.js";
 
 const DEFAULT_READ_LIMIT = 2000;
 const MAX_LINE_LENGTH = 2000;
@@ -27,7 +27,7 @@ const COMMAND_TIMEOUT_MS = 5 * 60 * 1000;
 const LEADING_DOT_SLASH_REGEX = /^\.\//;
 
 interface SandboxToolContextOpts {
-  sandbox: Sandbox;
+  sandbox: SandboxHandle;
   worktreePath: string;
   repoRoot: string;
   runId: string;
@@ -40,7 +40,7 @@ interface SandboxToolContextOpts {
 }
 
 interface SandboxToolContext extends ToolContext {
-  sandbox: Sandbox;
+  sandbox: SandboxHandle;
 }
 
 export const createSandboxToolContext = (
@@ -135,7 +135,7 @@ const getValidatedPath = (
 };
 
 const checkFileExists = async (
-  sandbox: Sandbox,
+  sandbox: SandboxHandle,
   absPath: string,
   filePath: string
 ): Promise<ToolResult | null> => {
@@ -178,7 +178,10 @@ const formatLinesWithNumbers = (
   };
 };
 
-export const createSandboxReadFileTool = (sandbox: Sandbox): Tool => ({
+const toText = (content: string | Uint8Array): string =>
+  typeof content === "string" ? content : new TextDecoder().decode(content);
+
+export const createSandboxReadFileTool = (sandbox: SandboxHandle): Tool => ({
   name: "read_file",
   description:
     "Read a file from the codebase. Returns file contents with line numbers. Use offset and limit for large files.",
@@ -232,9 +235,10 @@ export const createSandboxReadFileTool = (sandbox: Sandbox): Tool => ({
         return fileError;
       }
 
-      const content = await sandbox.files.read(absPathOrError, {
+      const rawContent = await sandbox.files.read(absPathOrError, {
         format: "text",
       });
+      const content = toText(rawContent);
 
       if (content === "") {
         return successResult("(empty file)");
@@ -321,7 +325,7 @@ const formatEditSummary = (oldLines: number, newLines: number): string => {
   return `replaced ${oldLines} line(s) with ${newLines} line(s) (-${oldLines - newLines})`;
 };
 
-export const createSandboxEditFileTool = (sandbox: Sandbox): Tool => ({
+export const createSandboxEditFileTool = (sandbox: SandboxHandle): Tool => ({
   name: "edit_file",
   description:
     "Replace a string in a file. The old_string must match exactly once in the file (for safety). Use read_file first to see the exact content.",
@@ -365,9 +369,10 @@ export const createSandboxEditFileTool = (sandbox: Sandbox): Tool => ({
         return fileError;
       }
 
-      const content = await sandbox.files.read(absPathOrError, {
+      const rawContent = await sandbox.files.read(absPathOrError, {
         format: "text",
       });
+      const content = toText(rawContent);
 
       const occurrences = countOccurrences(content, oldString);
 
@@ -425,7 +430,7 @@ const formatGlobOutput = (files: string[], pattern: string): string => {
   return output;
 };
 
-export const createSandboxGlobTool = (sandbox: Sandbox): Tool => ({
+export const createSandboxGlobTool = (sandbox: SandboxHandle): Tool => ({
   name: "glob",
   description:
     "Find files matching a glob pattern. Supports ** for recursive matching. Returns file paths sorted by modification time (newest first).",
@@ -541,7 +546,7 @@ const processGrepOutput = (stdout: string, worktreePath: string): string => {
   return output.replaceAll(`${worktreePath}/`, "");
 };
 
-export const createSandboxGrepTool = (sandbox: Sandbox): Tool => ({
+export const createSandboxGrepTool = (sandbox: SandboxHandle): Tool => ({
   name: "grep",
   description:
     "Search for a pattern in code using grep. Returns matching lines with file paths and line numbers.",
@@ -809,7 +814,7 @@ const validateAndNormalizeCommand = (
   return { normalizedCmd, parts };
 };
 
-export const createSandboxRunCommandTool = (sandbox: Sandbox): Tool => ({
+export const createSandboxRunCommandTool = (sandbox: SandboxHandle): Tool => ({
   name: "run_command",
   description:
     "Run a shell command. Common build/test/lint commands are pre-approved. Other commands require user approval.",
@@ -907,7 +912,7 @@ const getFailingStepCommand = (ctx: ToolContext): ToolResult | string => {
   return command;
 };
 
-export const createSandboxRunCheckTool = (sandbox: Sandbox): Tool => ({
+export const createSandboxRunCheckTool = (sandbox: SandboxHandle): Tool => ({
   name: "run_check",
   description:
     "Re-run the failing CI command to verify your fix works. Call this after editing files to confirm the error is resolved.",
@@ -945,7 +950,7 @@ export const createSandboxRunCheckTool = (sandbox: Sandbox): Tool => ({
   },
 });
 
-export const createSandboxTools = (sandbox: Sandbox): Tool[] => [
+export const createSandboxTools = (sandbox: SandboxHandle): Tool[] => [
   createSandboxReadFileTool(sandbox),
   createSandboxEditFileTool(sandbox),
   createSandboxGlobTool(sandbox),

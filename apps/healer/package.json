@@ -8,13 +8,14 @@
     "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
     "start": "bun run dist/index.js",
+    "queue:smoke": "bun run src/queue-smoke.ts",
     "check-types": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
     "@detent/healing": "*",
+    "@detent/sandbox": "*",
     "@detent/types": "*",
-    "@e2b/code-interpreter": "^1.0.4",
     "drizzle-orm": "^0.41.0",
     "hono": "^4.7.4",
     "jose": "^6.0.10",

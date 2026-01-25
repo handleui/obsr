@@ -42,6 +42,17 @@ For Cloudflare Workers, use `HYPERDRIVE` binding instead of `DATABASE_URL`.
 | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL | `https://xxx.upstash.io` |
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST token | `AxxxYyyy` |
 
+### Sandbox Provider
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SANDBOX_PROVIDER` | Sandbox provider (`vercel` or `e2b`) | `vercel` |
+| `E2B_API_KEY` | E2B sandbox API key (required when `SANDBOX_PROVIDER=e2b`) | - |
+| `VERCEL_OIDC_TOKEN` | Vercel OIDC token (preferred for Sandboxes) | - |
+| `VERCEL_TOKEN` | Vercel access token (when OIDC unavailable) | - |
+| `VERCEL_TEAM_ID` | Vercel team ID (when OIDC unavailable) | - |
+| `VERCEL_PROJECT_ID` | Vercel project ID (when OIDC unavailable) | - |
+
 ## Optional Variables
 
 ### Security
@@ -151,6 +162,14 @@ WORKOS_API_KEY=sk_test_abc123
 # Rate Limiting
 UPSTASH_REDIS_REST_URL=https://global-abc.upstash.io
 UPSTASH_REDIS_REST_TOKEN=AaBbCc123
+
+# Sandbox
+SANDBOX_PROVIDER=vercel
+VERCEL_OIDC_TOKEN=your_vercel_oidc_token
+# Or when OIDC is unavailable:
+# VERCEL_TOKEN=your_vercel_access_token
+# VERCEL_TEAM_ID=team_xxx
+# VERCEL_PROJECT_ID=prj_xxx
 
 # Security
 ENCRYPTION_KEY=base64encodedkey==

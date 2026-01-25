@@ -329,7 +329,12 @@ Active heals tracked in-memory. New heals only fetched when slots available.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `PORT` | No | Server port (default: 3000) |
-| `E2B_API_KEY` | Yes | E2B sandbox API key |
+| `SANDBOX_PROVIDER` | No | Sandbox provider (`vercel` or `e2b`, default: `vercel`) |
+| `E2B_API_KEY` | No | E2B sandbox API key (required if `SANDBOX_PROVIDER=e2b`) |
+| `VERCEL_OIDC_TOKEN` | No | Vercel OIDC token (preferred for Vercel Sandboxes) |
+| `VERCEL_TOKEN` | No | Vercel access token (when OIDC unavailable) |
+| `VERCEL_TEAM_ID` | No | Vercel team ID (when OIDC unavailable) |
+| `VERCEL_PROJECT_ID` | No | Vercel project ID (when OIDC unavailable) |
 | `AI_GATEWAY_API_KEY` | Yes | AI Gateway access |
 | `DATABASE_URL` | Yes | Neon PostgreSQL connection |
 | `GITHUB_APP_ID` | Yes | GitHub App ID |

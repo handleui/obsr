@@ -21,8 +21,8 @@
   "dependencies": {
     "@detent/healing": "*",
     "@detent/lore": "*",
+    "@detent/sandbox": "*",
     "@detent/types": "*",
-    "@e2b/code-interpreter": "^2.3.3",
     "@polar-sh/sdk": "^0.42.2",
     "@react-email/components": "^0.0.34",
     "react": "^18.3.1",

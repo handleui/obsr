@@ -28,7 +28,13 @@ vi.mock("@e2b/code-interpreter", () => ({
   },
 }));
 
-import { createSandboxService } from "./index.js";
+import { createSandboxService as createBaseSandboxService } from "./index.js";
+
+const createSandboxService = (apiKey: string) =>
+  createBaseSandboxService({
+    SANDBOX_PROVIDER: "e2b",
+    E2B_API_KEY: apiKey,
+  });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -188,7 +194,7 @@ describe("isRateLimitError", () => {
 
     const svc = createSandboxService("test-api-key");
     await expect(svc.create()).rejects.toThrow(
-      "E2B rate limit exceeded. Please try again later."
+      "Sandbox rate limit exceeded. Please try again later."
     );
   });
 
@@ -208,7 +214,7 @@ describe("isRateLimitError", () => {
 
     const svc = createSandboxService("test-api-key");
     await expect(svc.create()).rejects.toThrow(
-      "E2B rate limit exceeded. Please try again later."
+      "Sandbox rate limit exceeded. Please try again later."
     );
   });
 });
@@ -274,7 +280,7 @@ describe("error wrapping in service methods", () => {
     const svc = createSandboxService("test-api-key");
     const sbx = await svc.create();
     await expect(
-      svc.writeFile(sbx as never, "/test.txt", "content")
+      svc.writeFile(sbx as never, "/home/user/test.txt", "content")
     ).rejects.toThrow("Failed to write file: Disk full");
   });
 
@@ -289,9 +295,9 @@ describe("error wrapping in service methods", () => {
 
     const svc = createSandboxService("test-api-key");
     const sbx = await svc.create();
-    await expect(svc.readFile(sbx as never, "/missing.txt")).rejects.toThrow(
-      "Failed to read file: File not found"
-    );
+    await expect(
+      svc.readFile(sbx as never, "/home/user/missing.txt")
+    ).rejects.toThrow("Failed to read file: File not found");
   });
 
   it("wraps kill errors with context prefix", async () => {
@@ -352,7 +358,9 @@ describe("error wrapping in service methods", () => {
 
 describe("missing API key detection", () => {
   it("throws at service creation when API key is empty", () => {
-    expect(() => createSandboxService("")).toThrow("E2B API key is required");
+    expect(() => createSandboxService("")).toThrow(
+      "E2B_API_KEY environment variable is not configured"
+    );
   });
 
   it("allows service creation with valid API key", () => {

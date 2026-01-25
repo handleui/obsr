@@ -6,17 +6,17 @@ import {
   type HealResult,
   SYSTEM_PROMPT,
 } from "@detent/healing";
-import { Sandbox } from "@e2b/code-interpreter";
 import { z } from "zod";
 import {
   createSandboxToolContext,
   createSandboxTools,
 } from "../adapters/sandbox-tools.js";
 import type { Env } from "../env.js";
+import type { SandboxHandle } from "./sandbox/index.js";
+import { createSandboxService } from "./sandbox/index.js";
 
 const SANDBOX_TEMPLATE = "base";
 const SANDBOX_TIMEOUT_SEC = 600;
-const WORKTREE_PATH = "/home/user/repo";
 const CLONE_TIMEOUT_MS = 120_000;
 const INSTALL_TIMEOUT_MS = 300_000;
 const DEFAULT_MODEL = "openai/gpt-5.2-codex";
@@ -70,7 +70,8 @@ interface HealResponse {
 }
 
 const detectPackageManager = async (
-  sandbox: Sandbox
+  sandbox: SandboxHandle,
+  worktreePath: string
 ): Promise<"bun" | "pnpm" | "yarn" | "npm" | null> => {
   const lockFiles = [
     { file: "bun.lockb", manager: "bun" as const },
@@ -83,7 +84,7 @@ const detectPackageManager = async (
   const checks = await Promise.all(
     lockFiles.map(async ({ file, manager }) => ({
       manager,
-      exists: await sandbox.files.exists(`${WORKTREE_PATH}/${file}`),
+      exists: await sandbox.files.exists(`${worktreePath}/${file}`),
     }))
   );
 
@@ -94,13 +95,16 @@ const detectPackageManager = async (
   }
 
   const hasPackageJson = await sandbox.files.exists(
-    `${WORKTREE_PATH}/package.json`
+    `${worktreePath}/package.json`
   );
   return hasPackageJson ? "npm" : null;
 };
 
-const installDependencies = async (sandbox: Sandbox): Promise<void> => {
-  const manager = await detectPackageManager(sandbox);
+const installDependencies = async (
+  sandbox: SandboxHandle,
+  worktreePath: string
+): Promise<void> => {
+  const manager = await detectPackageManager(sandbox, worktreePath);
   if (!manager) {
     return;
   }
@@ -111,7 +115,7 @@ const installDependencies = async (sandbox: Sandbox): Promise<void> => {
   console.log(`[heal-executor] Installing dependencies with ${manager}`);
 
   const result = await sandbox.commands.run(installCmd, {
-    cwd: WORKTREE_PATH,
+    cwd: worktreePath,
     timeoutMs: INSTALL_TIMEOUT_MS,
   });
 
@@ -122,9 +126,12 @@ const installDependencies = async (sandbox: Sandbox): Promise<void> => {
   }
 };
 
-const extractPatch = async (sandbox: Sandbox): Promise<string | null> => {
+const extractPatch = async (
+  sandbox: SandboxHandle,
+  worktreePath: string
+): Promise<string | null> => {
   const result = await sandbox.commands.run("git diff", {
-    cwd: WORKTREE_PATH,
+    cwd: worktreePath,
     timeoutMs: 30_000,
   });
 
@@ -137,9 +144,12 @@ const extractPatch = async (sandbox: Sandbox): Promise<string | null> => {
   return patch === "" ? null : patch;
 };
 
-const extractFilesChanged = async (sandbox: Sandbox): Promise<string[]> => {
+const extractFilesChanged = async (
+  sandbox: SandboxHandle,
+  worktreePath: string
+): Promise<string[]> => {
   const result = await sandbox.commands.run("git diff --name-only", {
-    cwd: WORKTREE_PATH,
+    cwd: worktreePath,
     timeoutMs: 30_000,
   });
 
@@ -189,14 +199,16 @@ export const executeHeal = async (
   }
 
   const request = parseResult.data;
-  let sandbox: Sandbox | null = null;
+  let sandbox: SandboxHandle | null = null;
+  const sandboxService = createSandboxService(appEnv);
+  const worktreePath = `${sandboxService.rootPath}/repo`;
 
   try {
     console.log(`[heal-executor] Creating sandbox for heal ${request.healId}`);
 
-    sandbox = await Sandbox.create(SANDBOX_TEMPLATE, {
-      apiKey: appEnv.E2B_API_KEY,
-      timeoutMs: SANDBOX_TIMEOUT_SEC * 1000,
+    sandbox = await sandboxService.create({
+      template: SANDBOX_TEMPLATE,
+      timeout: SANDBOX_TIMEOUT_SEC,
       metadata: { healId: request.healId },
     });
 
@@ -208,7 +220,7 @@ export const executeHeal = async (
     // - branch: SAFE_STRING_PATTERN allows only [a-zA-Z0-9_\-./]
     // - repoUrl: GITHUB_REPO_URL_PATTERN requires exact GitHub URL format
     // These patterns explicitly disallow shell metacharacters ($, `, ;, |, &, etc.)
-    const cloneCmd = `git clone --depth 1 --branch ${request.branch} ${request.repoUrl} ${WORKTREE_PATH}`;
+    const cloneCmd = `git clone --depth 1 --branch ${request.branch} ${request.repoUrl} ${worktreePath}`;
     const cloneResult = await sandbox.commands.run(cloneCmd, {
       timeoutMs: CLONE_TIMEOUT_MS,
     });
@@ -220,12 +232,12 @@ export const executeHeal = async (
     }
 
     console.log("[heal-executor] Repo cloned, installing dependencies");
-    await installDependencies(sandbox);
+    await installDependencies(sandbox, worktreePath);
 
     const toolContext = createSandboxToolContext({
       sandbox,
-      worktreePath: WORKTREE_PATH,
-      repoRoot: WORKTREE_PATH,
+      worktreePath,
+      repoRoot: worktreePath,
       runId: request.healId,
     });
 
@@ -259,8 +271,8 @@ export const executeHeal = async (
 
     if (healResult.success) {
       [patch, filesChanged] = await Promise.all([
-        extractPatch(sandbox),
-        extractFilesChanged(sandbox),
+        extractPatch(sandbox, worktreePath),
+        extractFilesChanged(sandbox, worktreePath),
       ]);
       console.log(
         `[heal-executor] Extracted patch with ${filesChanged.length} files changed`

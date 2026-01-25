@@ -37,6 +37,7 @@ import { createSandboxService } from "./index";
 
 const createMockEnv = (apiKey = "test-api-key"): Env =>
   ({
+    SANDBOX_PROVIDER: "e2b",
     E2B_API_KEY: apiKey,
   }) as Env;
 
@@ -202,7 +203,7 @@ describe("isRateLimitError", () => {
 
     const svc = createSandboxService(createMockEnv());
     await expect(svc.create()).rejects.toThrow(
-      "E2B rate limit exceeded. Please try again later."
+      "Sandbox rate limit exceeded. Please try again later."
     );
   });
 
@@ -222,7 +223,7 @@ describe("isRateLimitError", () => {
 
     const svc = createSandboxService(createMockEnv());
     await expect(svc.create()).rejects.toThrow(
-      "E2B rate limit exceeded. Please try again later."
+      "Sandbox rate limit exceeded. Please try again later."
     );
   });
 });
@@ -288,7 +289,7 @@ describe("error wrapping in service methods", () => {
     const svc = createSandboxService(createMockEnv());
     const sbx = await svc.create();
     await expect(
-      svc.writeFile(sbx as never, "/test.txt", "content")
+      svc.writeFile(sbx as never, "/home/user/test.txt", "content")
     ).rejects.toThrow("Failed to write file: Disk full");
   });
 
@@ -303,9 +304,9 @@ describe("error wrapping in service methods", () => {
 
     const svc = createSandboxService(createMockEnv());
     const sbx = await svc.create();
-    await expect(svc.readFile(sbx as never, "/missing.txt")).rejects.toThrow(
-      "Failed to read file: File not found"
-    );
+    await expect(
+      svc.readFile(sbx as never, "/home/user/missing.txt")
+    ).rejects.toThrow("Failed to read file: File not found");
   });
 
   it("wraps kill errors with context prefix", async () => {
@@ -369,7 +370,7 @@ describe("error wrapping in service methods", () => {
 
 describe("missing API key detection", () => {
   it("throws at service creation when E2B_API_KEY is missing", () => {
-    const envWithoutKey = { E2B_API_KEY: "" } as Env;
+    const envWithoutKey = { SANDBOX_PROVIDER: "e2b", E2B_API_KEY: "" } as Env;
 
     expect(() => createSandboxService(envWithoutKey)).toThrow(
       "E2B_API_KEY environment variable is not configured"
@@ -377,7 +378,10 @@ describe("missing API key detection", () => {
   });
 
   it("throws at service creation when E2B_API_KEY is undefined", () => {
-    const envWithUndefined = { E2B_API_KEY: undefined } as unknown as Env;
+    const envWithUndefined = {
+      SANDBOX_PROVIDER: "e2b",
+      E2B_API_KEY: undefined,
+    } as unknown as Env;
 
     expect(() => createSandboxService(envWithUndefined)).toThrow(
       "E2B_API_KEY environment variable is not configured"

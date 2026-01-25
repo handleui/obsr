@@ -55,8 +55,15 @@ export interface Env {
   // Sentry error monitoring
   SENTRY_DSN?: string;
 
+  // Sandbox provider selection (vercel | e2b)
+  SANDBOX_PROVIDER?: string;
   // E2B sandbox for AI code execution
-  E2B_API_KEY: string;
+  E2B_API_KEY?: string;
+  // Vercel Sandboxes authentication
+  VERCEL_OIDC_TOKEN?: string;
+  VERCEL_TOKEN?: string;
+  VERCEL_TEAM_ID?: string;
+  VERCEL_PROJECT_ID?: string;
 
   // Cloudflare version metadata for Sentry release tracking
   CF_VERSION_METADATA?: {

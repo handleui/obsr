@@ -438,8 +438,9 @@ export const createSandboxService = (env: SandboxEnv) => {
 
 export type SandboxService = ReturnType<typeof createSandboxService>;
 
+// Re-export for testing - allows consumers to mock without direct @e2b/code-interpreter dependency
+export { RateLimitError, Sandbox as E2BSandbox } from "@e2b/code-interpreter";
 export { DEFAULT_TEMPLATE, DEFAULTS, TEMPLATES } from "./config.js";
-
 export type {
   CodeResult,
   CommandResult,

@@ -46,7 +46,7 @@
     "memfs": "^4.51.1",
     "react-devtools-core": "^7.0.1",
     "semver": "^7.7.1",
-    "typescript": "5.9.2",
+    "typescript": "^5.9.3",
     "vitest": "^4.0.16"
   }
 }

@@ -17,6 +17,7 @@ import apiKeysRoutes from "./routes/api-keys";
 import authRoutes from "./routes/auth";
 import autofixResultRoutes from "./routes/autofix-result";
 import billingRoutes from "./routes/billing";
+import diagnosticsRoutes from "./routes/diagnostics";
 import errorsRoutes from "./routes/errors";
 import githubSecretsRoutes from "./routes/github-secrets";
 import healRoutes from "./routes/heal";
@@ -199,6 +200,7 @@ api.route("/orgs/:orgId/invitations", orgInvitationsRoutes);
 api.route("/orgs", apiKeysRoutes);
 api.route("/orgs", githubSecretsRoutes);
 api.route("/billing", billingRoutes);
+api.route("/diagnostics", diagnosticsRoutes);
 
 app.route("/v1", api);
 

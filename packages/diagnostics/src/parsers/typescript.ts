@@ -8,7 +8,7 @@
  * - Colon-separated (pretty mode): file.ts:42:5 - error TS2304: message
  */
 
-import type { ParsedError } from "../types";
+import type { Diagnostic } from "../types.js";
 
 /**
  * TypeScript file extension pattern.
@@ -49,18 +49,18 @@ const tsColonPattern = new RegExp(
   "i"
 );
 
+// Pre-compiled ANSI escape code regex (avoids regex compilation per line)
+const ANSI_PATTERN =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape codes intentionally use control characters
+  /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
+
 /**
  * Strip ANSI escape codes from a string.
  */
-const stripAnsi = (str: string): string =>
-  str.replace(
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape codes intentionally use control characters
-    /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g,
-    ""
-  );
+const stripAnsi = (str: string): string => str.replace(ANSI_PATTERN, "");
 
 /**
- * Map severity string to ParsedError severity.
+ * Map severity string to Diagnostic severity.
  */
 const mapSeverity = (severity: string | undefined): "error" | "warning" =>
   severity?.toLowerCase() === "warning" ? "warning" : "error";
@@ -78,8 +78,8 @@ const MAX_LINE_LENGTH = 2000;
  * @param content - Raw tsc output text
  * @returns Array of parsed errors
  */
-export const parseTypeScript = (content: string): ParsedError[] => {
-  const errors: ParsedError[] = [];
+export const parseTypeScript = (content: string): Diagnostic[] => {
+  const errors: Diagnostic[] = [];
   const lines = content.split("\n");
 
   for (const line of lines) {
@@ -97,14 +97,16 @@ export const parseTypeScript = (content: string): ParsedError[] => {
     let match = tsParenPattern.exec(stripped);
     if (match) {
       const [, filePath, lineStr, colStr, severity, ruleId, message] = match;
-      errors.push({
-        filePath,
-        line: Number.parseInt(lineStr, 10),
-        column: Number.parseInt(colStr, 10),
-        severity: mapSeverity(severity),
-        ruleId: ruleId || undefined,
-        message: message.trim(),
-      });
+      if (filePath && lineStr && colStr && message) {
+        errors.push({
+          filePath,
+          line: Number.parseInt(lineStr, 10),
+          column: Number.parseInt(colStr, 10),
+          severity: mapSeverity(severity),
+          ruleId: ruleId || undefined,
+          message: message.trim(),
+        });
+      }
       continue;
     }
 
@@ -112,14 +114,16 @@ export const parseTypeScript = (content: string): ParsedError[] => {
     match = tsColonPattern.exec(stripped);
     if (match) {
       const [, filePath, lineStr, colStr, severity, ruleId, message] = match;
-      errors.push({
-        filePath,
-        line: Number.parseInt(lineStr, 10),
-        column: Number.parseInt(colStr, 10),
-        severity: mapSeverity(severity),
-        ruleId: ruleId || undefined,
-        message: message.trim(),
-      });
+      if (filePath && lineStr && colStr && message) {
+        errors.push({
+          filePath,
+          line: Number.parseInt(lineStr, 10),
+          column: Number.parseInt(colStr, 10),
+          severity: mapSeverity(severity),
+          ruleId: ruleId || undefined,
+          message: message.trim(),
+        });
+      }
     }
   }
 

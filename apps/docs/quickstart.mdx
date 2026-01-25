@@ -1,11 +1,60 @@
 ---
 title: Quickstart
-description: Get up and running in 5 minutes
+description: Add Detent to your repo in 5 minutes
 ---
 
-## Installation
+## 1. Add the GitHub Action
 
-Install Detent CLI globally:
+Add this to your workflow file. Put it at the end of your CI job:
+
+```yaml .github/workflows/ci.yml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm run lint -- --format json --output-file eslint-report.json
+        continue-on-error: true
+      - run: npm test
+        continue-on-error: true
+
+      # Add Detent at the end
+      - uses: detent/action@v1
+        with:
+          token: ${{ secrets.DETENT_TOKEN }}
+        if: always()
+```
+
+<Warning>
+Use `if: always()` — otherwise the action won't run when your CI fails (which is exactly when you need it).
+</Warning>
+
+## 2. Get Your Token
+
+1. Go to [navigator.detent.sh](https://navigator.detent.sh)
+2. Sign in with GitHub
+3. Copy your API token
+4. Add it to your repo's secrets as `DETENT_TOKEN`
+
+## 3. Push and Break Something
+
+Push a commit with a lint error. On purpose. Watch what happens:
+
+1. GitHub Actions runs
+2. ESLint fails
+3. Detent parses the error
+4. You get a PR comment with the fix
+
+<Frame>
+  <img src="/images/pr-comment.png" alt="Detent PR comment with suggested fix" />
+</Frame>
+
+Click **Apply** and the fix is committed to your branch.
+
+## 4. Install the CLI (Optional)
+
+The CLI lets you view errors locally and manage your projects:
 
 <CodeGroup>
 ```bash curl
@@ -21,70 +70,26 @@ brew install handleui/tap/detent
 ```
 </CodeGroup>
 
-## Basic Usage
-
-### 1. Run a Check
-
-Navigate to your repository and run:
+Then link your repo:
 
 ```bash
-detent check
+dt auth login
+dt link
 ```
 
-This parses your CI configuration and runs the relevant workflows against your changed files.
-
-### 2. Heal Failures
-
-If checks fail, let AI fix them:
+Now you can check errors from the command line:
 
 ```bash
-detent heal
-```
-
-Detent will analyze the failures and apply fixes automatically.
-
-### 3. Verify
-
-After healing, run check again to verify:
-
-```bash
-detent check
-```
-
-## Example Workflow
-
-```bash
-# Make some changes
-git checkout -b feature/my-changes
-# ... edit files ...
-
-# Run CI locally
-detent check
-
-# If failures, heal them
-detent heal
-
-# Verify fixes worked
-detent check
-
-# Commit and push with confidence
-git add . && git commit -m "feat: my changes"
-git push
+dt errors
 ```
 
 ## Next Steps
 
 <CardGroup cols={2}>
-  <Card title="Installation" icon="download" href="/cli/installation">
-    Detailed installation options
+  <Card title="How Healing Works" icon="wand-magic-sparkles" href="/cli/how-healing-works">
+    Understand the AI under the hood
   </Card>
-  <Card title="Core Concepts" icon="lightbulb" href="/cli/concepts">
-    Understand how Detent works
-  </Card>
-  <Card title="Configuration" icon="gear" href="/cli/settings">
-    Customize Detent for your project
-  </Card>
-  <Card title="API Reference" icon="code" href="/api/introduction">
-    Integrate with the Detent API
+  <Card title="Supported Tools" icon="wrench" href="/cli/tools">
+    ESLint, TypeScript, Vitest, and more
   </Card>
 </CardGroup>

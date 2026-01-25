@@ -1,4 +1,69 @@
 ---
-title: Settings
-description: Configure API keys, models, and preferences
+title: Configuration
+description: Customize Detent for your workflow
 ---
+
+## View Config
+
+```bash
+dt config list
+```
+
+Shows your current settings:
+
+```
+api_url: https://backend.detent.sh
+```
+
+## Set a Value
+
+```bash
+dt config set <key> <value>
+```
+
+Example:
+
+```bash
+dt config set api_url https://api.example.com
+```
+
+## Get a Value
+
+```bash
+dt config get api_url
+```
+
+## Available Settings
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `api_url` | `https://backend.detent.sh` | API endpoint (for self-hosted) |
+
+## Config File Location
+
+Config is stored at:
+
+- **macOS/Linux**: `~/.config/detent/config.json`
+- **Windows**: `%APPDATA%\detent\config.json`
+
+## Project Config
+
+When you run `dt link`, a `.detent.json` file is created in your repo:
+
+```json
+{
+  "organizationSlug": "acme",
+  "projectHandle": "my-app"
+}
+```
+
+This connects your local repo to Detent. Commit it to share with your team.
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `DETENT_API_URL` | Override the API endpoint |
+| `DETENT_TOKEN` | API token (used in CI) |
+
+Environment variables override config file settings.

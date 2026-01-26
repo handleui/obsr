@@ -61,6 +61,7 @@ For unknown tools, optionally fall back to the Detent API:
 import { createParser } from "@detent/diagnostics"
 
 const parse = createParser({ apiKey: "your-api-key" })
+// parse is an AsyncParser - returns Promise<DiagnosticResult>
 const result = await parse(unknownOutput)
 ```
 
@@ -121,7 +122,8 @@ interface Diagnostic {
 }
 
 interface DiagnosticResult {
-  detectedTool: DetectedTool | null
+  /** Tool name (built-in DetectedTool or custom registered parser name) */
+  detectedTool: string | null
   diagnostics: Diagnostic[]
   summary: {
     total: number
@@ -131,6 +133,9 @@ interface DiagnosticResult {
 }
 
 type DetectedTool = "eslint" | "vitest" | "typescript" | "cargo" | "golangci"
+
+// Type guard for narrowing string to DetectedTool
+const isDetectedTool = (tool: string | null): tool is DetectedTool
 ```
 
 ## License

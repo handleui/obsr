@@ -13,7 +13,10 @@ export interface ParserOptions {
 const DEFAULT_API_URL = "https://backend.detent.sh/v1/diagnostics";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-/** Allowed URL protocols for API endpoint */
+/**
+ * Allowed URL protocols for API endpoint.
+ * HTTP is intentionally excluded to prevent SSRF attacks.
+ */
 const ALLOWED_PROTOCOLS = ["https:"];
 
 /**
@@ -148,7 +151,10 @@ export const createParser = (options?: ParserOptions) => {
     }
 
     if (!res.ok) {
-      throw new Error(`Diagnostics API error: ${res.status}`);
+      const text = await res.text().catch(() => "");
+      throw new Error(
+        `Diagnostics API error: ${res.status}${text ? ` - ${text.slice(0, 200)}` : ""}`
+      );
     }
 
     const data: unknown = await res.json();

@@ -160,7 +160,7 @@ export interface CheckSuitePayload {
 }
 
 export interface DetentCommand {
-  type: "status" | "help" | "unknown";
+  type: "status" | "help" | "heal" | "unknown";
 }
 
 // Variables stored in context by middleware

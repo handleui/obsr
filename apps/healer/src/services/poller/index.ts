@@ -7,7 +7,6 @@ import { getInstallationToken } from "../github/token.js";
 import { executeHeal } from "../heal-executor.js";
 
 const POLL_INTERVAL_MS = 5000;
-const MAX_CONCURRENT_HEALS = 5;
 const POOL_SIZE = 5;
 
 interface HealRow {
@@ -18,6 +17,7 @@ interface HealRow {
   project_id: string;
   commit_sha: string | null;
   pr_number: number | null;
+  check_run_id: string | null;
 }
 
 interface ProjectRow {
@@ -85,13 +85,13 @@ const createDatabase = (): Database => {
 };
 
 const fetchPendingHeals = async (db: Database): Promise<HealRow[]> => {
-  const limit = MAX_CONCURRENT_HEALS - state.activeHealIds.size;
+  const limit = env.MAX_CONCURRENT_HEALS - state.activeHealIds.size;
   if (limit <= 0) {
     return [];
   }
 
   const result = await db.execute(sql`
-    SELECT id, type, status, run_id, project_id, commit_sha, pr_number
+    SELECT id, type, status, run_id, project_id, commit_sha, pr_number, check_run_id
     FROM heals
     WHERE type = 'heal' AND status = 'pending'
     ORDER BY created_at ASC
@@ -220,6 +220,307 @@ const fetchOrganization = async (
   return (result.rows[0] as unknown as OrganizationRow | undefined) ?? null;
 };
 
+const GITHUB_API = "https://api.github.com";
+
+// Retry config loaded from environment variables (with defaults)
+const getRetryConfig = () => ({
+  maxRetries: env.GITHUB_API_MAX_RETRIES,
+  initialDelayMs: env.GITHUB_API_INITIAL_DELAY_MS,
+  backoffMultiplier: env.GITHUB_API_BACKOFF_MULTIPLIER,
+});
+
+// HTTP status codes that should not be retried (auth issues, not found, validation errors)
+const NON_RETRYABLE_STATUSES = new Set([401, 403, 404, 422]);
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+// Result type for GitHub API calls with retry
+type GitHubCallResult =
+  | { ok: true }
+  | { ok: false; retryable: false; status: number }
+  | { ok: false; retryable: true; error: Error; retryAfterMs?: number };
+
+// Parse Retry-After header value (GitHub sends seconds as integer)
+const parseRetryAfterHeader = (response: Response): number | undefined => {
+  const retryAfter = response.headers.get("retry-after");
+  if (!retryAfter) {
+    return undefined;
+  }
+  const seconds = Number.parseInt(retryAfter, 10);
+  if (Number.isNaN(seconds) || seconds <= 0) {
+    return undefined;
+  }
+  // Convert seconds to milliseconds, cap at 5 minutes to prevent excessive waits
+  return Math.min(seconds * 1000, 300_000);
+};
+
+// Execute a single GitHub API request and categorize the result
+const executeGitHubRequest = async (
+  url: string,
+  options: RequestInit
+): Promise<GitHubCallResult> => {
+  try {
+    const response = await fetch(url, options);
+    if (response.ok) {
+      return { ok: true };
+    }
+    if (NON_RETRYABLE_STATUSES.has(response.status)) {
+      return { ok: false, retryable: false, status: response.status };
+    }
+    // For 429 rate limits, extract Retry-After header if present
+    const retryAfterMs =
+      response.status === 429 ? parseRetryAfterHeader(response) : undefined;
+    return {
+      ok: false,
+      retryable: true,
+      error: new Error(`HTTP ${response.status}`),
+      retryAfterMs,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      retryable: true,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+};
+
+// Retry helper for GitHub API calls with exponential backoff
+interface GitHubRetryParams {
+  url: string;
+  options: RequestInit;
+  successMsg: string;
+  failureMsg: string;
+}
+
+const withGitHubRetry = async (params: GitHubRetryParams): Promise<void> => {
+  const { url, options, successMsg, failureMsg } = params;
+  const retryConfig = getRetryConfig();
+  let lastError: Error | null = null;
+  let delay = retryConfig.initialDelayMs;
+  const totalAttempts = retryConfig.maxRetries + 1;
+
+  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+    const result = await executeGitHubRequest(url, options);
+
+    if (result.ok) {
+      const msg =
+        attempt > 1
+          ? `${successMsg} (succeeded on attempt ${attempt})`
+          : successMsg;
+      console.log(`[poller] ${msg}`);
+      return;
+    }
+
+    if (!result.retryable) {
+      console.error(
+        `[poller] ${failureMsg}: HTTP ${result.status} (not retrying)`
+      );
+      return;
+    }
+
+    lastError = result.error;
+    if (attempt < totalAttempts) {
+      // Use Retry-After header value for 429 responses, otherwise use exponential backoff
+      const waitMs = result.retryAfterMs ?? delay;
+      console.warn(
+        `[poller] ${failureMsg} (attempt ${attempt}/${totalAttempts}): ${result.error.message}, retrying in ${waitMs}ms${result.retryAfterMs ? " (from Retry-After)" : ""}`
+      );
+      await sleep(waitMs);
+      delay *= retryConfig.backoffMultiplier;
+    }
+  }
+
+  console.error(
+    `[poller] ${failureMsg} after ${totalAttempts} attempts: ${lastError?.message ?? "Unknown error"}`
+  );
+};
+
+// GitHub name validation pattern (alphanumeric with hyphens, dots, underscores)
+const GITHUB_NAME_PATTERN = /^[a-zA-Z0-9][-a-zA-Z0-9._]*$/;
+
+const isValidGitHubName = (name: string): boolean =>
+  name.length > 0 &&
+  name.length <= 100 &&
+  GITHUB_NAME_PATTERN.test(name) &&
+  !name.includes("..");
+
+const sanitizeErrorForCheckRun = (error: string): string => {
+  // Remove potentially sensitive info: paths, tokens, URLs with credentials
+  const sanitized = error
+    .replace(/https?:\/\/[^\s]+/g, "[URL]")
+    .replace(/\/[\w/.-]+/g, "[PATH]")
+    .replace(/token[=:]\s*\S+/gi, "token=[REDACTED]");
+  // Truncate to reasonable length for GitHub check run summary
+  return sanitized.length > 500 ? `${sanitized.slice(0, 497)}...` : sanitized;
+};
+
+// ============================================================================
+// PR Comment Posting
+// ============================================================================
+// Posts comments on PRs when heals complete or fail.
+// Formatters match comment-formatter.ts in apps/api for consistent styling.
+
+// Detent documentation URL for comment headers
+const DOCS_URL = "https://detent.sh/docs";
+
+// Format friendly header with context-specific message
+// Matches formatHeader() in apps/api/src/services/comment-formatter.ts
+const formatHeader = (message: string): string => {
+  return `${message}\nNot sure what's happening? [Read the docs](${DOCS_URL})`;
+};
+
+// HTML entity map for escaping (prevents XSS via user-controlled content)
+const HTML_TAG_PATTERN = /[<>&"']/g;
+const HTML_ENTITIES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+const escapeHtml = (text: string): string => {
+  return text.replace(HTML_TAG_PATTERN, (char) => HTML_ENTITIES[char] ?? char);
+};
+
+const formatHealSuccessComment = (
+  filesFixed: number,
+  projectId: string,
+  navigatorBaseUrl: string
+): string => {
+  const fileText = filesFixed === 1 ? "1 file" : `${filesFixed} files`;
+  const projectUrl = `${navigatorBaseUrl}/dashboard/${projectId}`;
+
+  const lines: string[] = [];
+  lines.push(formatHeader(`Healed ${fileText}. Ready to apply.`));
+  lines.push("");
+  lines.push(`[Review and apply in dashboard](${projectUrl})`);
+
+  return lines.join("\n");
+};
+
+const formatHealFailedComment = (reason: string): string => {
+  // Truncate and sanitize reason to prevent injection
+  const safeReason =
+    reason.length > 200
+      ? `${escapeHtml(reason.slice(0, 197))}...`
+      : escapeHtml(reason);
+
+  const lines: string[] = [];
+  lines.push(formatHeader("Failed to heal."));
+  lines.push("");
+  lines.push(`Reason: ${safeReason}`);
+
+  return lines.join("\n");
+};
+
+const postPrComment = async (
+  appEnv: Env,
+  installationId: number,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  body: string
+): Promise<void> => {
+  // Validate inputs early (no retry for validation failures)
+  if (!(isValidGitHubName(owner) && isValidGitHubName(repo))) {
+    console.error("[poller] Invalid owner or repo name for PR comment");
+    return;
+  }
+  if (!Number.isInteger(prNumber) || prNumber <= 0) {
+    console.error("[poller] Invalid PR number for comment");
+    return;
+  }
+
+  const token = await getInstallationToken(appEnv, installationId);
+  if (!token) {
+    console.error(`[poller] No token for installation ${installationId}`);
+    return;
+  }
+
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/issues/${prNumber}/comments`;
+  const options: RequestInit = {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "Detent-Healer",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ body }),
+  };
+
+  await withGitHubRetry({
+    url,
+    options,
+    successMsg: `Posted comment on ${owner}/${repo}#${prNumber}`,
+    failureMsg: "Failed to post comment",
+  });
+};
+
+const updateCheckRun = async (
+  appEnv: Env,
+  installationId: number,
+  owner: string,
+  repo: string,
+  checkRunId: number,
+  conclusion: "success" | "failure",
+  output: { title: string; summary: string }
+): Promise<void> => {
+  // Validate inputs early (no retry for validation failures)
+  if (!(isValidGitHubName(owner) && isValidGitHubName(repo))) {
+    console.error("[poller] Invalid owner or repo name for check run update");
+    return;
+  }
+  if (!Number.isInteger(checkRunId) || checkRunId <= 0) {
+    console.error("[poller] Invalid check run ID");
+    return;
+  }
+
+  const token = await getInstallationToken(appEnv, installationId);
+  if (!token) {
+    console.error(`[poller] No token for installation ${installationId}`);
+    return;
+  }
+
+  // Sanitize output summary to avoid leaking sensitive info
+  const sanitizedOutput = {
+    title: output.title,
+    summary:
+      conclusion === "failure"
+        ? sanitizeErrorForCheckRun(output.summary)
+        : output.summary,
+  };
+
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/check-runs/${checkRunId}`;
+  const options: RequestInit = {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "Detent-Healer",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      status: "completed",
+      conclusion,
+      completed_at: new Date().toISOString(),
+      output: sanitizedOutput,
+    }),
+  };
+
+  await withGitHubRetry({
+    url,
+    options,
+    successMsg: `Updated check run ${checkRunId} to ${conclusion}`,
+    failureMsg: `Failed to update check run ${checkRunId}`,
+  });
+};
+
 const maskSecret = (secret: string): string =>
   secret.length > 8 ? `${secret.slice(0, 4)}****` : "****";
 
@@ -264,12 +565,79 @@ const formatErrorsForPrompt = (errors: RunErrorRow[]): string => {
   return formatted.join("\n\n");
 };
 
+// ============================================================================
+// Heal Completion Notification Helper
+// ============================================================================
+// Extracted helper to reduce duplication - handles both check run update and PR comment
+
+interface NotifyHealCompletionParams {
+  appEnv: Env;
+  heal: HealRow;
+  installationId: number | null;
+  repoFullName: string | null;
+  conclusion: "success" | "failure";
+  checkRunOutput: { title: string; summary: string };
+  prComment: string;
+}
+
+const notifyHealCompletion = async (
+  params: NotifyHealCompletionParams
+): Promise<void> => {
+  const {
+    appEnv,
+    heal,
+    installationId,
+    repoFullName,
+    conclusion,
+    checkRunOutput,
+    prComment,
+  } = params;
+
+  if (!(installationId && repoFullName)) {
+    return;
+  }
+
+  const [owner, repo] = repoFullName.split("/");
+  if (!(owner && repo)) {
+    return;
+  }
+
+  // Update check run if present
+  if (heal.check_run_id) {
+    await updateCheckRun(
+      appEnv,
+      installationId,
+      owner,
+      repo,
+      Number.parseInt(heal.check_run_id, 10),
+      conclusion,
+      checkRunOutput
+    );
+  }
+
+  // Post PR comment if PR number present
+  if (heal.pr_number) {
+    await postPrComment(
+      appEnv,
+      installationId,
+      owner,
+      repo,
+      heal.pr_number,
+      prComment
+    );
+  }
+};
+
 const processHeal = async (
   db: Database,
   heal: HealRow,
   appEnv: Env
 ): Promise<void> => {
   console.log(`[poller] Processing heal ${heal.id}`);
+
+  // Store for check run update at the end
+  let installationId: number | null = null;
+  let repoFullName: string | null = null;
 
   try {
     await markHealRunning(db, heal.id);
@@ -279,6 +647,7 @@ const processHeal = async (
       throw new Error(`Project ${heal.project_id} not found`);
     }
 
+    repoFullName = project.provider_repo_full_name;
     const org = await fetchOrganization(db, project.organization_id);
 
     let branch = project.provider_default_branch ?? "main";
@@ -297,7 +666,7 @@ const processHeal = async (
 
     let token: string | null = null;
     if (org?.provider_installation_id) {
-      const installationId = Number.parseInt(org.provider_installation_id, 10);
+      installationId = Number.parseInt(org.provider_installation_id, 10);
       if (!Number.isNaN(installationId)) {
         token = await getInstallationToken(appEnv, installationId);
       }
@@ -328,14 +697,58 @@ const processHeal = async (
         result: result.result,
       });
       console.log(`[poller] Heal ${heal.id} completed successfully`);
+
+      await notifyHealCompletion({
+        appEnv,
+        heal,
+        installationId,
+        repoFullName,
+        conclusion: "success",
+        checkRunOutput: {
+          title: "Healing complete",
+          summary: `Found fixes for ${result.filesChanged.length} files. Review in dashboard.`,
+        },
+        prComment: formatHealSuccessComment(
+          result.filesChanged.length,
+          heal.project_id,
+          appEnv.NAVIGATOR_BASE_URL
+        ),
+      });
     } else {
-      await markHealFailed(db, heal.id, result.error ?? "Heal failed");
+      const errorMessage = result.error ?? "Heal failed";
+      await markHealFailed(db, heal.id, errorMessage);
       console.log(`[poller] Heal ${heal.id} failed: ${result.error}`);
+
+      await notifyHealCompletion({
+        appEnv,
+        heal,
+        installationId,
+        repoFullName,
+        conclusion: "failure",
+        checkRunOutput: {
+          title: "Healing failed",
+          summary: errorMessage,
+        },
+        prComment: formatHealFailedComment(errorMessage),
+      });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[poller] Error processing heal ${heal.id}: ${message}`);
     await markHealFailed(db, heal.id, message);
+
+    await notifyHealCompletion({
+      appEnv,
+      heal,
+      installationId,
+      repoFullName,
+      conclusion: "failure",
+      checkRunOutput: {
+        title: "Healing failed",
+        summary: message,
+      },
+      prComment: formatHealFailedComment(message),
+    });
   }
 };
 
@@ -380,8 +793,19 @@ const pollLoop = async (db: Database, appEnv: Env): Promise<void> => {
   }
 };
 
-const markStaleHealsAsFailed = async (db: Database): Promise<void> => {
+interface StaleHealRow {
+  id: string;
+  check_run_id: string | null;
+  project_id: string;
+}
+
+const markStaleHealsAsFailed = async (
+  db: Database,
+  appEnv: Env
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: stale heal processing requires multiple DB queries and GitHub API calls
+): Promise<void> => {
   try {
+    // Get stale heals with their check_run_id and project_id for GitHub updates
     const result = await db.execute(sql`
       UPDATE heals
       SET
@@ -392,11 +816,69 @@ const markStaleHealsAsFailed = async (db: Database): Promise<void> => {
         type = 'heal'
         AND status IN ('pending', 'running')
         AND updated_at < NOW() - INTERVAL '30 minutes'
-      RETURNING id
+      RETURNING id, check_run_id, project_id
     `);
 
-    if (result.rowCount && result.rowCount > 0) {
-      console.log(`[poller] Marked ${result.rowCount} stale heals as failed`);
+    const staleHeals = result.rows as unknown as StaleHealRow[];
+
+    if (staleHeals.length === 0) {
+      return;
+    }
+
+    console.log(`[poller] Marked ${staleHeals.length} stale heals as failed`);
+
+    // Update GitHub check runs for stale heals to avoid orphaned "in_progress" status
+    for (const heal of staleHeals) {
+      if (!heal.check_run_id) {
+        continue;
+      }
+
+      try {
+        const project = await fetchProject(db, heal.project_id);
+        if (!project) {
+          continue;
+        }
+
+        const org = await fetchOrganization(db, project.organization_id);
+        if (!org?.provider_installation_id) {
+          continue;
+        }
+
+        const installationId = Number.parseInt(
+          org.provider_installation_id,
+          10
+        );
+        if (Number.isNaN(installationId)) {
+          continue;
+        }
+
+        const [owner, repo] = project.provider_repo_full_name.split("/");
+        if (!(owner && repo)) {
+          continue;
+        }
+
+        await updateCheckRun(
+          appEnv,
+          installationId,
+          owner,
+          repo,
+          Number.parseInt(heal.check_run_id, 10),
+          "failure",
+          {
+            title: "Healing timed out",
+            summary: "The heal operation exceeded the 30 minute timeout limit.",
+          }
+        );
+
+        console.log(
+          `[poller] Updated stale check run ${heal.check_run_id} for heal ${heal.id}`
+        );
+      } catch (error) {
+        // Log but don't fail the overall operation
+        console.error(
+          `[poller] Failed to update stale check run for heal ${heal.id}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
     }
   } catch (error) {
     console.error(
@@ -417,7 +899,7 @@ export const startPoller = async (): Promise<void> => {
     const db = createDatabase();
     state.isRunning = true;
 
-    await markStaleHealsAsFailed(db);
+    await markStaleHealsAsFailed(db, env);
 
     pollLoop(db, env).catch((err) => {
       console.error(

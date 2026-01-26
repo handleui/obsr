@@ -802,3 +802,141 @@ export const releaseHealCreationLock = async (
     );
   }
 };
+
+// ============================================================================
+// Heal Command Lock
+// ============================================================================
+// Prevents race conditions when two @detent heal commands are posted
+// simultaneously on the same PR. This ensures only one heal orchestration
+// runs at a time per PR, preventing duplicate heals even when the
+// existingHeals DB check has a race window.
+
+const HEAL_COMMAND_LOCK_PREFIX = "detent:heal:command";
+
+// Short TTL since heal orchestration should complete within 30 seconds
+const HEAL_COMMAND_LOCK_TTL_SECONDS = 60;
+
+// Stale threshold for heal command locks (30 seconds)
+const HEAL_COMMAND_LOCK_STALE_MS = 30 * 1000;
+
+interface HealCommandLockState {
+  lockId: string;
+  timestamp: number;
+}
+
+interface HealCommandLockResult {
+  acquired: boolean;
+  lockId?: string;
+  kvError?: boolean;
+  validationError?: boolean;
+}
+
+/**
+ * Validates inputs for heal command lock operations.
+ */
+const validateHealCommandInputs = (
+  projectId: string,
+  prNumber: number
+): { projectId: string; prNumber: number } | null => {
+  if (!UUID_REGEX.test(projectId)) {
+    console.warn(
+      `[heal-command-lock] Invalid project ID format rejected: ${projectId.substring(0, 20)}...`
+    );
+    return null;
+  }
+
+  if (
+    !Number.isInteger(prNumber) ||
+    prNumber <= 0 ||
+    prNumber > 2_147_483_647
+  ) {
+    console.warn(`[heal-command-lock] Invalid PR number rejected: ${prNumber}`);
+    return null;
+  }
+
+  return {
+    projectId: projectId.toLowerCase(),
+    prNumber,
+  };
+};
+
+const buildHealCommandLockKey = (projectId: string, prNumber: number): string =>
+  `${HEAL_COMMAND_LOCK_PREFIX}:${projectId}:${prNumber}`;
+
+/**
+ * Attempts to acquire a lock for the @detent heal command on a specific PR.
+ * This prevents race conditions when multiple heal commands are posted
+ * simultaneously, ensuring only one orchestration runs at a time.
+ */
+export const acquireHealCommandLock = async (
+  kv: KVNamespace,
+  projectId: string,
+  prNumber: number
+): Promise<HealCommandLockResult> => {
+  const validated = validateHealCommandInputs(projectId, prNumber);
+  if (!validated) {
+    return { acquired: true, validationError: true };
+  }
+
+  const key = buildHealCommandLockKey(validated.projectId, validated.prNumber);
+
+  try {
+    const result = await tryAcquireLock<HealCommandLockState>(
+      kv,
+      key,
+      HEAL_COMMAND_LOCK_TTL_SECONDS,
+      HEAL_COMMAND_LOCK_STALE_MS,
+      (lockId) => ({ lockId, timestamp: Date.now() }),
+      "heal-command-lock"
+    );
+
+    if (result.acquired) {
+      console.log(
+        `[heal-command-lock] Acquired lock for project=${projectId} PR#${prNumber}`
+      );
+    } else {
+      console.log(
+        `[heal-command-lock] Lock held for project=${projectId} PR#${prNumber}, skipping`
+      );
+    }
+
+    return {
+      acquired: result.acquired,
+      lockId: result.lockId,
+    };
+  } catch (error) {
+    console.error(
+      `[heal-command-lock] acquireHealCommandLock failed for project=${projectId} PR#${prNumber}, proceeding with fail-open:`,
+      error
+    );
+    return { acquired: true, kvError: true };
+  }
+};
+
+/**
+ * Releases the heal command lock after orchestration completes or fails.
+ */
+export const releaseHealCommandLock = async (
+  kv: KVNamespace,
+  projectId: string,
+  prNumber: number
+): Promise<void> => {
+  const validated = validateHealCommandInputs(projectId, prNumber);
+  if (!validated) {
+    return;
+  }
+
+  const key = buildHealCommandLockKey(validated.projectId, validated.prNumber);
+
+  try {
+    await kv.delete(key);
+    console.log(
+      `[heal-command-lock] Released lock for project=${projectId} PR#${prNumber}`
+    );
+  } catch (error) {
+    console.error(
+      `[heal-command-lock] releaseHealCommandLock failed for project=${projectId} PR#${prNumber}:`,
+      error
+    );
+  }
+};

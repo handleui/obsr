@@ -133,7 +133,7 @@ jobs:
 
       - name: Verify install from Blob
         run: |
-          VERSION="v${{ steps.version.outputs.version }}"
+          VERSION="cli-v${{ steps.version.outputs.version }}"
           echo "Testing install of $VERSION from Blob..."
 
           # Test direct download and checksum

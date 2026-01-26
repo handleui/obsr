@@ -78,7 +78,7 @@ const uploadChecksums = async (version: string): Promise<void> => {
   const checksumsPath = join(DIST_DIR, "checksums.txt");
   try {
     const content = await readFile(checksumsPath);
-    const blobPath = `cli/v${version}/checksums.txt`;
+    const blobPath = `cli/cli-v${version}/checksums.txt`;
     await withRetry(
       () =>
         put(blobPath, content, {
@@ -99,7 +99,7 @@ const uploadChecksums = async (version: string): Promise<void> => {
     const filePath = join(DIST_DIR, filename);
     try {
       const content = await readFile(filePath);
-      const blobPath = `cli/v${version}/${filename}`;
+      const blobPath = `cli/cli-v${version}/${filename}`;
       await withRetry(
         () =>
           put(blobPath, content, {
@@ -137,7 +137,7 @@ const getManifest = async (): Promise<Manifest> => {
 
 const updateManifest = async (version: string): Promise<Manifest> => {
   const manifest = await getManifest();
-  const tag = `v${version}`;
+  const tag = `cli-v${version}`;
 
   if (!manifest.versions.includes(tag)) {
     manifest.versions.unshift(tag);
@@ -170,7 +170,7 @@ const uploadBinary = async (
   version: string
 ): Promise<void> => {
   const { filename, path } = archive;
-  const blobPath = `cli/v${version}/${filename}`;
+  const blobPath = `cli/cli-v${version}/${filename}`;
 
   log(`Uploading ${filename}...`);
   const content = await readFile(path);

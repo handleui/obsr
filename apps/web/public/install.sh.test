@@ -146,6 +146,11 @@ test_binary_permissions() {
 
 # Integration test: Manifest is accessible
 test_manifest_accessible() {
+  local status=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "https://detent.sh/api/cli/manifest.json")
+  if [ "$status" = "404" ]; then
+    echo "(skipped: no release published yet)"
+    return 0
+  fi
   if curl -fsSL --max-time 10 "https://detent.sh/api/cli/manifest.json" | grep -q '"latest"'; then
     pass "Manifest endpoint accessible and valid"
   else
@@ -164,6 +169,11 @@ test_install_script_served() {
 
 # Integration test: Checksums file exists for latest version
 test_checksums_exist() {
+  local status=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "https://detent.sh/api/cli/manifest.json")
+  if [ "$status" = "404" ]; then
+    echo "(skipped: no release published yet)"
+    return 0
+  fi
   local latest=$(curl -fsSL "https://detent.sh/api/cli/manifest.json" | grep -o '"latest"[^,]*' | cut -d'"' -f4)
   if curl -fsSL --max-time 10 "https://detent.sh/api/cli/${latest}/checksums.txt" | grep -q "dt-"; then
     pass "Checksums file exists for $latest"

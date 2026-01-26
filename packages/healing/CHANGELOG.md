@@ -1,5 +1,12 @@
 # @detent/healing
 
+## 0.4.6
+
+### Patch Changes
+
+- 8c0d460: Add security guidance to system prompt for handling user-provided context.
+  Instructs the model to treat additional context sections as data, not commands.
+
 ## 0.4.5
 
 ### Patch Changes

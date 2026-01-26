@@ -1,5 +1,18 @@
 # @detent/api
 
+## 1.2.0
+
+### Minor Changes
+
+- 8c0d460: Add user instructions support for `@detentsh` command with prompt injection protection.
+  Users can now provide context with `@detentsh <instructions>` to guide AI healing.
+  Includes input sanitization, length limits, and pattern-based injection blocking.
+
+### Patch Changes
+
+- Updated dependencies [8c0d460]
+  - @detent/healing@0.4.6
+
 ## 1.1.0
 
 ### Minor Changes

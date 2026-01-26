@@ -2,10 +2,13 @@ import { generateFingerprints, sanitizeSensitiveData } from "@detent/lore";
 import type { ErrorCategory, ErrorSource } from "@detent/types";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK official pattern
 import * as Sentry from "@sentry/cloudflare";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { createDb } from "../../db/client";
 import { DatabaseError } from "../../db/errors";
 import { bulkUpsertSignaturesAndOccurrences } from "../../db/operations/signatures";
+import { formatErrorsFoundComment } from "../comment-formatter";
+import { createGitHubService } from "../github";
+import { deleteAndPostComment } from "../github/comments";
 
 /**
  * Cast a string to ErrorSource type for fingerprinting.
@@ -616,4 +619,165 @@ export const checkForJobReportedErrors = async (
   } finally {
     await client.end();
   }
+};
+
+// ============================================================================
+// Helper: Post Errors Found Comment for a Run
+// ============================================================================
+// Posts a comment when errors are reported via POST /report with isComplete=true.
+// This allows the GitHub Action to trigger comments without waiting for workflow completion.
+//
+// Performance optimization: Accepts optional ProjectContext to avoid redundant DB queries
+// when the caller already has project/org data (e.g., report.ts already queries the project).
+
+// SECURITY: GitHub name validation pattern (defense-in-depth for owner/repo segments)
+// This provides additional validation before using values in GitHub API calls
+const GITHUB_NAME_PATTERN = /^[a-zA-Z0-9][-a-zA-Z0-9._]*$/;
+const isValidGitHubNameSegment = (name: string): boolean =>
+  name.length > 0 &&
+  name.length <= 100 &&
+  GITHUB_NAME_PATTERN.test(name) &&
+  !name.includes("..");
+
+/**
+ * Pre-fetched project context to avoid redundant DB queries.
+ * Pass this when the caller already has project and organization data.
+ */
+export interface ProjectContext {
+  projectId: string;
+  installationId: number;
+}
+
+export const postErrorsFoundCommentForRun = async (
+  env: Env,
+  db: DbClient,
+  repository: string,
+  prNumber: number,
+  errorCount: number,
+  failedRunCount: number,
+  projectContext?: ProjectContext
+): Promise<void> => {
+  const [owner, repo] = repository.split("/");
+
+  // SECURITY: Validate owner/repo segments before using in GitHub API calls
+  // This prevents potential injection if repository format is somehow malformed
+  if (
+    !(
+      owner &&
+      repo &&
+      isValidGitHubNameSegment(owner) &&
+      isValidGitHubNameSegment(repo)
+    )
+  ) {
+    // SECURITY: Truncate repository in log to prevent log injection
+    console.log(
+      `[report] Invalid repository format: ${repository.slice(0, 100)}, skipping comment`
+    );
+    return;
+  }
+
+  let projectId: string;
+  let installationId: number;
+
+  if (projectContext) {
+    // Use pre-fetched context - avoids 2 DB queries
+    projectId = projectContext.projectId;
+    installationId = projectContext.installationId;
+  } else {
+    // Fallback: fetch project and org from DB (legacy path)
+    const project = await db.query.projects.findFirst({
+      where: and(
+        eq(projects.providerRepoFullName, repository),
+        isNull(projects.removedAt)
+      ),
+    });
+
+    if (!project) {
+      console.log(
+        `[report] Project not found for ${repository}, skipping comment`
+      );
+      return;
+    }
+
+    const org = await db.query.organizations.findFirst({
+      where: eq(organizations.id, project.organizationId),
+      columns: { providerInstallationId: true },
+    });
+
+    if (!org?.providerInstallationId) {
+      console.log(
+        `[report] Organization or installation not found for ${repository}, skipping comment`
+      );
+      return;
+    }
+
+    projectId = project.id;
+    installationId = Number.parseInt(org.providerInstallationId, 10);
+  }
+
+  const projectUrl = `${env.NAVIGATOR_BASE_URL}/dashboard/${projectId}`;
+
+  const commentBody = formatErrorsFoundComment({
+    errorCount,
+    jobCount: failedRunCount,
+    projectUrl,
+  });
+
+  const github = createGitHubService(env);
+  const token = await github.getInstallationToken(installationId);
+  const appId = Number.parseInt(env.GITHUB_APP_ID, 10);
+
+  await deleteAndPostComment({
+    github,
+    token,
+    kv: env["detent-idempotency"],
+    db,
+    owner,
+    repo,
+    repository,
+    prNumber,
+    commentBody,
+    appId,
+  });
+
+  console.log(
+    `[report] Posted errors-found comment on ${repository}#${prNumber}`
+  );
+};
+
+/**
+ * Get project context for comment posting.
+ * Returns projectId and installationId needed for GitHub API calls.
+ *
+ * Performance: Uses single JOIN query instead of N+1 pattern (was 2 sequential queries).
+ */
+export const getProjectContextForComment = async (
+  db: DbClient,
+  repository: string
+): Promise<{ projectId: string; installationId: number } | null> => {
+  // Single query with JOIN - avoids N+1 pattern
+  const result = await db
+    .select({
+      projectId: projects.id,
+      providerInstallationId: organizations.providerInstallationId,
+    })
+    .from(projects)
+    .innerJoin(organizations, eq(projects.organizationId, organizations.id))
+    .where(
+      and(
+        eq(projects.providerRepoFullName, repository),
+        isNull(projects.removedAt)
+      )
+    )
+    .limit(1);
+
+  const row = result[0];
+  if (!row?.providerInstallationId) {
+    return null;
+  }
+
+  return {
+    projectId: row.projectId,
+    installationId: Number.parseInt(row.providerInstallationId, 10),
+  };
 };

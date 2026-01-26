@@ -9,6 +9,12 @@ export {
   handleOrganizationEvent,
   handleRepositoryEvent,
 } from "./handlers/repository";
+export {
+  handleWorkflowJobCompleted,
+  handleWorkflowJobInProgress,
+  handleWorkflowJobQueued,
+  handleWorkflowJobWaiting,
+} from "./handlers/workflow-job";
 // Re-export handlers
 export {
   handleWorkflowRunCompleted,

@@ -334,6 +334,9 @@ const run = async (): Promise<void> => {
       payload.errors.push(...tsErrors);
     }
 
+    // Mark as complete since this is the final report
+    payload.isComplete = true;
+
     core.info(`Reporting to ${apiUrl}...`);
     const result = await report(payload, token, apiUrl);
 

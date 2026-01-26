@@ -43,6 +43,26 @@ export const healStatusEnum = pgEnum("heal_status", [
   "failed",
 ]);
 
+export const jobStatusEnum = pgEnum("job_status", [
+  "queued",
+  "waiting",
+  "in_progress",
+  "completed",
+  "pending",
+  "requested",
+]);
+export const jobConclusionEnum = pgEnum("job_conclusion", [
+  "success",
+  "failure",
+  "cancelled",
+  "skipped",
+  "timed_out",
+  "action_required",
+  "neutral",
+  "stale",
+  "startup_failure",
+]);
+
 // Provider short codes for handles (used in slugs/URLs)
 export const providerShortCodes: Record<"github" | "gitlab", string> = {
   github: "gh",
@@ -693,6 +713,115 @@ export const heals = pgTable(
 );
 
 // ============================================================================
+// Jobs (Individual workflow jobs for full CI visibility)
+// ============================================================================
+// Tracks ALL jobs from workflow runs via workflow_job webhook.
+// Jobs with Detent action have hasDetent=true and aggregate errors.
+
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+
+    // GitHub job identity
+    providerJobId: varchar("provider_job_id", { length: 64 }).notNull(),
+
+    // Parent run reference (optional - job webhook may arrive before run record)
+    runId: varchar("run_id", { length: 36 }).references(() => runs.id, {
+      onDelete: "set null",
+    }),
+
+    // Denormalized for efficient queries without joins
+    repository: varchar("repository", { length: 500 }).notNull(),
+    commitSha: varchar("commit_sha", { length: 64 }).notNull(),
+    prNumber: integer("pr_number"),
+
+    // Job metadata
+    name: varchar("name", { length: 255 }).notNull(),
+    workflowName: varchar("workflow_name", { length: 255 }),
+    status: jobStatusEnum("status").notNull(),
+    conclusion: jobConclusionEnum("conclusion"),
+
+    // Detent integration
+    hasDetent: boolean("has_detent").default(false).notNull(),
+    errorCount: integer("error_count").default(0),
+
+    // For UI linking and log fetching
+    htmlUrl: varchar("html_url", { length: 500 }),
+    runnerName: varchar("runner_name", { length: 255 }),
+    headBranch: varchar("head_branch", { length: 255 }),
+
+    // Timing
+    queuedAt: timestamp("queued_at"),
+    startedAt: timestamp("started_at"),
+    completedAt: timestamp("completed_at"),
+
+    // Timestamps
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    // Primary deduplication: unique per repository + GitHub job ID
+    uniqueIndex("jobs_repo_provider_job_id_idx").on(
+      table.repository,
+      table.providerJobId
+    ),
+    // Commit-level queries (aggregation, dashboard)
+    // NOTE: Also covers lookups by (repository, commitSha) prefix
+    index("jobs_repo_commit_sha_idx").on(table.repository, table.commitSha),
+    // markJobAsDetent query: WHERE repository = ? AND commit_sha = ? AND name = ?
+    // Composite index covers full WHERE clause for efficient updates
+    index("jobs_repo_commit_name_idx").on(
+      table.repository,
+      table.commitSha,
+      table.name
+    ),
+    // Parent run lookup
+    index("jobs_run_id_idx").on(table.runId),
+    // NOTE: Removed jobs_status_idx - low cardinality (4 values) makes single-column
+    // status index ineffective. Queries filtering by status should use composite indexes.
+  ]
+);
+
+// ============================================================================
+// Commit Job Stats (Aggregation cache for commit-level job statistics)
+// ============================================================================
+// Updated on each job insert/update. Tracks completion state for comment posting.
+
+export const commitJobStats = pgTable(
+  "commit_job_stats",
+  {
+    id: varchar("id", { length: 36 }).primaryKey(),
+
+    // Commit identity
+    repository: varchar("repository", { length: 500 }).notNull(),
+    commitSha: varchar("commit_sha", { length: 64 }).notNull(),
+    prNumber: integer("pr_number"),
+
+    // Aggregated counts
+    totalJobs: integer("total_jobs").default(0).notNull(),
+    completedJobs: integer("completed_jobs").default(0).notNull(),
+    failedJobs: integer("failed_jobs").default(0).notNull(),
+    detentJobs: integer("detent_jobs").default(0).notNull(),
+    totalErrors: integer("total_errors").default(0).notNull(),
+
+    // Comment posting state (prevents duplicate comments)
+    commentPosted: boolean("comment_posted").default(false).notNull(),
+
+    // Timestamps
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => [
+    // Primary lookup: stats for a specific commit
+    uniqueIndex("commit_job_stats_repo_commit_idx").on(
+      table.repository,
+      table.commitSha
+    ),
+  ]
+);
+
+// ============================================================================
 // API Keys (Organization-scoped API tokens for external integrations)
 // ============================================================================
 
@@ -770,6 +899,14 @@ export const runsRelations = relations(runs, ({ one, many }) => ({
   }),
   errors: many(runErrors),
   heals: many(heals),
+  jobs: many(jobs),
+}));
+
+export const jobsRelations = relations(jobs, ({ one }) => ({
+  run: one(runs, {
+    fields: [jobs.runId],
+    references: [runs.id],
+  }),
 }));
 
 export const runErrorsRelations = relations(runErrors, ({ one }) => ({
@@ -872,3 +1009,9 @@ export type NewHeal = typeof heals.$inferInsert;
 
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type NewApiKey = typeof apiKeys.$inferInsert;
+
+export type Job = typeof jobs.$inferSelect;
+export type NewJob = typeof jobs.$inferInsert;
+
+export type CommitJobStats = typeof commitJobStats.$inferSelect;
+export type NewCommitJobStats = typeof commitJobStats.$inferInsert;

@@ -9,6 +9,10 @@ import {
   handleIssueCommentEvent,
   handleOrganizationEvent,
   handleRepositoryEvent,
+  handleWorkflowJobCompleted,
+  handleWorkflowJobInProgress,
+  handleWorkflowJobQueued,
+  handleWorkflowJobWaiting,
   handleWorkflowRunCompleted,
   handleWorkflowRunInProgress,
   type InstallationPayload,
@@ -19,6 +23,7 @@ import {
   type RepositoryPayload,
   type WebhookContext,
   type WebhookVariables,
+  type WorkflowJobPayload,
   type WorkflowRunPayload,
 } from "./webhooks/index";
 
@@ -80,6 +85,25 @@ app.post("/github", webhookSignatureMiddleware, (c: WebhookContext) => {
 
     case "check_suite":
       return handleCheckSuiteRequested(c, payload as CheckSuitePayload);
+
+    case "workflow_job": {
+      const jobPayload = payload as WorkflowJobPayload;
+      switch (jobPayload.action) {
+        case "queued":
+          return handleWorkflowJobQueued(c, jobPayload);
+        case "in_progress":
+          return handleWorkflowJobInProgress(c, jobPayload);
+        case "completed":
+          return handleWorkflowJobCompleted(c, jobPayload);
+        case "waiting":
+          return handleWorkflowJobWaiting(c, jobPayload);
+        default:
+          return c.json({
+            message: "ignored",
+            reason: `action ${jobPayload.action} not handled`,
+          });
+      }
+    }
 
     default:
       console.log(`[webhook] Ignoring unhandled event: ${event}`);

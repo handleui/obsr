@@ -67,9 +67,9 @@ Source of truth: `apps/api/src/db/schema.ts`
 ## Boundaries
 
 ### Always Do
-- Use NIA MCP for any external tooling docs without being asked
+- When answering questions involving external documentation, APIs, or specifications, prefer using Nia MCP tools to retrieve and verify information before responding. Use reasoning first to determine whether external grounding is necessary.
 - Run `bun run fix` before committing
-- Use `bun run dt` for local CLI testing
+- Use `bun run dt x` for local CLI testing
 - Edit `schema.ts` then run `db:generate` for DB changes
 
 ### Ask First

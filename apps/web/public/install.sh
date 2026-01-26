@@ -161,10 +161,11 @@ main() {
     # Determine version
     if [ -n "${DETENT_VERSION:-}" ]; then
         version="$DETENT_VERSION"
-        # Ensure version starts with 'v'
+        # Ensure version starts with 'cli-v'
         case "$version" in
-            v*) ;;
-            *)  version="v$version" ;;
+            cli-v*) ;;
+            v*)     version="cli-$version" ;;
+            *)      version="cli-v$version" ;;
         esac
     else
         log "Fetching latest version..."

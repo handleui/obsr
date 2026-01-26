@@ -3,7 +3,7 @@ name: Build
 on:
   push:
     tags:
-      - "v*"
+      - "cli-v*"
   workflow_dispatch:
     inputs:
       ref:
@@ -41,10 +41,10 @@ jobs:
         id: version
         run: |
           REF="${{ steps.ref.outputs.ref }}"
-          # Extract version from tag (e.g., refs/tags/v0.10.0 -> 0.10.0, or v0.10.0 -> 0.10.0)
-          VERSION=$(echo "$REF" | sed 's|refs/tags/||' | sed 's|^v||')
+          # Extract version from tag (e.g., cli-v0.13.0 -> 0.13.0)
+          VERSION=$(echo "$REF" | sed 's|refs/tags/||' | sed 's|^cli-v||' | sed 's|^v||')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=cli-v$VERSION" >> $GITHUB_OUTPUT
           echo "Building version: $VERSION"
 
       - name: Setup Bun
@@ -133,7 +133,7 @@ jobs:
 
       - name: Verify install from Blob
         run: |
-          VERSION="${{ steps.version.outputs.tag }}"
+          VERSION="cli-v${{ steps.version.outputs.version }}"
           echo "Testing install of $VERSION from Blob..."
 
           # Test direct download and checksum

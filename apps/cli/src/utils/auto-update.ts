@@ -53,7 +53,7 @@ const MAX_RESPONSE_SIZE = 64 * 1024; // 64KB
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 500;
 
-const VERSION_PREFIX_REGEX = /^v/;
+const VERSION_PREFIX_REGEX = /^(cli-)?v/;
 
 /** Commands that should skip auto-update to prevent loops */
 const SKIP_UPDATE_COMMANDS = new Set([
@@ -332,7 +332,7 @@ const compareVersions = (
   const result = compare(latestClean, currentClean);
   return {
     hasUpdate: result > 0,
-    latestVersion: latest.startsWith("v") ? latest : `v${latest}`,
+    latestVersion: latest.startsWith("cli-v") ? latest : `cli-v${latestClean}`,
   };
 };
 

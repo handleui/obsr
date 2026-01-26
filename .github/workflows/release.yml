@@ -25,43 +25,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Release Please
+        id: release
+        uses: googleapis/release-please-action@v4
         with:
-          bun-version: latest
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
-      - name: Install dependencies
-        run: bun install
-
-      - name: Create Release PR or Version
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          version: bun changeset version
-          commit: "chore: release"
-          title: "chore: release"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Create and push tag for CLI version (runs unconditionally)
-      # The tag script is idempotent - it won't fail if tag already exists
-      - name: Create version tag
-        if: steps.changesets.outputs.hasChangesets == 'false'
-        run: bun run tag
-
-      # IMPORTANT: Manual trigger is required because GITHUB_TOKEN pushes don't
-      # trigger other workflows (GitHub security measure to prevent infinite loops).
-      # The tag push won't trigger build.yml automatically.
       - name: Trigger Build workflow
-        if: steps.changesets.outputs.hasChangesets == 'false'
+        if: ${{ steps.release.outputs.release_created }}
         run: |
-          VERSION="v$(node -p "require('./apps/cli/package.json').version")"
-          # Check if release already exists for this version
-          if gh release view "$VERSION" &>/dev/null; then
-            echo "Release $VERSION already exists, skipping build trigger"
-          else
-            echo "Triggering build for $VERSION"
-            gh workflow run build.yml --ref "$VERSION"
-          fi
+          gh workflow run build.yml --ref "${{ steps.release.outputs.tag_name }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

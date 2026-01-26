@@ -8,6 +8,22 @@ import {
 import { Hono } from "hono";
 import type { Env } from "../types/env";
 
+/**
+ * TODO: Evolve this endpoint into a "smart" diagnostics service.
+ *
+ * Current state: Thin wrapper around @detent/diagnostics extract().
+ * The SDK handles parsing locally (used directly by GitHub Action).
+ *
+ * Future direction - AI-enhanced capabilities:
+ * - Log compaction: Summarize 10k errors into key patterns
+ * - Visualization prep: Identify error clusters, dependency graphs
+ * - ML parsing: Handle unknown tools, messy/unstructured output
+ * - Agent-ready data: Structure output for downstream AI consumption
+ *
+ * This becomes the "little AI" for parsing/understanding,
+ * complementing /v1/healing as the "full AI core" for fixing.
+ */
+
 interface DiagnosticResponse {
   message: string;
   file_path?: string;
@@ -29,7 +45,7 @@ interface DiagnosticLite {
 }
 
 interface DiagnosticsResponseFull {
-  detected_tool: DetectedTool | null;
+  detected_tool: string | null;
   diagnostics: DiagnosticResponse[];
   summary: {
     total: number;
@@ -40,7 +56,7 @@ interface DiagnosticsResponseFull {
 }
 
 interface DiagnosticsResponseLite {
-  detected_tool: DetectedTool | null;
+  detected_tool: string | null;
   diagnostics: DiagnosticLite[];
   truncated: boolean;
 }

@@ -36,6 +36,34 @@ jobs:
       - name: Trigger CLI Build
         if: ${{ steps.release.outputs['apps/cli--release_created'] }}
         run: |
-          gh workflow run build.yml --ref "${{ steps.release.outputs['apps/cli--tag_name'] }}"
+          gh workflow run build.yml --ref "$CLI_TAG_NAME"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLI_TAG_NAME: ${{ steps.release.outputs['apps/cli--tag_name'] }}
+
+      - name: Setup Node for npm publish
+        if: ${{ steps.release.outputs['packages/diagnostics--release_created'] }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Setup Bun
+        if: ${{ steps.release.outputs['packages/diagnostics--release_created'] }}
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        if: ${{ steps.release.outputs['packages/diagnostics--release_created'] }}
+        run: bun install
+
+      - name: Build diagnostics
+        if: ${{ steps.release.outputs['packages/diagnostics--release_created'] }}
+        run: bun run build
+        working-directory: packages/diagnostics
+
+      - name: Publish @detent/diagnostics
+        if: ${{ steps.release.outputs['packages/diagnostics--release_created'] }}
+        run: npm publish --access public
+        working-directory: packages/diagnostics
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

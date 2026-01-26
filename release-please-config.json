@@ -5,6 +5,10 @@
     "apps/cli": {
       "component": "cli",
       "changelog-path": "CHANGELOG.md"
+    },
+    "packages/diagnostics": {
+      "component": "diagnostics",
+      "changelog-path": "CHANGELOG.md"
     }
   },
   "include-component-in-tag": true,

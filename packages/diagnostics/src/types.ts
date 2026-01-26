@@ -34,9 +34,14 @@ export interface DiagnosticSummary {
 }
 
 export interface DiagnosticResult {
-  detectedTool: DetectedTool | null;
+  /** Tool name (built-in DetectedTool or custom registered parser name) */
+  detectedTool: string | null;
   diagnostics: Diagnostic[];
   summary: DiagnosticSummary;
 }
+
+/** Type guard to check if a tool name is a built-in detected tool */
+export const isDetectedTool = (tool: string | null): tool is DetectedTool =>
+  tool !== null && DETECTED_TOOLS.includes(tool as DetectedTool);
 
 export type Parser = (content: string) => Diagnostic[];

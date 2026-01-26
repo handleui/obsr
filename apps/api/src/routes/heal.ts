@@ -322,7 +322,9 @@ app.post("/:id/apply", async (c) => {
     }
 
     const github = createGitHubService(c.env);
-    const token = await github.getInstallationToken(Number(installationId));
+    const token = await github.getInstallationToken(
+      Number.parseInt(installationId, 10)
+    );
 
     // Get PR info to find the branch name and current head SHA
     const prInfo = await github.getPullRequestInfo(
@@ -526,7 +528,7 @@ app.post("/:id/trigger", async (c) => {
         try {
           const github = createGitHubService(c.env);
           const token = await github.getInstallationToken(
-            Number(installationId)
+            Number.parseInt(installationId, 10)
           );
           const errorCount = heal.errorIds?.length ?? 1;
           const checkRun = await github.createCheckRun(token, {

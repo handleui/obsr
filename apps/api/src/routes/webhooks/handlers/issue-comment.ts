@@ -177,6 +177,14 @@ const handleHealCommand = async (
       // If no heals exist yet but we have fixable errors, create them via orchestrateHeals
       // This fixes the logic gap where users see "no fixable errors" when heals haven't been created yet
       if (existingHeals.length === 0 && errors.length > 0) {
+        // Cannot orchestrate heals without a commit SHA (needed for check runs and matching)
+        if (!run.commitSha) {
+          return c.json({
+            message: "heal command failed",
+            reason: "no_commit_sha",
+          });
+        }
+
         const installationId = project.organization.providerInstallationId;
         if (installationId) {
           const orgSettings = getOrgSettings(project.organization.settings);
@@ -189,7 +197,7 @@ const handleHealCommand = async (
             env: c.env,
             projectId: project.id,
             runId: run.id,
-            commitSha: run.commitSha ?? "",
+            commitSha: run.commitSha,
             prNumber,
             branch: run.headBranch ?? "main",
             repoFullName: repository.full_name,

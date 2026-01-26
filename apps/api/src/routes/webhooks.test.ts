@@ -1954,7 +1954,7 @@ describe("webhooks - check_suite events", () => {
     });
   });
 
-  it("skips check_suite without PR", async () => {
+  it("skips check_suite with automatic_check_runs_disabled", async () => {
     const payload = {
       action: "requested",
       check_suite: {
@@ -1976,8 +1976,7 @@ describe("webhooks - check_suite events", () => {
     expect(res.status).toBe(200);
     expect(json).toEqual({
       message: "skipped",
-      reason: "no_pr",
-      branch: "main",
+      reason: "automatic_check_runs_disabled",
     });
   });
 });

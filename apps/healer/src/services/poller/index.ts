@@ -268,6 +268,55 @@ const executeGitHubRequest = async (
   }
 };
 
+// Retry helper for GitHub API calls with exponential backoff
+interface GitHubRetryParams {
+  url: string;
+  options: RequestInit;
+  successMsg: string;
+  failureMsg: string;
+}
+
+const withGitHubRetry = async (params: GitHubRetryParams): Promise<void> => {
+  const { url, options, successMsg, failureMsg } = params;
+  const retryConfig = getRetryConfig();
+  let lastError: Error | null = null;
+  let delay = retryConfig.initialDelayMs;
+  const totalAttempts = retryConfig.maxRetries + 1;
+
+  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+    const result = await executeGitHubRequest(url, options);
+
+    if (result.ok) {
+      const msg =
+        attempt > 1
+          ? `${successMsg} (succeeded on attempt ${attempt})`
+          : successMsg;
+      console.log(`[poller] ${msg}`);
+      return;
+    }
+
+    if (!result.retryable) {
+      console.error(
+        `[poller] ${failureMsg}: HTTP ${result.status} (not retrying)`
+      );
+      return;
+    }
+
+    lastError = result.error;
+    if (attempt < totalAttempts) {
+      console.warn(
+        `[poller] ${failureMsg} (attempt ${attempt}/${totalAttempts}): ${result.error.message}, retrying in ${delay}ms`
+      );
+      await sleep(delay);
+      delay *= retryConfig.backoffMultiplier;
+    }
+  }
+
+  console.error(
+    `[poller] ${failureMsg} after ${totalAttempts} attempts: ${lastError?.message ?? "Unknown error"}`
+  );
+};
+
 // GitHub name validation pattern (alphanumeric with hyphens, dots, underscores)
 const GITHUB_NAME_PATTERN = /^[a-zA-Z0-9][-a-zA-Z0-9._]*$/;
 
@@ -372,7 +421,7 @@ const postPrComment = async (
   }
 
   const url = `${GITHUB_API}/repos/${owner}/${repo}/issues/${prNumber}/comments`;
-  const requestOptions: RequestInit = {
+  const options: RequestInit = {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -384,43 +433,12 @@ const postPrComment = async (
     body: JSON.stringify({ body }),
   };
 
-  const retryConfig = getRetryConfig();
-  let lastError: Error | null = null;
-  let delay = retryConfig.initialDelayMs;
-  const totalAttempts = retryConfig.maxRetries + 1;
-
-  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
-    const result = await executeGitHubRequest(url, requestOptions);
-
-    if (result.ok) {
-      const msg =
-        attempt > 1
-          ? `Posted comment on ${owner}/${repo}#${prNumber} (succeeded on attempt ${attempt})`
-          : `Posted comment on ${owner}/${repo}#${prNumber}`;
-      console.log(`[poller] ${msg}`);
-      return;
-    }
-
-    if (!result.retryable) {
-      console.error(
-        `[poller] Failed to post comment: HTTP ${result.status} (not retrying)`
-      );
-      return;
-    }
-
-    lastError = result.error;
-    if (attempt < totalAttempts) {
-      console.warn(
-        `[poller] PR comment failed (attempt ${attempt}/${totalAttempts}): ${result.error.message}, retrying in ${delay}ms`
-      );
-      await sleep(delay);
-      delay *= retryConfig.backoffMultiplier;
-    }
-  }
-
-  console.error(
-    `[poller] Failed to post comment after ${totalAttempts} attempts: ${lastError?.message ?? "Unknown error"}`
-  );
+  await withGitHubRetry({
+    url,
+    options,
+    successMsg: `Posted comment on ${owner}/${repo}#${prNumber}`,
+    failureMsg: "Failed to post comment",
+  });
 };
 
 const updateCheckRun = async (
@@ -458,7 +476,7 @@ const updateCheckRun = async (
   };
 
   const url = `${GITHUB_API}/repos/${owner}/${repo}/check-runs/${checkRunId}`;
-  const requestOptions: RequestInit = {
+  const options: RequestInit = {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -475,43 +493,12 @@ const updateCheckRun = async (
     }),
   };
 
-  const retryConfig = getRetryConfig();
-  let lastError: Error | null = null;
-  let delay = retryConfig.initialDelayMs;
-  const totalAttempts = retryConfig.maxRetries + 1;
-
-  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
-    const result = await executeGitHubRequest(url, requestOptions);
-
-    if (result.ok) {
-      const msg =
-        attempt > 1
-          ? `Updated check run ${checkRunId} to ${conclusion} (succeeded on attempt ${attempt})`
-          : `Updated check run ${checkRunId} to ${conclusion}`;
-      console.log(`[poller] ${msg}`);
-      return;
-    }
-
-    if (!result.retryable) {
-      console.error(
-        `[poller] Failed to update check run ${checkRunId}: HTTP ${result.status} (not retrying)`
-      );
-      return;
-    }
-
-    lastError = result.error;
-    if (attempt < totalAttempts) {
-      console.warn(
-        `[poller] Check run update failed (attempt ${attempt}/${totalAttempts}): ${result.error.message}, retrying in ${delay}ms`
-      );
-      await sleep(delay);
-      delay *= retryConfig.backoffMultiplier;
-    }
-  }
-
-  console.error(
-    `[poller] Failed to update check run ${checkRunId} after ${totalAttempts} attempts: ${lastError?.message ?? "Unknown error"}`
-  );
+  await withGitHubRetry({
+    url,
+    options,
+    successMsg: `Updated check run ${checkRunId} to ${conclusion}`,
+    failureMsg: `Failed to update check run ${checkRunId}`,
+  });
 };
 
 const maskSecret = (secret: string): string =>

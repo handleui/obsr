@@ -33,9 +33,9 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      - name: Trigger Build workflow
-        if: ${{ steps.release.outputs.release_created }}
+      - name: Trigger CLI Build
+        if: ${{ steps.release.outputs['apps/cli--release_created'] }}
         run: |
-          gh workflow run build.yml --ref "${{ steps.release.outputs.tag_name }}"
+          gh workflow run build.yml --ref "${{ steps.release.outputs['apps/cli--tag_name'] }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

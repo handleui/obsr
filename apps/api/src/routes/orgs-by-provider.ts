@@ -20,18 +20,54 @@ const resolveProvider = (shortcode: string): "github" | "gitlab" => {
   return provider;
 };
 
-// GitHub login validation: alphanumeric with hyphens, 1-39 chars
-// Must not start/end with hyphen, no consecutive hyphens
+// GitHub: alphanumeric + hyphens, 1-39 chars, no start/end hyphen, no consecutive hyphens
 const GITHUB_LOGIN_PATTERN = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
 
+// GitLab: alphanumeric + underscores/hyphens/periods, 2-255 chars
+// Must start/end with alphanumeric, no consecutive special chars
+const GITLAB_LOGIN_PATTERN =
+  /^[a-z\d](?:[a-z\d]|[._-](?=[a-z\d])){0,253}[a-z\d]$|^[a-z\d]{1}$/i;
+
 const validateProviderLogin = (
-  login: string
+  login: string,
+  provider: "github" | "gitlab"
 ): { valid: boolean; error?: string } => {
   if (!login || typeof login !== "string") {
     return { valid: false, error: "Organization login is required" };
   }
-  if (!GITHUB_LOGIN_PATTERN.test(login)) {
-    return { valid: false, error: "Invalid organization login format" };
+
+  if (provider === "github") {
+    if (!GITHUB_LOGIN_PATTERN.test(login)) {
+      return {
+        valid: false,
+        error: "Invalid GitHub organization login format",
+      };
+    }
+  } else {
+    if (login.length < 2 || login.length > 255) {
+      return {
+        valid: false,
+        error: "GitLab login must be between 2 and 255 characters",
+      };
+    }
+    if (!GITLAB_LOGIN_PATTERN.test(login)) {
+      return {
+        valid: false,
+        error: "Invalid GitLab organization login format",
+      };
+    }
+  }
+
+  return { valid: true };
+};
+
+// Project handles are internal, use GitHub-style pattern (alphanumeric + hyphens, 1-39 chars)
+const validateHandle = (handle: string): { valid: boolean; error?: string } => {
+  if (!handle || typeof handle !== "string") {
+    return { valid: false, error: "Project handle is required" };
+  }
+  if (!GITHUB_LOGIN_PATTERN.test(handle)) {
+    return { valid: false, error: "Invalid project handle format" };
   }
   return { valid: true };
 };
@@ -86,7 +122,7 @@ app.get("/:provider/:slug", async (c) => {
   const provider = resolveProvider(c.req.param("provider"));
   const slugParam = c.req.param("slug");
 
-  const validation = validateProviderLogin(slugParam);
+  const validation = validateProviderLogin(slugParam, provider);
   if (!validation.valid) {
     return c.json({ error: validation.error }, 400);
   }
@@ -134,7 +170,7 @@ app.get("/:provider/:slug/membership", async (c) => {
   const provider = resolveProvider(c.req.param("provider"));
   const slugParam = c.req.param("slug");
 
-  const validation = validateProviderLogin(slugParam);
+  const validation = validateProviderLogin(slugParam, provider);
   if (!validation.valid) {
     return c.json({ error: validation.error }, 400);
   }
@@ -173,7 +209,7 @@ app.get("/:provider/:slug/projects", async (c) => {
   const provider = resolveProvider(c.req.param("provider"));
   const slugParam = c.req.param("slug");
 
-  const validation = validateProviderLogin(slugParam);
+  const validation = validateProviderLogin(slugParam, provider);
   if (!validation.valid) {
     return c.json({ error: validation.error }, 400);
   }
@@ -239,16 +275,14 @@ app.get("/:provider/:slug/projects/:handle", async (c) => {
   const slugParam = c.req.param("slug");
   const handleParam = c.req.param("handle");
 
-  // Validate inputs
-  const slugValidation = validateProviderLogin(slugParam);
+  const slugValidation = validateProviderLogin(slugParam, provider);
   if (!slugValidation.valid) {
     return c.json({ error: slugValidation.error }, 400);
   }
 
-  // Handle uses the same pattern as provider login (alphanumeric + hyphens)
-  const handleValidation = validateProviderLogin(handleParam);
+  const handleValidation = validateHandle(handleParam);
   if (!handleValidation.valid) {
-    return c.json({ error: "Invalid project handle format" }, 400);
+    return c.json({ error: handleValidation.error }, 400);
   }
 
   const slug = slugParam.toLowerCase();

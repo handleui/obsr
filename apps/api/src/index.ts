@@ -25,6 +25,7 @@ import healthRoutes from "./routes/health";
 import { invitationRoutes, orgInvitationsRoutes } from "./routes/invitations";
 import organizationMembersRoutes from "./routes/organization-members";
 import organizationsRoutes from "./routes/organizations";
+import orgsByProviderRoutes from "./routes/orgs-by-provider";
 import projectsRoutes from "./routes/projects";
 import reportRoutes from "./routes/report";
 import webhookRoutes from "./routes/webhooks";
@@ -199,6 +200,7 @@ api.route("/invitations", invitationRoutes);
 api.route("/orgs/:orgId/invitations", orgInvitationsRoutes);
 api.route("/orgs", apiKeysRoutes);
 api.route("/orgs", githubSecretsRoutes);
+api.route("/orgs", orgsByProviderRoutes);
 api.route("/billing", billingRoutes);
 api.route("/diagnostics", diagnosticsRoutes);
 

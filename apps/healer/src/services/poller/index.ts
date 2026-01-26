@@ -239,7 +239,21 @@ const sleep = (ms: number): Promise<void> =>
 type GitHubCallResult =
   | { ok: true }
   | { ok: false; retryable: false; status: number }
-  | { ok: false; retryable: true; error: Error };
+  | { ok: false; retryable: true; error: Error; retryAfterMs?: number };
+
+// Parse Retry-After header value (GitHub sends seconds as integer)
+const parseRetryAfterHeader = (response: Response): number | undefined => {
+  const retryAfter = response.headers.get("retry-after");
+  if (!retryAfter) {
+    return undefined;
+  }
+  const seconds = Number.parseInt(retryAfter, 10);
+  if (Number.isNaN(seconds) || seconds <= 0) {
+    return undefined;
+  }
+  // Convert seconds to milliseconds, cap at 5 minutes to prevent excessive waits
+  return Math.min(seconds * 1000, 300_000);
+};
 
 // Execute a single GitHub API request and categorize the result
 const executeGitHubRequest = async (
@@ -254,10 +268,14 @@ const executeGitHubRequest = async (
     if (NON_RETRYABLE_STATUSES.has(response.status)) {
       return { ok: false, retryable: false, status: response.status };
     }
+    // For 429 rate limits, extract Retry-After header if present
+    const retryAfterMs =
+      response.status === 429 ? parseRetryAfterHeader(response) : undefined;
     return {
       ok: false,
       retryable: true,
       error: new Error(`HTTP ${response.status}`),
+      retryAfterMs,
     };
   } catch (error) {
     return {
@@ -304,10 +322,12 @@ const withGitHubRetry = async (params: GitHubRetryParams): Promise<void> => {
 
     lastError = result.error;
     if (attempt < totalAttempts) {
+      // Use Retry-After header value for 429 responses, otherwise use exponential backoff
+      const waitMs = result.retryAfterMs ?? delay;
       console.warn(
-        `[poller] ${failureMsg} (attempt ${attempt}/${totalAttempts}): ${result.error.message}, retrying in ${delay}ms`
+        `[poller] ${failureMsg} (attempt ${attempt}/${totalAttempts}): ${result.error.message}, retrying in ${waitMs}ms${result.retryAfterMs ? " (from Retry-After)" : ""}`
       );
-      await sleep(delay);
+      await sleep(waitMs);
       delay *= retryConfig.backoffMultiplier;
     }
   }

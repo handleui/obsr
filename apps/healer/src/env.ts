@@ -1,5 +1,6 @@
 export interface Env {
   PORT: string;
+  /** Max concurrent heals (default: 20). Set lower if Railway resources are constrained. */
   MAX_CONCURRENT_HEALS: number;
   SANDBOX_PROVIDER?: string;
   E2B_API_KEY?: string;
@@ -48,6 +49,8 @@ const loadEnv = (): Env => {
     );
   }
 
+  // Default 20 concurrent heals. Adjust via env var based on Railway memory/CPU allocation.
+  // Each heal uses ~512MB RAM (sandbox) + 1 DB connection from the pool (POOL_SIZE=5).
   const maxConcurrentHeals = Number.parseInt(
     process.env.MAX_CONCURRENT_HEALS ?? "20",
     10

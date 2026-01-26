@@ -1,7 +1,6 @@
 {
   "name": "@detent/cli",
-  "version": "0.12.0",
-  "private": true,
+  "version": "1.0.0",
   "type": "module",
   "bin": {
     "dt": "./dist/index.js"

@@ -1,5 +1,15 @@
 # @detent/api
 
+## 1.1.0
+
+### Minor Changes
+
+- 89239c2: Add `@detent heal` command and move check runs to heal trigger time.
+  Check runs are no longer created automatically when CI starts. Instead, they are created when a user triggers healing via the `@detent heal` PR comment or dashboard. This reduces noise and gives users explicit control over when healing happens.
+- a44c02e: Add provider-based organization routes for GitHub/GitLab lookups.
+  New endpoints: `/orgs/:provider/:slug`, `/orgs/:provider/:slug/membership`,
+  `/orgs/:provider/:slug/projects`, and `/orgs/:provider/:slug/projects/:handle`.
+
 ## 1.0.1
 
 ### Patch Changes

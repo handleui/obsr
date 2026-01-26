@@ -1,5 +1,12 @@
 # @detent/healer
 
+## 0.2.0
+
+### Minor Changes
+
+- 89239c2: Add GitHub status updates when heals complete.
+  The healer now updates check runs and posts PR comments when heals succeed or fail, providing clear feedback in GitHub. Includes configurable concurrency limit and retry logic for API calls.
+
 ## 0.1.1
 
 ### Patch Changes

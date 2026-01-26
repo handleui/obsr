@@ -1,5 +1,13 @@
 # @detent/navigator
 
+## 0.6.0
+
+### Minor Changes
+
+- a44c02e: Add dashboard route structure with organization and project authorization.
+  Includes Data Access Layer (DAL) for authenticated API calls, org/project
+  context providers, and auth interrupt pages (401, 403).
+
 ## 0.5.2
 
 ### Patch Changes

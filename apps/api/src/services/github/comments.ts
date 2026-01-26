@@ -361,3 +361,81 @@ export const updateCommentToPassingState = async (
     throw error;
   }
 };
+
+// ============================================================================
+// Delete and Post Comment
+// ============================================================================
+// Deletes the existing Detent comment (if any) and posts a new one.
+// This keeps the comment near the bottom of the PR conversation.
+
+export interface DeleteAndPostCommentContext {
+  github: GitHubCommentClient;
+  token: string;
+  kv: KVNamespace;
+  db: DbClient;
+  owner: string;
+  repo: string;
+  repository: string;
+  prNumber: number;
+  commentBody: string;
+}
+
+export const deleteAndPostComment = async (
+  ctx: DeleteAndPostCommentContext
+): Promise<{ commentId: number }> => {
+  const {
+    github,
+    token,
+    kv,
+    db,
+    owner,
+    repo,
+    repository,
+    prNumber,
+    commentBody,
+  } = ctx;
+
+  // Get existing comment ID
+  let existingCommentId = await getStoredCommentId(kv, repository, prNumber);
+
+  if (!existingCommentId) {
+    const dbCommentId = await getCommentIdFromDb(db, repository, prNumber);
+    if (dbCommentId) {
+      existingCommentId = Number.parseInt(dbCommentId, 10);
+    }
+  }
+
+  // Delete existing comment if present (ignore errors - comment may already be gone)
+  if (existingCommentId) {
+    try {
+      await deleteComment(token, owner, repo, existingCommentId);
+      console.log(
+        `[comment] Deleted comment ${existingCommentId} on PR #${prNumber}`
+      );
+    } catch (error) {
+      // Ignore delete errors - comment may already be deleted
+      console.log(
+        `[comment] Could not delete comment ${existingCommentId}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  // Post new comment
+  const { id: newCommentId } = await github.postCommentWithId(
+    token,
+    owner,
+    repo,
+    prNumber,
+    commentBody
+  );
+
+  // Store new comment ID
+  await storeCommentId(kv, repository, prNumber, newCommentId);
+  await upsertCommentIdInDb(db, repository, prNumber, String(newCommentId));
+
+  console.log(
+    `[comment] Posted new comment ${newCommentId} on PR #${prNumber}`
+  );
+
+  return { commentId: newCommentId };
+};

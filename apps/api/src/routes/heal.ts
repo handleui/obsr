@@ -13,9 +13,8 @@ import {
   getHealsByPr,
   getPendingHeals,
   rejectHeal,
-  triggerHeal,
 } from "../db/operations/heals";
-import { getOrgSettings, projects, runErrors, runs } from "../db/schema";
+import { getOrgSettings, heals, projects, runErrors, runs } from "../db/schema";
 import { verifyOrgAccess } from "../lib/org-access";
 import { validateUUID } from "../lib/validation";
 import { generateAutofixCommitMessage } from "../services/autofix/commit-message";
@@ -453,7 +452,7 @@ app.post("/:id/reject", async (c) => {
 
 /**
  * POST /:id/trigger
- * Trigger a heal
+ * Trigger a heal - creates check run and queues heal for processing
  */
 app.post("/:id/trigger", async (c) => {
   const auth = c.get("auth");
@@ -505,9 +504,64 @@ app.post("/:id/trigger", async (c) => {
       );
     }
 
-    await triggerHeal(db, id);
+    // Update heal to pending status FIRST (before external API call)
+    // This ensures the heal proceeds even if check run creation fails or API crashes
+    await db
+      .update(heals)
+      .set({
+        status: "pending",
+        updatedAt: new Date(),
+      })
+      .where(eq(heals.id, id));
 
-    return c.json({ success: true, status: "pending" });
+    // Create check run to show healing status on GitHub (non-blocking)
+    // If this fails or API crashes, the heal still proceeds - check run is optional UX
+    let checkRunId: number | undefined;
+    const installationId = project.organization.providerInstallationId;
+
+    if (installationId && heal.commitSha) {
+      const [owner, repo] = project.providerRepoFullName.split("/");
+      if (owner && repo) {
+        try {
+          const github = createGitHubService(c.env);
+          const token = await github.getInstallationToken(
+            Number(installationId)
+          );
+          const errorCount = heal.errorIds?.length ?? 1;
+          const checkRun = await github.createCheckRun(token, {
+            owner,
+            repo,
+            headSha: heal.commitSha,
+            name: `Detent Heal: ${heal.autofixSource ?? "AI"}`,
+            status: "in_progress",
+            output: {
+              title: "Healing started",
+              summary: `Detent is working on fixing ${errorCount} ${errorCount === 1 ? "error" : "errors"}`,
+            },
+          });
+          checkRunId = checkRun.id;
+
+          // Store checkRunId in separate update (if API crashes here, heal still proceeds)
+          await db
+            .update(heals)
+            .set({
+              checkRunId: String(checkRunId),
+              updatedAt: new Date(),
+            })
+            .where(eq(heals.id, id));
+
+          console.log(`[heal] Created check run ${checkRunId} for heal ${id}`);
+        } catch (error) {
+          // Check run creation failed - heal proceeds without GitHub status indicator
+          console.error(
+            `[heal] Failed to create check run for heal ${id}:`,
+            error
+          );
+        }
+      }
+    }
+
+    return c.json({ success: true, status: "pending", checkRunId });
   } finally {
     await client.end();
   }
@@ -517,6 +571,7 @@ app.post("/:id/trigger", async (c) => {
  * POST /trigger
  * Manually trigger heal for a PR
  */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: orchestration requires sequential validation steps
 app.post("/trigger", async (c) => {
   const auth = c.get("auth");
 
@@ -646,6 +701,55 @@ app.post("/trigger", async (c) => {
       orgSettings,
     });
 
+    // Create check runs for each heal created (after heals are already in pending status)
+    // If check run creation fails or API crashes, heals still proceed - check runs are optional UX
+    const checkRunIds: Record<string, number> = {};
+    if (result.healIds.length > 0 && run.commitSha) {
+      const [owner, repo] = project.providerRepoFullName.split("/");
+      if (owner && repo) {
+        try {
+          const github = createGitHubService(c.env);
+          const token = await github.getInstallationToken(
+            Number.parseInt(installationId, 10)
+          );
+
+          for (const healId of result.healIds) {
+            try {
+              const checkRun = await github.createCheckRun(token, {
+                owner,
+                repo,
+                headSha: run.commitSha,
+                name: `Detent Heal: ${type}`,
+                status: "in_progress",
+                output: {
+                  title: "Healing started",
+                  summary: `Detent is working on fixing ${errors.length} ${errors.length === 1 ? "error" : "errors"}`,
+                },
+              });
+              checkRunIds[healId] = checkRun.id;
+
+              // Update heal with check run ID
+              await db
+                .update(heals)
+                .set({ checkRunId: String(checkRun.id), updatedAt: new Date() })
+                .where(eq(heals.id, healId));
+
+              console.log(
+                `[heal] Created check run ${checkRun.id} for heal ${healId}`
+              );
+            } catch (error) {
+              console.error(
+                `[heal] Failed to create check run for heal ${healId}:`,
+                error
+              );
+            }
+          }
+        } catch (error) {
+          console.error("[heal] Failed to get installation token:", error);
+        }
+      }
+    }
+
     return c.json({
       success: true,
       message: `Manual ${type} trigger queued`,
@@ -653,6 +757,7 @@ app.post("/trigger", async (c) => {
       prNumber: body.prNumber,
       healsCreated: result.healsCreated,
       healIds: result.healIds,
+      checkRunIds,
       autofixes: result.autofixes,
     });
   } finally {

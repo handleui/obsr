@@ -638,6 +638,7 @@ export const heals = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     commitSha: varchar("commit_sha", { length: 64 }),
     prNumber: integer("pr_number"),
+    checkRunId: varchar("check_run_id", { length: 64 }),
 
     // Error references (JSONB arrays of IDs)
     errorIds: jsonb("error_ids").$type<string[]>(),

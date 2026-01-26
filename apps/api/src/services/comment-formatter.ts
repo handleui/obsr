@@ -1408,3 +1408,114 @@ export const formatCheckSummary = (
 
   return lines.join("\n");
 };
+
+// ============================================================================
+// Heal Lifecycle Comments
+// ============================================================================
+// These comments are used during the heal lifecycle:
+// 1. Errors found → "Found X issues in Y jobs"
+// 2. Heal triggered → "Healing X issues..."
+// 3. Heal success → "Healed X issues. Ready to apply."
+// 4. Heal failed → "Failed to heal: {reason}"
+
+// Options for formatting an "errors found" comment
+export interface FormatErrorsFoundCommentOptions {
+  errorCount: number;
+  jobCount: number;
+  projectUrl: string;
+}
+
+// Format comment when CI fails and fixable errors are detected
+export const formatErrorsFoundComment = (
+  options: FormatErrorsFoundCommentOptions
+): string => {
+  const { errorCount, jobCount, projectUrl } = options;
+  const errorText = errorCount === 1 ? "1 issue" : `${errorCount} issues`;
+  const jobText = jobCount === 1 ? "1 job" : `${jobCount} jobs`;
+
+  const lines: string[] = [];
+  lines.push(formatHeader(`Found ${errorText} in ${jobText}.`));
+  lines.push("");
+  lines.push(
+    `[View in dashboard](${projectUrl}) or reply \`@detent heal\` to fix.`
+  );
+
+  return lines.join("\n");
+};
+
+// Options for formatting a "healing" comment
+export interface FormatHealingCommentOptions {
+  errorCount: number;
+}
+
+// Format comment when heal is triggered
+export const formatHealingComment = (
+  options: FormatHealingCommentOptions
+): string => {
+  const { errorCount } = options;
+  const errorText = errorCount === 1 ? "1 issue" : `${errorCount} issues`;
+
+  const lines: string[] = [];
+  lines.push(formatHeader(`Healing ${errorText}...`));
+  lines.push("");
+  lines.push("This may take a few minutes. You'll be notified when it's done.");
+
+  return lines.join("\n");
+};
+
+// Options for formatting a "heal success" comment
+export interface FormatHealSuccessCommentOptions {
+  filesFixed: number;
+  projectUrl: string;
+}
+
+// Format comment when heal completes successfully
+export const formatHealSuccessComment = (
+  options: FormatHealSuccessCommentOptions
+): string => {
+  const { filesFixed, projectUrl } = options;
+  const fileText = filesFixed === 1 ? "1 file" : `${filesFixed} files`;
+
+  const lines: string[] = [];
+  lines.push(formatHeader(`Healed ${fileText}. Ready to apply.`));
+  lines.push("");
+  lines.push(`[Review and apply in dashboard](${projectUrl})`);
+
+  return lines.join("\n");
+};
+
+// Options for formatting a "heal failed" comment
+export interface FormatHealFailedCommentOptions {
+  reason: string;
+}
+
+// Format comment when heal fails
+export const formatHealFailedComment = (
+  options: FormatHealFailedCommentOptions
+): string => {
+  const { reason } = options;
+  // Truncate and sanitize reason to prevent injection
+  const safeReason =
+    reason.length > 200
+      ? `${escapeHtml(reason.slice(0, 197))}...`
+      : escapeHtml(reason);
+
+  const lines: string[] = [];
+  lines.push(formatHeader("Failed to heal."));
+  lines.push("");
+  lines.push(`Reason: ${safeReason}`);
+
+  return lines.join("\n");
+};
+
+// Format comment when there are no heal candidates
+export const formatNoHealCandidatesComment = (): string => {
+  const lines: string[] = [];
+  lines.push(formatHeader("No fixable errors found."));
+  lines.push("");
+  lines.push(
+    "Either all errors have been fixed or no errors match our heal patterns."
+  );
+
+  return lines.join("\n");
+};

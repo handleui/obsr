@@ -1,5 +1,6 @@
 export interface Env {
   PORT: string;
+  MAX_CONCURRENT_HEALS: number;
   SANDBOX_PROVIDER?: string;
   E2B_API_KEY?: string;
   VERCEL_TOKEN?: string;
@@ -9,6 +10,8 @@ export interface Env {
   DATABASE_URL: string;
   GITHUB_APP_ID: string;
   GITHUB_APP_PRIVATE_KEY: string;
+  /** Navigator (web app) base URL for dashboard links, e.g., https://navigator.detent.sh */
+  NAVIGATOR_BASE_URL: string;
 }
 
 const validateRequired = (name: string, value: string | undefined): string => {
@@ -39,8 +42,16 @@ const loadEnv = (): Env => {
     );
   }
 
+  const maxConcurrentHeals = Number.parseInt(
+    process.env.MAX_CONCURRENT_HEALS ?? "20",
+    10
+  );
+
   return {
     PORT: process.env.PORT ?? "8080",
+    MAX_CONCURRENT_HEALS: Number.isNaN(maxConcurrentHeals)
+      ? 20
+      : maxConcurrentHeals,
     SANDBOX_PROVIDER: sandboxProvider,
     E2B_API_KEY: e2bApiKey,
     VERCEL_TOKEN: vercelToken,
@@ -56,6 +67,8 @@ const loadEnv = (): Env => {
       "GITHUB_APP_PRIVATE_KEY",
       process.env.GITHUB_APP_PRIVATE_KEY
     ),
+    NAVIGATOR_BASE_URL:
+      process.env.NAVIGATOR_BASE_URL ?? "https://navigator.detent.sh",
   };
 };
 

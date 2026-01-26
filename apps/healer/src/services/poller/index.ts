@@ -222,12 +222,12 @@ const fetchOrganization = async (
 
 const GITHUB_API = "https://api.github.com";
 
-// Retry config for GitHub API calls
-const RETRY_CONFIG = {
-  maxRetries: 2,
-  initialDelayMs: 1000,
-  backoffMultiplier: 2,
-} as const;
+// Retry config loaded from environment variables (with defaults)
+const getRetryConfig = () => ({
+  maxRetries: env.GITHUB_API_MAX_RETRIES,
+  initialDelayMs: env.GITHUB_API_INITIAL_DELAY_MS,
+  backoffMultiplier: env.GITHUB_API_BACKOFF_MULTIPLIER,
+});
 
 // HTTP status codes that should not be retried (rate limits, auth issues)
 const NON_RETRYABLE_STATUSES = new Set([401, 403, 404, 422, 429]);
@@ -384,9 +384,10 @@ const postPrComment = async (
     body: JSON.stringify({ body }),
   };
 
+  const retryConfig = getRetryConfig();
   let lastError: Error | null = null;
-  let delay = RETRY_CONFIG.initialDelayMs;
-  const totalAttempts = RETRY_CONFIG.maxRetries + 1;
+  let delay = retryConfig.initialDelayMs;
+  const totalAttempts = retryConfig.maxRetries + 1;
 
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     const result = await executeGitHubRequest(url, requestOptions);
@@ -413,7 +414,7 @@ const postPrComment = async (
         `[poller] PR comment failed (attempt ${attempt}/${totalAttempts}): ${result.error.message}, retrying in ${delay}ms`
       );
       await sleep(delay);
-      delay *= RETRY_CONFIG.backoffMultiplier;
+      delay *= retryConfig.backoffMultiplier;
     }
   }
 
@@ -474,9 +475,10 @@ const updateCheckRun = async (
     }),
   };
 
+  const retryConfig = getRetryConfig();
   let lastError: Error | null = null;
-  let delay = RETRY_CONFIG.initialDelayMs;
-  const totalAttempts = RETRY_CONFIG.maxRetries + 1;
+  let delay = retryConfig.initialDelayMs;
+  const totalAttempts = retryConfig.maxRetries + 1;
 
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     const result = await executeGitHubRequest(url, requestOptions);
@@ -503,7 +505,7 @@ const updateCheckRun = async (
         `[poller] Check run update failed (attempt ${attempt}/${totalAttempts}): ${result.error.message}, retrying in ${delay}ms`
       );
       await sleep(delay);
-      delay *= RETRY_CONFIG.backoffMultiplier;
+      delay *= retryConfig.backoffMultiplier;
     }
   }
 

@@ -16,6 +16,7 @@ import {
 } from "../db/operations/heals";
 import { getOrgSettings, heals, projects, runErrors, runs } from "../db/schema";
 import { verifyOrgAccess } from "../lib/org-access";
+import { captureCheckRunError } from "../lib/sentry";
 import { validateUUID } from "../lib/validation";
 import { generateAutofixCommitMessage } from "../services/autofix/commit-message";
 import { orchestrateHeals } from "../services/autofix/orchestrator";
@@ -553,10 +554,19 @@ app.post("/:id/trigger", async (c) => {
           console.log(`[heal] Created check run ${checkRunId} for heal ${id}`);
         } catch (error) {
           // Check run creation failed - heal proceeds without GitHub status indicator
+          // Track in Sentry to detect persistent permission issues or API problems
           console.error(
             `[heal] Failed to create check run for heal ${id}:`,
             error
           );
+          captureCheckRunError(error, {
+            healId: id,
+            projectId: heal.projectId,
+            owner,
+            repo,
+            commitSha: heal.commitSha,
+            operation: "create",
+          });
         }
       }
     }
@@ -738,10 +748,19 @@ app.post("/trigger", async (c) => {
                 `[heal] Created check run ${checkRun.id} for heal ${healId}`
               );
             } catch (error) {
+              // Track in Sentry to detect persistent permission issues or API problems
               console.error(
                 `[heal] Failed to create check run for heal ${healId}:`,
                 error
               );
+              captureCheckRunError(error, {
+                healId,
+                projectId: body.projectId,
+                owner,
+                repo,
+                commitSha: run.commitSha,
+                operation: "create",
+              });
             }
           }
         } catch (error) {

@@ -169,6 +169,13 @@
       "when": 1769248141918,
       "tag": "0023_nifty_morlun",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1769393096728,
+      "tag": "0024_foamy_slipstream",
+      "breakpoints": true
     }
   ]
 }

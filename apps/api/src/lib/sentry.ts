@@ -301,3 +301,56 @@ export const withSpan = <T>(
     },
     callback
   );
+
+export interface CheckRunErrorContext {
+  healId: string;
+  projectId: string;
+  owner: string;
+  repo: string;
+  commitSha: string;
+  operation: "create" | "update";
+}
+
+/**
+ * Capture a check run creation/update failure.
+ * These are non-blocking errors (heals proceed without check runs) but
+ * persistent failures may indicate permission issues or API problems.
+ *
+ * Uses warning level since the system is still functional, but users
+ * don't see the healing status indicator on GitHub.
+ *
+ * @param error - The original error
+ * @param context - Check run context for debugging
+ */
+export const captureCheckRunError = (
+  error: unknown,
+  context: CheckRunErrorContext
+): void => {
+  Sentry.withScope((scope) => {
+    // Group by operation and repository for pattern detection
+    scope.setFingerprint([
+      "check_run_error",
+      context.operation,
+      `${context.owner}/${context.repo}`,
+    ]);
+
+    scope.setLevel("warning");
+
+    // Tags for searching/filtering
+    scope.setTag("checkrun.operation", context.operation);
+    scope.setTag("github.repository", `${context.owner}/${context.repo}`);
+    scope.setTag("heal.id", context.healId);
+
+    // Context for debugging
+    scope.setContext("check_run", {
+      healId: context.healId,
+      projectId: context.projectId,
+      owner: context.owner,
+      repo: context.repo,
+      commitSha: context.commitSha,
+      operation: context.operation,
+    });
+
+    Sentry.captureException(error);
+  });
+};

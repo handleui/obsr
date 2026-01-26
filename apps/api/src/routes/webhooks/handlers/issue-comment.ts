@@ -15,6 +15,10 @@ import {
 } from "../../../services/comment-formatter";
 import { createGitHubService } from "../../../services/github";
 import { deleteAndPostComment } from "../../../services/github/comments";
+import {
+  acquireHealCommandLock,
+  releaseHealCommandLock,
+} from "../../../services/idempotency";
 import { classifyError } from "../../../services/webhooks/error-classifier";
 import type {
   DetentCommand,
@@ -143,89 +147,124 @@ const handleHealCommand = async (
       });
     }
 
-    // Check for existing pending/found heals for this PR and trigger them
-    let existingHeals = await db
-      .select({ id: heals.id, status: heals.status })
-      .from(heals)
-      .where(
-        and(
-          eq(heals.projectId, project.id),
-          eq(heals.prNumber, prNumber),
-          inArray(heals.status, ["found", "pending"])
-        )
+    // Acquire lock to prevent race condition when two heal commands fire simultaneously
+    // This ensures only one orchestration runs at a time per PR
+    const kv = c.env["detent-idempotency"];
+    const lockResult = await acquireHealCommandLock(kv, project.id, prNumber);
+    if (!lockResult.acquired) {
+      console.log(
+        `[issue_comment] Heal command already processing for PR #${prNumber}, skipping`
       );
+      return c.json({
+        message: "heal command skipped",
+        reason: "concurrent_request",
+      });
+    }
 
-    // If no heals exist yet but we have fixable errors, create them via orchestrateHeals
-    // This fixes the logic gap where users see "no fixable errors" when heals haven't been created yet
-    if (existingHeals.length === 0 && errors.length > 0) {
-      const installationId = project.organization.providerInstallationId;
-      if (installationId) {
-        const orgSettings = getOrgSettings(project.organization.settings);
-
-        console.log(
-          `[issue_comment] Creating heals for ${errors.length} errors on PR #${prNumber}`
+    try {
+      // Check for existing pending/found heals for this PR and trigger them
+      let existingHeals = await db
+        .select({ id: heals.id, status: heals.status })
+        .from(heals)
+        .where(
+          and(
+            eq(heals.projectId, project.id),
+            eq(heals.prNumber, prNumber),
+            inArray(heals.status, ["found", "pending"])
+          )
         );
 
-        const result = await orchestrateHeals({
-          env: c.env,
-          projectId: project.id,
-          runId: run.id,
-          commitSha: run.commitSha ?? "",
-          prNumber,
-          branch: run.headBranch ?? "main",
-          repoFullName: repository.full_name,
-          installationId: Number.parseInt(installationId, 10),
-          errors: errors.map((e) => ({
-            id: e.id,
-            source: e.source ?? undefined,
-            signatureId: e.signatureId ?? undefined,
-            fixable: e.fixable ?? false,
-          })),
-          orgSettings,
-        });
+      // If no heals exist yet but we have fixable errors, create them via orchestrateHeals
+      // This fixes the logic gap where users see "no fixable errors" when heals haven't been created yet
+      if (existingHeals.length === 0 && errors.length > 0) {
+        const installationId = project.organization.providerInstallationId;
+        if (installationId) {
+          const orgSettings = getOrgSettings(project.organization.settings);
 
-        if (result.healsCreated > 0) {
           console.log(
-            `[issue_comment] Created ${result.healsCreated} heals for PR #${prNumber}`
+            `[issue_comment] Creating heals for ${errors.length} errors on PR #${prNumber}`
           );
 
-          // Re-fetch existing heals after orchestration
-          existingHeals = await db
-            .select({ id: heals.id, status: heals.status })
-            .from(heals)
-            .where(
-              and(
-                eq(heals.projectId, project.id),
-                eq(heals.prNumber, prNumber),
-                inArray(heals.status, ["found", "pending"])
-              )
+          const result = await orchestrateHeals({
+            env: c.env,
+            projectId: project.id,
+            runId: run.id,
+            commitSha: run.commitSha ?? "",
+            prNumber,
+            branch: run.headBranch ?? "main",
+            repoFullName: repository.full_name,
+            installationId: Number.parseInt(installationId, 10),
+            errors: errors.map((e) => ({
+              id: e.id,
+              source: e.source ?? undefined,
+              signatureId: e.signatureId ?? undefined,
+              fixable: e.fixable ?? false,
+            })),
+            orgSettings,
+          });
+
+          if (result.healsCreated > 0) {
+            console.log(
+              `[issue_comment] Created ${result.healsCreated} heals for PR #${prNumber}`
             );
+
+            // Re-fetch existing heals after orchestration
+            existingHeals = await db
+              .select({ id: heals.id, status: heals.status })
+              .from(heals)
+              .where(
+                and(
+                  eq(heals.projectId, project.id),
+                  eq(heals.prNumber, prNumber),
+                  inArray(heals.status, ["found", "pending"])
+                )
+              );
+          }
         }
       }
-    }
 
-    // Trigger all found heals by updating their status to pending
-    const healIdsToTrigger = existingHeals
-      .filter((h) => h.status === "found")
-      .map((h) => h.id);
+      // Trigger all found heals by updating their status to pending
+      const healIdsToTrigger = existingHeals
+        .filter((h) => h.status === "found")
+        .map((h) => h.id);
 
-    if (healIdsToTrigger.length > 0) {
-      await db
-        .update(heals)
-        .set({ status: "pending", updatedAt: new Date() })
-        .where(inArray(heals.id, healIdsToTrigger));
+      if (healIdsToTrigger.length > 0) {
+        await db
+          .update(heals)
+          .set({ status: "pending", updatedAt: new Date() })
+          .where(inArray(heals.id, healIdsToTrigger));
 
-      console.log(
-        `[issue_comment] Triggered ${healIdsToTrigger.length} heals for PR #${prNumber}`
-      );
-    }
+        console.log(
+          `[issue_comment] Triggered ${healIdsToTrigger.length} heals for PR #${prNumber}`
+        );
+      }
 
-    const totalHeals = existingHeals.length;
+      const totalHeals = existingHeals.length;
 
-    // If still no heals after orchestration attempt, post "no heal candidates" comment
-    // This can happen when autofix is disabled or no errors have matching autofix handlers
-    if (totalHeals === 0) {
-      const commentBody = formatNoHealCandidatesComment();
+      // If still no heals after orchestration attempt, post "no heal candidates" comment
+      // This can happen when autofix is disabled or no errors have matching autofix handlers
+      if (totalHeals === 0) {
+        const commentBody = formatNoHealCandidatesComment();
+        await deleteAndPostComment({
+          github,
+          token,
+          kv: c.env["detent-idempotency"],
+          db,
+          owner,
+          repo,
+          repository: repository.full_name,
+          prNumber,
+          commentBody,
+        });
+        return c.json({
+          message: "heal command completed",
+          reason: "no_heals_available",
+          errorCount: errors.length,
+        });
+      }
+
+      // Post "healing" comment
+      const commentBody = formatHealingComment({ errorCount: errors.length });
       await deleteAndPostComment({
         github,
         token,
@@ -237,33 +276,17 @@ const handleHealCommand = async (
         prNumber,
         commentBody,
       });
+
       return c.json({
         message: "heal command completed",
-        reason: "no_heals_available",
+        healsTriggered: healIdsToTrigger.length,
+        totalHeals,
         errorCount: errors.length,
       });
+    } finally {
+      // Release the heal command lock
+      await releaseHealCommandLock(kv, project.id, prNumber);
     }
-
-    // Post "healing" comment
-    const commentBody = formatHealingComment({ errorCount: errors.length });
-    await deleteAndPostComment({
-      github,
-      token,
-      kv: c.env["detent-idempotency"],
-      db,
-      owner,
-      repo,
-      repository: repository.full_name,
-      prNumber,
-      commentBody,
-    });
-
-    return c.json({
-      message: "heal command completed",
-      healsTriggered: healIdsToTrigger.length,
-      totalHeals,
-      errorCount: errors.length,
-    });
   } finally {
     await client.end();
   }

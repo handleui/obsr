@@ -12,6 +12,12 @@ export interface Env {
   GITHUB_APP_PRIVATE_KEY: string;
   /** Navigator (web app) base URL for dashboard links, e.g., https://navigator.detent.sh */
   NAVIGATOR_BASE_URL: string;
+  /** GitHub API retry config - max number of retry attempts (default: 2) */
+  GITHUB_API_MAX_RETRIES: number;
+  /** GitHub API retry config - initial delay in ms before first retry (default: 1000) */
+  GITHUB_API_INITIAL_DELAY_MS: number;
+  /** GitHub API retry config - backoff multiplier for subsequent retries (default: 2) */
+  GITHUB_API_BACKOFF_MULTIPLIER: number;
 }
 
 const validateRequired = (name: string, value: string | undefined): string => {
@@ -47,11 +53,33 @@ const loadEnv = (): Env => {
     10
   );
 
+  const githubApiMaxRetries = Number.parseInt(
+    process.env.GITHUB_API_MAX_RETRIES ?? "2",
+    10
+  );
+  const githubApiInitialDelayMs = Number.parseInt(
+    process.env.GITHUB_API_INITIAL_DELAY_MS ?? "1000",
+    10
+  );
+  const githubApiBackoffMultiplier = Number.parseInt(
+    process.env.GITHUB_API_BACKOFF_MULTIPLIER ?? "2",
+    10
+  );
+
   return {
     PORT: process.env.PORT ?? "8080",
     MAX_CONCURRENT_HEALS: Number.isNaN(maxConcurrentHeals)
       ? 20
       : maxConcurrentHeals,
+    GITHUB_API_MAX_RETRIES: Number.isNaN(githubApiMaxRetries)
+      ? 2
+      : githubApiMaxRetries,
+    GITHUB_API_INITIAL_DELAY_MS: Number.isNaN(githubApiInitialDelayMs)
+      ? 1000
+      : githubApiInitialDelayMs,
+    GITHUB_API_BACKOFF_MULTIPLIER: Number.isNaN(githubApiBackoffMultiplier)
+      ? 2
+      : githubApiBackoffMultiplier,
     SANDBOX_PROVIDER: sandboxProvider,
     E2B_API_KEY: e2bApiKey,
     VERCEL_TOKEN: vercelToken,

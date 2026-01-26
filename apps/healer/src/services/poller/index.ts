@@ -229,8 +229,8 @@ const getRetryConfig = () => ({
   backoffMultiplier: env.GITHUB_API_BACKOFF_MULTIPLIER,
 });
 
-// HTTP status codes that should not be retried (rate limits, auth issues)
-const NON_RETRYABLE_STATUSES = new Set([401, 403, 404, 422, 429]);
+// HTTP status codes that should not be retried (auth issues, not found, validation errors)
+const NON_RETRYABLE_STATUSES = new Set([401, 403, 404, 422]);
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));

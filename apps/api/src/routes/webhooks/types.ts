@@ -160,6 +160,80 @@ export interface CheckSuitePayload {
   installation: { id: number };
 }
 
+// ============================================================================
+// workflow_job webhook payload (for full CI job visibility)
+// ============================================================================
+
+export interface WorkflowJobStep {
+  name: string;
+  status: "queued" | "in_progress" | "completed" | "pending";
+  conclusion:
+    | "success"
+    | "failure"
+    | "cancelled"
+    | "skipped"
+    | "neutral"
+    | null;
+  number: number;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface WorkflowJobPayload {
+  action: "queued" | "in_progress" | "completed" | "waiting";
+  workflow_job: {
+    id: number;
+    run_id: number;
+    run_attempt: number;
+    run_url: string;
+    node_id: string;
+    name: string;
+    status:
+      | "queued"
+      | "in_progress"
+      | "completed"
+      | "waiting"
+      | "pending"
+      | "requested";
+    conclusion:
+      | "success"
+      | "failure"
+      | "cancelled"
+      | "skipped"
+      | "timed_out"
+      | "action_required"
+      | "neutral"
+      | "stale"
+      | "startup_failure"
+      | null;
+    created_at: string;
+    started_at: string | null;
+    completed_at: string | null;
+    head_sha: string;
+    head_branch: string | null;
+    check_run_url: string;
+    runner_id: number | null;
+    runner_name: string | null;
+    runner_group_id: number | null;
+    runner_group_name: string | null;
+    workflow_name: string | null;
+    html_url: string;
+    labels: string[];
+    steps?: WorkflowJobStep[];
+  };
+  repository: {
+    full_name: string;
+    owner: { login: string };
+    name: string;
+  };
+  installation: { id: number };
+  sender: {
+    id: number;
+    login: string;
+    type: string;
+  };
+}
+
 export interface DetentCommand {
   type: "heal";
   userInstructions?: string;
@@ -169,6 +243,7 @@ export interface DetentCommand {
 export interface WebhookVariables {
   webhookPayload:
     | WorkflowRunPayload
+    | WorkflowJobPayload
     | IssueCommentPayload
     | PingPayload
     | InstallationPayload

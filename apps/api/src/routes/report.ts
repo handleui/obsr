@@ -55,6 +55,7 @@ interface ReportPayload {
   matrix?: Record<string, string>;
   steps: ReportStep[];
   errors: ReportError[];
+  isComplete?: boolean;
 }
 
 type ValidationResult =
@@ -650,8 +651,74 @@ const validatePayload = (body: unknown): ValidationResult => {
       matrix: b.matrix as Record<string, string> | undefined,
       steps: b.steps as ReportStep[],
       errors: b.errors as ReportError[],
+      isComplete: b.isComplete === true ? true : undefined,
     },
   };
+};
+
+type Database = Awaited<ReturnType<typeof createDb>>["db"];
+
+// Import job tracking functions
+import { checkAndTriggerAggregation } from "../services/webhooks/job-aggregation";
+import {
+  markJobAsDetent,
+  updateCommitJobStats,
+} from "../services/webhooks/job-operations";
+
+/**
+ * Mark job as Detent-enabled and trigger aggregation check.
+ * Comment is only posted when ALL jobs for the commit are complete.
+ */
+const handleJobCompletion = async (
+  env: Env,
+  db: Database,
+  repository: string,
+  commitSha: string,
+  workflowJob: string,
+  errorCount: number
+): Promise<{ commentPosted: boolean; allJobsComplete: boolean }> => {
+  try {
+    // Mark this job as having Detent action and set error count
+    const jobFound = await markJobAsDetent(
+      db,
+      repository,
+      commitSha,
+      workflowJob,
+      errorCount
+    );
+
+    if (!jobFound) {
+      // Job record doesn't exist yet (webhook hasn't arrived)
+      // This is expected in some cases - the aggregation will happen
+      // when the workflow_job webhook arrives
+      console.log(
+        `[report] Job ${workflowJob} not found for ${repository}@${commitSha.slice(0, 7)}, will aggregate later`
+      );
+      return { commentPosted: false, allJobsComplete: false };
+    }
+
+    // Update aggregated stats
+    await updateCommitJobStats(db, repository, commitSha);
+
+    // Check if all jobs are complete and post comment if so
+    const aggregation = await checkAndTriggerAggregation(
+      env,
+      db,
+      repository,
+      commitSha
+    );
+
+    return {
+      commentPosted: aggregation.commentPosted,
+      allJobsComplete: aggregation.allComplete,
+    };
+  } catch (error) {
+    console.error(
+      `[report] Error in job completion handling for ${repository}:`,
+      error instanceof Error ? error.message : String(error)
+    );
+    return { commentPosted: false, allJobsComplete: false };
+  }
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -678,17 +745,25 @@ app.post("/", async (c) => {
 
   const { db, client } = await createDb(c.env);
   try {
+    // Performance: fetch project with organization in single query to avoid N+1
     const project = await db.query.projects.findFirst({
       where: and(
         eq(projects.providerRepoFullName, payload.repository),
         eq(projects.organizationId, organizationId),
         isNull(projects.removedAt)
       ),
+      with: {
+        organization: {
+          columns: { providerInstallationId: true },
+        },
+      },
     });
 
     if (!project) {
       return c.json({ error: "Project not found" }, 404);
     }
+
+    // Note: installationId no longer needed here - aggregation handles GitHub API calls
 
     const runRecordId = crypto.randomUUID();
     const runIdStr = String(payload.runId);
@@ -769,17 +844,34 @@ app.post("/", async (c) => {
       );
     }
 
-    // Only include warnings in response if there are any
+    // Handle job completion: mark as Detent-enabled and check aggregation
+    // Comment is only posted when ALL jobs for the commit are complete
+    const { commentPosted } =
+      payload.isComplete === true && result.stored > 0
+        ? await handleJobCompletion(
+            c.env,
+            db,
+            payload.repository,
+            payload.commitSha,
+            payload.workflowJob,
+            result.stored
+          )
+        : { commentPosted: false };
+
     const response: {
       stored: number;
       runId: string;
       warnings?: TruncationWarning[];
+      commentPosted?: boolean;
     } = {
       stored: result.stored,
       runId: result.runId,
     };
     if (result.warnings.length > 0) {
       response.warnings = result.warnings;
+    }
+    if (payload.isComplete === true) {
+      response.commentPosted = commentPosted;
     }
 
     return c.json(response);

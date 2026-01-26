@@ -20,6 +20,7 @@ export interface ReportPayload {
   runAttempt: number;
   matrix?: Record<string, string>;
   steps: StepOutcome[];
+  isComplete?: boolean;
   errors: Array<{
     message: string;
     filePath?: string;

@@ -19,6 +19,7 @@ interface HealRow {
   pr_number: number | null;
   check_run_id: string | null;
   user_instructions: string | null;
+  autofix_source: string | null;
 }
 
 interface ProjectRow {
@@ -92,7 +93,7 @@ const fetchPendingHeals = async (db: Database): Promise<HealRow[]> => {
   }
 
   const result = await db.execute(sql`
-    SELECT id, type, status, run_id, project_id, commit_sha, pr_number, check_run_id, user_instructions
+    SELECT id, type, status, run_id, project_id, commit_sha, pr_number, check_run_id, user_instructions, autofix_source
     FROM heals
     WHERE type = 'heal' AND status = 'pending'
     ORDER BY created_at ASC
@@ -340,12 +341,16 @@ const withGitHubRetry = async (params: GitHubRetryParams): Promise<void> => {
 
 // GitHub name validation pattern (alphanumeric with hyphens, dots, underscores)
 const GITHUB_NAME_PATTERN = /^[a-zA-Z0-9][-a-zA-Z0-9._]*$/;
+// Git SHA validation pattern (7-40 hex characters)
+const GIT_SHA_PATTERN = /^[a-fA-F0-9]{7,40}$/;
 
 const isValidGitHubName = (name: string): boolean =>
   name.length > 0 &&
   name.length <= 100 &&
   GITHUB_NAME_PATTERN.test(name) &&
   !name.includes("..");
+
+const isValidGitSha = (sha: string): boolean => GIT_SHA_PATTERN.test(sha);
 
 const sanitizeErrorForCheckRun = (error: string): string => {
   // Remove potentially sensitive info: paths, tokens, URLs with credentials
@@ -460,6 +465,192 @@ const postPrComment = async (
     successMsg: `Posted comment on ${owner}/${repo}#${prNumber}`,
     failureMsg: "Failed to post comment",
   });
+};
+
+// Result type for GitHub API calls that return data
+interface GitHubCreateResult<T> {
+  ok: true;
+  data: T;
+}
+
+interface GitHubCreateError {
+  ok: false;
+  retryable: boolean;
+  status?: number;
+  error?: Error;
+  retryAfterMs?: number;
+}
+
+type GitHubCreateCallResult<T> = GitHubCreateResult<T> | GitHubCreateError;
+
+// Execute a GitHub API request that returns JSON data
+const executeGitHubCreateRequest = async <T>(
+  url: string,
+  options: RequestInit
+): Promise<GitHubCreateCallResult<T>> => {
+  try {
+    const response = await fetch(url, options);
+    if (response.ok) {
+      const data = (await response.json()) as T;
+      return { ok: true, data };
+    }
+    if (NON_RETRYABLE_STATUSES.has(response.status)) {
+      return { ok: false, retryable: false, status: response.status };
+    }
+    const retryAfterMs =
+      response.status === 429 ? parseRetryAfterHeader(response) : undefined;
+    return {
+      ok: false,
+      retryable: true,
+      error: new Error(`HTTP ${response.status}`),
+      retryAfterMs,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      retryable: true,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+};
+
+// Retry helper for GitHub API calls that return data
+interface GitHubCreateRetryParams {
+  url: string;
+  options: RequestInit;
+  successMsg: string;
+  failureMsg: string;
+}
+
+const withGitHubCreateRetry = async <T>(
+  params: GitHubCreateRetryParams
+): Promise<T | null> => {
+  const { url, options, successMsg, failureMsg } = params;
+  const retryConfig = getRetryConfig();
+  let lastError: Error | null = null;
+  let delay = retryConfig.initialDelayMs;
+  const totalAttempts = retryConfig.maxRetries + 1;
+
+  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+    const result = await executeGitHubCreateRequest<T>(url, options);
+
+    if (result.ok) {
+      const msg =
+        attempt > 1
+          ? `${successMsg} (succeeded on attempt ${attempt})`
+          : successMsg;
+      console.log(`[poller] ${msg}`);
+      return result.data;
+    }
+
+    if (!result.retryable) {
+      console.error(
+        `[poller] ${failureMsg}: HTTP ${result.status} (not retrying)`
+      );
+      return null;
+    }
+
+    lastError = result.error ?? null;
+    if (attempt < totalAttempts) {
+      const waitMs = result.retryAfterMs ?? delay;
+      console.warn(
+        `[poller] ${failureMsg} (attempt ${attempt}/${totalAttempts}): ${result.error?.message ?? "Unknown error"}, retrying in ${waitMs}ms${result.retryAfterMs ? " (from Retry-After)" : ""}`
+      );
+      await sleep(waitMs);
+      delay *= retryConfig.backoffMultiplier;
+    }
+  }
+
+  console.error(
+    `[poller] ${failureMsg} after ${totalAttempts} attempts: ${lastError?.message ?? "Unknown error"}`
+  );
+  return null;
+};
+
+interface CheckRunResponse {
+  id: number;
+}
+
+const createCheckRun = async (
+  appEnv: Env,
+  installationId: number,
+  owner: string,
+  repo: string,
+  headSha: string,
+  name: string,
+  errorCount: number,
+  detailsUrl: string
+): Promise<number | null> => {
+  // Validate inputs early (defense-in-depth against malformed data)
+  if (!(isValidGitHubName(owner) && isValidGitHubName(repo))) {
+    console.error("[poller] Invalid owner or repo name for check run creation");
+    return null;
+  }
+  // SECURITY: Validate SHA is a valid hex string, not just length check
+  // This prevents potential injection if headSha contains unexpected characters
+  if (!isValidGitSha(headSha)) {
+    console.error("[poller] Invalid head SHA for check run creation");
+    return null;
+  }
+
+  const token = await getInstallationToken(appEnv, installationId);
+  if (!token) {
+    console.error(`[poller] No token for installation ${installationId}`);
+    return null;
+  }
+
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/check-runs`;
+  const errorText = errorCount === 1 ? "1 error" : `${errorCount} errors`;
+  const options: RequestInit = {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "Detent-Healer",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      name,
+      head_sha: headSha,
+      status: "in_progress",
+      started_at: new Date().toISOString(),
+      details_url: detailsUrl,
+      output: {
+        title: "Healing started",
+        summary: `Working on ${errorText}`,
+      },
+    }),
+  };
+
+  const result = await withGitHubCreateRetry<CheckRunResponse>({
+    url,
+    options,
+    successMsg: `Created check run for ${owner}/${repo}`,
+    failureMsg: `Failed to create check run for ${owner}/${repo}`,
+  });
+
+  return result?.id ?? null;
+};
+
+const storeCheckRunId = async (
+  db: Database,
+  healId: string,
+  checkRunId: number
+): Promise<void> => {
+  try {
+    await db.execute(sql`
+      UPDATE heals
+      SET check_run_id = ${String(checkRunId)}, updated_at = NOW()
+      WHERE id = ${healId}
+    `);
+  } catch (error) {
+    console.error(
+      `[poller] Failed to store check run ID ${checkRunId} for heal ${healId}:`,
+      error
+    );
+    // Non-critical: heal can proceed, check run already exists on GitHub
+  }
 };
 
 const updateCheckRun = async (
@@ -579,6 +770,8 @@ interface NotifyHealCompletionParams {
   conclusion: "success" | "failure";
   checkRunOutput: { title: string; summary: string };
   prComment: string;
+  /** Override check run ID (use when created during this run, before heal object is updated) */
+  checkRunIdOverride?: string;
 }
 
 const notifyHealCompletion = async (
@@ -592,6 +785,7 @@ const notifyHealCompletion = async (
     conclusion,
     checkRunOutput,
     prComment,
+    checkRunIdOverride,
   } = params;
 
   if (!(installationId && repoFullName)) {
@@ -603,14 +797,15 @@ const notifyHealCompletion = async (
     return;
   }
 
-  // Update check run if present
-  if (heal.check_run_id) {
+  // Update check run if present (prefer override for newly created check runs)
+  const effectiveCheckRunId = checkRunIdOverride ?? heal.check_run_id;
+  if (effectiveCheckRunId) {
     await updateCheckRun(
       appEnv,
       installationId,
       owner,
       repo,
-      Number.parseInt(heal.check_run_id, 10),
+      Number.parseInt(effectiveCheckRunId, 10),
       conclusion,
       checkRunOutput
     );
@@ -633,12 +828,14 @@ const processHeal = async (
   db: Database,
   heal: HealRow,
   appEnv: Env
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: heal processing requires multiple DB queries and GitHub API calls
 ): Promise<void> => {
   console.log(`[poller] Processing heal ${heal.id}`);
 
   // Store for check run update at the end
   let installationId: number | null = null;
   let repoFullName: string | null = null;
+  let newCheckRunId: string | undefined;
 
   try {
     await markHealRunning(db, heal.id);
@@ -670,6 +867,37 @@ const processHeal = async (
       installationId = Number.parseInt(org.provider_installation_id, 10);
       if (!Number.isNaN(installationId)) {
         token = await getInstallationToken(appEnv, installationId);
+      }
+    }
+
+    // Create check run when healer actually starts processing (if not already created)
+    // Non-blocking: if creation fails, heal still proceeds
+    // Guard: only create if errors exist to avoid "Working on 0 errors" display
+    if (
+      !heal.check_run_id &&
+      installationId &&
+      heal.commit_sha &&
+      errors.length > 0
+    ) {
+      const [owner, repo] = repoFullName.split("/");
+      if (owner && repo) {
+        const detailsUrl = `${appEnv.NAVIGATOR_BASE_URL}/dashboard/${project.id}`;
+        const healName = `Detent Heal: ${heal.autofix_source ?? "AI"}`;
+        const checkRunId = await createCheckRun(
+          appEnv,
+          installationId,
+          owner,
+          repo,
+          heal.commit_sha,
+          healName,
+          errors.length,
+          detailsUrl
+        );
+        if (checkRunId) {
+          await storeCheckRunId(db, heal.id, checkRunId);
+          // Track the new checkRunId for notifyHealCompletion (avoids mutating heal parameter)
+          newCheckRunId = String(checkRunId);
+        }
       }
     }
 
@@ -727,6 +955,7 @@ const processHeal = async (
           heal.project_id,
           appEnv.NAVIGATOR_BASE_URL
         ),
+        checkRunIdOverride: newCheckRunId,
       });
     } else {
       const errorMessage = result.error ?? "Heal failed";
@@ -744,6 +973,7 @@ const processHeal = async (
           summary: errorMessage,
         },
         prComment: formatHealFailedComment(errorMessage),
+        checkRunIdOverride: newCheckRunId,
       });
     }
   } catch (error) {
@@ -762,6 +992,7 @@ const processHeal = async (
         summary: message,
       },
       prComment: formatHealFailedComment(message),
+      checkRunIdOverride: newCheckRunId,
     });
   }
 };
@@ -807,33 +1038,47 @@ const pollLoop = async (db: Database, appEnv: Env): Promise<void> => {
   }
 };
 
-interface StaleHealRow {
+interface StaleHealWithContext {
   id: string;
   check_run_id: string | null;
-  project_id: string;
+  provider_repo_full_name: string | null;
+  provider_installation_id: string | null;
 }
 
+/**
+ * Mark stale heals as failed and update their GitHub check runs.
+ *
+ * Performance optimization: Uses a single JOIN query to fetch heal + project + org data,
+ * avoiding N+1 queries (previously: 2N queries for N stale heals).
+ */
 const markStaleHealsAsFailed = async (
   db: Database,
   appEnv: Env
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: stale heal processing requires multiple DB queries and GitHub API calls
 ): Promise<void> => {
   try {
-    // Get stale heals with their check_run_id and project_id for GitHub updates
+    // Performance: Single query with JOINs fetches all data needed for GitHub updates
+    // This replaces the previous N+1 pattern (fetchProject + fetchOrganization per heal)
     const result = await db.execute(sql`
-      UPDATE heals
+      UPDATE heals h
       SET
         status = 'failed',
         failed_reason = 'Heal timed out',
         updated_at = NOW()
+      FROM projects p
+      JOIN organizations o ON o.id = p.organization_id
       WHERE
-        type = 'heal'
-        AND status IN ('pending', 'running')
-        AND updated_at < NOW() - INTERVAL '30 minutes'
-      RETURNING id, check_run_id, project_id
+        h.project_id = p.id
+        AND h.type = 'heal'
+        AND h.status IN ('pending', 'running')
+        AND h.updated_at < NOW() - INTERVAL '30 minutes'
+      RETURNING
+        h.id,
+        h.check_run_id,
+        p.provider_repo_full_name,
+        o.provider_installation_id
     `);
 
-    const staleHeals = result.rows as unknown as StaleHealRow[];
+    const staleHeals = result.rows as unknown as StaleHealWithContext[];
 
     if (staleHeals.length === 0) {
       return;
@@ -847,30 +1092,21 @@ const markStaleHealsAsFailed = async (
         continue;
       }
 
+      if (!(heal.provider_installation_id && heal.provider_repo_full_name)) {
+        continue;
+      }
+
+      const installationId = Number.parseInt(heal.provider_installation_id, 10);
+      if (Number.isNaN(installationId)) {
+        continue;
+      }
+
+      const [owner, repo] = heal.provider_repo_full_name.split("/");
+      if (!(owner && repo)) {
+        continue;
+      }
+
       try {
-        const project = await fetchProject(db, heal.project_id);
-        if (!project) {
-          continue;
-        }
-
-        const org = await fetchOrganization(db, project.organization_id);
-        if (!org?.provider_installation_id) {
-          continue;
-        }
-
-        const installationId = Number.parseInt(
-          org.provider_installation_id,
-          10
-        );
-        if (Number.isNaN(installationId)) {
-          continue;
-        }
-
-        const [owner, repo] = project.provider_repo_full_name.split("/");
-        if (!(owner && repo)) {
-          continue;
-        }
-
         await updateCheckRun(
           appEnv,
           installationId,

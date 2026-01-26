@@ -1,28 +1,18 @@
-import { extract } from "./index.js";
+import { extract } from "./extract.js";
 import type { Diagnostic, DiagnosticResult } from "./types.js";
 
 export interface ParserOptions {
-  /** API key for Detent diagnostics service */
   apiKey?: string;
-  /** Custom API URL (default: https://backend.detent.sh/v1/diagnostics) */
   apiUrl?: string;
-  /** Request timeout in milliseconds (default: 30000) */
   timeout?: number;
 }
 
 const DEFAULT_API_URL = "https://backend.detent.sh/v1/diagnostics";
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-/**
- * Allowed URL protocols for API endpoint.
- * HTTP is intentionally excluded to prevent SSRF attacks.
- */
+// SSRF prevention: only HTTPS allowed
 const ALLOWED_PROTOCOLS = ["https:"];
 
-/**
- * Validate that a URL is safe to use as an API endpoint.
- * Prevents SSRF by restricting to HTTPS protocol.
- */
 const validateApiUrl = (urlString: string): URL => {
   let url: URL;
   try {
@@ -40,9 +30,6 @@ const validateApiUrl = (urlString: string): URL => {
   return url;
 };
 
-/**
- * Type guard to validate API response structure.
- */
 const isValidApiResponse = (
   data: unknown
 ): data is {
@@ -87,9 +74,6 @@ const isValidApiResponse = (
   return true;
 };
 
-/**
- * Map API response diagnostic to internal Diagnostic type with safe type coercion.
- */
 const mapApiDiagnostic = (d: Record<string, unknown>): Diagnostic => {
   const suggestions = Array.isArray(d.suggestions)
     ? d.suggestions.filter((s): s is string => typeof s === "string")
@@ -118,13 +102,11 @@ const mapApiDiagnostic = (d: Record<string, unknown>): Diagnostic => {
  */
 export const createParser = (options?: ParserOptions) => {
   return async (content: string, tool?: string): Promise<DiagnosticResult> => {
-    // Try local first
     const result = extract(content, tool);
     if (result.detectedTool) {
       return result;
     }
 
-    // Fallback to API if configured
     if (!options?.apiKey) {
       return result;
     }

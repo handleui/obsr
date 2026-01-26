@@ -57,6 +57,31 @@
         "group": "CI Integration",
         "icon": "github",
         "pages": ["action/index", "cli/workflows"]
+      },
+      {
+        "group": "SDK",
+        "icon": "code",
+        "pages": [
+          {
+            "group": "Diagnostics",
+            "pages": [
+              "sdk/getting-started",
+              "sdk/running-commands",
+              "sdk/custom-parsers"
+            ]
+          }
+        ]
+      },
+      {
+        "group": "API",
+        "icon": "brackets-curly",
+        "pages": [
+          "api/introduction",
+          "api/authentication",
+          "api/checks",
+          "api/repositories",
+          "api/webhooks"
+        ]
       }
     ]
   },

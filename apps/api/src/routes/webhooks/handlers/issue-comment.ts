@@ -9,10 +9,7 @@ import {
 } from "../../../db/schema";
 import { captureWebhookError } from "../../../lib/sentry";
 import { orchestrateHeals } from "../../../services/autofix/orchestrator";
-import {
-  formatHealingComment,
-  formatNoHealCandidatesComment,
-} from "../../../services/comment-formatter";
+import { formatNoHealCandidatesComment } from "../../../services/comment-formatter";
 import { createGitHubService } from "../../../services/github";
 import { deleteAndPostComment } from "../../../services/github/comments";
 import {
@@ -26,38 +23,128 @@ import type {
   WebhookContext,
 } from "../types";
 
-// Parse @detent commands from comment body
-const parseDetentCommand = (body: string): DetentCommand => {
-  const lower = body.toLowerCase();
+// Top-level regex for performance (avoid creating in loops)
+const DETENTSH_COMMAND_PATTERN = /@detentsh(?:\s+(.*))?/i;
 
-  // Check heal first (more specific command)
-  if (lower.includes("@detent heal")) {
-    return { type: "heal" };
+// Maximum user instructions length for early truncation in webhook handler.
+// This is intentionally smaller than the DB layer limit (2000 in heals.ts) because:
+// 1. Early truncation reduces payload size through the system
+// 2. Shorter instructions are more likely to be actionable
+// 3. Limits prompt injection surface area before sanitization
+// The DB layer provides a secondary safety net for any paths that bypass this handler.
+const MAX_USER_INSTRUCTIONS_LENGTH = 500;
+
+// SECURITY: Patterns that indicate prompt injection attempts
+// These patterns attempt to override system instructions or manipulate model behavior
+// @internal Exported for testing only
+export const PROMPT_INJECTION_PATTERNS = [
+  /ignore\s+(previous|all|above|prior)\s+instructions/i,
+  /disregard\s+(previous|all|above|prior)/i,
+  /forget\s+(everything|all|previous)/i,
+  /you\s+are\s+now\s+a/i,
+  /new\s+instruction[s]?:/i,
+  /system\s*prompt/i,
+  /\[\[.*system.*\]\]/i, // [[system]] style delimiters
+  /```\s*(system|assistant)/i, // Code block role injection
+  /<\|.*\|>/i, // Special token patterns like <|im_end|>
+  /ASSISTANT:/i,
+  /SYSTEM:/i,
+  /Human:/i,
+];
+
+// SECURITY: Control character pattern for sanitization (built from char codes to avoid lint errors)
+// Matches: \x00-\x08, \x0B, \x0C, \x0E-\x1F, \x7F (excludes \t=0x09, \n=0x0A, \r=0x0D)
+const buildControlCharPattern = (): RegExp => {
+  const parts = [
+    "[",
+    String.fromCharCode(0x00),
+    "-",
+    String.fromCharCode(0x08),
+    String.fromCharCode(0x0b),
+    String.fromCharCode(0x0c),
+    String.fromCharCode(0x0e),
+    "-",
+    String.fromCharCode(0x1f),
+    String.fromCharCode(0x7f),
+    "]",
+  ];
+  return new RegExp(parts.join(""), "g");
+};
+const CONTROL_CHAR_PATTERN = buildControlCharPattern();
+
+/**
+ * Sanitize user instructions to mitigate prompt injection risks.
+ * Returns sanitized string or null if content appears malicious.
+ *
+ * SECURITY: This is defense-in-depth. The AI model should also be instructed
+ * to treat user content as data, not instructions (see SYSTEM_PROMPT).
+ *
+ * @internal Exported for testing only
+ */
+export const sanitizeUserInstructions = (
+  instructions: string
+): { sanitized: string; blocked: boolean } => {
+  // Truncate to max length first
+  const truncated = instructions.slice(0, MAX_USER_INSTRUCTIONS_LENGTH);
+
+  // SECURITY: Check for null bytes (encoding attacks) first
+  if (truncated.includes(String.fromCharCode(0))) {
+    console.warn(
+      "[issue_comment] Blocked potential encoding attack: null byte detected"
+    );
+    return { sanitized: "", blocked: true };
   }
 
-  if (lower.includes("@detent status")) {
-    return { type: "status" };
+  // Check for obvious prompt injection patterns
+  for (const pattern of PROMPT_INJECTION_PATTERNS) {
+    if (pattern.test(truncated)) {
+      console.warn(
+        `[issue_comment] Blocked potential prompt injection: matched pattern ${pattern}`
+      );
+      return { sanitized: "", blocked: true };
+    }
   }
 
-  if (lower.includes("@detent help")) {
-    return { type: "help" };
-  }
+  // Remove control characters except newlines, tabs, and carriage returns
+  const cleaned = truncated.replace(CONTROL_CHAR_PATTERN, "");
 
-  return { type: "unknown" };
+  return { sanitized: cleaned, blocked: false };
 };
 
-// Format help message
-const formatHelpMessage = (): string => {
-  return `**Available commands:**
-- \`@detent heal\` - Trigger AI healing for fixable errors
-- \`@detent status\` - Show current error status
-- \`@detent help\` - Show this message`;
+// Parse @detentsh commands from comment body
+const parseDetentCommand = (body: string): DetentCommand | null => {
+  // Match @detentsh with optional text after it
+  const match = body.match(DETENTSH_COMMAND_PATTERN);
+
+  if (!match) {
+    return null;
+  }
+
+  // Extract any text after @detentsh as user instructions
+  const instructionsText = match[1]?.trim();
+
+  if (instructionsText) {
+    // SECURITY: Sanitize user instructions to mitigate prompt injection
+    const { sanitized, blocked } = sanitizeUserInstructions(instructionsText);
+
+    if (blocked) {
+      // Return command without instructions if blocked
+      return { type: "heal" };
+    }
+
+    if (sanitized) {
+      return { type: "heal", userInstructions: sanitized };
+    }
+  }
+
+  return { type: "heal" };
 };
 
-// Handle @detent heal command
+// Handle @detentsh heal command
 const handleHealCommand = async (
   c: WebhookContext,
-  payload: IssueCommentPayload
+  payload: IssueCommentPayload,
+  command: DetentCommand
 ): Promise<Response> => {
   const { issue, repository, installation } = payload;
   const prNumber = issue.number;
@@ -130,6 +217,7 @@ const handleHealCommand = async (
     if (errors.length === 0) {
       // Post "no heal candidates" comment
       const commentBody = formatNoHealCandidatesComment();
+      const appId = Number.parseInt(c.env.GITHUB_APP_ID, 10);
       await deleteAndPostComment({
         github,
         token,
@@ -140,6 +228,7 @@ const handleHealCommand = async (
         repository: repository.full_name,
         prNumber,
         commentBody,
+        appId,
       });
       return c.json({
         message: "heal command completed",
@@ -209,6 +298,7 @@ const handleHealCommand = async (
               fixable: e.fixable ?? false,
             })),
             orgSettings,
+            userInstructions: command.userInstructions,
           });
 
           if (result.healsCreated > 0) {
@@ -253,6 +343,7 @@ const handleHealCommand = async (
       // This can happen when autofix is disabled or no errors have matching autofix handlers
       if (totalHeals === 0) {
         const commentBody = formatNoHealCandidatesComment();
+        const appId = Number.parseInt(c.env.GITHUB_APP_ID, 10);
         await deleteAndPostComment({
           github,
           token,
@@ -263,6 +354,7 @@ const handleHealCommand = async (
           repository: repository.full_name,
           prNumber,
           commentBody,
+          appId,
         });
         return c.json({
           message: "heal command completed",
@@ -270,20 +362,6 @@ const handleHealCommand = async (
           errorCount: errors.length,
         });
       }
-
-      // Post "healing" comment
-      const commentBody = formatHealingComment({ errorCount: errors.length });
-      await deleteAndPostComment({
-        github,
-        token,
-        kv: c.env["detent-idempotency"],
-        db,
-        owner,
-        repo,
-        repository: repository.full_name,
-        prNumber,
-        commentBody,
-      });
 
       return c.json({
         message: "heal command completed",
@@ -300,7 +378,7 @@ const handleHealCommand = async (
   }
 };
 
-// Handle issue_comment events (@detent mentions)
+// Handle issue_comment events (@detentsh mentions)
 export const handleIssueCommentEvent = async (
   c: WebhookContext,
   payload: IssueCommentPayload
@@ -323,18 +401,22 @@ export const handleIssueCommentEvent = async (
     return c.json({ message: "ignored", reason: "bot comment" });
   }
 
-  // Check for @detent mention
+  // Check for @detentsh mention
   const body = comment.body.toLowerCase();
-  if (!body.includes("@detent")) {
-    return c.json({ message: "ignored", reason: "no @detent mention" });
+  if (!body.includes("@detentsh")) {
+    return c.json({ message: "ignored", reason: "no @detentsh mention" });
   }
 
   console.log(
-    `[issue_comment] @detent mentioned in ${repository.full_name}#${issue.number} by ${comment.user.login}`
+    `[issue_comment] @detentsh mentioned in ${repository.full_name}#${issue.number} by ${comment.user.login}`
   );
 
   // Parse command
   const command = parseDetentCommand(comment.body);
+
+  if (!command) {
+    return c.json({ message: "ignored", reason: "no valid command" });
+  }
 
   // Get GitHub service
   const github = createGitHubService(c.env);
@@ -343,48 +425,16 @@ export const handleIssueCommentEvent = async (
     // Get installation token
     const token = await github.getInstallationToken(installation.id);
 
-    switch (command.type) {
-      case "heal": {
-        return handleHealCommand(c, payload);
-      }
+    // Add eyes reaction to acknowledge the command
+    await github.addReactionToComment(
+      token,
+      repository.owner.login,
+      repository.name,
+      comment.id,
+      "eyes"
+    );
 
-      case "status": {
-        // Future: Report current error status from stored analysis
-        await github.postComment(
-          token,
-          repository.owner.login,
-          repository.name,
-          issue.number,
-          "Status check is not yet implemented."
-        );
-        return c.json({
-          message: "status command received",
-          status: "not_implemented",
-        });
-      }
-
-      case "help": {
-        await github.postComment(
-          token,
-          repository.owner.login,
-          repository.name,
-          issue.number,
-          formatHelpMessage()
-        );
-        return c.json({ message: "help command received", status: "posted" });
-      }
-
-      default: {
-        await github.postComment(
-          token,
-          repository.owner.login,
-          repository.name,
-          issue.number,
-          `Unknown command. ${formatHelpMessage()}`
-        );
-        return c.json({ message: "unknown command", status: "posted" });
-      }
-    }
+    return handleHealCommand(c, payload, command);
   } catch (error) {
     console.error(
       `[issue_comment] Error processing [delivery: ${deliveryId}]:`,

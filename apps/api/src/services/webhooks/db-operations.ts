@@ -1,5 +1,7 @@
 import { generateFingerprints, sanitizeSensitiveData } from "@detent/lore";
 import type { ErrorCategory, ErrorSource } from "@detent/types";
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK official pattern
+import * as Sentry from "@sentry/cloudflare";
 import { and, eq, inArray } from "drizzle-orm";
 import { createDb } from "../../db/client";
 import { DatabaseError } from "../../db/errors";
@@ -237,6 +239,20 @@ export const bulkStoreRunsAndErrors = async (
             .where(eq(projects.providerRepoFullName, firstRun.repository))
             .limit(1);
           projectId = projectResult[0]?.id;
+
+          // Capture missing projectId for observability
+          if (!projectId && errorsWithFingerprints.length > 0) {
+            Sentry.captureMessage(
+              "Project not found for repository during error tracking",
+              {
+                level: "warning",
+                extra: {
+                  repository: firstRun.repository,
+                  errorCount: errorsWithFingerprints.length,
+                },
+              }
+            );
+          }
         }
       }
 
@@ -363,6 +379,7 @@ export const checkRunsAndLoadOrgSettings = async (
   const { db, client } = await createDb(env);
   try {
     // Execute both queries in parallel for better performance
+    // Org settings query is wrapped to capture failures while still using defaults
     const [existingRunsResult, orgResult] = await Promise.all([
       // Query 1: Check existing run attempts
       runIdentifiers.length > 0
@@ -386,13 +403,22 @@ export const checkRunsAndLoadOrgSettings = async (
       // Query 2: Load org settings (skip if cached)
       cachedSettings
         ? Promise.resolve(null)
-        : db.query.organizations.findFirst({
-            where: eq(
-              organizations.providerInstallationId,
-              String(installationId)
-            ),
-            columns: { settings: true },
-          }),
+        : db.query.organizations
+            .findFirst({
+              where: eq(
+                organizations.providerInstallationId,
+                String(installationId)
+              ),
+              columns: { settings: true },
+            })
+            .catch((error) => {
+              // Capture org settings query failure but continue with defaults
+              Sentry.captureException(error, {
+                extra: { installationId, repository },
+                tags: { operation: "org_settings_query" },
+              });
+              return null;
+            }),
     ]);
 
     // Process run results

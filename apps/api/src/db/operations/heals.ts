@@ -18,6 +18,10 @@ const MAX_COMMIT_LENGTH = 64;
 const MAX_SOURCE_LENGTH = 64;
 const MAX_COMMAND_LENGTH = 500;
 const MAX_COMMIT_MESSAGE_LENGTH = 500;
+// DB-layer safety limit for user instructions. Larger than the webhook handler limit
+// (500 in issue-comment.ts) to serve as a secondary safety net for any code paths
+// that bypass the webhook layer. The webhook handler truncates earlier for efficiency.
+const MAX_USER_INSTRUCTIONS_LENGTH = 2000;
 const MAX_REJECTION_REASON_LENGTH = 2000;
 const MAX_FAILED_REASON_LENGTH = 2000;
 const MAX_PATCH_LENGTH = 1_000_000; // 1MB for patches
@@ -39,12 +43,16 @@ const validateUUIDs = (ids: string[] | undefined): string[] | undefined => {
   return valid.length > 0 ? valid : undefined;
 };
 
-/** Truncate string to max length, returning undefined for empty/null */
+/** Truncate string to max length, returning undefined for empty/whitespace-only */
 const truncate = (
   value: string | undefined,
   maxLength: number
 ): string | undefined => {
   if (!value) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
     return undefined;
   }
   return value.length > maxLength ? value.slice(0, maxLength) : value;
@@ -70,6 +78,7 @@ export const createHeal = async (
     autofixSource?: string;
     autofixCommand?: string;
     commitMessage?: string;
+    userInstructions?: string;
   }
 ): Promise<string> => {
   // SECURITY: Validate required UUIDs
@@ -97,6 +106,10 @@ export const createHeal = async (
     autofixSource: truncate(data.autofixSource, MAX_SOURCE_LENGTH),
     autofixCommand: truncate(data.autofixCommand, MAX_COMMAND_LENGTH),
     commitMessage: truncate(data.commitMessage, MAX_COMMIT_MESSAGE_LENGTH),
+    userInstructions: truncate(
+      data.userInstructions,
+      MAX_USER_INSTRUCTIONS_LENGTH
+    ),
     createdAt: now,
     updatedAt: now,
   };

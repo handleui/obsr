@@ -176,6 +176,13 @@
       "when": 1769393096728,
       "tag": "0024_foamy_slipstream",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1769409223278,
+      "tag": "0025_aromatic_zaladane",
+      "breakpoints": true
     }
   ]
 }

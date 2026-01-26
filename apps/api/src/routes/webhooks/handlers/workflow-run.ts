@@ -19,7 +19,7 @@ import type { WebhookContext, WorkflowRunPayload } from "../types";
 // ============================================================================
 // Tracks workflow runs and posts errors-found comments when CI fails.
 // Check runs are no longer created automatically - they are created when
-// user triggers heal via @detent heal command.
+// user triggers heal via @detentsh heal command.
 
 // ============================================================================
 // Handle workflow_run.in_progress
@@ -47,7 +47,7 @@ export const handleWorkflowRunInProgress = async (
 // Handle workflow_run.completed
 // ============================================================================
 // Tracks workflow completion and posts errors-found comment if errors detected.
-// Users trigger heals via @detent heal command or from dashboard.
+// Users trigger heals via @detentsh heal command or from dashboard.
 export const handleWorkflowRunCompleted = async (
   c: WebhookContext,
   payload: WorkflowRunPayload
@@ -185,6 +185,7 @@ export const handleWorkflowRunCompleted = async (
       );
 
       // Post errors-found comment if there are fixable errors
+      const appId = Number.parseInt(c.env.GITHUB_APP_ID, 10);
       await postErrorsFoundComment(c, {
         token,
         owner,
@@ -192,6 +193,7 @@ export const handleWorkflowRunCompleted = async (
         prNumber,
         errorCount,
         failedRunCount: failedRuns.length,
+        appId,
       });
     } else if (failedRuns.length > 0) {
       console.log(
@@ -242,7 +244,7 @@ export const handleWorkflowRunCompleted = async (
 // Post Errors Found Comment
 // ============================================================================
 // Posts a comment when CI fails with fixable errors.
-// The comment includes a link to the dashboard and prompts user to @detent heal.
+// The comment includes a link to the dashboard and prompts user to @detentsh heal.
 
 interface PostErrorsFoundContext {
   token: string;
@@ -251,13 +253,15 @@ interface PostErrorsFoundContext {
   prNumber: number;
   errorCount: number;
   failedRunCount: number;
+  appId: number;
 }
 
 const postErrorsFoundComment = async (
   c: WebhookContext,
   ctx: PostErrorsFoundContext
 ): Promise<void> => {
-  const { token, owner, repo, prNumber, errorCount, failedRunCount } = ctx;
+  const { token, owner, repo, prNumber, errorCount, failedRunCount, appId } =
+    ctx;
   const repositoryFullName = `${owner}/${repo}`;
 
   // Look up project to get the dashboard URL
@@ -297,6 +301,7 @@ const postErrorsFoundComment = async (
       repository: repositoryFullName,
       prNumber,
       commentBody,
+      appId,
     });
 
     console.log(

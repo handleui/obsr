@@ -1,8 +1,7 @@
 import type { Env } from "../types/env";
 
-// GitLab API service (stub)
-// TODO: Implement GitLab integration
-// Reference: https://docs.gitlab.com/ee/api/
+// GitLab integration intentionally stubbed until MVP with dashboard.
+// All methods throw "not yet implemented" by design.
 
 const GITLAB_API = "https://gitlab.com/api/v4";
 

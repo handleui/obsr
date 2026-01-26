@@ -3,7 +3,7 @@ title: Webhooks
 description: GitHub and GitLab webhook integration
 ---
 
-Detent receives webhooks from GitHub and GitLab to track CI status, manage installations, and respond to commands.
+Detent receives webhooks from GitHub and GitLab to track CI status and respond to commands.
 
 ## Webhook Endpoints
 
@@ -12,238 +12,42 @@ Detent receives webhooks from GitHub and GitLab to track CI status, manage insta
 | GitHub | `POST /webhooks/github` |
 | GitLab | `POST /webhooks/gitlab` |
 
-## GitHub Webhooks
+<Info>
+Webhooks are automatically configured when you install the GitHub App. Manual configuration is only needed for GitLab.
+</Info>
 
-### Signature Verification
-
-All GitHub webhooks are verified using HMAC-SHA256:
-
-```
-X-Hub-Signature-256: sha256=abc123...
-```
-
-The signature is computed over the raw request body using the webhook secret configured in your GitHub App.
-
-### Supported Events
-
-#### `installation`
-
-Triggered when the GitHub App is installed or uninstalled.
-
-| Action | Description |
-|--------|-------------|
-| `created` | App installed - creates organization and projects |
-| `deleted` | App uninstalled - soft-deletes organization |
-| `suspend` | App suspended - marks organization as suspended |
-| `unsuspend` | App unsuspended - clears suspension |
-
-**Example payload:**
-
-```json
-{
-  "action": "created",
-  "installation": {
-    "id": 12345678,
-    "account": {
-      "id": 123456,
-      "login": "handleui",
-      "type": "Organization",
-      "avatar_url": "https://avatars.githubusercontent.com/u/123456"
-    }
-  },
-  "repositories": [
-    {
-      "id": 111222333,
-      "name": "detent",
-      "full_name": "handleui/detent",
-      "private": false
-    }
-  ]
-}
-```
-
-#### `installation_repositories`
-
-Triggered when repositories are added or removed from the installation.
-
-| Action | Description |
-|--------|-------------|
-| `added` | Repositories added - creates projects |
-| `removed` | Repositories removed - soft-deletes projects |
-
-#### `repository`
-
-Triggered when a repository is modified.
-
-| Action | Description |
-|--------|-------------|
-| `renamed` | Repository renamed - updates project metadata |
-| `transferred` | Repository transferred - updates full_name |
-| `privatized` | Made private - updates visibility |
-| `publicized` | Made public - updates visibility |
-
-#### `workflow_run`
-
-Triggered when a CI workflow completes.
-
-```json
-{
-  "action": "completed",
-  "workflow_run": {
-    "id": 9876543210,
-    "name": "CI",
-    "conclusion": "failure",
-    "head_branch": "feat/new-feature",
-    "pull_requests": [{ "number": 42 }]
-  },
-  "repository": {
-    "full_name": "handleui/detent",
-    "owner": { "login": "handleui" },
-    "name": "detent"
-  },
-  "installation": { "id": 12345678 }
-}
-```
-
-When a workflow fails, Detent:
-1. Fetches the workflow logs
-2. Posts a summary comment on the associated PR
-3. Offers healing via `@detent heal` command
-
-#### `check_suite`
-
-Triggered when a check suite is requested (immediately when code is pushed to a PR).
-
-| Action | Description |
-|--------|-------------|
-| `requested` | Creates a "queued" check run immediately |
-
-This provides better UX by showing the Detent Parser check right away, before workflows start running.
-
-```json
-{
-  "action": "requested",
-  "check_suite": {
-    "id": 12345678,
-    "head_sha": "abc123def456",
-    "head_branch": "feat/new-feature",
-    "pull_requests": [{ "number": 42 }]
-  },
-  "repository": {
-    "full_name": "handleui/detent",
-    "owner": { "login": "handleui" },
-    "name": "detent"
-  },
-  "installation": { "id": 12345678 }
-}
-```
-
-#### `issue_comment`
-
-Triggered when a comment is posted on an issue or PR.
-
-Detent listens for `@detent` mentions:
-
-| Command | Description |
-|---------|-------------|
-| `@detent heal` | Analyze failures and attempt fixes |
-| `@detent heal --dry-run` | Analyze without pushing changes |
-| `@detent status` | Show current error status |
-| `@detent help` | Show available commands |
-
-#### `ping`
-
-Sent when the webhook is first configured. Returns:
-
-```json
-{
-  "message": "pong",
-  "zen": "Speak like a human."
-}
-```
-
-## GitLab Webhooks
-
-<Note>
-GitLab webhook support requires manual webhook configuration.
-</Note>
-
-### Token Verification
-
-GitLab webhooks are verified using a secret token:
-
-```
-X-Gitlab-Token: your-webhook-secret
-```
-
-### Supported Events
+## GitHub Events
 
 | Event | Description |
 |-------|-------------|
-| `push` | Code pushed to repository |
-| `pipeline` | Pipeline status changed |
-| `merge_request` | MR created/updated |
+| `installation` | App installed/uninstalled |
+| `installation_repositories` | Repos added/removed |
+| `repository` | Repo renamed/transferred |
+| `workflow_run` | CI workflow completed |
+| `check_suite` | Checks requested |
+| `issue_comment` | PR comments (for `@detent` commands) |
 
-## Webhook Response Format
+## PR Commands
 
-Successful webhook processing returns:
+Comment on a PR to trigger actions:
 
-```json
-{
-  "message": "installation created",
-  "organization_id": "550e8400-e29b-41d4-a716-446655440000",
-  "organization_slug": "gh/handleui",
-  "projects_created": 3
-}
-```
+| Command | Description |
+|---------|-------------|
+| `@detent heal` | Analyze failures and push fixes |
+| `@detent heal --dry-run` | Preview fixes without pushing |
+| `@detent status` | Show current error status |
 
-Ignored events return:
+## Workflow Failures
 
-```json
-{
-  "message": "ignored",
-  "reason": "not a failure"
-}
-```
+When a workflow fails, Detent automatically:
+1. Fetches the workflow logs
+2. Posts a summary comment on the PR
+3. Offers `@detent heal` to fix issues
 
-## Testing Webhooks
+## GitLab
 
-### Local Development
+<Note>
+GitLab requires manual webhook configuration with a secret token in the `X-Gitlab-Token` header.
+</Note>
 
-Use a tunnel service to receive webhooks locally:
-
-```bash
-# Using ngrok
-ngrok http 3000
-
-# Configure GitHub App webhook URL:
-# https://abc123.ngrok.io/webhooks/github
-```
-
-### Replay Deliveries
-
-In GitHub App settings → Advanced → Recent Deliveries, you can redeliver past webhooks for testing.
-
-## Error Handling
-
-Webhook errors return `500` with details:
-
-```json
-{
-  "message": "installation error",
-  "error": "Database connection failed"
-}
-```
-
-GitHub will retry failed webhooks with exponential backoff.
-
-## Security Considerations
-
-<Warning>
-Always verify webhook signatures. Never process unverified webhooks.
-</Warning>
-
-- Webhook secrets should be at least 32 characters
-- Rotate secrets periodically
-- Log webhook deliveries for audit purposes
-- Implement idempotency for critical operations
+Supported events: `push`, `pipeline`, `merge_request`

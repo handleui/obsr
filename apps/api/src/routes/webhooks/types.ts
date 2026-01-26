@@ -26,6 +26,7 @@ export interface WorkflowRunPayload {
 export interface IssueCommentPayload {
   action: string;
   comment: {
+    id: number;
     body: string;
     user: { login: string; type: string };
   };
@@ -160,7 +161,8 @@ export interface CheckSuitePayload {
 }
 
 export interface DetentCommand {
-  type: "status" | "help" | "heal" | "unknown";
+  type: "heal";
+  userInstructions?: string;
 }
 
 // Variables stored in context by middleware

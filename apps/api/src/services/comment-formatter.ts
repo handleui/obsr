@@ -1437,28 +1437,8 @@ export const formatErrorsFoundComment = (
   lines.push(formatHeader(`Found ${errorText} in ${jobText}.`));
   lines.push("");
   lines.push(
-    `[View in dashboard](${projectUrl}) or reply \`@detent heal\` to fix.`
+    `[View in dashboard](${projectUrl}) or reply \`@detentsh\` to fix.`
   );
-
-  return lines.join("\n");
-};
-
-// Options for formatting a "healing" comment
-export interface FormatHealingCommentOptions {
-  errorCount: number;
-}
-
-// Format comment when heal is triggered
-export const formatHealingComment = (
-  options: FormatHealingCommentOptions
-): string => {
-  const { errorCount } = options;
-  const errorText = errorCount === 1 ? "1 issue" : `${errorCount} issues`;
-
-  const lines: string[] = [];
-  lines.push(formatHeader(`Healing ${errorText}...`));
-  lines.push("");
-  lines.push("This may take a few minutes. You'll be notified when it's done.");
 
   return lines.join("\n");
 };
@@ -1510,12 +1490,5 @@ export const formatHealFailedComment = (
 
 // Format comment when there are no heal candidates
 export const formatNoHealCandidatesComment = (): string => {
-  const lines: string[] = [];
-  lines.push(formatHeader("No fixable errors found."));
-  lines.push("");
-  lines.push(
-    "Either all errors have been fixed or no errors match our heal patterns."
-  );
-
-  return lines.join("\n");
+  return "Nothing to heal";
 };

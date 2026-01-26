@@ -1119,6 +1119,76 @@ const createGitHubServiceInternal = (env: Env) => {
     console.log(`[github] ${context}: Updated comment`);
   };
 
+  // POST /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions
+  // Fire-and-forget: logs errors but doesn't throw (reactions are non-critical)
+  // Per GitHub docs: 201 = created, 200 = already exists, 422 = validation/spam
+  const addReactionToComment = async (
+    token: string,
+    owner: string,
+    repo: string,
+    commentId: number,
+    reaction:
+      | "eyes"
+      | "confused"
+      | "+1"
+      | "-1"
+      | "laugh"
+      | "hooray"
+      | "heart"
+      | "rocket"
+  ): Promise<void> => {
+    const context = `addReactionToComment(${owner}/${repo}, commentId=${commentId})`;
+
+    try {
+      // Validate inputs
+      validateOwnerRepo(owner, repo, context);
+      validateCommentId(commentId, context);
+
+      const response = await fetch(
+        `${GITHUB_API}/repos/${owner}/${repo}/issues/comments/${commentId}/reactions`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "Detent-App",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ content: reaction }),
+        }
+      );
+
+      // 201 = created, 200 = already exists (both are success)
+      if (response.status === 201) {
+        console.log(`[github] ${context}: Added "${reaction}" reaction`);
+        return;
+      }
+
+      if (response.status === 200) {
+        console.log(
+          `[github] ${context}: Reaction "${reaction}" already exists`
+        );
+        return;
+      }
+
+      // 422 = validation failed or endpoint spammed (secondary rate limit)
+      if (response.status === 422) {
+        const error = await response.text();
+        console.warn(`[github] ${context}: Reaction rejected (422): ${error}`);
+        return;
+      }
+
+      // Other errors
+      const error = await response.text();
+      console.error(
+        `[github] ${context}: Failed to add reaction: ${response.status} ${error}`
+      );
+    } catch (error) {
+      console.error(`[github] ${context}: Error adding reaction:`, error);
+    }
+  };
+
   return {
     getInstallationToken,
     getInstallationInfo,
@@ -1136,6 +1206,7 @@ const createGitHubServiceInternal = (env: Env) => {
     postCommentWithId,
     updateComment,
     getOrgMembers,
+    addReactionToComment,
   };
 };
 

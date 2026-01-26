@@ -1810,7 +1810,8 @@ describe("webhooks - issue_comment events", () => {
     const payload = {
       action: "edited",
       comment: {
-        body: "@detent help",
+        id: 12_345,
+        body: "@detentsh",
         user: { type: "User", login: "test-user" },
       },
       issue: {
@@ -1839,7 +1840,8 @@ describe("webhooks - issue_comment events", () => {
     const payload = {
       action: "created",
       comment: {
-        body: "@detent help",
+        id: 12_345,
+        body: "@detentsh",
         user: { type: "User", login: "test-user" },
       },
       issue: {
@@ -1868,6 +1870,7 @@ describe("webhooks - issue_comment events", () => {
     const payload = {
       action: "created",
       comment: {
+        id: 12_345,
         body: "@detent/cli package was updated",
         user: { type: "Bot", login: "changeset-bot" },
       },
@@ -1893,10 +1896,11 @@ describe("webhooks - issue_comment events", () => {
     });
   });
 
-  it("ignores comments without @detent mention", async () => {
+  it("ignores comments without @detentsh mention", async () => {
     const payload = {
       action: "created",
       comment: {
+        id: 12_345,
         body: "This is a regular comment without any mention",
         user: { type: "User", login: "test-user" },
       },
@@ -1918,7 +1922,7 @@ describe("webhooks - issue_comment events", () => {
     expect(res.status).toBe(200);
     expect(json).toEqual({
       message: "ignored",
-      reason: "no @detent mention",
+      reason: "no @detentsh mention",
     });
   });
 });

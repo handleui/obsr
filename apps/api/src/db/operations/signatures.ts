@@ -1,3 +1,5 @@
+// biome-ignore lint/performance/noNamespaceImport: Sentry SDK official pattern
+import * as Sentry from "@sentry/cloudflare";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Database } from "../client";
 import { errorOccurrences, errorSignatures } from "../schema";
@@ -290,6 +292,18 @@ export const bulkUpsertSignaturesAndOccurrences = async (
 
   // SECURITY: Filter out errors with invalid fingerprints
   const validErrors = errors.filter((e) => isValidFingerprint(e.fingerprint));
+  const filteredCount = errors.length - validErrors.length;
+
+  // Capture filtered fingerprints for observability
+  if (filteredCount > 0) {
+    Sentry.captureMessage(
+      `Filtered ${filteredCount} invalid fingerprints during signature upsert`,
+      {
+        level: "warning",
+        extra: { totalErrors: errors.length, validErrors: validErrors.length },
+      }
+    );
+  }
 
   if (validErrors.length === 0) {
     return fingerprintToId;

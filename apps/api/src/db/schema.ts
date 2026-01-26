@@ -657,6 +657,9 @@ export const heals = pgTable(
     autofixSource: varchar("autofix_source", { length: 64 }), // e.g., "biome", "eslint"
     autofixCommand: varchar("autofix_command", { length: 500 }),
 
+    // User instructions (from @detentsh <instructions> command)
+    userInstructions: text("user_instructions"),
+
     // AI heal specific
     healResult: jsonb("heal_result").$type<{
       model?: string;

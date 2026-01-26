@@ -1,5 +1,10 @@
 import { deleteComment, listIssueComments } from "./github/comments";
 
+// Deduplication runs in waitUntil (background) so we can use parallel deletion
+// for better performance without blocking the response.
+// Note: deleteAndPostComment in github/comments.ts uses sequential deletion
+// because it runs in the main request path where simplicity is preferred.
+
 interface DeduplicatePrCommentsOptions {
   token: string;
   owner: string;
@@ -44,10 +49,20 @@ export const deduplicatePrComments = async (
     (comment) => comment.id !== keepCommentId
   );
 
+  // Delete in parallel since this runs in background (waitUntil)
+  // Use allSettled to continue even if some deletions fail
+  const results = await Promise.allSettled(
+    commentsToDelete.map((comment) =>
+      deleteComment(token, owner, repo, comment.id)
+    )
+  );
+
   let deletedCount = 0;
-  for (const comment of commentsToDelete) {
-    await deleteComment(token, owner, repo, comment.id);
-    deletedCount += 1;
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      deletedCount += 1;
+    }
+    // Failures are expected (404 = already deleted, race condition)
   }
 
   return { deletedCount };

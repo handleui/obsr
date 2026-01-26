@@ -28,6 +28,7 @@ interface OrchestrationContext {
     fixable?: boolean;
   }>;
   orgSettings: OrganizationSettings;
+  userInstructions?: string;
 }
 
 interface PartialFailure {
@@ -121,8 +122,16 @@ const classifyError = (
 export const orchestrateHeals = async (
   ctx: OrchestrationContext
 ): Promise<OrchestrationResult> => {
-  const { env, projectId, runId, commitSha, prNumber, errors, orgSettings } =
-    ctx;
+  const {
+    env,
+    projectId,
+    runId,
+    commitSha,
+    prNumber,
+    errors,
+    orgSettings,
+    userInstructions,
+  } = ctx;
 
   // Check if autofix is enabled
   if (!orgSettings.autofixEnabled) {
@@ -252,6 +261,7 @@ export const orchestrateHeals = async (
           autofixSource: config.source,
           autofixCommand: config.command,
           commitMessage,
+          userInstructions,
         });
 
         healIds.push(healId);

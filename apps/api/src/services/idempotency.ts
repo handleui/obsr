@@ -806,7 +806,7 @@ export const releaseHealCreationLock = async (
 // ============================================================================
 // Heal Command Lock
 // ============================================================================
-// Prevents race conditions when two @detent heal commands are posted
+// Prevents race conditions when two @detentsh heal commands are posted
 // simultaneously on the same PR. This ensures only one heal orchestration
 // runs at a time per PR, preventing duplicate heals even when the
 // existingHeals DB check has a race window.
@@ -864,7 +864,7 @@ const buildHealCommandLockKey = (projectId: string, prNumber: number): string =>
   `${HEAL_COMMAND_LOCK_PREFIX}:${projectId}:${prNumber}`;
 
 /**
- * Attempts to acquire a lock for the @detent heal command on a specific PR.
+ * Attempts to acquire a lock for the @detentsh heal command on a specific PR.
  * This prevents race conditions when multiple heal commands are posted
  * simultaneously, ensuring only one orchestration runs at a time.
  */

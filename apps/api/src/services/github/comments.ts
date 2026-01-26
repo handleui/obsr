@@ -365,8 +365,25 @@ export const updateCommentToPassingState = async (
 // ============================================================================
 // Delete and Post Comment
 // ============================================================================
-// Deletes the existing Detent comment (if any) and posts a new one.
-// This keeps the comment near the bottom of the PR conversation.
+// Deletes ALL previous Detent comments and posts a new one.
+// This ensures a clean slate on each new CI run.
+//
+// Performance analysis:
+// - API calls: 1 list (paginated) + N deletes + 1 post = O(N+2) calls
+// - Typical case: 1-3 app comments per PR, so overhead is minimal
+// - Pagination: listIssueComments handles 100+ comments via pagination
+//
+// Rate limits (GitHub REST API):
+// - Primary: 5,000 requests/hour (authenticated)
+// - Secondary: 900 points/min, 100 concurrent requests max
+// - DELETE requests don't count toward content-generation limits (80/min)
+//
+// Design decisions:
+// - Sequential deletion: Used here because this runs in the main request path.
+//   Keeping it sequential simplifies error handling and avoids potential race
+//   conditions. Note: comment-dedup.ts uses parallel deletion because it runs
+//   in waitUntil (background), where parallel execution is acceptable.
+// - Error handling: Continue on delete failure (comment may be already deleted)
 
 export interface DeleteAndPostCommentContext {
   github: GitHubCommentClient;
@@ -378,6 +395,7 @@ export interface DeleteAndPostCommentContext {
   repository: string;
   prNumber: number;
   commentBody: string;
+  appId: number;
 }
 
 export const deleteAndPostComment = async (
@@ -393,31 +411,49 @@ export const deleteAndPostComment = async (
     repository,
     prNumber,
     commentBody,
+    appId,
   } = ctx;
 
-  // Get existing comment ID
-  let existingCommentId = await getStoredCommentId(kv, repository, prNumber);
+  // Delete ALL Detent comments on this PR (not just the stored one)
+  // This ensures we clear orphaned comments from retries, race conditions, etc.
+  if (Number.isInteger(appId) && appId > 0) {
+    const comments = await listIssueComments(token, owner, repo, prNumber);
+    const appComments = comments.filter(
+      (comment) => comment.performed_via_github_app?.id === appId
+    );
 
-  if (!existingCommentId) {
-    const dbCommentId = await getCommentIdFromDb(db, repository, prNumber);
-    if (dbCommentId) {
-      existingCommentId = Number.parseInt(dbCommentId, 10);
+    let deletedCount = 0;
+    let failedCount = 0;
+    for (const comment of appComments) {
+      try {
+        await deleteComment(token, owner, repo, comment.id);
+        deletedCount += 1;
+      } catch (error) {
+        // Continue on delete errors - comment may already be deleted by concurrent request
+        // or user may have deleted it manually
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        const is404 = errorMsg.includes("404");
+        if (!is404) {
+          console.log(`[comment] Delete failed for ${comment.id}: ${errorMsg}`);
+        }
+        failedCount += 1;
+      }
     }
-  }
 
-  // Delete existing comment if present (ignore errors - comment may already be gone)
-  if (existingCommentId) {
-    try {
-      await deleteComment(token, owner, repo, existingCommentId);
+    if (deletedCount > 0 || failedCount > 0) {
       console.log(
-        `[comment] Deleted comment ${existingCommentId} on PR #${prNumber}`
-      );
-    } catch (error) {
-      // Ignore delete errors - comment may already be deleted
-      console.log(
-        `[comment] Could not delete comment ${existingCommentId}: ${error instanceof Error ? error.message : String(error)}`
+        `[comment] Cleanup: deleted=${deletedCount} failed=${failedCount} on PR #${prNumber}`
       );
     }
+  } else {
+    // SECURITY: Log warning if appId is invalid - this could leave orphaned comments
+    // The appId comes from GITHUB_APP_ID env var. If misconfigured, we skip app-based
+    // filtering but still proceed with posting. This is intentional to avoid breaking
+    // functionality, but the warning helps operators identify the misconfiguration.
+    console.warn(
+      `[comment] Invalid appId (${appId}) - skipping orphaned comment cleanup for PR #${prNumber}. ` +
+        "Check GITHUB_APP_ID environment variable."
+    );
   }
 
   // Post new comment
@@ -429,7 +465,7 @@ export const deleteAndPostComment = async (
     commentBody
   );
 
-  // Store new comment ID
+  // Store new comment ID for future updates
   await storeCommentId(kv, repository, prNumber, newCommentId);
   await upsertCommentIdInDb(db, repository, prNumber, String(newCommentId));
 

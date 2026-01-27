@@ -12,78 +12,13 @@ permissions:
     paths:
       - packages/sdk/.speakeasy/gen.lock
   workflow_dispatch: {}
-
 jobs:
-  release:
-    name: Create Github Release
-    runs-on: ubuntu-latest
-    outputs:
-      publish_typescript: ${{ steps.release.outputs.publish_typescript }}
-      typescript_directory: ${{ steps.release.outputs.typescript_directory }}
-    steps:
-      - name: Tune GitHub-hosted runner network
-        uses: smorimoto/tune-github-hosted-runner-network@v1
-      - uses: actions/checkout@v4
-      - name: Checkout sdk-generation-action
-        uses: actions/checkout@v4
-        with:
-          repository: speakeasy-api/sdk-generation-action
-          ref: v15
-          path: _speakeasy
-      - id: release
-        uses: ./_speakeasy
-        with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
-          action: release
-          speakeasy_api_key: ${{ secrets.SPEAKEASY_API_KEY }}
-          working_directory: packages/sdk
-          target: detent
-
   publish:
-    name: Publish Typescript SDK
-    runs-on: ubuntu-latest
-    needs: release
-    if: ${{ needs.release.outputs.publish_typescript == 'true' }}
-    defaults:
-      run:
-        working-directory: ${{ needs.release.outputs.typescript_directory }}
-    steps:
-      - name: Tune GitHub-hosted runner network
-        uses: smorimoto/tune-github-hosted-runner-network@v1
-      - uses: actions/checkout@v4
-      - name: Checkout sdk-generation-action
-        uses: actions/checkout@v4
-        with:
-          repository: speakeasy-api/sdk-generation-action
-          ref: v15
-          path: _speakeasy
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          registry-url: "https://registry.npmjs.org"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        run: pnpm run build
-
-      - name: Publish to npm
-        run: npm publish --access public
-
-      - id: publish-event
-        uses: ./_speakeasy
-        if: always()
-        with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
-          action: publish-event
-          speakeasy_api_key: ${{ secrets.SPEAKEASY_API_KEY }}
-          working_directory: ${{ needs.release.outputs.typescript_directory }}
-          target: detent
-          registry_name: npm
+    uses: speakeasy-api/sdk-generation-action/.github/workflows/sdk-publish.yaml@v15
+    with:
+      target: detent
+      working_directory: packages/sdk
+    secrets:
+      github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      npm_token: ${{ secrets.NPM_TOKEN }}
+      speakeasy_api_key: ${{ secrets.SPEAKEASY_API_KEY }}

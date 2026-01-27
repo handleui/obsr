@@ -7,6 +7,7 @@
  * - Explicit flush before exit to ensure events are sent
  */
 
+import { scrubEvent } from "@detent/sentry";
 import { isProduction } from "./env.js";
 
 // Lazily loaded Sentry module
@@ -67,13 +68,12 @@ export const initSentry = (): Promise<void> => {
         scope.setTag("arch", process.arch);
         return scope;
       },
-      // Filter out known non-actionable errors
       beforeSend: (event) => {
         // Don't report user-initiated exits
         if (event.exception?.values?.[0]?.type === "ExitError") {
           return null;
         }
-        return event;
+        return scrubEvent(event);
       },
     });
 

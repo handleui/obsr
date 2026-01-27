@@ -7,6 +7,8 @@ const nextConfig: NextConfig = {
   experimental: {
     authInterrupts: true,
   },
+  // Transpile workspace packages that export source TypeScript
+  transpilePackages: ["@detent/sentry"],
 };
 
 const configWithBetterStack = withBetterStack(nextConfig);

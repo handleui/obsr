@@ -19,6 +19,7 @@
   "dependencies": {
     "@detent/git": "*",
     "@detent/healing": "*",
+    "@detent/sentry": "workspace:*",
     "@detent/types": "*",
     "@handleui/shimmer": "^0.1.0",
     "@sentry/node": "^9.0.0",

@@ -22,6 +22,7 @@
     "@detent/diagnostics": "*",
     "@detent/healing": "*",
     "@detent/lore": "*",
+    "@detent/sentry": "workspace:*",
     "@detent/sandbox": "*",
     "@detent/types": "*",
     "@hono/zod-openapi": "^1.2.0",

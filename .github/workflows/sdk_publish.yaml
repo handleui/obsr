@@ -76,8 +76,6 @@ jobs:
         run: bun run build
 
       - name: Publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           VERSION=$(bun -e "console.log(require('./package.json').version)")
           echo "Detected version: $VERSION"

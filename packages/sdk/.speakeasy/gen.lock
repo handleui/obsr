@@ -1,0 +1,193 @@
+lockVersion: 2.0.0
+id: ea3edbd5-abf0-4dbd-a1e2-bdf00336cfe8
+management: {}
+trackedFiles:
+  .devcontainer/README.md:
+    last_write_checksum: sha1:b6564d2a7c8ae764fff6d1b4666dcd787210a000
+  .devcontainer/devcontainer.json:
+    last_write_checksum: sha1:d0b15193202c961e7d1875864ddb15f9d17c84dd
+  .devcontainer/setup.sh:
+    last_write_checksum: sha1:515bbaec6b3f87ea2db55af229fc052732aa7dd0
+  .gitattributes:
+    last_write_checksum: sha1:26d16d8297b104945139da8c25bd38feeaad3e25
+  .npmignore:
+    last_write_checksum: sha1:3d5eb92f81539175db1ff0280e0aefbdd701f200
+  FUNCTIONS.md:
+    last_write_checksum: sha1:8d0af6ba219a4bc73c97da697b5f49cea2b6ced1
+  RUNTIMES.md:
+    last_write_checksum: sha1:e45b854f02c357cbcfdb8c3663000e8339e16505
+  USAGE.md:
+    last_write_checksum: sha1:63d2d19336fae63b3786912e552339d5e15db0f7
+  docs/lib/utils/retryconfig.md:
+    last_write_checksum: sha1:bc4454e196fcd219f5a78da690375a884f5ed07b
+  docs/models/detected-tool.md:
+    last_write_checksum: sha1:1c4514e6d19f1f79db3f521393d4c6fe945d2dd0
+  docs/models/diagnostic-lite.md:
+    last_write_checksum: sha1:920b04a85b641ba9dfc93dba2e28f214a9d5b38d
+  docs/models/diagnostic-summary.md:
+    last_write_checksum: sha1:4a755dce5749abe0a9ec0e370f4654c08406876a
+  docs/models/diagnostic.md:
+    last_write_checksum: sha1:f6e0645ade4fabaddcdcc858db34231fb16c4323
+  docs/models/diagnostics-request.md:
+    last_write_checksum: sha1:c5415d78701b2df5514e52e94c4fde7fc5950b4d
+  docs/models/diagnostics-response-full.md:
+    last_write_checksum: sha1:693f2efa8b51bc636363b7f8bea550009f5feb54
+  docs/models/diagnostics-response-lite.md:
+    last_write_checksum: sha1:88ccc8ad609b7ec002325152d9f9181242335d75
+  docs/models/diagnostics-response.md:
+    last_write_checksum: sha1:9335f7d3868aace04a64a56a6bcdade70a9e7afe
+  docs/models/errors/error-response.md:
+    last_write_checksum: sha1:8c7d4aee194bae28cbc259cdc6b88e49c886129f
+  docs/models/errors/rate-limit-error.md:
+    last_write_checksum: sha1:dce251c511a933e299eb2da5421b6e2c81a30cd2
+  docs/models/mode-enum.md:
+    last_write_checksum: sha1:5df2310b9b2a6d9e2dcb0249b67c4452ad341d93
+  docs/models/severity.md:
+    last_write_checksum: sha1:c7ab2f2ac3e20bed09187b8b8f796157f9d2a84d
+  docs/sdks/diagnostics/README.md:
+    last_write_checksum: sha1:036227f413d2a1fcf6f1f230d417668a42273696
+  eslint.config.mjs:
+    last_write_checksum: sha1:9398f326377fe47f67af2df6eb6370750c0790b4
+  examples/.env.template:
+    last_write_checksum: sha1:b9f4e12bc53ddbb0abd56bf3d470e5084a58316c
+  examples/README.md:
+    last_write_checksum: sha1:c35796dca777dbc2451f3e5e57ad5207605babf6
+  examples/diagnosticsPostV1Diagnostics.example.ts:
+    last_write_checksum: sha1:4d43cacd9594b84a53dd37c68f0f3be00a38198e
+  examples/package.json:
+    last_write_checksum: sha1:17d0c096ee434766228032f995eb4af2e38d6406
+  jsr.json:
+    last_write_checksum: sha1:2022d1a14ca182ef95da6328419cc152b2730a82
+  package.json:
+    last_write_checksum: sha1:a7c8ef6172f3afe73b7680a3bb2525b166e56f86
+  src/core.ts:
+    last_write_checksum: sha1:4398c152c4ed9ab4ed95dbf8a2816ac50c6b56b1
+  src/funcs/diagnostics-post-v1-diagnostics.ts:
+    last_write_checksum: sha1:e98f73daab67ffceeb330d7562d64e9e3cae749a
+  src/hooks/hooks.ts:
+    last_write_checksum: sha1:7dd975bbcc46a32dd394f86a4652b74ecc70d874
+  src/hooks/index.ts:
+    last_write_checksum: sha1:1a11c073a6cd792932218e1d4ed36b8567bad8ef
+  src/hooks/types.ts:
+    last_write_checksum: sha1:27a3444c4839bec58ae89820fd8c2483edafc3f4
+  src/index.ts:
+    last_write_checksum: sha1:35c9cde3ae14b18b3f893a1afe8b6c44f8760f24
+  src/lib/base64.ts:
+    last_write_checksum: sha1:8c94164f2f78e6041c853186fa01f659591f5913
+  src/lib/config.ts:
+    last_write_checksum: sha1:89b3ddfc142cf06a0d48e51609828916dc685b74
+  src/lib/dlv.ts:
+    last_write_checksum: sha1:1dd3e3fbb4550c4bf31f5ef997faff355d6f3250
+  src/lib/encodings.ts:
+    last_write_checksum: sha1:7b206b995d985c9c1c89856a23346cf87c22d374
+  src/lib/env.ts:
+    last_write_checksum: sha1:fce28dbf7469a52091d2abda8778f876005f723f
+  src/lib/files.ts:
+    last_write_checksum: sha1:d0f325f445b8d22e7d73baf052c585ec2dd24841
+  src/lib/http.ts:
+    last_write_checksum: sha1:797cbf16d3c7c4d62d3ba0eedb08617524938457
+  src/lib/is-plain-object.ts:
+    last_write_checksum: sha1:df687f25a9590b6fd95d39df41a652ae3fd4e517
+  src/lib/logger.ts:
+    last_write_checksum: sha1:0ec9d3a2a34c362746b767e4f9a746c055d57a7b
+  src/lib/matchers.ts:
+    last_write_checksum: sha1:b25210e49abd948a9cd78ced433eb240fb3fb255
+  src/lib/primitives.ts:
+    last_write_checksum: sha1:987869fc54790b9c22e9182099103d6aa7c67016
+  src/lib/retries.ts:
+    last_write_checksum: sha1:f3da74dffcbe2756c69393f8600205aa1dc06e68
+  src/lib/schemas.ts:
+    last_write_checksum: sha1:b4b5fd22340ebd5b2914ee7b177c797b28fba7ef
+  src/lib/sdks.ts:
+    last_write_checksum: sha1:2de81aa6ef055e2d34f83a029d4821344266b6a2
+  src/lib/security.ts:
+    last_write_checksum: sha1:d5a03cc3a47e31c557c6f0b5a7567a9aa2c17978
+  src/lib/url.ts:
+    last_write_checksum: sha1:d124050c7e755c0cce233b9e029afb584ff65201
+  src/models/detected-tool.ts:
+    last_write_checksum: sha1:6855e9c1705d50a5291980ea67a7ec22dba93e26
+  src/models/diagnostic-lite.ts:
+    last_write_checksum: sha1:9eeafc42d1c1343f6b3a4c3a3a159be2302beadc
+  src/models/diagnostic-summary.ts:
+    last_write_checksum: sha1:9923b4eeeb07b1b335794169c1da741045e6aafc
+  src/models/diagnostic.ts:
+    last_write_checksum: sha1:092565208b62dcde83df1cab445f79fcdc6acbdb
+  src/models/diagnostics-request.ts:
+    last_write_checksum: sha1:6dd6db9b035042e4aa22766414778340cb5a9285
+  src/models/diagnostics-response-full.ts:
+    last_write_checksum: sha1:3be3a3f8bbafbc4239b5a799615bf6f259d6d3c9
+  src/models/diagnostics-response-lite.ts:
+    last_write_checksum: sha1:a5bc5b519f09d2c8ffac868352a45bff675c97af
+  src/models/diagnostics-response.ts:
+    last_write_checksum: sha1:61b1f6e17e06fa6a6772ccd061d05fed58b1b68b
+  src/models/errors/detent-default-error.ts:
+    last_write_checksum: sha1:5d746f33152d62d4e7535f28e756cf8c61a2286e
+  src/models/errors/detent-error.ts:
+    last_write_checksum: sha1:4ba311229f79f92030d7aa2e83c4f44277487761
+  src/models/errors/error-response.ts:
+    last_write_checksum: sha1:0bbbbf2218b455e7e9b4acf5acf134b541cdf267
+  src/models/errors/http-client-errors.ts:
+    last_write_checksum: sha1:994ced121c54fecd0af038ccfb7855fbfd3868ec
+  src/models/errors/index.ts:
+    last_write_checksum: sha1:44ea3a118d18e6c44b10bb74b9218abc9ea3bf90
+  src/models/errors/rate-limit-error.ts:
+    last_write_checksum: sha1:f9486668557ed7b1c367a515f2fdae48d8a23374
+  src/models/errors/response-validation-error.ts:
+    last_write_checksum: sha1:6c4e0dd938eceb1dfa4cd4eeaaf7a2cc9d84fc38
+  src/models/errors/sdk-validation-error.ts:
+    last_write_checksum: sha1:92771987c251f02fd86cfd824a3be709cd3c2837
+  src/models/index.ts:
+    last_write_checksum: sha1:e47e39ad8151255fbcad26fcb0cad2db36b6b9bc
+  src/models/mode-enum.ts:
+    last_write_checksum: sha1:3b0655e251c9a9ee1060d64946275b1a41bb3528
+  src/models/severity.ts:
+    last_write_checksum: sha1:86f64eacea3c5604e09f60add34b12dc49165bab
+  src/sdk/diagnostics.ts:
+    last_write_checksum: sha1:51a3043cced640d64f8a61e3432102646f2059c1
+  src/sdk/index.ts:
+    last_write_checksum: sha1:ed6d64f2a6135349aa8498b8d8cff9ba85c7fb8f
+  src/sdk/sdk.ts:
+    last_write_checksum: sha1:24bbf37d6982200de5d17a59e4b9502f41bb467c
+  src/types/async.ts:
+    last_write_checksum: sha1:3ff07b3feaf390ec1aeb18ff938e139c6c4a9585
+  src/types/blobs.ts:
+    last_write_checksum: sha1:fd681458b532138913c372b05b3e16407abaa7a1
+  src/types/const-date-time.ts:
+    last_write_checksum: sha1:ce05316b31b373401875d5e962d63d2422e09cf2
+  src/types/default-to-zero-value.ts:
+    last_write_checksum: sha1:2820c0bc8e71d475e79cc6b6947ca18d93f6310c
+  src/types/discriminated-union.ts:
+    last_write_checksum: sha1:06d1dfd89ad24e907e2ba49ea8d73ce48f3d486f
+  src/types/enums.ts:
+    last_write_checksum: sha1:d7d0ffad0c128a11c5feb1f0ae8f3b507ee03c14
+  src/types/fp.ts:
+    last_write_checksum: sha1:d24994d58f37a1ca106847fcc6d2e976c6f1c093
+  src/types/index.ts:
+    last_write_checksum: sha1:a591fec0ad2231615101ebb6a95cc4d043733a6c
+  src/types/operations.ts:
+    last_write_checksum: sha1:c49e724cfb1259296381cb57bc0fcdd2eae45865
+  src/types/primitives.ts:
+    last_write_checksum: sha1:7bdf6c790bdbcb8e369088557c42878f5270a701
+  src/types/rfcdate.ts:
+    last_write_checksum: sha1:8e5f382e02fe21c2f2e24deb1b7bbf8cddd3dd16
+  src/types/smart-union.ts:
+    last_write_checksum: sha1:ae1574ecd384d1bffd08c13a75f3fe5b0edcfe35
+  src/types/streams.ts:
+    last_write_checksum: sha1:cc9ced2dd34a76c3a1bd7784ccda1cc3b37ab9a9
+  src/types/unrecognized.ts:
+    last_write_checksum: sha1:d33ac686528492f4cdc0dbf81ed343b4afe020fe
+  tsconfig.json:
+    last_write_checksum: sha1:c3ec7996536cdb9a54319e7d1eb3b199b733d34c
+examples:
+  post_/v1/diagnostics:
+    speakeasy-default-post-/v1-/diagnostics:
+      requestBody:
+        application/json: {"content": "src/app.ts:10:5 - error TS2304: Cannot find name 'foo'", "mode": "full"}
+      responses:
+        "200":
+          application/json: {"mode": "lite", "detected_tool": "typescript", "diagnostics": [{"message": "Cannot find name 'foo'", "file_path": "src/app.ts", "line": 10, "column": 5}], "truncated": false}
+        "400":
+          application/json: {"error": "content must be a string"}
+        "429":
+          application/json: {"error": "Rate limit exceeded", "retryAfter": 1706300000}
+examplesVersion: 1.0.2

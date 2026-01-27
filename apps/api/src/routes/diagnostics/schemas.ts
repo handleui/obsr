@@ -39,11 +39,11 @@ export const DiagnosticSchema = z
       description: "File path where the issue occurred",
       example: "src/app.ts",
     }),
-    line: z.number().int().positive().optional().openapi({
+    line: z.number().int().min(1).optional().openapi({
       description: "Line number (1-indexed)",
       example: 10,
     }),
-    column: z.number().int().positive().optional().openapi({
+    column: z.number().int().min(1).optional().openapi({
       description: "Column number (1-indexed)",
       example: 5,
     }),
@@ -76,11 +76,11 @@ export const DiagnosticLiteSchema = z
       description: "File path where the issue occurred",
       example: "src/app.ts",
     }),
-    line: z.number().int().positive().optional().openapi({
+    line: z.number().int().min(1).optional().openapi({
       description: "Line number (1-indexed)",
       example: 10,
     }),
-    column: z.number().int().positive().optional().openapi({
+    column: z.number().int().min(1).optional().openapi({
       description: "Column number (1-indexed)",
       example: 5,
     }),

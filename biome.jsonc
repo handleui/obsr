@@ -5,6 +5,9 @@
     "ultracite/biome/react",
     "ultracite/biome/next"
   ],
+  "files": {
+    "includes": ["!packages/sdk"]
+  },
   "overrides": [
     {
       "includes": ["packages/*/src/index.ts", "packages/*/src/*/index.ts"],

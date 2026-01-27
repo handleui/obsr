@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/detent-sh/phoenix",
+    "url": "https://github.com/detentsh/detent",
     "directory": "packages/diagnostics"
   },
   "sideEffects": false,

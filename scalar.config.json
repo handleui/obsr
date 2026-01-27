@@ -141,7 +141,7 @@
   "references": [
     {
       "name": "API Reference",
-      "path": "packages/sdk/.speakeasy/out.openapi.yaml"
+      "path": "https://backend.detent.sh/openapi.json"
     }
   ]
 }

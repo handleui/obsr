@@ -1,5 +1,12 @@
 # @detent/cli
 
+## [1.2.0](https://github.com/detentsh/detent/compare/cli-v1.1.0...cli-v1.2.0) (2026-01-27)
+
+
+### Features
+
+* extract sentry utilities into workspace package ([#148](https://github.com/detentsh/detent/issues/148)) ([7b9060a](https://github.com/detentsh/detent/commit/7b9060a00f72fba3cdc4d59c48e4705cc2b4d0d4))
+
 ## [1.1.0](https://github.com/detentsh/detent/compare/cli-v1.0.0...cli-v1.1.0) (2026-01-26)
 
 

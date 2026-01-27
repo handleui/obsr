@@ -77,7 +77,8 @@ app.openAPIRegistry.registerComponent("securitySchemes", "apiKey", {
   type: "apiKey",
   in: "header",
   name: "X-Detent-Token",
-  description: "Detent API key (dtk_*) for CI/CD and machine-to-machine access",
+  description:
+    "Detent API key (dtk_*) for CI/CD and machine-to-machine access. [Get your API key →](https://navigator.detent.sh/settings/api-keys)",
 });
 
 // Apply IP-based rate limiting to all routes in this router

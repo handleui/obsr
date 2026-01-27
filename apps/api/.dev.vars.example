@@ -17,7 +17,7 @@ WORKOS_API_KEY=your_workos_api_key
 
 # Neon database (dev branch, direct connection)
 DATABASE_URL=postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/dbname?sslmode=require
-WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/dbname?sslmode=require
+CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/dbname?sslmode=require
 
 # Upstash Redis for rate limiting
 UPSTASH_REDIS_REST_URL=your_upstash_url

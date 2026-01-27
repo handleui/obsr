@@ -191,7 +191,7 @@
     },
     "packages/diagnostics": {
       "name": "@detent/diagnostics",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "devDependencies": {
         "@detent/typescript-config": "*",
         "@types/node": "^22.0.0",

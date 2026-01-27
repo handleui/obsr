@@ -21,10 +21,10 @@ export default async function Page(props: PageProps) {
     notFound();
   }
 
-  const MDX = page.data.body;
+  const { body: MDX, toc } = await page.data.load();
 
   return (
-    <DocsPage full={page.data.full} toc={page.data.toc}>
+    <DocsPage full={page.data.full} toc={toc}>
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
       <DocsBody>

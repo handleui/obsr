@@ -64,6 +64,22 @@ Returns parsed diagnostics with file locations, severity, and tool-specific meta
 
 const app = new OpenAPIHono<{ Bindings: Env }>();
 
+// Register security schemes for OpenAPI spec
+app.openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", {
+  type: "http",
+  scheme: "bearer",
+  bearerFormat: "JWT",
+  description:
+    "WorkOS access token obtained after login via navigator.detent.sh",
+});
+
+app.openAPIRegistry.registerComponent("securitySchemes", "apiKey", {
+  type: "apiKey",
+  in: "header",
+  name: "X-Detent-Token",
+  description: "Detent API key (dtk_*) for CI/CD and machine-to-machine access",
+});
+
 // Apply IP-based rate limiting to all routes in this router
 app.use("*", publicRateLimitMiddleware);
 

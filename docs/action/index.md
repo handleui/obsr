@@ -7,26 +7,30 @@ The Detent action runs at the end of your CI job to collect structured error dat
 
 ## What It Does
 
-<CardGroup cols={2}>
-  <Card title="Detects Errors" icon="magnifying-glass">
-    Finds JSON outputs from ESLint, Vitest, golangci-lint, Cargo
-  </Card>
-  <Card title="Extracts Context" icon="code">
-    Reads source code around each error for AI context
-  </Card>
-  <Card title="Reports to API" icon="paper-plane">
-    Sends structured data (not logs) to Detent backend
-  </Card>
-  <Card title="Enables Healing" icon="wand-magic-sparkles">
-    Powers automatic fix suggestions and PR comments
-  </Card>
-</CardGroup>
+::::scalar-row
+:::scalar-card{ icon="solid/basic-magnifier" title="Detects Errors" }
+Finds JSON outputs from ESLint, Vitest, golangci-lint, Cargo
+:::
+
+:::scalar-card{ icon="solid/programming-code" title="Extracts Context" }
+Reads source code around each error for AI context
+:::
+
+:::scalar-card{ icon="solid/basic-send" title="Reports to API" }
+Sends structured data (not logs) to Detent backend
+:::
+
+:::scalar-card{ icon="solid/basic-magic-wand" title="Enables Healing" }
+Powers automatic fix suggestions and PR comments
+:::
+::::
 
 ## Installation
 
 Add the action as the final step in your workflow jobs:
 
-```yaml .github/workflows/ci.yml
+```yaml
+# .github/workflows/ci.yml
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -42,9 +46,9 @@ jobs:
         if: always()
 ```
 
-<Warning>
+:::scalar-callout{type="warning"}
 The action must run with `if: always()` to capture errors from failed steps.
-</Warning>
+:::
 
 ## Performance Impact
 
@@ -69,51 +73,55 @@ For typical projects, this is **less than 1% of job duration**.
 
 The action auto-detects JSON outputs from these tools:
 
-<Tabs>
-  <Tab title="ESLint">
-    Enable JSON output in your lint command:
+::::scalar-tabs
+:::scalar-tab{ title="ESLint" }
+Enable JSON output in your lint command:
 
-    ```bash
-    eslint . --format json --output-file eslint-report.json
-    ```
+```bash
+eslint . --format json --output-file eslint-report.json
+```
 
-    Or in your workflow:
+Or in your workflow:
 
-    ```yaml
-    - run: npm run lint -- --format json --output-file eslint-report.json
-    ```
-  </Tab>
-  <Tab title="Vitest">
-    Enable the JSON reporter in your config:
+```yaml
+- run: npm run lint -- --format json --output-file eslint-report.json
+```
+:::
 
-    ```typescript vitest.config.ts
-    import { defineConfig } from 'vitest/config'
+:::scalar-tab{ title="Vitest" }
+Enable the JSON reporter in your config:
 
-    export default defineConfig({
-      test: {
-        reporters: ['default', 'json'],
-        outputFile: 'vitest.json'
-      }
-    })
-    ```
-  </Tab>
-  <Tab title="golangci-lint">
-    Output to JSON format:
+```typescript
+// vitest.config.ts
+import { defineConfig } from 'vitest/config'
 
-    ```bash
-    golangci-lint run --out-format json > golangci-lint.json
-    ```
-  </Tab>
-  <Tab title="Cargo">
-    Use JSON message format:
+export default defineConfig({
+  test: {
+    reporters: ['default', 'json'],
+    outputFile: 'vitest.json'
+  }
+})
+```
+:::
 
-    ```bash
-    cargo build --message-format=json 2>&1 | tee cargo-output.json
-    ```
+:::scalar-tab{ title="golangci-lint" }
+Output to JSON format:
 
-    Or set the `CARGO_STDOUT` environment variable with the JSON output.
-  </Tab>
-</Tabs>
+```bash
+golangci-lint run --out-format json > golangci-lint.json
+```
+:::
+
+:::scalar-tab{ title="Cargo" }
+Use JSON message format:
+
+```bash
+cargo build --message-format=json 2>&1 | tee cargo-output.json
+```
+
+Or set the `CARGO_STDOUT` environment variable with the JSON output.
+:::
+::::
 
 ### Detection Locations
 
@@ -137,7 +145,8 @@ The action sends **only structured error data**, never raw logs:
 | `errors[]` | See below | Parsed error details |
 | `codeSnippet` | 7 lines | Context for AI healing |
 
-<Accordion title="Full error structure">
+### Full Error Structure
+
 ```json
 {
   "message": "Type 'string' is not assignable to type 'number'",
@@ -161,7 +170,6 @@ The action sends **only structured error data**, never raw logs:
   }
 }
 ```
-</Accordion>
 
 ## Configuration
 
@@ -179,7 +187,8 @@ The action sends **only structured error data**, never raw logs:
 
 ### Full Example
 
-```yaml .github/workflows/ci.yml
+```yaml
+# .github/workflows/ci.yml
 name: CI
 on: [push, pull_request]
 
@@ -204,6 +213,6 @@ jobs:
         if: always()
 ```
 
-<Info>
+:::scalar-callout{type="info"}
 Using `continue-on-error: true` on lint/test steps ensures the Detent action runs even when checks fail, which is when you need error collection most.
-</Info>
+:::

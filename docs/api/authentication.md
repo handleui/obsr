@@ -49,42 +49,42 @@ This opens a browser for authentication and stores the token securely.
 
 For custom integrations:
 
-<Steps>
-  <Step title="Initiate Login">
-    Redirect users to the WorkOS authorization URL:
+::::scalar-steps
+:::scalar-step{ id="step-1" title="Initiate Login" }
+Redirect users to the WorkOS authorization URL:
 
-    ```
-    https://authkit.detent.sh/authorize?
-      client_id=YOUR_WORKOS_CLIENT_ID&
-      redirect_uri=YOUR_CALLBACK_URL&
-      response_type=code&
-      state=RANDOM_STATE
-    ```
-  </Step>
+```
+https://authkit.detent.sh/authorize?
+  client_id=YOUR_WORKOS_CLIENT_ID&
+  redirect_uri=YOUR_CALLBACK_URL&
+  response_type=code&
+  state=RANDOM_STATE
+```
+:::
 
-  <Step title="Handle Callback">
-    After login, WorkOS redirects to your callback URL with an authorization code:
+:::scalar-step{ id="step-2" title="Handle Callback" }
+After login, WorkOS redirects to your callback URL with an authorization code:
 
-    ```
-    https://your-app.com/callback?code=AUTH_CODE&state=RANDOM_STATE
-    ```
-  </Step>
+```
+https://your-app.com/callback?code=AUTH_CODE&state=RANDOM_STATE
+```
+:::
 
-  <Step title="Exchange Code">
-    Exchange the authorization code for tokens:
+:::scalar-step{ id="step-3" title="Exchange Code" }
+Exchange the authorization code for tokens:
 
-    ```bash
-    curl -X POST https://api.workos.com/user_management/authenticate \
-      -H "Content-Type: application/json" \
-      -d '{
-        "client_id": "YOUR_WORKOS_CLIENT_ID",
-        "client_secret": "YOUR_WORKOS_API_KEY",
-        "code": "AUTH_CODE",
-        "grant_type": "authorization_code"
-      }'
-    ```
-  </Step>
-</Steps>
+```bash
+curl -X POST https://api.workos.com/user_management/authenticate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_id": "YOUR_WORKOS_CLIENT_ID",
+    "client_secret": "YOUR_WORKOS_API_KEY",
+    "code": "AUTH_CODE",
+    "grant_type": "authorization_code"
+  }'
+```
+:::
+::::
 
 ## Using Tokens
 
@@ -180,9 +180,9 @@ Status: `401 Unauthorized`
 
 ## Security Best Practices
 
-<Warning>
+:::scalar-callout{type="warning"}
 Never expose JWT tokens in client-side code, URLs, or logs.
-</Warning>
+:::
 
 - Store tokens securely (system keychain, encrypted storage)
 - Use HTTPS for all API requests

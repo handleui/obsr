@@ -7,7 +7,8 @@ Detent works with GitHub Actions. Add our action to your workflow to collect err
 
 ## Basic Setup
 
-```yaml .github/workflows/ci.yml
+```yaml
+# .github/workflows/ci.yml
 name: CI
 on: [push, pull_request]
 

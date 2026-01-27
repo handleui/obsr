@@ -16,9 +16,9 @@ Projects link repositories to organizations in Detent.
 | `GET` | `/v1/projects/:id` | Get project details |
 | `DELETE` | `/v1/projects/:id` | Remove project |
 
-<Info>
+:::scalar-callout{type="info"}
 Full API reference with request/response schemas coming soon via OpenAPI.
-</Info>
+:::
 
 ## List Projects
 

@@ -12,9 +12,9 @@ Parse CI configurations and trigger AI-powered healing for failures.
 | `POST` | `/v1/parse` | Parse CI configuration file |
 | `POST` | `/v1/heal` | Request AI healing for errors |
 
-<Info>
+:::scalar-callout{type="info"}
 Full API reference with request/response schemas coming soon via OpenAPI.
-</Info>
+:::
 
 ## Parse CI Configuration
 

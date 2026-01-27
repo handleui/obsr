@@ -7,15 +7,19 @@ The Detent API enables programmatic access to CI management, healing, and organi
 
 ## Base URL
 
-<CodeGroup>
-```bash Cloud
+::::scalar-tabs
+:::scalar-tab{ title="Cloud" }
+```bash
 https://backend.detent.sh/v1
 ```
+:::
 
-```bash Self-Hosted
+:::scalar-tab{ title="Self-Hosted" }
+```bash
 https://your-domain.com/v1
 ```
-</CodeGroup>
+:::
+::::
 
 ## Authentication
 
@@ -81,20 +85,31 @@ X-RateLimit-Reset: 1704067200
 
 ## API Endpoints
 
-<CardGroup cols={2}>
-  <Card title="Authentication" icon="key" href="/api/authentication">
-    OAuth and token management
-  </Card>
-  <Card title="Webhooks" icon="webhook" href="/api/webhooks">
-    GitHub and GitLab webhooks
-  </Card>
-  <Card title="Projects" icon="folder" href="/api/repositories">
-    Project and repository management
-  </Card>
-  <Card title="Checks" icon="circle-check" href="/api/checks">
-    CI check execution and healing
-  </Card>
-</CardGroup>
+::::scalar-row
+:::scalar-card{ icon="solid/basic-key" title="Authentication" }
+OAuth and token management
+
+[View Docs →](/api/authentication)
+:::
+
+:::scalar-card{ icon="solid/basic-link" title="Webhooks" }
+GitHub and GitLab webhooks
+
+[View Docs →](/api/webhooks)
+:::
+
+:::scalar-card{ icon="solid/basic-folder" title="Projects" }
+Project and repository management
+
+[View Docs →](/api/repositories)
+:::
+
+:::scalar-card{ icon="solid/basic-check-circle" title="Checks" }
+CI check execution and healing
+
+[View Docs →](/api/checks)
+:::
+::::
 
 ## SDKs
 

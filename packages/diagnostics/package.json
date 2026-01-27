@@ -1,6 +1,6 @@
 {
   "name": "@detent/diagnostics",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "Parse CI tool output into structured diagnostics",
   "license": "MIT",

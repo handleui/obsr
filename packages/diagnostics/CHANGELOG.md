@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/detentsh/detent/compare/diagnostics-v1.0.0...diagnostics-v1.1.0) (2026-01-27)
+
+
+### Features
+
+* generated sdk ([7b391ba](https://github.com/detentsh/detent/commit/7b391ba0886c796d67a96fc9968f9810c94cdff2))
+
 ## 1.0.0 (2026-01-27)
 
 

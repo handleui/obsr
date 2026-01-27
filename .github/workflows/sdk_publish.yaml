@@ -58,10 +58,9 @@ jobs:
           ref: v15
           path: _speakeasy
 
-      - name: Set up bun
-        uses: oven-sh/setup-bun@v2
+      - uses: pnpm/action-setup@v4
         with:
-          bun-version: latest
+          version: 10
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -70,25 +69,13 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build
-        run: bun run build
+        run: pnpm run build
 
-      - name: Publish
-        run: |
-          VERSION=$(bun -e "console.log(require('./package.json').version)")
-          echo "Detected version: $VERSION"
-
-          if [[ "$VERSION" == *"-"* ]]; then
-            PRERELEASE=${VERSION#*-}
-            TAG=${PRERELEASE%%.*}
-            echo "Prerelease detected; publishing under dist-tag: $TAG"
-            npm publish --tag "$TAG" --access public
-          else
-            echo "Official release detected; publishing under 'latest'"
-            npm publish --access public
-          fi
+      - name: Publish to npm
+        run: npm publish --access public
 
       - id: publish-event
         uses: ./_speakeasy
@@ -97,3 +84,6 @@ jobs:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
           action: publish-event
           speakeasy_api_key: ${{ secrets.SPEAKEASY_API_KEY }}
+          working_directory: ${{ needs.release.outputs.typescript_directory }}
+          target: detent
+          registry_name: npm

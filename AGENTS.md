@@ -95,7 +95,7 @@ Biome handles all standard linting. These are project-specific deviations:
 
 ## Git
 
-- Conventional commits, header only, no description
+- Conventional commits, semver, make descriptions brief
 
 ## Plan Mode
 

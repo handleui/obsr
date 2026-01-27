@@ -1,7 +1,6 @@
 {
   "$schema": "https://cdn.scalar.com/schema/scalar-config.json",
   "subdomain": "detent",
-  "customDomain": "docs.detent.sh",
   "assetsDir": "docs/assets",
   "siteConfig": {
     "logo": {

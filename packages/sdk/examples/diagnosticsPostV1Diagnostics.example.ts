@@ -3,9 +3,7 @@
  */
 
 import dotenv from "dotenv";
-
 dotenv.config();
-
 /**
  * Example usage of the @detent/sdk SDK
  *

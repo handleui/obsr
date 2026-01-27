@@ -3,7 +3,7 @@
  */
 
 import { SDKHooks } from "../hooks/hooks.js";
-import type { HookContext } from "../hooks/types.js";
+import { HookContext } from "../hooks/types.js";
 import {
   ConnectionError,
   InvalidRequestError,
@@ -11,13 +11,9 @@ import {
   RequestTimeoutError,
   UnexpectedClientError,
 } from "../models/errors/http-client-errors.js";
-import { ERR, OK, type Result } from "../types/fp.js";
+import { ERR, OK, Result } from "../types/fp.js";
 import { stringToBase64 } from "./base64.js";
-import {
-  SDK_METADATA,
-  type SDKOptions,
-  serverURLFromOptions,
-} from "./config.js";
+import { SDK_METADATA, SDKOptions, serverURLFromOptions } from "./config.js";
 import { encodeForm } from "./encodings.js";
 import { env } from "./env.js";
 import {
@@ -28,9 +24,9 @@ import {
   matchContentType,
   matchStatusCode,
 } from "./http.js";
-import type { Logger } from "./logger.js";
-import { type RetryConfig, retry } from "./retries.js";
-import type { SecurityState } from "./security.js";
+import { Logger } from "./logger.js";
+import { retry, RetryConfig } from "./retries.js";
+import { SecurityState } from "./security.js";
 
 export type RequestOptions = {
   /**
@@ -74,15 +70,13 @@ type RequestConfig = {
 };
 
 const gt: unknown = typeof globalThis === "undefined" ? null : globalThis;
-const webWorkerLike =
-  typeof gt === "object" &&
-  gt != null &&
-  "importScripts" in gt &&
-  typeof gt["importScripts"] === "function";
-const isBrowserLike =
-  webWorkerLike ||
-  (typeof navigator !== "undefined" && "serviceWorker" in navigator) ||
-  (typeof window === "object" && typeof window.document !== "undefined");
+const webWorkerLike = typeof gt === "object"
+  && gt != null
+  && "importScripts" in gt
+  && typeof gt["importScripts"] === "function";
+const isBrowserLike = webWorkerLike
+  || (typeof navigator !== "undefined" && "serviceWorker" in navigator)
+  || (typeof window === "object" && typeof window.document !== "undefined");
 
 export class ClientSDK {
   readonly #httpClient: HTTPClient;
@@ -94,10 +88,10 @@ export class ClientSDK {
   constructor(options: SDKOptions = {}) {
     const opt = options as unknown;
     if (
-      typeof opt === "object" &&
-      opt != null &&
-      "hooks" in opt &&
-      opt.hooks instanceof SDKHooks
+      typeof opt === "object"
+      && opt != null
+      && "hooks" in opt
+      && opt.hooks instanceof SDKHooks
     ) {
       this.#hooks = opt.hooks;
     } else {
@@ -125,7 +119,7 @@ export class ClientSDK {
   public _createRequest(
     context: HookContext,
     conf: RequestConfig,
-    options?: RequestOptions
+    options?: RequestOptions,
   ): Result<Request, InvalidRequestError | UnexpectedClientError> {
     const { method, path, query, headers: opHeaders, security } = conf;
 
@@ -165,7 +159,7 @@ export class ClientSDK {
     const password = security?.basic.password;
     if (username != null || password != null) {
       const encoded = stringToBase64(
-        [username || "", password || ""].join(":")
+        [username || "", password || ""].join(":"),
       );
       headers.set("Authorization", `Basic ${encoded}`);
     }
@@ -183,7 +177,7 @@ export class ClientSDK {
     headers.set("cookie", cookie);
 
     const userHeaders = new Headers(
-      options?.headers ?? options?.fetchOptions?.headers
+      options?.headers ?? options?.fetchOptions?.headers,
     );
     for (const [k, v] of userHeaders) {
       headers.set(k, v);
@@ -194,7 +188,7 @@ export class ClientSDK {
     if (!isBrowserLike) {
       headers.set(
         conf.uaHeader ?? "user-agent",
-        conf.userAgent ?? SDK_METADATA.userAgent
+        conf.userAgent ?? SDK_METADATA.userAgent,
       );
     }
 
@@ -226,7 +220,7 @@ export class ClientSDK {
       return ERR(
         new UnexpectedClientError("Create request hook failed to execute", {
           cause: err,
-        })
+        }),
       );
     }
 
@@ -240,7 +234,7 @@ export class ClientSDK {
       errorCodes: number | string | (number | string)[];
       retryConfig: RetryConfig;
       retryCodes: string[];
-    }
+    },
   ): Promise<
     Result<
       Response,
@@ -266,7 +260,7 @@ export class ClientSDK {
             const result = await this.#hooks.afterError(
               context,
               response,
-              null
+              null,
             );
             if (result.error) {
               throw result.error;
@@ -276,14 +270,13 @@ export class ClientSDK {
             response = await this.#hooks.afterSuccess(context, response);
           }
         } finally {
-          await logResponse(this.#logger, response, req).catch((e) =>
-            this.#logger?.log("Failed to log response:", e)
-          );
+          await logResponse(this.#logger, response, req)
+            .catch(e => this.#logger?.log("Failed to log response:", e));
         }
 
         return response;
       },
-      { config: options.retryConfig, statusCodes: options.retryCodes }
+      { config: options.retryConfig, statusCodes: options.retryCodes },
     ).then(
       (r) => OK(r),
       (err) => {
@@ -292,24 +285,24 @@ export class ClientSDK {
             return ERR(
               new RequestAbortedError("Request aborted by client", {
                 cause: err,
-              })
+              }),
             );
           case isTimeoutError(err):
             return ERR(
-              new RequestTimeoutError("Request timed out", { cause: err })
+              new RequestTimeoutError("Request timed out", { cause: err }),
             );
           case isConnectionError(err):
             return ERR(
-              new ConnectionError("Unable to make request", { cause: err })
+              new ConnectionError("Unable to make request", { cause: err }),
             );
           default:
             return ERR(
               new UnexpectedClientError("Unexpected HTTP client error", {
                 cause: err,
-              })
+              }),
             );
         }
-      }
+      },
     );
   }
 }
@@ -361,7 +354,7 @@ async function logRequest(logger: Logger | undefined, req: Request) {
 async function logResponse(
   logger: Logger | undefined,
   res: Response,
-  req: Request
+  req: Request,
 ) {
   if (!logger) {
     return;
@@ -381,12 +374,12 @@ async function logResponse(
 
   logger.group("Body:");
   switch (true) {
-    case matchContentType(res, "application/json") ||
-      (jsonLikeContentTypeRE.test(ct) && !jsonlLikeContentTypeRE.test(ct)):
+    case matchContentType(res, "application/json")
+      || jsonLikeContentTypeRE.test(ct) && !jsonlLikeContentTypeRE.test(ct):
       logger.log(await res.clone().json());
       break;
-    case matchContentType(res, "application/jsonl") ||
-      jsonlLikeContentTypeRE.test(ct):
+    case matchContentType(res, "application/jsonl")
+      || jsonlLikeContentTypeRE.test(ct):
       logger.log(await res.clone().text());
       break;
     case matchContentType(res, "text/event-stream"):

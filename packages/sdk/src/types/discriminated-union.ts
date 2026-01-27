@@ -8,15 +8,17 @@ import { startCountingUnrecognized } from "./unrecognized.js";
 
 const UNKNOWN = Symbol("UNKNOWN");
 
-export type Unknown<Discriminator extends string, UnknownValue = "UNKNOWN"> = {
-  [K in Discriminator]: UnknownValue;
-} & {
-  raw: unknown;
-  isUnknown: true;
-};
+export type Unknown<Discriminator extends string, UnknownValue = "UNKNOWN"> =
+  & {
+    [K in Discriminator]: UnknownValue;
+  }
+  & {
+    raw: unknown;
+    isUnknown: true;
+  };
 
 export function isUnknown<Discriminator extends string>(
-  value: unknown
+  value: unknown,
 ): value is Unknown<Discriminator> {
   return typeof value === "object" && value !== null && UNKNOWN in value;
 }
@@ -44,7 +46,7 @@ export function discriminatedUnion<
   opts: {
     unknownValue?: UnknownValue;
     outputPropertyName?: OutputDiscriminator;
-  } = {}
+  } = {},
 ): z.ZodMiniType<
   | z.output<TOptions[keyof TOptions]>
   | Unknown<OutputDiscriminator, UnknownValue>,
@@ -60,7 +62,7 @@ export function discriminatedUnion<
           [outputPropertyName ?? inputPropertyName]: unknownValue,
           isUnknown: true as const,
         },
-        { [UNKNOWN]: { value: true, enumerable: false, configurable: false } }
+        { [UNKNOWN]: { value: true, enumerable: false, configurable: false } },
       );
 
       const isObject = typeof input === "object" && input !== null;
@@ -94,6 +96,6 @@ export function discriminatedUnion<
       }
 
       return result.data;
-    })
+    }),
   ) as any;
 }

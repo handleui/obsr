@@ -15,7 +15,7 @@ export class EncodingError extends Error {
 export function encodeMatrix(
   key: string,
   value: unknown,
-  options?: { explode?: boolean; charEncoding?: "percent" | "none" }
+  options?: { explode?: boolean; charEncoding?: "percent" | "none" },
 ): string | undefined {
   let out = "";
   const pairs: [string, unknown][] = options?.explode
@@ -37,8 +37,7 @@ export function encodeMatrix(
 
     if (pv == null) {
       return;
-    }
-    if (Array.isArray(pv)) {
+    } else if (Array.isArray(pv)) {
       encValue = mapDefined(pv, (v) => `${encodeValue(v)}`)?.join(",");
     } else if (isPlainObject(pv)) {
       const mapped = mapDefinedEntries(Object.entries(pv), ([k, v]) => {
@@ -74,7 +73,7 @@ export function encodeMatrix(
 export function encodeLabel(
   key: string,
   value: unknown,
-  options?: { explode?: boolean; charEncoding?: "percent" | "none" }
+  options?: { explode?: boolean; charEncoding?: "percent" | "none" },
 ): string | undefined {
   let out = "";
   const pairs: [string, unknown][] = options?.explode
@@ -95,8 +94,7 @@ export function encodeLabel(
 
     if (pv == null) {
       return;
-    }
-    if (Array.isArray(pv)) {
+    } else if (Array.isArray(pv)) {
       encValue = mapDefined(pv, (v) => `${encodeValue(v)}`)?.join(".");
     } else if (isPlainObject(pv)) {
       const mapped = mapDefinedEntries(Object.entries(pv), ([k, v]) => {
@@ -104,8 +102,9 @@ export function encodeLabel(
       });
       encValue = mapped?.join("").slice(1);
     } else {
-      const k =
-        options?.explode && isPlainObject(value) ? `${encodeString(pk)}=` : "";
+      const k = options?.explode && isPlainObject(value)
+        ? `${encodeString(pk)}=`
+        : "";
       encValue = `${k}${encodeValue(pv)}`;
     }
 
@@ -118,14 +117,14 @@ export function encodeLabel(
 type FormEncoder = (
   key: string,
   value: unknown,
-  options?: { explode?: boolean; charEncoding?: "percent" | "none" }
+  options?: { explode?: boolean; charEncoding?: "percent" | "none" },
 ) => string | undefined;
 
 function formEncoder(sep: string): FormEncoder {
   return (
     key: string,
     value: unknown,
-    options?: { explode?: boolean; charEncoding?: "percent" | "none" }
+    options?: { explode?: boolean; charEncoding?: "percent" | "none" },
   ) => {
     let out = "";
     const pairs: [string, unknown][] = options?.explode
@@ -150,8 +149,7 @@ function formEncoder(sep: string): FormEncoder {
 
       if (pv == null) {
         return;
-      }
-      if (Array.isArray(pv)) {
+      } else if (Array.isArray(pv)) {
         encValue = mapDefined(pv, (v) => `${encodeValue(v)}`)?.join(encodedSep);
       } else if (isPlainObject(pv)) {
         encValue = mapDefinedEntries(Object.entries(pv), ([k, v]) => {
@@ -186,7 +184,7 @@ export const encodePipeDelimited = formEncoder("|");
 export function encodeBodyForm(
   key: string,
   value: unknown,
-  options?: { explode?: boolean; charEncoding?: "percent" | "none" }
+  options?: { explode?: boolean; charEncoding?: "percent" | "none" },
 ): string {
   let out = "";
   const pairs: [string, unknown][] = options?.explode
@@ -205,8 +203,7 @@ export function encodeBodyForm(
 
     if (pv == null) {
       return;
-    }
-    if (Array.isArray(pv)) {
+    } else if (Array.isArray(pv)) {
       encValue = JSON.stringify(pv, jsonReplacer);
     } else if (isPlainObject(pv)) {
       encValue = JSON.stringify(pv, jsonReplacer);
@@ -230,7 +227,7 @@ export function encodeBodyForm(
 export function encodeDeepObject(
   key: string,
   value: unknown,
-  options?: { charEncoding?: "percent" | "none" }
+  options?: { charEncoding?: "percent" | "none" },
 ): string | undefined {
   if (value == null) {
     return;
@@ -238,7 +235,7 @@ export function encodeDeepObject(
 
   if (!isPlainObject(value)) {
     throw new EncodingError(
-      `Value of parameter '${key}' which uses deepObject encoding must be an object or null`
+      `Value of parameter '${key}' which uses deepObject encoding must be an object or null`,
     );
   }
 
@@ -248,7 +245,7 @@ export function encodeDeepObject(
 export function encodeDeepObjectObject(
   key: string,
   value: unknown,
-  options?: { charEncoding?: "percent" | "none" }
+  options?: { charEncoding?: "percent" | "none" },
 ): string | undefined {
   if (value == null) {
     return;
@@ -293,7 +290,7 @@ export function encodeDeepObjectObject(
 export function encodeJSON(
   key: string,
   value: unknown,
-  options?: { explode?: boolean; charEncoding?: "percent" | "none" }
+  options?: { explode?: boolean; charEncoding?: "percent" | "none" },
 ): string | undefined {
   if (typeof value === "undefined") {
     return;
@@ -311,7 +308,7 @@ export function encodeJSON(
 export const encodeSimple = (
   key: string,
   value: unknown,
-  options?: { explode?: boolean; charEncoding?: "percent" | "none" }
+  options?: { explode?: boolean; charEncoding?: "percent" | "none" },
 ): string | undefined => {
   let out = "";
   const pairs: [string, unknown][] = options?.explode
@@ -332,8 +329,7 @@ export const encodeSimple = (
 
     if (pv == null) {
       return;
-    }
-    if (Array.isArray(pv)) {
+    } else if (Array.isArray(pv)) {
       tmp = mapDefined(pv, (v) => `${encodeValue(v)}`)?.join(",");
     } else if (isPlainObject(pv)) {
       const mapped = mapDefinedEntries(Object.entries(pv), ([k, v]) => {
@@ -354,25 +350,22 @@ export const encodeSimple = (
 function explode(key: string, value: unknown): [string, unknown][] {
   if (Array.isArray(value)) {
     return value.map((v) => [key, v]);
-  }
-  if (isPlainObject(value)) {
+  } else if (isPlainObject(value)) {
     const o = value ?? {};
     return Object.entries(o).map(([k, v]) => [k, v]);
+  } else {
+    return [[key, value]];
   }
-  return [[key, value]];
 }
 
 function serializeValue(value: unknown): string {
   if (value == null) {
     return "";
-  }
-  if (value instanceof Date) {
+  } else if (value instanceof Date) {
     return value.toISOString();
-  }
-  if (value instanceof Uint8Array) {
+  } else if (value instanceof Uint8Array) {
     return bytesToBase64(value);
-  }
-  if (typeof value === "object") {
+  } else if (typeof value === "object") {
     return JSON.stringify(value, jsonReplacer);
   }
 
@@ -382,8 +375,9 @@ function serializeValue(value: unknown): string {
 function jsonReplacer(_: string, value: unknown): unknown {
   if (value instanceof Uint8Array) {
     return bytesToBase64(value);
+  } else {
+    return value;
   }
-  return value;
 }
 
 function mapDefined<T, R>(inp: T[], mapper: (v: T) => R): R[] | null {
@@ -407,7 +401,7 @@ function mapDefined<T, R>(inp: T[], mapper: (v: T) => R): R[] | null {
 
 function mapDefinedEntries<K, V, R>(
   inp: Iterable<[K, V]>,
-  mapper: (v: [K, V]) => R
+  mapper: (v: [K, V]) => R,
 ): R[] | null {
   const acc: R[] = [];
   for (const [k, v] of inp) {
@@ -439,19 +433,19 @@ type QueryEncoderOptions = {
 type QueryEncoder = (
   key: string,
   value: unknown,
-  options?: QueryEncoderOptions
+  options?: QueryEncoderOptions,
 ) => string | undefined;
 
 type BulkQueryEncoder = (
   values: Record<string, unknown>,
-  options?: QueryEncoderOptions
+  options?: QueryEncoderOptions,
 ) => string;
 
 export function queryEncoder(f: QueryEncoder): BulkQueryEncoder {
-  const bulkEncode = (
+  const bulkEncode = function(
     values: Record<string, unknown>,
-    options?: QueryEncoderOptions
-  ): string => {
+    options?: QueryEncoderOptions,
+  ): string {
     const opts: QueryEncoderOptions = {
       ...options,
       explode: options?.explode ?? true,
@@ -461,14 +455,15 @@ export function queryEncoder(f: QueryEncoder): BulkQueryEncoder {
     const allowEmptySet = new Set(options?.allowEmptyValue ?? []);
 
     const encoded = Object.entries(values).map(([key, value]) => {
-      if (
-        allowEmptySet.has(key) &&
-        (value === undefined ||
-          value === null ||
-          value === "" ||
-          (Array.isArray(value) && value.length === 0))
-      ) {
-        return `${encodeURIComponent(key)}=`;
+      if (allowEmptySet.has(key)) {
+        if (
+          value === undefined
+          || value === null
+          || value === ""
+          || (Array.isArray(value) && value.length === 0)
+        ) {
+          return `${encodeURIComponent(key)}=`;
+        }
       }
       return f(key, value, opts);
     });
@@ -488,12 +483,11 @@ export function appendForm(
   fd: FormData,
   key: string,
   value: unknown,
-  fileName?: string
+  fileName?: string,
 ): void {
   if (value == null) {
     return;
-  }
-  if (value instanceof Blob && fileName) {
+  } else if (value instanceof Blob && fileName) {
     fd.append(key, value, fileName);
   } else if (value instanceof Blob) {
     fd.append(key, value);

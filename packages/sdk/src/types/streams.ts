@@ -3,7 +3,7 @@
  */
 
 export function isReadableStream<T = Uint8Array>(
-  val: unknown
+  val: unknown,
 ): val is ReadableStream<T> {
   if (typeof val !== "object" || val === null) {
     return false;

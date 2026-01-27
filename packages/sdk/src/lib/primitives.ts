@@ -11,7 +11,7 @@ class InvariantError extends Error {
 
 export function invariant(
   condition: unknown,
-  message: string
+  message: string,
 ): asserts condition {
   if (!condition) {
     throw new InvariantError(message);
@@ -26,8 +26,8 @@ export type Remap<Inp, Mapping extends { [k in keyof Inp]?: string | null }> = {
   [k in keyof Inp as Mapping[k] extends string /* if we have a string mapping for this key then use it */
     ? Mapping[k]
     : Mapping[k] extends null /* if the mapping is to `null` then drop the key */
-      ? never
-      : k /* otherwise keep the key as-is */]: Inp[k];
+    ? never
+    : k /* otherwise keep the key as-is */]: Inp[k];
 };
 
 /**
@@ -122,7 +122,7 @@ export function abortSignalAny(signals: AbortSignal[]): AbortSignal {
 }
 
 export function compactMap<T>(
-  values: Record<string, T | undefined>
+  values: Record<string, T | undefined>,
 ): Record<string, T> {
   const out: Record<string, T> = {};
 
@@ -136,7 +136,7 @@ export function compactMap<T>(
 }
 
 export function allRequired<V extends Record<string, unknown>>(
-  v: V
+  v: V,
 ):
   | {
       [K in keyof V]: NonNullable<V[K]>;

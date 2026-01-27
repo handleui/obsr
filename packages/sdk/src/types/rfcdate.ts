@@ -27,7 +27,7 @@ export class RFCDate {
   constructor(date: Date | string) {
     if (typeof date === "string" && !dateRE.test(date)) {
       throw new RangeError(
-        "RFCDate: date strings must be in the format YYYY-MM-DD: " + date
+        "RFCDate: date strings must be in the format YYYY-MM-DD: " + date,
       );
     }
 
@@ -39,7 +39,7 @@ export class RFCDate {
     this.serialized = value.toISOString().slice(0, "YYYY-MM-DD".length);
     if (!dateRE.test(this.serialized)) {
       throw new TypeError(
-        `RFCDate: failed to build valid date with given value: ${date} serialized to ${this.serialized}`
+        `RFCDate: failed to build valid date with given value: ${date} serialized to ${this.serialized}`,
       );
     }
   }

@@ -25,7 +25,7 @@ function isDeno() {
   return false;
 }
 
-let envMemo: Env | undefined;
+let envMemo: Env | undefined = undefined;
 /**
  * Reads and validates environment variables.
  */

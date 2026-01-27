@@ -3,7 +3,7 @@
  */
 
 import * as z from "zod/v4-mini";
-import type { ClosedEnum } from "../types/enums.js";
+import { ClosedEnum } from "../types/enums.js";
 
 /**
  * Hint for which tool produced the output. Auto-detected if omitted.
@@ -21,5 +21,5 @@ export const DetectedTool = {
 export type DetectedTool = ClosedEnum<typeof DetectedTool>;
 
 /** @internal */
-export const DetectedTool$outboundSchema: z.ZodMiniEnum<typeof DetectedTool> =
-  z.enum(DetectedTool);
+export const DetectedTool$outboundSchema: z.ZodMiniEnum<typeof DetectedTool> = z
+  .enum(DetectedTool);

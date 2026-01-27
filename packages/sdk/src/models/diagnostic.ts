@@ -5,10 +5,10 @@
 import * as z from "zod/v4-mini";
 import { remap as remap$ } from "../lib/primitives.js";
 import { safeParse } from "../lib/schemas.js";
-import type { Result as SafeParseResult } from "../types/fp.js";
+import { Result as SafeParseResult } from "../types/fp.js";
 import * as types from "../types/primitives.js";
-import type { SDKValidationError } from "./errors/sdk-validation-error.js";
-import { type Severity, Severity$inboundSchema } from "./severity.js";
+import { SDKValidationError } from "./errors/sdk-validation-error.js";
+import { Severity, Severity$inboundSchema } from "./severity.js";
 
 export type Diagnostic = {
   /**
@@ -50,8 +50,8 @@ export type Diagnostic = {
 };
 
 /** @internal */
-export const Diagnostic$inboundSchema: z.ZodMiniType<Diagnostic, unknown> =
-  z.pipe(
+export const Diagnostic$inboundSchema: z.ZodMiniType<Diagnostic, unknown> = z
+  .pipe(
     z.object({
       message: types.string(),
       file_path: types.optional(types.string()),
@@ -65,19 +65,19 @@ export const Diagnostic$inboundSchema: z.ZodMiniType<Diagnostic, unknown> =
     }),
     z.transform((v) => {
       return remap$(v, {
-        file_path: "filePath",
-        rule_id: "ruleId",
-        stack_trace: "stackTrace",
+        "file_path": "filePath",
+        "rule_id": "ruleId",
+        "stack_trace": "stackTrace",
       });
-    })
+    }),
   );
 
 export function diagnosticFromJSON(
-  jsonString: string
+  jsonString: string,
 ): SafeParseResult<Diagnostic, SDKValidationError> {
   return safeParse(
     jsonString,
     (x) => Diagnostic$inboundSchema.parse(JSON.parse(x)),
-    `Failed to parse 'Diagnostic' from JSON`
+    `Failed to parse 'Diagnostic' from JSON`,
   );
 }

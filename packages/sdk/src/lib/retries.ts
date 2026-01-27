@@ -13,9 +13,9 @@ export type BackoffStrategy = {
 
 const defaultBackoff: BackoffStrategy = {
   initialInterval: 500,
-  maxInterval: 60_000,
+  maxInterval: 60000,
   exponent: 1.5,
-  maxElapsedTime: 3_600_000,
+  maxElapsedTime: 3600000,
 };
 
 export type RetryConfig =
@@ -74,7 +74,7 @@ export async function retry(
   options: {
     config: RetryConfig;
     statusCodes: string[];
-  }
+  },
 ): Promise<Response> {
   switch (options.config.strategy) {
     case "backoff":
@@ -83,7 +83,7 @@ export async function retry(
           statusCodes: options.statusCodes,
           retryConnectionErrors: !!options.config.retryConnectionErrors,
         }),
-        options.config.backoff ?? defaultBackoff
+        options.config.backoff ?? defaultBackoff,
       );
     default:
       return await fetchFn();
@@ -95,7 +95,7 @@ function wrapFetcher(
   options: {
     statusCodes: string[];
     retryConnectionErrors: boolean;
-  }
+  },
 ): () => Promise<Response> {
   return async () => {
     try {
@@ -103,7 +103,7 @@ function wrapFetcher(
       if (isRetryableResponse(res, options.statusCodes)) {
         throw new TemporaryError(
           "Response failed with retryable status code",
-          res
+          res,
         );
       }
 
@@ -125,7 +125,7 @@ function wrapFetcher(
   };
 }
 
-const codeRangeRE = /^[0-9]xx$/i;
+const codeRangeRE = new RegExp("^[0-9]xx$", "i");
 
 function isRetryableResponse(res: Response, statusCodes: string[]): boolean {
   const actual = `${res.status}`;
@@ -151,7 +151,7 @@ function isRetryableResponse(res: Response, statusCodes: string[]): boolean {
 
 async function retryBackoff(
   fn: () => Promise<Response>,
-  strategy: BackoffStrategy
+  strategy: BackoffStrategy,
 ): Promise<Response> {
   const { maxElapsedTime, initialInterval, exponent, maxInterval } = strategy;
 
@@ -181,7 +181,8 @@ async function retryBackoff(
       }
 
       if (retryInterval <= 0) {
-        retryInterval = initialInterval * x ** exponent + Math.random() * 1000;
+        retryInterval =
+          initialInterval * Math.pow(x, exponent) + Math.random() * 1000;
       }
 
       const d = Math.min(retryInterval, maxInterval);

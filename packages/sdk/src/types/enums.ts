@@ -3,7 +3,7 @@
  */
 
 import * as z from "zod/v4-mini";
-import { type Unrecognized, unrecognized } from "./unrecognized.js";
+import { Unrecognized, unrecognized } from "./unrecognized.js";
 
 export type ClosedEnum<T extends Readonly<Record<string, string | number>>> =
   T[keyof T];
@@ -12,40 +12,34 @@ export type OpenEnum<T extends Readonly<Record<string, string | number>>> =
   | Unrecognized<T[keyof T] extends number ? number : string>;
 
 export function inboundSchema<T extends Record<string, string>>(
-  enumObj: T
+  enumObj: T,
 ): z.ZodMiniType<OpenEnum<T>, unknown> {
   const options = Object.values(enumObj);
   return z.union([
-    ...options.map((x) => z.literal(x)),
-    z.pipe(
-      z.string(),
-      z.transform((x) => unrecognized(x))
-    ),
+    ...options.map(x => z.literal(x)),
+    z.pipe(z.string(), z.transform(x => unrecognized(x))),
   ] as any);
 }
 
 export function inboundSchemaInt<T extends Record<string, number | string>>(
-  enumObj: T
+  enumObj: T,
 ): z.ZodMiniType<OpenEnum<T>, unknown> {
   // For numeric enums, Object.values returns both numbers and string keys
-  const options = Object.values(enumObj).filter((v) => typeof v === "number");
+  const options = Object.values(enumObj).filter(v => typeof v === "number");
   return z.union([
-    ...options.map((x) => z.literal(x)),
-    z.pipe(
-      z.int(),
-      z.transform((x) => unrecognized(x))
-    ),
+    ...options.map(x => z.literal(x)),
+    z.pipe(z.int(), z.transform(x => unrecognized(x))),
   ] as any);
 }
 
 export function outboundSchema<T extends Record<string, string>>(
-  _: T
+  _: T,
 ): z.ZodMiniType<string, OpenEnum<T>> {
   return z.string() as any;
 }
 
 export function outboundSchemaInt<T extends Record<string, number | string>>(
-  _: T
+  _: T,
 ): z.ZodMiniType<number, OpenEnum<T>> {
   return z.int() as any;
 }

@@ -26,7 +26,7 @@ interface Candidate {
 export function smartUnion<
   Options extends readonly [z.ZodMiniType, z.ZodMiniType, ...z.ZodMiniType[]],
 >(
-  options: Options
+  options: Options,
 ): z.ZodMiniType<z.output<Options[number]>, z.input<Options[number]>> {
   return z.pipe(
     z.unknown(),
@@ -61,9 +61,9 @@ export function smartUnion<
         parentUnrecognizedCtr.end(0);
         parentZeroDefaultCtr.end(0);
         ctx.issues.push({
-          input,
+          input: input,
           code: "invalid_union",
-          errors,
+          errors: errors,
         });
         return z.NEVER;
       }
@@ -84,7 +84,7 @@ export function smartUnion<
       parentZeroDefaultCtr.end(best.zeroDefaultCount);
 
       return best.data;
-    })
+    }),
   ) as any;
 }
 
@@ -118,13 +118,13 @@ function countFieldsRecursive(parsed: unknown): number {
     // Check if it's a primitive value
     const type = typeof value;
     if (
-      value === null ||
-      type === "number" ||
-      type === "string" ||
-      type === "boolean" ||
-      type === "bigint" ||
-      value instanceof Date ||
-      value instanceof RFCDate
+      value === null
+      || type === "number"
+      || type === "string"
+      || type === "boolean"
+      || type === "bigint"
+      || value instanceof Date
+      || value instanceof RFCDate
     ) {
       fieldCount++;
       continue;

@@ -29,11 +29,11 @@ export function stringFromBase64(b64str: string): string {
 }
 
 export const zodOutbound = z.union([
-  z.custom<Uint8Array>((x) => x instanceof Uint8Array),
+  z.custom<Uint8Array>(x => x instanceof Uint8Array),
   z.pipe(z.string(), z.transform(stringToBytes)),
 ]);
 
 export const zodInbound = z.union([
-  z.custom<Uint8Array>((x) => x instanceof Uint8Array),
+  z.custom<Uint8Array>(x => x instanceof Uint8Array),
   z.pipe(z.string(), z.transform(bytesFromBase64)),
 ]);

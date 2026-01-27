@@ -12,10 +12,10 @@ export class DetentDefaultError extends DetentError {
       response: Response;
       request: Request;
       body: string;
-    }
+    },
   ) {
     if (message) {
-      message += ": ";
+      message += `: `;
     }
     message += `Status ${httpMeta.response.status}`;
     const contentType = httpMeta.response.headers.get("content-type") || `""`;
@@ -27,9 +27,9 @@ export class DetentDefaultError extends DetentError {
     const body = httpMeta.body || `""`;
     message += body.length > 100 ? "\n" : ". ";
     let bodyDisplay = body;
-    if (body.length > 10_000) {
-      const truncated = body.substring(0, 10_000);
-      const remaining = body.length - 10_000;
+    if (body.length > 10000) {
+      const truncated = body.substring(0, 10000);
+      const remaining = body.length - 10000;
       bodyDisplay = `${truncated}...and ${remaining} more chars`;
     }
     message += `Body: ${bodyDisplay}`;

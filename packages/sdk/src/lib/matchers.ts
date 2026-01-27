@@ -4,12 +4,8 @@
 
 import { DetentDefaultError } from "../models/errors/detent-default-error.js";
 import { ResponseValidationError } from "../models/errors/response-validation-error.js";
-import { ERR, OK, type Result } from "../types/fp.js";
-import {
-  matchResponse,
-  matchStatusCode,
-  type StatusCodePredicate,
-} from "./http.js";
+import { ERR, OK, Result } from "../types/fp.js";
+import { matchResponse, matchStatusCode, StatusCodePredicate } from "./http.js";
 import { isPlainObject } from "./is-plain-object.js";
 
 export type Encoding =
@@ -65,14 +61,14 @@ export type Matcher<T, E> = ValueMatcher<T> | ErrorMatcher<E> | FailMatcher;
 export function jsonErr<E>(
   codes: StatusCodePredicate,
   schema: Schema<E>,
-  options?: MatchOptions
+  options?: MatchOptions,
 ): ErrorMatcher<E> {
   return { ...options, err: true, enc: "json", codes, schema };
 }
 export function json<T>(
   codes: StatusCodePredicate,
   schema: Schema<T>,
-  options?: MatchOptions
+  options?: MatchOptions,
 ): ValueMatcher<T> {
   return { ...options, enc: "json", codes, schema };
 }
@@ -80,7 +76,7 @@ export function json<T>(
 export function jsonl<T>(
   codes: StatusCodePredicate,
   schema: Schema<T>,
-  options?: MatchOptions
+  options?: MatchOptions,
 ): ValueMatcher<T> {
   return { ...options, enc: "jsonl", codes, schema };
 }
@@ -88,21 +84,21 @@ export function jsonl<T>(
 export function jsonlErr<E>(
   codes: StatusCodePredicate,
   schema: Schema<E>,
-  options?: MatchOptions
+  options?: MatchOptions,
 ): ErrorMatcher<E> {
   return { ...options, err: true, enc: "jsonl", codes, schema };
 }
 export function textErr<E>(
   codes: StatusCodePredicate,
   schema: Schema<E>,
-  options?: MatchOptions
+  options?: MatchOptions,
 ): ErrorMatcher<E> {
   return { ...options, err: true, enc: "text", codes, schema };
 }
 export function text<T>(
   codes: StatusCodePredicate,
   schema: Schema<T>,
-  options?: MatchOptions
+  options?: MatchOptions,
 ): ValueMatcher<T> {
   return { ...options, enc: "text", codes, schema };
 }
@@ -110,14 +106,14 @@ export function text<T>(
 export function bytesErr<E>(
   codes: StatusCodePredicate,
   schema: Schema<E>,
-  options?: MatchOptions
+  options?: MatchOptions,
 ): ErrorMatcher<E> {
   return { ...options, err: true, enc: "bytes", codes, schema };
 }
 export function bytes<T>(
   codes: StatusCodePredicate,
   schema: Schema<T>,
-  options?: MatchOptions
+  options?: MatchOptions,
 ): ValueMatcher<T> {
   return { ...options, enc: "bytes", codes, schema };
 }
@@ -125,14 +121,14 @@ export function bytes<T>(
 export function streamErr<E>(
   codes: StatusCodePredicate,
   schema: Schema<E>,
-  options?: MatchOptions
+  options?: MatchOptions,
 ): ErrorMatcher<E> {
   return { ...options, err: true, enc: "stream", codes, schema };
 }
 export function stream<T>(
   codes: StatusCodePredicate,
   schema: Schema<T>,
-  options?: MatchOptions
+  options?: MatchOptions,
 ): ValueMatcher<T> {
   return { ...options, enc: "stream", codes, schema };
 }
@@ -140,14 +136,14 @@ export function stream<T>(
 export function sseErr<E>(
   codes: StatusCodePredicate,
   schema: Schema<E>,
-  options?: MatchOptions
+  options?: MatchOptions,
 ): ErrorMatcher<E> {
   return { ...options, err: true, enc: "sse", codes, schema };
 }
 export function sse<T>(
   codes: StatusCodePredicate,
   schema: Schema<T>,
-  options?: MatchOptions
+  options?: MatchOptions,
 ): ValueMatcher<T> {
   return { ...options, enc: "sse", codes, schema };
 }
@@ -155,14 +151,14 @@ export function sse<T>(
 export function nilErr<E>(
   codes: StatusCodePredicate,
   schema: Schema<E>,
-  options?: MatchOptions
+  options?: MatchOptions,
 ): ErrorMatcher<E> {
   return { ...options, err: true, enc: "nil", codes, schema };
 }
 export function nil<T>(
   codes: StatusCodePredicate,
   schema: Schema<T>,
-  options?: MatchOptions
+  options?: MatchOptions,
 ): ValueMatcher<T> {
   return { ...options, enc: "nil", codes, schema };
 }
@@ -180,7 +176,7 @@ export type MatchedError<Matchers> = Matchers extends Matcher<any, infer E>[]
 export type MatchFunc<T, E> = (
   response: Response,
   request: Request,
-  options?: { resultKey?: string; extraFields?: Record<string, unknown> }
+  options?: { resultKey?: string; extraFields?: Record<string, unknown> },
 ) => Promise<[result: Result<T, E>, raw: unknown]>;
 
 export function match<T, E>(
@@ -189,7 +185,7 @@ export function match<T, E>(
   return async function matchFunc(
     response: Response,
     request: Request,
-    options?: { resultKey?: string; extraFields?: Record<string, unknown> }
+    options?: { resultKey?: string; extraFields?: Record<string, unknown> },
   ): Promise<
     [
       result: Result<T, E | DetentDefaultError | ResponseValidationError>,
@@ -200,30 +196,27 @@ export function match<T, E>(
     let matcher: Matcher<T, E> | undefined;
     for (const match of matchers) {
       const { codes } = match;
-      const ctpattern =
-        "ctype" in match ? match.ctype : DEFAULT_CONTENT_TYPES[match.enc];
+      const ctpattern = "ctype" in match
+        ? match.ctype
+        : DEFAULT_CONTENT_TYPES[match.enc];
       if (ctpattern && matchResponse(response, codes, ctpattern)) {
         matcher = match;
         break;
-      }
-      if (!ctpattern && matchStatusCode(response, codes)) {
+      } else if (!ctpattern && matchStatusCode(response, codes)) {
         matcher = match;
         break;
       }
     }
 
     if (!matcher) {
-      return [
-        {
-          ok: false,
-          error: new DetentDefaultError("Unexpected Status or Content-Type", {
-            response,
-            request,
-            body: await response.text().catch(() => ""),
-          }),
-        },
-        raw,
-      ];
+      return [{
+        ok: false,
+        error: new DetentDefaultError("Unexpected Status or Content-Type", {
+          response,
+          request,
+          body: await response.text().catch(() => ""),
+        }),
+      }, raw];
     }
 
     const encoding = matcher.enc;
@@ -263,17 +256,14 @@ export function match<T, E>(
     }
 
     if (matcher.enc === "fail") {
-      return [
-        {
-          ok: false,
-          error: new DetentDefaultError("API error occurred", {
-            request,
-            response,
-            body,
-          }),
-        },
-        raw,
-      ];
+      return [{
+        ok: false,
+        error: new DetentDefaultError("API error occurred", {
+          request,
+          response,
+          body,
+        }),
+      }, raw];
     }
 
     const resultKey = matcher.key || options?.resultKey;
@@ -309,19 +299,20 @@ export function match<T, E>(
         data,
         (v: unknown) => matcher.schema.parse(v),
         "Response validation failed",
-        { request, response, body }
+        { request, response, body },
       );
       return [result.ok ? { ok: false, error: result.value } : result, raw];
+    } else {
+      return [
+        safeParseResponse(
+          data,
+          (v: unknown) => matcher.schema.parse(v),
+          "Response validation failed",
+          { request, response, body },
+        ),
+        raw,
+      ];
     }
-    return [
-      safeParseResponse(
-        data,
-        (v: unknown) => matcher.schema.parse(v),
-        "Response validation failed",
-        { request, response, body }
-      ),
-      raw,
-    ];
   };
 }
 
@@ -344,7 +335,7 @@ function safeParseResponse<Inp, Out>(
   rawValue: Inp,
   fn: (value: Inp) => Out,
   errorMessage: string,
-  httpMeta: { response: Response; request: Request; body: string }
+  httpMeta: { response: Response; request: Request; body: string },
 ): Result<Out, ResponseValidationError> {
   try {
     return OK(fn(rawValue));
@@ -355,7 +346,7 @@ function safeParseResponse<Inp, Out>(
         rawValue,
         rawMessage: errorMessage,
         ...httpMeta,
-      })
+      }),
     );
   }
 }

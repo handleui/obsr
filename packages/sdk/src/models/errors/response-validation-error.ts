@@ -26,7 +26,7 @@ export class ResponseValidationError extends DetentError {
       cause: unknown;
       rawValue: unknown;
       rawMessage: unknown;
-    }
+    },
   ) {
     super(message, extra);
     this.name = "ResponseValidationError";
@@ -43,7 +43,8 @@ export class ResponseValidationError extends DetentError {
   public pretty(): string {
     if (this.cause instanceof z.$ZodError) {
       return `${this.rawMessage}\n${formatZodError(this.cause)}`;
+    } else {
+      return this.toString();
     }
-    return this.toString();
   }
 }

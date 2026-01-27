@@ -17,7 +17,7 @@ export class SDKValidationError extends Error {
 
   // Allows for backwards compatibility for `instanceof` checks of `ResponseValidationError`
   static override [Symbol.hasInstance](
-    instance: unknown
+    instance: unknown,
   ): instance is SDKValidationError {
     if (!(instance instanceof Error)) return false;
     if (!("rawValue" in instance)) return false;
@@ -43,8 +43,9 @@ export class SDKValidationError extends Error {
   public pretty(): string {
     if (this.cause instanceof z.$ZodError) {
       return `${this.rawMessage}\n${formatZodError(this.cause)}`;
+    } else {
+      return this.toString();
     }
-    return this.toString();
   }
 }
 

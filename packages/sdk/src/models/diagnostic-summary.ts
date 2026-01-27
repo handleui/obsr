@@ -4,9 +4,9 @@
 
 import * as z from "zod/v4-mini";
 import { safeParse } from "../lib/schemas.js";
-import type { Result as SafeParseResult } from "../types/fp.js";
+import { Result as SafeParseResult } from "../types/fp.js";
 import * as types from "../types/primitives.js";
-import type { SDKValidationError } from "./errors/sdk-validation-error.js";
+import { SDKValidationError } from "./errors/sdk-validation-error.js";
 
 /**
  * Aggregated counts
@@ -37,11 +37,11 @@ export const DiagnosticSummary$inboundSchema: z.ZodMiniType<
 });
 
 export function diagnosticSummaryFromJSON(
-  jsonString: string
+  jsonString: string,
 ): SafeParseResult<DiagnosticSummary, SDKValidationError> {
   return safeParse(
     jsonString,
     (x) => DiagnosticSummary$inboundSchema.parse(JSON.parse(x)),
-    `Failed to parse 'DiagnosticSummary' from JSON`
+    `Failed to parse 'DiagnosticSummary' from JSON`,
   );
 }

@@ -24,12 +24,11 @@ export class ErrorResponse extends DetentError {
 
   constructor(
     err: ErrorResponseData,
-    httpMeta: { response: Response; request: Request; body: string }
+    httpMeta: { response: Response; request: Request; body: string },
   ) {
-    const message =
-      "message" in err && typeof err.message === "string"
-        ? err.message
-        : `API error occurred: ${JSON.stringify(err)}`;
+    const message = "message" in err && typeof err.message === "string"
+      ? err.message
+      : `API error occurred: ${JSON.stringify(err)}`;
     super(message, httpMeta);
     this.data$ = err;
     this.error = err.error;
@@ -45,8 +44,8 @@ export const ErrorResponse$inboundSchema: z.ZodMiniType<
 > = z.pipe(
   z.object({
     error: types.string(),
-    request$: z.custom<Request>((x) => x instanceof Request),
-    response$: z.custom<Response>((x) => x instanceof Response),
+    request$: z.custom<Request>(x => x instanceof Request),
+    response$: z.custom<Response>(x => x instanceof Response),
     body$: z.string(),
   }),
   z.transform((v) => {
@@ -55,5 +54,5 @@ export const ErrorResponse$inboundSchema: z.ZodMiniType<
       response: v.response$,
       body: v.body$,
     });
-  })
+  }),
 );

@@ -21,7 +21,7 @@ export class DetentError extends Error {
       response: Response;
       request: Request;
       body: string;
-    }
+    },
   ) {
     super(message);
     this.statusCode = httpMeta.response.status;

@@ -3,11 +3,8 @@
  */
 
 import * as z from "zod/v4-mini";
-import {
-  type DetectedTool,
-  DetectedTool$outboundSchema,
-} from "./detected-tool.js";
-import { type ModeEnum, ModeEnum$outboundSchema } from "./mode-enum.js";
+import { DetectedTool, DetectedTool$outboundSchema } from "./detected-tool.js";
+import { ModeEnum, ModeEnum$outboundSchema } from "./mode-enum.js";
 
 export type DiagnosticsRequest = {
   /**
@@ -42,9 +39,9 @@ export const DiagnosticsRequest$outboundSchema: z.ZodMiniType<
 });
 
 export function diagnosticsRequestToJSON(
-  diagnosticsRequest: DiagnosticsRequest
+  diagnosticsRequest: DiagnosticsRequest,
 ): string {
   return JSON.stringify(
-    DiagnosticsRequest$outboundSchema.parse(diagnosticsRequest)
+    DiagnosticsRequest$outboundSchema.parse(diagnosticsRequest),
   );
 }

@@ -41,11 +41,11 @@ export class APIPromise<T> implements Promise<T> {
     onrejected?:
       | ((reason: any) => TResult2 | PromiseLike<TResult2>)
       | null
-      | undefined
+      | undefined,
   ): Promise<TResult1 | TResult2> {
     return this.#promise.then(
       onfulfilled ? ([value]) => onfulfilled(value) : void 0,
-      onrejected
+      onrejected,
     );
   }
 
@@ -53,7 +53,7 @@ export class APIPromise<T> implements Promise<T> {
     onrejected?:
       | ((reason: any) => TResult | PromiseLike<TResult>)
       | null
-      | undefined
+      | undefined,
   ): Promise<T | TResult> {
     return this.#unwrapped.catch(onrejected);
   }

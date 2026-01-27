@@ -3,7 +3,7 @@
  */
 
 import * as z from "zod/v4-mini";
-import type { ClosedEnum } from "../types/enums.js";
+import { ClosedEnum } from "../types/enums.js";
 
 /**
  * Response detail level. 'full' includes severity, ruleId, suggestions. 'lite' is minimal.
@@ -18,5 +18,6 @@ export const ModeEnum = {
 export type ModeEnum = ClosedEnum<typeof ModeEnum>;
 
 /** @internal */
-export const ModeEnum$outboundSchema: z.ZodMiniEnum<typeof ModeEnum> =
-  z.enum(ModeEnum);
+export const ModeEnum$outboundSchema: z.ZodMiniEnum<typeof ModeEnum> = z.enum(
+  ModeEnum,
+);

@@ -14,10 +14,7 @@ export function string(): z.ZodMiniType<string> {
     zodDefaultToZeroValue(""),
 
     // Any other value -> String(x)
-    z.pipe(
-      z.any(),
-      z.transform((x) => unrecognized(JSON.stringify(x)))
-    ),
+    z.pipe(z.any(), z.transform((x) => unrecognized(JSON.stringify(x)))),
   ]);
 }
 
@@ -39,7 +36,7 @@ export function boolean(): z.ZodMiniType<boolean> {
           received: "string",
         });
         return z.NEVER;
-      })
+      }),
     ),
 
     zodDefaultToZeroValue(false),
@@ -65,7 +62,7 @@ export function number(): z.ZodMiniType<number> {
           return z.NEVER;
         }
         return unrecognized(num);
-      })
+      }),
     ),
 
     // Null or undefined -> 0
@@ -89,7 +86,7 @@ export function bigint(): z.ZodMiniType<bigint> {
           });
           return z.NEVER;
         }
-      })
+      }),
     ),
     zodDefaultToZeroValue(0n),
   ]);
@@ -100,9 +97,9 @@ export function date(): z.ZodMiniType<Date> {
     z.pipe(
       z.pipe(
         z.union([z.string(), zodDefaultToZeroValue(0)]),
-        z.transform((x) => new Date(x))
+        z.transform((x) => new Date(x)),
       ),
-      z.date()
+      z.date(),
     ),
     z.pipe(
       z.number(),
@@ -118,22 +115,19 @@ export function date(): z.ZodMiniType<Date> {
           return z.NEVER;
         }
         return unrecognized(date);
-      })
+      }),
     ),
   ]);
 }
 
 export function literal<T extends string | number | boolean>(
-  value: T
+  value: T,
 ): z.ZodMiniType<T> {
   return z.union([z.literal(value), zodDefaultToZeroValue(value)]);
 }
 
 export function literalBigInt<T extends bigint>(value: T): z.ZodMiniType<T> {
-  return z.pipe(
-    z.literal(String(value)),
-    z.transform((x) => BigInt(x))
-  ) as any;
+  return z.pipe(z.literal(String(value)), z.transform((x) => BigInt(x))) as any;
 }
 
 export function optional<T extends z.ZodMiniType>(t: T) {
@@ -141,10 +135,7 @@ export function optional<T extends z.ZodMiniType>(t: T) {
     z.undefined(),
 
     // Null -> undefined
-    z.pipe(
-      z.null(),
-      z.transform(() => unrecognized(undefined))
-    ),
+    z.pipe(z.null(), z.transform(() => unrecognized(undefined))),
     t,
   ]);
 }
@@ -154,10 +145,7 @@ export function nullable<T extends z.ZodMiniType>(t: T) {
     z.null(),
 
     // Undefined -> null
-    z.pipe(
-      z.undefined(),
-      z.transform(() => defaultToZeroValue(null))
-    ),
+    z.pipe(z.undefined(), z.transform(() => defaultToZeroValue(null))),
     t,
   ]);
 }
@@ -169,12 +157,12 @@ function zodDefaultToZeroValue<T>(value: T): z.ZodMiniType<T> {
       if (input === undefined) return defaultToZeroValue(value);
       if (input === null) return defaultToZeroValue(value);
       ctx.issues.push({
-        input,
+        input: input,
         code: "invalid_type",
         expected: "undefined",
         received: "unknown",
       });
       return z.NEVER;
-    })
+    }),
   );
 }

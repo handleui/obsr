@@ -18,7 +18,7 @@ export enum SecurityErrorCode {
 export class SecurityError extends Error {
   constructor(
     public code: SecurityErrorCode,
-    message: string
+    message: string,
   ) {
     super(message);
     this.name = "SecurityError";
@@ -27,13 +27,13 @@ export class SecurityError extends Error {
   static incomplete(): SecurityError {
     return new SecurityError(
       SecurityErrorCode.Incomplete,
-      "Security requirements not met in order to perform the operation"
+      "Security requirements not met in order to perform the operation",
     );
   }
   static unrecognizedType(type: string): SecurityError {
     return new SecurityError(
       SecurityErrorCode.UnrecognisedSecurityType,
-      `Unrecognised security type: ${type}`
+      `Unrecognised security type: ${type}`,
     );
   }
 }
@@ -82,9 +82,9 @@ type SecurityInputOAuth2ClientCredentials = {
   type: "oauth2:client_credentials";
   value:
     | {
-        clientID?: string | undefined;
-        clientSecret?: string | undefined;
-      }
+      clientID?: string | undefined;
+      clientSecret?: string | undefined;
+    }
     | null
     | string
     | undefined;
@@ -93,7 +93,10 @@ type SecurityInputOAuth2ClientCredentials = {
 
 type SecurityInputOAuth2PasswordCredentials = {
   type: "oauth2:password";
-  value: string | null | undefined;
+  value:
+    | string
+    | null
+    | undefined;
   fieldName?: string;
 };
 
@@ -128,28 +131,27 @@ export function resolveSecurity(
     return opts.every((o) => {
       if (o.value == null) {
         return false;
-      }
-      if (o.type === "http:basic") {
+      } else if (o.type === "http:basic") {
         return o.value.username != null || o.value.password != null;
-      }
-      if (o.type === "http:custom") {
+      } else if (o.type === "http:custom") {
         return null;
-      }
-      if (o.type === "oauth2:password") {
-        return typeof o.value === "string" && !!o.value;
-      }
-      if (o.type === "oauth2:client_credentials") {
+      } else if (o.type === "oauth2:password") {
+        return (
+          typeof o.value === "string" && !!o.value
+        );
+      } else if (o.type === "oauth2:client_credentials") {
         if (typeof o.value == "string") {
           return !!o.value;
         }
         return o.value.clientID != null || o.value.clientSecret != null;
-      }
-      if (typeof o.value === "string") {
+      } else if (typeof o.value === "string") {
         return !!o.value;
+      } else {
+        throw new Error(
+          `Unrecognized security type: ${o.type} (value type: ${typeof o
+            .value})`,
+        );
       }
-      throw new Error(
-        `Unrecognized security type: ${o.type} (value type: ${typeof o.value})`
-      );
     });
   });
   if (option == null) {
@@ -201,7 +203,10 @@ export function resolveSecurity(
   return state;
 }
 
-function applyBasic(state: SecurityState, spec: SecurityInputBasic) {
+function applyBasic(
+  state: SecurityState,
+  spec: SecurityInputBasic,
+) {
   if (spec.value == null) {
     return;
   }
@@ -215,7 +220,7 @@ function applyBearer(
     | SecurityInputBearer
     | SecurityInputOAuth2
     | SecurityInputOIDC
-    | SecurityInputOAuth2PasswordCredentials
+    | SecurityInputOAuth2PasswordCredentials,
 ) {
   if (typeof spec.value !== "string" || !spec.value) {
     return;

@@ -11,6 +11,9 @@ targets:
     detent:
         target: typescript
         source: Detent API
+        publish:
+            npm:
+                token: $npm_token
         codeSamples:
             registry:
                 location: registry.speakeasyapi.dev/detent/detent/detent-api-typescript-code-samples

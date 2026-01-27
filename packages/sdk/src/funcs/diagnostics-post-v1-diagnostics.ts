@@ -3,15 +3,15 @@
  */
 
 import * as z from "zod/v4-mini";
-import type { DetentCore } from "../core.js";
+import { DetentCore } from "../core.js";
 import { encodeJSON } from "../lib/encodings.js";
 import * as M from "../lib/matchers.js";
 import { compactMap } from "../lib/primitives.js";
 import { safeParse } from "../lib/schemas.js";
-import type { RequestOptions } from "../lib/sdks.js";
+import { RequestOptions } from "../lib/sdks.js";
 import { pathToFunc } from "../lib/url.js";
-import type { DetentError } from "../models/errors/detent-error.js";
-import type {
+import { DetentError } from "../models/errors/detent-error.js";
+import {
   ConnectionError,
   InvalidRequestError,
   RequestAbortedError,
@@ -19,11 +19,11 @@ import type {
   UnexpectedClientError,
 } from "../models/errors/http-client-errors.js";
 import * as errors from "../models/errors/index.js";
-import type { ResponseValidationError } from "../models/errors/response-validation-error.js";
-import type { SDKValidationError } from "../models/errors/sdk-validation-error.js";
+import { ResponseValidationError } from "../models/errors/response-validation-error.js";
+import { SDKValidationError } from "../models/errors/sdk-validation-error.js";
 import * as models from "../models/index.js";
-import { type APICall, APIPromise } from "../types/async.js";
-import type { Result } from "../types/fp.js";
+import { APICall, APIPromise } from "../types/async.js";
+import { Result } from "../types/fp.js";
 
 /**
  * Parse CI/build logs into structured diagnostics
@@ -40,7 +40,7 @@ import type { Result } from "../types/fp.js";
 export function diagnosticsPostV1Diagnostics(
   client: DetentCore,
   request: models.DiagnosticsRequest,
-  options?: RequestOptions
+  options?: RequestOptions,
 ): APIPromise<
   Result<
     models.DiagnosticsResponse,
@@ -56,13 +56,17 @@ export function diagnosticsPostV1Diagnostics(
     | SDKValidationError
   >
 > {
-  return new APIPromise($do(client, request, options));
+  return new APIPromise($do(
+    client,
+    request,
+    options,
+  ));
 }
 
 async function $do(
   client: DetentCore,
   request: models.DiagnosticsRequest,
-  options?: RequestOptions
+  options?: RequestOptions,
 ): Promise<
   [
     Result<
@@ -84,7 +88,7 @@ async function $do(
   const parsed = safeParse(
     request,
     (value) => z.parse(models.DiagnosticsRequest$outboundSchema, value),
-    "Input validation failed"
+    "Input validation failed",
   );
   if (!parsed.ok) {
     return [parsed, { status: "invalid" }];
@@ -94,12 +98,10 @@ async function $do(
 
   const path = pathToFunc("/v1/diagnostics")();
 
-  const headers = new Headers(
-    compactMap({
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    })
-  );
+  const headers = new Headers(compactMap({
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  }));
 
   const context = {
     options: client._options,
@@ -110,24 +112,21 @@ async function $do(
     resolvedSecurity: null,
 
     securitySource: null,
-    retryConfig: options?.retries ||
-      client._options.retryConfig || { strategy: "none" },
+    retryConfig: options?.retries
+      || client._options.retryConfig
+      || { strategy: "none" },
     retryCodes: options?.retryCodes || ["429", "500", "502", "503", "504"],
   };
 
-  const requestRes = client._createRequest(
-    context,
-    {
-      method: "POST",
-      baseURL: options?.serverURL,
-      path,
-      headers,
-      body,
-      userAgent: client._options.userAgent,
-      timeoutMs: options?.timeoutMs || client._options.timeoutMs || -1,
-    },
-    options
-  );
+  const requestRes = client._createRequest(context, {
+    method: "POST",
+    baseURL: options?.serverURL,
+    path: path,
+    headers: headers,
+    body: body,
+    userAgent: client._options.userAgent,
+    timeoutMs: options?.timeoutMs || client._options.timeoutMs || -1,
+  }, options);
   if (!requestRes.ok) {
     return [requestRes, { status: "invalid" }];
   }
@@ -165,7 +164,7 @@ async function $do(
     M.jsonErr(400, errors.ErrorResponse$inboundSchema),
     M.jsonErr(429, errors.RateLimitError$inboundSchema),
     M.fail("4XX"),
-    M.fail("5XX")
+    M.fail("5XX"),
   )(response, req, { extraFields: responseFields });
   if (!result.ok) {
     return [result, { status: "complete", request: req, response }];

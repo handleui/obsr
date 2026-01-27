@@ -3,12 +3,12 @@
  */
 
 export * from "./detected-tool.js";
-export * from "./diagnostic.js";
 export * from "./diagnostic-lite.js";
 export * from "./diagnostic-summary.js";
+export * from "./diagnostic.js";
 export * from "./diagnostics-request.js";
-export * from "./diagnostics-response.js";
 export * from "./diagnostics-response-full.js";
 export * from "./diagnostics-response-lite.js";
+export * from "./diagnostics-response.js";
 export * from "./mode-enum.js";
 export * from "./severity.js";

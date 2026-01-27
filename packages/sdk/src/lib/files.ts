@@ -9,7 +9,7 @@
  * request structure.
  */
 export async function readableStreamToArrayBuffer(
-  readable: ReadableStream<Uint8Array>
+  readable: ReadableStream<Uint8Array>,
 ): Promise<ArrayBuffer> {
   const reader = readable.getReader();
   const chunks: Uint8Array[] = [];

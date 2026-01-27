@@ -3,8 +3,8 @@
  */
 
 import { diagnosticsPostV1Diagnostics } from "../funcs/diagnostics-post-v1-diagnostics.js";
-import { ClientSDK, type RequestOptions } from "../lib/sdks.js";
-import type * as models from "../models/index.js";
+import { ClientSDK, RequestOptions } from "../lib/sdks.js";
+import * as models from "../models/index.js";
 import { unwrapAsync } from "../types/fp.js";
 
 export class Diagnostics extends ClientSDK {
@@ -22,8 +22,12 @@ export class Diagnostics extends ClientSDK {
    */
   async postV1Diagnostics(
     request: models.DiagnosticsRequest,
-    options?: RequestOptions
+    options?: RequestOptions,
   ): Promise<models.DiagnosticsResponse> {
-    return unwrapAsync(diagnosticsPostV1Diagnostics(this, request, options));
+    return unwrapAsync(diagnosticsPostV1Diagnostics(
+      this,
+      request,
+      options,
+    ));
   }
 }

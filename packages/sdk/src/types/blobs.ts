@@ -9,7 +9,7 @@ export const blobLikeSchema: z.ZodMiniType<Blob, Blob> = z.custom<Blob>(
   {
     message: "expected a Blob, File or Blob-like object",
     abort: true,
-  }
+  },
 );
 
 export function isBlobLike(val: unknown): val is Blob {

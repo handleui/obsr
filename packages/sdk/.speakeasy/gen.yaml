@@ -42,10 +42,10 @@ typescript:
   additionalScripts: {}
   alwaysIncludeInboundAndOutbound: false
   author: Speakeasy
-  baseErrorName: ""
+  baseErrorName: DetentError
   clientServerStatusCodesAsErrors: true
   constFieldsAlwaysOptional: false
-  defaultErrorName: ""
+  defaultErrorName: DetentDefaultError
   enableCustomCodeRegions: false
   enableMCPServer: false
   enableReactQuery: false

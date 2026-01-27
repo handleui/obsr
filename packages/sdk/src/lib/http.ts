@@ -4,7 +4,7 @@
 
 export type Fetcher = (
   input: RequestInfo | URL,
-  init?: RequestInit
+  init?: RequestInit,
 ) => Promise<Response>;
 
 export type Awaitable<T> = T | Promise<T>;
@@ -16,8 +16,9 @@ const DEFAULT_FETCHER: Fetcher = (input, init) => {
   // therefore needed for interop with Bun.
   if (init == null) {
     return fetch(input);
+  } else {
+    return fetch(input, init);
   }
-  return fetch(input, init);
 };
 
 export type RequestInput = {
@@ -177,7 +178,7 @@ export function matchContentType(response: Response, pattern: string): boolean {
   const [gotType = "", ...gotParams] = gotParts;
 
   const [type = "", subtype = ""] = gotType.split("/");
-  if (!(type && subtype)) {
+  if (!type || !subtype) {
     return false;
   }
 
@@ -204,11 +205,11 @@ export function matchContentType(response: Response, pattern: string): boolean {
   return true;
 }
 
-const codeRangeRE = /^[0-9]xx$/i;
+const codeRangeRE = new RegExp("^[0-9]xx$", "i");
 
 export function matchStatusCode(
   response: Response,
-  codes: StatusCodePredicate
+  codes: StatusCodePredicate,
 ): boolean {
   const actual = `${response.status}`;
   const expectedCodes = Array.isArray(codes) ? codes : [codes];
@@ -244,7 +245,7 @@ export function matchStatusCode(
 export function matchResponse(
   response: Response,
   code: StatusCodePredicate,
-  contentTypePattern: string
+  contentTypePattern: string,
 ): boolean {
   return (
     matchStatusCode(response, code) &&

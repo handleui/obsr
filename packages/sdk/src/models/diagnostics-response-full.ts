@@ -5,14 +5,14 @@
 import * as z from "zod/v4-mini";
 import { remap as remap$ } from "../lib/primitives.js";
 import { safeParse } from "../lib/schemas.js";
-import type { Result as SafeParseResult } from "../types/fp.js";
+import { Result as SafeParseResult } from "../types/fp.js";
 import * as types from "../types/primitives.js";
-import { type Diagnostic, Diagnostic$inboundSchema } from "./diagnostic.js";
 import {
-  type DiagnosticSummary,
+  DiagnosticSummary,
   DiagnosticSummary$inboundSchema,
 } from "./diagnostic-summary.js";
-import type { SDKValidationError } from "./errors/sdk-validation-error.js";
+import { Diagnostic, Diagnostic$inboundSchema } from "./diagnostic.js";
+import { SDKValidationError } from "./errors/sdk-validation-error.js";
 
 export type DiagnosticsResponseFull = {
   /**
@@ -51,17 +51,17 @@ export const DiagnosticsResponseFull$inboundSchema: z.ZodMiniType<
   }),
   z.transform((v) => {
     return remap$(v, {
-      detected_tool: "detectedTool",
+      "detected_tool": "detectedTool",
     });
-  })
+  }),
 );
 
 export function diagnosticsResponseFullFromJSON(
-  jsonString: string
+  jsonString: string,
 ): SafeParseResult<DiagnosticsResponseFull, SDKValidationError> {
   return safeParse(
     jsonString,
     (x) => DiagnosticsResponseFull$inboundSchema.parse(JSON.parse(x)),
-    `Failed to parse 'DiagnosticsResponseFull' from JSON`
+    `Failed to parse 'DiagnosticsResponseFull' from JSON`,
   );
 }

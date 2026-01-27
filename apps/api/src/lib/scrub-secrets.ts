@@ -15,7 +15,7 @@
  * - OpenAI keys (sk-...)
  * - Anthropic keys (sk-ant-...)
  * - Generic env var patterns (KEY=value, SECRET=value, etc.)
- * - Base64-encoded secrets (long base64 strings)
+ * - Base64-encoded secrets (in assignment context only)
  * - Private keys (-----BEGIN ... PRIVATE KEY-----)
  * - Connection strings with credentials
  */
@@ -65,8 +65,9 @@ const TOKEN_PATTERNS = [
   // Private keys in PEM format
   /-----BEGIN\s+(?:RSA\s+)?(?:PRIVATE|EC)\s+KEY-----[\s\S]*?-----END\s+(?:RSA\s+)?(?:PRIVATE|EC)\s+KEY-----/g,
 
-  // Base64-encoded secrets (long base64 strings, 40+ chars, standalone)
-  /(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{40,}={0,2}(?![A-Za-z0-9+/=])/g,
+  // Base64-encoded secrets (40+ chars, only after assignment operator to avoid
+  // false positives on images, source maps, etc.)
+  /(?<=[=:]\s*['"]?)[A-Za-z0-9+/]{40,}={0,2}(?=['"]?\s*(?:[,}\]\n\r]|$))/g,
 ];
 
 // Environment variable patterns - KEY=value format

@@ -81,6 +81,7 @@ app.openapi(diagnosticsRoute, (c) => {
   if (body.mode === "lite") {
     return c.json(
       {
+        mode: "lite" as const,
         detected_tool: result.detectedTool,
         diagnostics: limitedDiagnostics.map((d) => ({
           message: scrubSecrets(d.message),
@@ -96,6 +97,7 @@ app.openapi(diagnosticsRoute, (c) => {
 
   return c.json(
     {
+      mode: "full" as const,
       detected_tool: result.detectedTool,
       diagnostics: limitedDiagnostics.map((d) => ({
         message: scrubSecrets(d.message),

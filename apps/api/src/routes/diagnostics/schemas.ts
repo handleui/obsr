@@ -106,6 +106,9 @@ export const SummarySchema = z
 
 export const DiagnosticsResponseFullSchema = z
   .object({
+    mode: z.literal("full").openapi({
+      description: "Response mode indicator (discriminator)",
+    }),
     detected_tool: z.string().nullable().openapi({
       description: "Tool detected from output (null if unknown)",
       example: "typescript",
@@ -124,6 +127,9 @@ export const DiagnosticsResponseFullSchema = z
 
 export const DiagnosticsResponseLiteSchema = z
   .object({
+    mode: z.literal("lite").openapi({
+      description: "Response mode indicator (discriminator)",
+    }),
     detected_tool: z.string().nullable().openapi({
       description: "Tool detected from output (null if unknown)",
       example: "typescript",
@@ -160,5 +166,8 @@ export const RateLimitErrorSchema = z
   .openapi("RateLimitError");
 
 export const DiagnosticsResponseSchema = z
-  .union([DiagnosticsResponseFullSchema, DiagnosticsResponseLiteSchema])
+  .discriminatedUnion("mode", [
+    DiagnosticsResponseFullSchema,
+    DiagnosticsResponseLiteSchema,
+  ])
   .openapi("DiagnosticsResponse");

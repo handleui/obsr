@@ -1,3 +1,4 @@
+import { scrubEvent } from "@detent/sentry";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK official pattern
 import * as Sentry from "@sentry/cloudflare";
 import { Hono } from "hono";
@@ -31,87 +32,6 @@ import reportRoutes from "./routes/report";
 import webhookRoutes from "./routes/webhooks";
 import polarWebhookRoutes from "./routes/webhooks/polar";
 import type { Env } from "./types/env";
-
-// Lightweight regex for scrubbing tokens from error messages
-// Optimized for Cloudflare Workers CPU limits - focuses on high-risk patterns only
-// Includes: GitHub tokens, Bearer tokens, Stripe keys, JWTs, Resend keys, GitLab PATs
-// Additional protection via sendDefaultPii: false and Sentry server-side scrubbing
-const SENSITIVE_PATTERN =
-  /gh[pors]_[A-Za-z0-9_]{36,}|github_pat_[A-Za-z0-9_]{22,}|Bearer\s+[A-Za-z0-9._\-/+=]+|sk_(?:live|test)_[A-Za-z0-9]+|eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+|re_[A-Za-z0-9_]{32,}|glpat-[A-Za-z0-9_-]{20,}/gi;
-
-const scrubSensitiveData = (value: string): string =>
-  value.replace(SENSITIVE_PATTERN, "[REDACTED]");
-
-// Keys that commonly contain sensitive data - filter these entirely
-const SENSITIVE_KEYS =
-  /password|secret|token|apikey|api_key|authorization|credential|cookie/i;
-
-// Recursively scrub sensitive data from objects (for context, extra, breadcrumbs)
-const scrubObject = (obj: unknown): unknown => {
-  if (typeof obj === "string") {
-    return scrubSensitiveData(obj);
-  }
-  if (Array.isArray(obj)) {
-    return obj.map(scrubObject);
-  }
-  if (obj !== null && typeof obj === "object") {
-    const scrubbed: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(obj)) {
-      scrubbed[key] = SENSITIVE_KEYS.test(key)
-        ? "[FILTERED]"
-        : scrubObject(value);
-    }
-    return scrubbed;
-  }
-  return obj;
-};
-
-// Scrub breadcrumbs array
-const scrubBreadcrumbs = (breadcrumbs: Sentry.Breadcrumb[]): void => {
-  for (const breadcrumb of breadcrumbs) {
-    if (breadcrumb.message) {
-      breadcrumb.message = scrubSensitiveData(breadcrumb.message);
-    }
-    if (breadcrumb.data) {
-      breadcrumb.data = scrubObject(breadcrumb.data) as Record<string, unknown>;
-    }
-  }
-};
-
-// Scrub tags object
-const scrubTags = (tags: Record<string, unknown>): Record<string, string> => {
-  const scrubbedTags: Record<string, string> = {};
-  for (const [key, value] of Object.entries(tags)) {
-    scrubbedTags[key] =
-      typeof value === "string" ? scrubSensitiveData(value) : String(value);
-  }
-  return scrubbedTags;
-};
-
-// Scrub exception values (error messages in stack traces)
-const scrubExceptions = (values: Sentry.Exception[]): void => {
-  for (const exception of values) {
-    if (exception.value) {
-      exception.value = scrubSensitiveData(exception.value);
-    }
-  }
-};
-
-// Scrub common event fields (contexts, extra, tags, user)
-const scrubEventFields = (event: Sentry.Event): void => {
-  if (event.contexts) {
-    event.contexts = scrubObject(event.contexts) as Record<
-      string,
-      Record<string, unknown>
-    >;
-  }
-  if (event.extra) {
-    event.extra = scrubObject(event.extra) as Record<string, unknown>;
-  }
-  if (event.tags) {
-    event.tags = scrubTags(event.tags);
-  }
-};
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -257,30 +177,20 @@ export default Sentry.withSentry(
     tracesSampleRate: 0.05, // MVP: 5% traces
     sampleRate: 1.0, // 100% errors
     sendDefaultPii: false, // Explicit: never send IP addresses, cookies, etc.
-    // Lightweight beforeSend using helper functions for CF Workers CPU limits
     beforeSend: (event: Sentry.ErrorEvent) => {
-      if (event.message) {
-        event.message = scrubSensitiveData(event.message);
-      }
-      if (event.exception?.values) {
-        scrubExceptions(event.exception.values);
-      }
-      if (event.breadcrumbs) {
-        scrubBreadcrumbs(event.breadcrumbs);
-      }
-      scrubEventFields(event);
+      scrubEvent(event);
       // Keep user.id only (internal IDs are safe)
       if (event.user) {
         event.user = event.user.id ? { id: event.user.id } : {};
       }
       return event;
     },
-    // Lighter scrubbing for transactions (5% sample rate = less critical)
     beforeSendTransaction: (event: TransactionEvent) => {
-      if (event.breadcrumbs) {
-        scrubBreadcrumbs(event.breadcrumbs);
+      scrubEvent(event);
+      // Keep user.id only (internal IDs are safe, email/username/ip_address are PII)
+      if (event.user) {
+        event.user = event.user.id ? { id: event.user.id } : {};
       }
-      scrubEventFields(event);
       return event;
     },
   }),

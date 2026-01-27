@@ -1,11 +1,12 @@
 {
   "$schema": "https://cdn.scalar.com/schema/scalar-config.json",
+  "subdomain": "detent",
   "customDomain": "docs.detent.sh",
   "assetsDir": "docs/assets",
   "siteConfig": {
     "logo": {
-      "light": "docs/assets/logo-light.svg",
-      "dark": "docs/assets/logo-dark.svg"
+      "lightMode": "docs/assets/logo-light.svg",
+      "darkMode": "docs/assets/logo-dark.svg"
     }
   },
   "guides": [

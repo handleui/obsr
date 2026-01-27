@@ -141,7 +141,7 @@
   "references": [
     {
       "name": "API Reference",
-      "path": "https://backend.detent.sh/openapi.json"
+      "liveLink": "https://backend.detent.sh/openapi.json"
     }
   ]
 }

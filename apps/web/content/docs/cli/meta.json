@@ -1,0 +1,14 @@
+{
+  "title": "CLI",
+  "pages": [
+    "installation",
+    "heal",
+    "settings",
+    "how-healing-works",
+    "tools",
+    "error-hints",
+    "budget",
+    "trust",
+    "workflows"
+  ]
+}

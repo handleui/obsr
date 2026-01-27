@@ -1,0 +1,56 @@
+---
+title: Checks & Healing
+description: CI check execution and AI-powered healing
+---
+
+Parse CI configurations and trigger AI-powered healing for failures.
+
+## Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/v1/parse` | Parse CI configuration file |
+| `POST` | `/v1/heal` | Request AI healing for errors |
+
+<Callout type="info">
+Full API reference with request/response schemas coming soon via OpenAPI.
+</Callout>
+
+## Parse CI Configuration
+
+Parse a GitHub Actions or GitLab CI configuration file and return structured workflow information.
+
+```bash
+curl -X POST https://backend.detent.sh/v1/parse \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"config_type": "github_actions", "config_content": "..."}'
+```
+
+## Request Healing
+
+Analyze CI failures and get AI-generated fixes.
+
+```bash
+curl -X POST https://backend.detent.sh/v1/heal \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"project_id": "...", "error_output": "..."}'
+```
+
+Options:
+- `dry_run: true` - Preview fixes without applying
+- `error_type` - Hint: `lint`, `type`, `test`, `build`
+- `file_context` - Include relevant source files
+
+## CLI
+
+Most users interact with checks via the CLI:
+
+```bash
+detent check          # Run checks for changed files
+detent heal           # Auto-heal failures
+detent heal --dry-run # Preview fixes
+```
+
+See [CLI documentation](/docs/cli/heal) for details.

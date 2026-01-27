@@ -1,0 +1,89 @@
+---
+title: Installation
+description: Install the Detent CLI
+---
+
+The CLI is optional. Detent works through GitHub Actions — you only need the CLI if you want to view errors locally or manage projects from the command line.
+
+## Install
+
+<Tabs items={["curl (recommended)", "npm", "homebrew"]}>
+  <Tab value="curl (recommended)">
+    ```bash
+    curl -fsSL https://detent.sh/install.sh | bash
+    ```
+  </Tab>
+  <Tab value="npm">
+    ```bash
+    npm install -g detent
+    ```
+  </Tab>
+  <Tab value="homebrew">
+    ```bash
+    brew install handleui/tap/detent
+    ```
+  </Tab>
+</Tabs>
+
+Verify it worked:
+
+```bash
+dt version
+```
+
+## Log In
+
+```bash
+dt auth login
+```
+
+This opens your browser. Sign in with GitHub, and you're authenticated.
+
+For headless environments (CI, SSH), use the device flow:
+
+```bash
+dt auth login --headless
+```
+
+## Link a Project
+
+Navigate to your repo and run:
+
+```bash
+dt link
+```
+
+This connects your local repo to Detent. You'll pick your organization and project.
+
+Check the status anytime:
+
+```bash
+dt link status
+```
+
+## Commands
+
+| Command | What it does |
+|---------|--------------|
+| `dt auth login` | Sign in |
+| `dt auth logout` | Sign out |
+| `dt link` | Connect a repo to Detent |
+| `dt link status` | Check connection |
+| `dt link unlink` | Disconnect |
+| `dt errors` | Show CI errors for current commit |
+| `dt whoami` | Show current user |
+| `dt org list` | List your organizations |
+| `dt config list` | Show configuration |
+| `dt update` | Update to latest version |
+
+## Uninstall
+
+```bash
+rm $(which dt)
+```
+
+Or if installed via npm:
+
+```bash
+npm uninstall -g detent
+```

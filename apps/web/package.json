@@ -10,6 +10,10 @@
   },
   "dependencies": {
     "@detent/ui": "*",
+    "@types/mdx": "^2.0.13",
+    "fumadocs-core": "^16.4.9",
+    "fumadocs-mdx": "^14.2.6",
+    "fumadocs-ui": "^16.4.9",
     "next": "16.1.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",

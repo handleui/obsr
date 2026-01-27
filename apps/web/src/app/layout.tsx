@@ -1,3 +1,4 @@
+import { RootProvider } from "fumadocs-ui/provider/next";
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
@@ -19,8 +20,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${neueMontreal.variable} antialiased`}>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${neueMontreal.variable} antialiased`}>
+        <RootProvider>{children}</RootProvider>
+      </body>
     </html>
   );
 }

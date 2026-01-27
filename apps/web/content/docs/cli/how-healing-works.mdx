@@ -1,0 +1,70 @@
+---
+title: How Healing Works
+description: What happens when Detent fixes your code
+---
+
+When your CI fails, Detent doesn't just report the error. It reads your code, understands the problem, and writes a fix.
+
+## The Flow
+
+```
+CI fails → Action parses errors → AI generates fix → You approve → Fix applied
+```
+
+### 1. Error Collection
+
+The Detent GitHub Action runs at the end of your CI job. It scans for output files from tools like ESLint, TypeScript, and Vitest:
+
+```
+eslint-report.json
+vitest.json
+tsc-output.txt
+```
+
+It extracts structured data: file path, line number, error message, and a code snippet around the error.
+
+### 2. AI Healing
+
+Your error data goes to our healing service. An AI agent (Claude) receives:
+
+- The error message
+- 7 lines of code around the error
+- Your project context
+
+The AI runs in a sandbox. It can read files, run commands, and test fixes. It tries the fix, verifies it works, then submits a patch.
+
+### 3. You Review
+
+Fixes appear as PR comments. You see:
+
+- What changed
+- Why it changed
+- A button to apply
+
+One click and the fix is committed to your branch.
+
+## What It Doesn't Do
+
+Detent fixes the small stuff. It won't:
+
+- Refactor your architecture
+- Add new features
+- Fix logic bugs it can't reproduce
+- Touch code outside the error location
+
+If a fix is uncertain, it'll tell you instead of guessing.
+
+## Autofix vs. AI Heal
+
+Detent has two modes:
+
+| Mode | When | What |
+|------|------|------|
+| **Autofix** | Deterministic fixes (formatting, imports) | Runs instantly, no AI cost |
+| **AI Heal** | Complex errors (type mismatches, test failures) | Uses Claude, costs credits |
+
+Autofix runs first. If it can't solve the problem, AI Heal kicks in.
+
+## Cost
+
+You're charged per successful heal, not per attempt. See [Pricing](/docs/pricing) for details.

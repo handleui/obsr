@@ -1,0 +1,10 @@
+{
+  "title": "API",
+  "pages": [
+    "introduction",
+    "authentication",
+    "checks",
+    "repositories",
+    "webhooks"
+  ]
+}

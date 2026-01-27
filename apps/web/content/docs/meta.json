@@ -1,0 +1,18 @@
+{
+  "title": "Detent Docs",
+  "pages": [
+    "---Getting Started---",
+    "index",
+    "quickstart",
+    "pricing",
+    "faq",
+    "---CLI---",
+    "...cli",
+    "---CI Integration---",
+    "...action",
+    "---SDK---",
+    "...sdk",
+    "---API---",
+    "...api"
+  ]
+}

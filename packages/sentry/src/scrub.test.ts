@@ -207,8 +207,8 @@ describe("scrubStringNullable", () => {
     expect(scrubStringNullable(undefined)).toBeUndefined();
   });
 
-  it("returns undefined for empty string", () => {
-    expect(scrubStringNullable("")).toBeUndefined();
+  it("preserves empty strings", () => {
+    expect(scrubStringNullable("")).toBe("");
   });
 
   it("scrubs non-empty strings", () => {

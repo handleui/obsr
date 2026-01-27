@@ -5,15 +5,15 @@
  * that may appear in CI logs submitted to public endpoints.
  *
  * Pattern coverage:
- * - GitHub tokens (ghp_, gho_, ghr_, ghs_, github_pat_)
+ * - GitHub tokens (ghp_, gho_, ghr_, ghs_, ghu_, github_pat_)
  * - GitLab PATs (glpat-)
  * - Bearer tokens
- * - Stripe keys (sk_live_, sk_test_, pk_live_, pk_test_)
+ * - Stripe keys (sk_, pk_, rk_ with live/test modes)
  * - JWTs (eyJ...)
  * - Resend keys (re_)
- * - AWS keys (AKIA..., aws_secret_access_key patterns)
- * - OpenAI keys (sk-...)
- * - Anthropic keys (sk-ant-...)
+ * - AWS keys (AKIA, ASIA for temp credentials)
+ * - OpenAI keys (sk-, sk-proj-, sk-admin-, sk-svcacct-)
+ * - Anthropic keys (sk-ant-api03-, sk-ant-admin-)
  * - Generic env var patterns (KEY=value, SECRET=value, etc.)
  * - Base64-encoded secrets (in assignment context only)
  * - Private keys (-----BEGIN ... PRIVATE KEY-----)
@@ -22,8 +22,8 @@
 
 // Core token patterns - high-confidence matches
 const TOKEN_PATTERNS = [
-  // GitHub tokens
-  /gh[pors]_[A-Za-z0-9_]{36,}/g,
+  // GitHub tokens (ghp_, gho_, ghr_, ghs_, ghu_)
+  /gh[porsu]_[A-Za-z0-9_]{36,}/g,
   /github_pat_[A-Za-z0-9_]{22,}/g,
 
   // GitLab PATs
@@ -32,8 +32,8 @@ const TOKEN_PATTERNS = [
   // Bearer tokens (captures the token value after Bearer)
   /Bearer\s+[A-Za-z0-9._\-/+=]{20,}/gi,
 
-  // Stripe keys
-  /[sp]k_(?:live|test)_[A-Za-z0-9]{20,}/g,
+  // Stripe keys (sk_, pk_, rk_ with live/test modes)
+  /[spr]k_(?:live|test)_[A-Za-z0-9]{20,}/g,
 
   // JWTs (three base64url-encoded segments)
   /eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
@@ -41,14 +41,14 @@ const TOKEN_PATTERNS = [
   // Resend keys
   /re_[A-Za-z0-9_]{32,}/g,
 
-  // AWS access keys (AKIA followed by 16 alphanumeric chars)
-  /AKIA[A-Z0-9]{16}/g,
+  // AWS access keys (AKIA for long-term, ASIA for temporary STS credentials)
+  /(?:AKIA|ASIA)[A-Z0-9]{16}/g,
 
-  // OpenAI keys
-  /sk-[A-Za-z0-9]{32,}/g,
+  // OpenAI keys (sk-, sk-proj-, sk-admin-, sk-svcacct-)
+  /sk-(?:proj-|admin-|svcacct-)?[A-Za-z0-9_-]{32,}/g,
 
-  // Anthropic keys
-  /sk-ant-[A-Za-z0-9_-]{32,}/g,
+  // Anthropic keys (sk-ant-api03-, sk-ant-admin-)
+  /sk-ant-(?:api03-|admin-)[A-Za-z0-9_-]{32,}/g,
 
   // Vercel tokens
   /vercel_[A-Za-z0-9_]{32,}/gi,

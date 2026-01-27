@@ -1,0 +1,82 @@
+{
+  "$schema": "https://cdn.scalar.com/schema/scalar-config.json",
+  "customDomain": "docs.detent.sh",
+  "assetsDir": "docs/assets",
+  "siteConfig": {
+    "logo": {
+      "light": "docs/assets/logo-light.svg",
+      "dark": "docs/assets/logo-dark.svg"
+    }
+  },
+  "guides": [
+    {
+      "name": "Detent Docs",
+      "sidebar": [
+        {
+          "type": "group",
+          "name": "Getting Started",
+          "children": [
+            { "type": "page", "path": "docs/introduction.md" },
+            { "type": "page", "path": "docs/quickstart.md" },
+            { "type": "page", "path": "docs/pricing.md" },
+            { "type": "page", "path": "docs/faq.md" }
+          ]
+        },
+        {
+          "type": "group",
+          "name": "CLI",
+          "children": [
+            { "type": "page", "path": "docs/cli/installation.md" },
+            { "type": "page", "path": "docs/cli/heal.md" },
+            { "type": "page", "path": "docs/cli/settings.md" }
+          ]
+        },
+        {
+          "type": "group",
+          "name": "How It Works",
+          "children": [
+            { "type": "page", "path": "docs/cli/how-healing-works.md" },
+            { "type": "page", "path": "docs/cli/tools.md" },
+            { "type": "page", "path": "docs/cli/error-hints.md" },
+            { "type": "page", "path": "docs/cli/budget.md" },
+            { "type": "page", "path": "docs/cli/trust.md" }
+          ]
+        },
+        {
+          "type": "group",
+          "name": "CI Integration",
+          "children": [
+            { "type": "page", "path": "docs/action/index.md" },
+            { "type": "page", "path": "docs/cli/workflows.md" }
+          ]
+        },
+        {
+          "type": "group",
+          "name": "SDK",
+          "children": [
+            { "type": "page", "path": "docs/sdk/getting-started.md" },
+            { "type": "page", "path": "docs/sdk/running-commands.md" },
+            { "type": "page", "path": "docs/sdk/custom-parsers.md" }
+          ]
+        },
+        {
+          "type": "group",
+          "name": "API",
+          "children": [
+            { "type": "page", "path": "docs/api/introduction.md" },
+            { "type": "page", "path": "docs/api/authentication.md" },
+            { "type": "page", "path": "docs/api/checks.md" },
+            { "type": "page", "path": "docs/api/repositories.md" },
+            { "type": "page", "path": "docs/api/webhooks.md" }
+          ]
+        }
+      ]
+    }
+  ],
+  "references": [
+    {
+      "name": "API Reference",
+      "path": "packages/sdk/.speakeasy/out.openapi.yaml"
+    }
+  ]
+}

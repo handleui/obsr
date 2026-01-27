@@ -7,7 +7,8 @@ description: Add Detent to your repo in 5 minutes
 
 Add this to your workflow file. Put it at the end of your CI job:
 
-```yaml .github/workflows/ci.yml
+```yaml
+# .github/workflows/ci.yml
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -26,9 +27,9 @@ jobs:
         if: always()
 ```
 
-<Warning>
+:::scalar-callout{type="warning"}
 Use `if: always()` — otherwise the action won't run when your CI fails (which is exactly when you need it).
-</Warning>
+:::
 
 ## 2. Get Your Token
 
@@ -46,9 +47,7 @@ Push a commit with a lint error. On purpose. Watch what happens:
 3. Detent parses the error
 4. You get a PR comment with the fix
 
-<Frame>
-  <img src="/images/pr-comment.png" alt="Detent PR comment with suggested fix" />
-</Frame>
+![Detent PR comment with suggested fix](/assets/pr-comment.png)
 
 Click **Apply** and the fix is committed to your branch.
 
@@ -56,19 +55,25 @@ Click **Apply** and the fix is committed to your branch.
 
 The CLI lets you view errors locally and manage your projects:
 
-<CodeGroup>
-```bash curl
+::::scalar-tabs
+:::scalar-tab{ title="curl (recommended)" }
+```bash
 curl -fsSL https://detent.sh/install.sh | bash
 ```
+:::
 
-```bash npm
+:::scalar-tab{ title="npm" }
+```bash
 npm install -g detent
 ```
+:::
 
-```bash homebrew
+:::scalar-tab{ title="homebrew" }
+```bash
 brew install handleui/tap/detent
 ```
-</CodeGroup>
+:::
+::::
 
 Then link your repo:
 
@@ -85,11 +90,16 @@ dt errors
 
 ## Next Steps
 
-<CardGroup cols={2}>
-  <Card title="How Healing Works" icon="wand-magic-sparkles" href="/cli/how-healing-works">
-    Understand the AI under the hood
-  </Card>
-  <Card title="Supported Tools" icon="wrench" href="/cli/tools">
-    ESLint, TypeScript, Vitest, and more
-  </Card>
-</CardGroup>
+::::scalar-row
+:::scalar-card{ icon="solid/basic-magic-wand" title="How Healing Works" }
+Understand the AI under the hood
+
+[Learn More →](/cli/how-healing-works)
+:::
+
+:::scalar-card{ icon="solid/basic-wrench" title="Supported Tools" }
+ESLint, TypeScript, Vitest, and more
+
+[View Tools →](/cli/tools)
+:::
+::::

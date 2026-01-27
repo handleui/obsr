@@ -12,9 +12,9 @@ Detent receives webhooks from GitHub and GitLab to track CI status and respond t
 | GitHub | `POST /webhooks/github` |
 | GitLab | `POST /webhooks/gitlab` |
 
-<Info>
+:::scalar-callout{type="info"}
 Webhooks are automatically configured when you install the GitHub App. Manual configuration is only needed for GitLab.
-</Info>
+:::
 
 ## GitHub Events
 
@@ -46,8 +46,8 @@ When a workflow fails, Detent automatically:
 
 ## GitLab
 
-<Note>
+:::scalar-callout{type="info"}
 GitLab requires manual webhook configuration with a secret token in the `X-Gitlab-Token` header.
-</Note>
+:::
 
 Supported events: `push`, `pipeline`, `merge_request`

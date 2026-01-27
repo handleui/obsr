@@ -7,19 +7,25 @@ The CLI is optional. Detent works through GitHub Actions — you only need the C
 
 ## Install
 
-<CodeGroup>
-```bash curl (recommended)
+::::scalar-tabs
+:::scalar-tab{ title="curl (recommended)" }
+```bash
 curl -fsSL https://detent.sh/install.sh | bash
 ```
+:::
 
-```bash npm
+:::scalar-tab{ title="npm" }
+```bash
 npm install -g detent
 ```
+:::
 
-```bash homebrew
+:::scalar-tab{ title="homebrew" }
+```bash
 brew install handleui/tap/detent
 ```
-</CodeGroup>
+:::
+::::
 
 Verify it worked:
 

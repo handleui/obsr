@@ -38,29 +38,29 @@ Detent includes hints for common errors across multiple languages and tools:
 
 ## Example Hints
 
-<Accordion title="TypeScript">
+### TypeScript
+
 | Rule | Hint |
 |------|------|
 | TS2322 | Type mismatch. Check type assertion, generic parameter, or use compatible type. |
 | TS2339 | Property doesn't exist on type. Check spelling, add to interface, or use optional chaining. |
 | TS2532 | Object possibly undefined. Add null check, optional chaining (?.), or non-null assertion (!). |
-</Accordion>
 
-<Accordion title="Go">
+### Go
+
 | Pattern | Hint |
 |---------|------|
 | `undefined: X` | Undefined identifier. Check imports, spelling, or if exported (capitalized). |
 | `declared but not used` | Unused variable. Remove or use blank identifier (_). |
 | `imported and not used` | Unused import. Remove or use blank import. |
-</Accordion>
 
-<Accordion title="Biome">
+### Biome
+
 | Rule | Hint |
 |------|------|
 | lint/style/noVar | Replace 'var' with 'const' or 'let'. |
 | lint/style/useConst | Variable is never reassigned. Use 'const' instead of 'let'. |
 | lint/correctness/noUnusedVariables | Remove unused variable or prefix with underscore. |
-</Accordion>
 
 ## Roadmap
 

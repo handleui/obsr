@@ -108,6 +108,6 @@ if (result.exitCode !== 0) {
 }
 ```
 
-<Warning>
+:::scalar-callout{type="warning"}
 The `command` parameter is passed to the shell. Don't pass untrusted user input directly.
-</Warning>
+:::

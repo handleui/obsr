@@ -7,19 +7,25 @@ The `@detent/diagnostics` SDK parses output from CI tools into structured diagno
 
 ## Install
 
-<CodeGroup>
-```bash npm
+::::scalar-tabs
+:::scalar-tab{ title="npm" }
+```bash
 npm install @detent/diagnostics
 ```
+:::
 
-```bash pnpm
+:::scalar-tab{ title="pnpm" }
+```bash
 pnpm add @detent/diagnostics
 ```
+:::
 
-```bash bun
+:::scalar-tab{ title="bun" }
+```bash
 bun add @detent/diagnostics
 ```
-</CodeGroup>
+:::
+::::
 
 ## Quick Start
 
@@ -63,9 +69,9 @@ extract(output, "eslint")
 | Cargo | NDJSON (`--message-format=json`) | Yes |
 | golangci-lint | JSON (`--out-format=json`) | Yes |
 
-<Info>
+:::scalar-callout{type="info"}
 Need a tool that's not listed? See [Custom Parsers](/sdk/custom-parsers) to add support for any tool.
-</Info>
+:::
 
 ## Core Types
 
@@ -91,11 +97,16 @@ interface DiagnosticResult {
 
 ## Next Steps
 
-<CardGroup cols={2}>
-  <Card title="Run Commands" icon="terminal" href="/sdk/running-commands">
-    Execute commands and auto-extract diagnostics
-  </Card>
-  <Card title="Custom Parsers" icon="puzzle-piece" href="/sdk/custom-parsers">
-    Add support for any CI tool
-  </Card>
-</CardGroup>
+::::scalar-row
+:::scalar-card{ icon="solid/programming-terminal" title="Run Commands" }
+Execute commands and auto-extract diagnostics
+
+[View Docs →](/sdk/running-commands)
+:::
+
+:::scalar-card{ icon="solid/basic-puzzle" title="Custom Parsers" }
+Add support for any CI tool
+
+[View Docs →](/sdk/custom-parsers)
+:::
+::::

@@ -202,9 +202,29 @@ api.route("/orgs", apiKeysRoutes);
 api.route("/orgs", githubSecretsRoutes);
 api.route("/orgs", orgsByProviderRoutes);
 api.route("/billing", billingRoutes);
-api.route("/diagnostics", diagnosticsRoutes);
 
 app.route("/v1", api);
+
+// Public diagnostics endpoint (no auth - used by SDK fallback)
+// Mounted at root because the OpenAPIHono route defines full path for accurate spec generation
+app.route("/", diagnosticsRoutes);
+
+// OpenAPI spec - generated once at module load time, not per request
+const openApiSpec = diagnosticsRoutes.getOpenAPIDocument({
+  openapi: "3.1.0",
+  info: {
+    title: "Detent API",
+    version: "1.0.0",
+    description:
+      "Self-healing CI/CD platform. Parse CI logs, match error patterns, and trigger AI fixes.",
+  },
+  servers: [
+    { url: "https://backend.detent.sh", description: "Production" },
+    { url: "http://localhost:8787", description: "Local development" },
+  ],
+});
+
+app.get("/openapi.json", (c) => c.json(openApiSpec));
 
 // Export type for potential RPC client
 export type AppType = typeof app;

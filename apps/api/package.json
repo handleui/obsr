@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "export $(grep '^CLOUDFLARE_HYPERDRIVE' .dev.vars 2>/dev/null | xargs) && wrangler dev",
     "dev:tunnel": "hookdeck listen 8787 github-app --path /webhooks/github --output compact",
     "build": "wrangler deploy --dry-run --outdir=dist",
     "deploy": "wrangler deploy --minify",
@@ -19,15 +19,14 @@
     "email:dev": "email dev --dir src/emails --port 3003"
   },
   "dependencies": {
+    "@detent/diagnostics": "*",
     "@detent/healing": "*",
     "@detent/lore": "*",
-    "@detent/diagnostics": "*",
     "@detent/sandbox": "*",
     "@detent/types": "*",
+    "@hono/zod-openapi": "^1.2.0",
     "@polar-sh/sdk": "^0.42.2",
     "@react-email/components": "^0.0.34",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
     "@sentry/cloudflare": "^10.32.1",
     "@upstash/ratelimit": "^2.0.7",
     "@upstash/redis": "^1.36.0",
@@ -35,10 +34,13 @@
     "fflate": "^0.8.2",
     "hono": "^4.11.3",
     "jose": "^6.0.10",
+    "pg": "^8.16.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "resend": "^6.7.0",
     "sealed-box": "^0.1.0",
     "tweetnacl": "^1.0.3",
-    "pg": "^8.16.3",
-    "resend": "^6.7.0"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250106.0",

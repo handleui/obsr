@@ -1,0 +1,28 @@
+[96msrc/app.ts[0m:[93m1[0m:[93m7[0m - [91merror[0m[90m TS2322: [0mType 'string' is not assignable to type 'number'.
+
+[7m1[0m const x: number = "string";
+[7m [0m [91m      ~[0m
+
+[96msrc/client.cts[0m:[93m1[0m:[93m7[0m - [91merror[0m[90m TS2322: [0mType 'string' is not assignable to type 'boolean'.
+
+[7m1[0m const z: boolean = "text";
+[7m [0m [91m      ~[0m
+
+[96msrc/components/Button.tsx[0m:[93m1[0m:[93m7[0m - [91merror[0m[90m TS2322: [0mType 'number' is not assignable to type 'string'.
+
+[7m1[0m const y: string = 123;
+[7m [0m [91m      ~[0m
+
+[96msrc/server.mts[0m:[93m1[0m:[93m49[0m - [91merror[0m[90m TS2322: [0mType 'number' is not assignable to type 'string'.
+
+[7m1[0m export const module1 = (val: number): string => val;
+[7m [0m [91m                                                ~~~[0m
+
+
+Found 4 errors in 4 files.
+
+Errors  Files
+     1  src/app.ts[90m:1[0m
+     1  src/client.cts[90m:1[0m
+     1  src/components/Button.tsx[90m:1[0m
+     1  src/server.mts[90m:1[0m

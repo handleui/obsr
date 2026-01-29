@@ -1,0 +1,15 @@
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    globals: true,
+    environment: "node",
+    include: ["src/**/*.test.{ts,tsx}"],
+    pool: "threads",
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json", "html"],
+      exclude: ["**/*.test.{ts,tsx}", "**/dist/**", "**/node_modules/**"],
+    },
+  },
+});

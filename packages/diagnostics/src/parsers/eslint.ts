@@ -87,6 +87,9 @@ export const parseEslint = (content: string): Diagnostic[] => {
   // Direct iteration avoids intermediate arrays from flatMap/filter/map
   const diagnostics: Diagnostic[] = [];
   for (const result of results) {
+    if (!Array.isArray(result.messages)) {
+      continue;
+    }
     for (const message of result.messages) {
       if (message.severity !== 0) {
         diagnostics.push(parseMessage(result.filePath, message));

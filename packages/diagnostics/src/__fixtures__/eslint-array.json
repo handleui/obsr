@@ -1,0 +1,99 @@
+[
+  {
+    "filePath": "/project/src/utils.ts",
+    "messages": [
+      {
+        "ruleId": "no-unused-vars",
+        "severity": 2,
+        "message": "'addOne' is defined but never used.",
+        "line": 1,
+        "column": 10,
+        "messageId": "unusedVar",
+        "endLine": 1,
+        "endColumn": 16,
+        "suggestions": [
+          {
+            "messageId": "removeVar",
+            "desc": "Remove unused variable 'addOne'.",
+            "fix": {
+              "range": [0, 94],
+              "text": ""
+            }
+          }
+        ]
+      },
+      {
+        "ruleId": "semi",
+        "severity": 1,
+        "message": "Missing semicolon.",
+        "line": 3,
+        "column": 20,
+        "messageId": "missingSemi",
+        "endLine": 4,
+        "endColumn": 1,
+        "fix": {
+          "range": [60, 60],
+          "text": ";"
+        }
+      },
+      {
+        "ruleId": null,
+        "severity": 2,
+        "message": "Parsing error: Unexpected token",
+        "line": 5,
+        "column": 1,
+        "fatal": true
+      },
+      {
+        "ruleId": "no-console",
+        "severity": 0,
+        "message": "Unexpected console statement.",
+        "line": 10,
+        "column": 1
+      }
+    ],
+    "errorCount": 2,
+    "warningCount": 1
+  },
+  {
+    "filePath": "/project/src/index.ts",
+    "messages": [
+      {
+        "ruleId": "use-isnan",
+        "severity": 2,
+        "message": "Use the isNaN function to compare with NaN.",
+        "line": 2,
+        "column": 9,
+        "messageId": "comparisonWithNaN",
+        "endLine": 2,
+        "endColumn": 17,
+        "suggestions": [
+          {
+            "messageId": "replaceWithIsNaN",
+            "desc": "Replace with Number.isNaN.",
+            "fix": {
+              "range": [29, 37],
+              "text": "!Number.isNaN(i)"
+            }
+          },
+          {
+            "messageId": "replaceWithCastingAndIsNaN",
+            "desc": "Replace with Number.isNaN and cast to a Number.",
+            "fix": {
+              "range": [29, 37],
+              "text": "!Number.isNaN(Number(i))"
+            }
+          }
+        ]
+      }
+    ],
+    "errorCount": 1,
+    "warningCount": 0
+  },
+  {
+    "filePath": "/project/src/empty.ts",
+    "messages": [],
+    "errorCount": 0,
+    "warningCount": 0
+  }
+]

@@ -81,11 +81,14 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@detent/typescript-config": "*",
     "@types/node": "^22.0.0",
-    "typescript": "5.9.2"
+    "typescript": "5.9.2",
+    "vitest": "^4.0.16"
   }
 }

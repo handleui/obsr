@@ -298,8 +298,7 @@ export const bulkStoreRunsAndErrors = async (
         ruleId: truncateString(e.error.ruleId, 200),
         source: truncateString(e.error.source, 100),
         stackTrace: truncateString(e.error.stackTrace, MAX_STACK_TRACE_LENGTH),
-        suggestions: e.error.suggestions ?? null,
-        hint: truncateString(e.error.hint, MAX_ERROR_MESSAGE_LENGTH),
+        hints: e.error.hints ?? null,
         codeSnippet: e.error.codeSnippet ?? null,
         workflowJob:
           truncateString(e.error.workflowJob, MAX_WORKFLOW_NAME_LENGTH) ??
@@ -314,11 +313,6 @@ export const bulkStoreRunsAndErrors = async (
         ),
         unknownPattern: e.error.unknownPattern ?? null,
         lineKnown: e.error.lineKnown ?? null,
-        columnKnown: e.error.columnKnown ?? null,
-        messageTruncated: e.error.messageTruncated ?? null,
-        stackTraceTruncated: e.error.stackTraceTruncated ?? null,
-        exitCode: e.error.exitCode ?? null,
-        isInfrastructure: e.error.isInfrastructure ?? null,
         possiblyTestOutput: e.error.possiblyTestOutput ?? null,
         fixable: e.error.fixable ?? null,
       }));

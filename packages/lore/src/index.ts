@@ -1,5 +1,6 @@
 export {
   createHintMatcher,
+  enrichErrorsWithHints,
   getHintsForError,
   HINT_RULES,
   matchHints,

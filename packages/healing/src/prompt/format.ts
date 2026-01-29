@@ -271,10 +271,11 @@ export const formatErrorsWithHints = async (
   const matches = matchHints(sorted);
   const parts: string[] = [];
 
-  for (const { error, hints } of matches) {
+  for (const { error, hints: loreHints } of matches) {
     let formatted = formatError(error);
-    if (hints.length > 0) {
-      formatted += `\n  HINTS: ${hints.join(" | ")}`;
+    const allHints = [...(error.hints ?? []), ...loreHints];
+    if (allHints.length > 0) {
+      formatted += `\n  HINTS: ${allHints.join(" | ")}`;
     }
     parts.push(formatted);
   }

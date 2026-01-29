@@ -229,7 +229,7 @@ interface Diagnostic {
   severity?: "error" | "warning"
   ruleId?: string
   stackTrace?: string
-  suggestions?: string[]
+  hints?: string[]
   fixable?: boolean
 }
 

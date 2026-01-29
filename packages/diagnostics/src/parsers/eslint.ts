@@ -48,7 +48,7 @@ const mapSeverity = (
   fatal?: boolean
 ): "warning" | "error" => (fatal || severity === 2 ? "error" : "warning");
 
-const extractSuggestions = (message: ESLintMessage): string[] | undefined => {
+const extractHints = (message: ESLintMessage): string[] | undefined => {
   if (!message.suggestions || message.suggestions.length === 0) {
     return undefined;
   }
@@ -67,7 +67,7 @@ const parseMessage = (
   column: message.column,
   severity: mapSeverity(message.severity, message.fatal),
   ruleId: message.ruleId ?? undefined,
-  suggestions: extractSuggestions(message),
+  hints: extractHints(message),
   fixable: message.fix !== undefined,
 });
 

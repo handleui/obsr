@@ -24,7 +24,6 @@ interface ReportError {
   ruleId?: string;
   stackTrace?: string;
   stepId?: string;
-  exitCode?: number;
   codeSnippet?: {
     lines: string[];
     startLine: number;
@@ -32,16 +31,16 @@ interface ReportError {
     language: string;
   };
   // Additional fields from ExtractedError
-  hint?: string;
-  isInfrastructure?: boolean;
   possiblyTestOutput?: boolean;
   fixable?: boolean;
-  suggestions?: string[];
+  hints?: string[];
   unknownPattern?: boolean;
   lineKnown?: boolean;
-  columnKnown?: boolean;
-  messageTruncated?: boolean;
-  stackTraceTruncated?: boolean;
+  // Backwards compatibility: accept legacy fields and merge into hints
+  /** @deprecated Use hints instead */
+  suggestions?: string[];
+  /** @deprecated Use hints instead */
+  hint?: string;
 }
 
 interface ReportPayload {
@@ -71,7 +70,7 @@ const MAX_ERRORS = 500;
 const MAX_MATRIX_ENTRIES = 50;
 const MAX_CODE_SNIPPET_LINES = 100;
 const MAX_CODE_SNIPPET_LINE_LENGTH = 500;
-const MAX_SUGGESTIONS = 20;
+const MAX_HINTS = 20;
 
 // Schema-aligned truncation limits (match DB varchar constraints)
 const SCHEMA_FILE_PATH_LENGTH = 2048; // run_errors.file_path varchar(2048)
@@ -161,6 +160,44 @@ const toErrorRow = (
 };
 
 /**
+ * Merge legacy hint/suggestions into hints array for backwards compatibility.
+ * Incoming data may have: hints, suggestions, hint (singular), or any combination.
+ * Output is always a single hints array.
+ */
+const mergeHints = (error: ReportError): string[] | null => {
+  const result: string[] = [];
+
+  // Helper to truncate and add hint if not duplicate
+  const addHint = (hint: string) => {
+    const truncated = hint.slice(0, MAX_STRING_LENGTH);
+    if (!result.includes(truncated)) {
+      result.push(truncated);
+    }
+  };
+
+  // New field takes precedence
+  if (error.hints) {
+    for (const h of error.hints) {
+      addHint(h);
+    }
+  }
+
+  // Backwards compat: merge legacy suggestions
+  if (error.suggestions) {
+    for (const s of error.suggestions) {
+      addHint(s);
+    }
+  }
+
+  // Backwards compat: merge legacy singular hint
+  if (error.hint) {
+    addHint(error.hint);
+  }
+
+  return result.length > 0 ? result : null;
+};
+
+/**
  * Internal helper to create the error row with truncation tracking
  */
 const createErrorRow = (
@@ -223,23 +260,12 @@ const createErrorRow = (
     warnings
   ),
   source: "job-report" as const,
-  exitCode: error.exitCode ?? null,
   codeSnippet: error.codeSnippet ?? null,
-  hint: truncateOptionalWithTracking(
-    error.hint,
-    MAX_LONG_STRING_LENGTH,
-    `${prefix}.hint`,
-    warnings
-  ),
-  isInfrastructure: error.isInfrastructure ?? null,
   possiblyTestOutput: error.possiblyTestOutput ?? null,
   fixable: error.fixable ?? null,
-  suggestions: error.suggestions ?? null,
+  hints: mergeHints(error),
   unknownPattern: error.unknownPattern ?? null,
   lineKnown: error.lineKnown ?? null,
-  columnKnown: error.columnKnown ?? null,
-  messageTruncated: error.messageTruncated ?? null,
-  stackTraceTruncated: error.stackTraceTruncated ?? null,
 });
 
 /**
@@ -453,42 +479,39 @@ const validateCodeSnippet = (
 };
 
 /**
- * Validate suggestions array
+ * Validate a string array field (hints or legacy suggestions)
  * Security: Limits array size and individual string lengths
  */
-const validateSuggestions = (
-  suggestions: unknown,
+const validateStringArray = (
+  arr: unknown,
+  fieldName: string,
   errorIndex: number
 ): string | null => {
-  if (suggestions === undefined || suggestions === null) {
+  if (arr === undefined || arr === null) {
     return null;
   }
-  if (!Array.isArray(suggestions)) {
-    return `errors[${errorIndex}].suggestions must be an array`;
+  if (!Array.isArray(arr)) {
+    return `errors[${errorIndex}].${fieldName} must be an array`;
   }
-  if (suggestions.length > MAX_SUGGESTIONS) {
-    return `errors[${errorIndex}].suggestions exceeds maximum of ${MAX_SUGGESTIONS} items`;
+  if (arr.length > MAX_HINTS) {
+    return `errors[${errorIndex}].${fieldName} exceeds maximum of ${MAX_HINTS} items`;
   }
-  for (const [j, suggestion] of suggestions.entries()) {
-    if (typeof suggestion !== "string") {
-      return `errors[${errorIndex}].suggestions[${j}] must be a string`;
+  for (const [j, item] of arr.entries()) {
+    if (typeof item !== "string") {
+      return `errors[${errorIndex}].${fieldName}[${j}] must be a string`;
     }
-    if (!isValidLength(suggestion, MAX_STRING_LENGTH)) {
-      return `errors[${errorIndex}].suggestions[${j}] exceeds maximum length`;
+    if (!isValidLength(item, MAX_STRING_LENGTH)) {
+      return `errors[${errorIndex}].${fieldName}[${j}] exceeds maximum length`;
     }
   }
   return null;
 };
 
 const BOOLEAN_ERROR_FIELDS = [
-  "isInfrastructure",
   "possiblyTestOutput",
   "fixable",
   "unknownPattern",
   "lineKnown",
-  "columnKnown",
-  "messageTruncated",
-  "stackTraceTruncated",
 ];
 
 /**
@@ -511,6 +534,7 @@ const validateErrorStrings = (
     ["category", e.category, SCHEMA_CATEGORY_LENGTH],
     ["ruleId", e.ruleId, SCHEMA_RULE_ID_LENGTH],
     ["stepId", e.stepId, SCHEMA_WORKFLOW_STEP_LENGTH],
+    // Legacy hint field - still accept for backwards compatibility
     ["hint", e.hint, MAX_LONG_STRING_LENGTH],
   ];
 
@@ -547,7 +571,6 @@ const validateErrorPrimitives = (
   const numericFields: [string, unknown][] = [
     ["line", e.line],
     ["column", e.column],
-    ["exitCode", e.exitCode],
   ];
 
   for (const [name, value] of numericFields) {
@@ -595,7 +618,14 @@ const validateError = (
     return snippetError;
   }
 
-  const suggestionsError = validateSuggestions(e.suggestions, i);
+  // Validate hints array (new field)
+  const hintsError = validateStringArray(e.hints, "hints", i);
+  if (hintsError) {
+    return hintsError;
+  }
+
+  // Validate legacy suggestions array (backwards compatibility)
+  const suggestionsError = validateStringArray(e.suggestions, "suggestions", i);
   if (suggestionsError) {
     return suggestionsError;
   }

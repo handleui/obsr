@@ -62,31 +62,31 @@ interface GolangciOutput {
 }
 
 /**
- * Extract suggestions from replacement and suggestedFixes.
+ * Extract hints from replacement and suggestedFixes.
  */
-const extractSuggestions = (
+const extractHints = (
   replacement: GolangciReplacement | null | undefined,
   suggestedFixes: GolangciSuggestedFix[] | undefined
 ): string[] => {
-  const suggestions: string[] = [];
+  const hints: string[] = [];
 
   // Handle legacy Replacement field
   if (replacement?.NewLines && replacement.NewLines.length > 0) {
-    suggestions.push(`Replace with: ${replacement.NewLines.join("\n")}`);
+    hints.push(`Replace with: ${replacement.NewLines.join("\n")}`);
   } else if (replacement?.NeedOnlyDelete) {
-    suggestions.push("Delete this code");
+    hints.push("Delete this code");
   }
 
   // Handle newer SuggestedFixes field
   if (suggestedFixes) {
     for (const fix of suggestedFixes) {
       if (fix.Message) {
-        suggestions.push(fix.Message);
+        hints.push(fix.Message);
       }
     }
   }
 
-  return suggestions;
+  return hints;
 };
 
 /**
@@ -107,10 +107,7 @@ const issueToError = (issue: GolangciIssue): Diagnostic | null => {
   const severity: "error" | "warning" =
     issue.Severity?.toLowerCase() === "warning" ? "warning" : "error";
 
-  const suggestions = extractSuggestions(
-    issue.Replacement,
-    issue.SuggestedFixes
-  );
+  const hints = extractHints(issue.Replacement, issue.SuggestedFixes);
 
   const error: Diagnostic = {
     message: issue.Text,
@@ -120,7 +117,7 @@ const issueToError = (issue: GolangciIssue): Diagnostic | null => {
     severity,
     ruleId: issue.FromLinter,
     fixable: hasFixAvailable(issue),
-    suggestions: suggestions.length > 0 ? suggestions : undefined,
+    hints: hints.length > 0 ? hints : undefined,
   };
 
   if (issue.SourceLines && issue.SourceLines.length > 0) {

@@ -75,8 +75,8 @@ const isValidApiResponse = (
 };
 
 const mapApiDiagnostic = (d: Record<string, unknown>): Diagnostic => {
-  const suggestions = Array.isArray(d.suggestions)
-    ? d.suggestions.filter((s): s is string => typeof s === "string")
+  const hints = Array.isArray(d.hints)
+    ? d.hints.filter((s): s is string => typeof s === "string")
     : undefined;
 
   return {
@@ -90,7 +90,7 @@ const mapApiDiagnostic = (d: Record<string, unknown>): Diagnostic => {
         : undefined,
     ruleId: typeof d.rule_id === "string" ? d.rule_id : undefined,
     stackTrace: typeof d.stack_trace === "string" ? d.stack_trace : undefined,
-    suggestions: suggestions?.length ? suggestions : undefined,
+    hints: hints?.length ? hints : undefined,
     fixable: typeof d.fixable === "boolean" ? d.fixable : undefined,
   };
 };

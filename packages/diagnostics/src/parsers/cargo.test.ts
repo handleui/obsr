@@ -25,6 +25,10 @@ describe("parseCargo", () => {
           "column": 9,
           "filePath": "src/lib.rs",
           "fixable": true,
+          "hints": [
+            "note: \`#[warn(unused_variables)]\` on by default",
+            "if this is intentional, prefix it with an underscore: \`_x\`",
+          ],
           "line": 3,
           "message": "unused variable: \`x\`",
           "ruleId": "unused_variables",
@@ -38,15 +42,12 @@ describe("parseCargo", () => {
         = note: \`#[warn(unused_variables)]\` on by default
 
       ",
-          "suggestions": [
-            "note: \`#[warn(unused_variables)]\` on by default",
-            "if this is intentional, prefix it with an underscore: \`_x\`",
-          ],
         },
         {
           "column": 13,
           "filePath": "src/lib.rs",
           "fixable": false,
+          "hints": undefined,
           "line": 8,
           "message": "cannot find value \`undefined_var\` in this scope: not found in this scope",
           "ruleId": "E0425",
@@ -58,12 +59,15 @@ describe("parseCargo", () => {
         |             ^^^^^^^^^^^^^ not found in this scope
 
       ",
-          "suggestions": undefined,
         },
         {
           "column": 5,
           "filePath": "src/lib.rs",
           "fixable": true,
+          "hints": [
+            "note: \`#[warn(unused_imports)]\` on by default",
+            "remove the whole \`use\` item",
+          ],
           "line": 1,
           "message": "unused import: \`std::collections::HashMap\`",
           "ruleId": "unused_imports",
@@ -78,15 +82,15 @@ describe("parseCargo", () => {
         = help: remove the whole \`use\` item
 
       ",
-          "suggestions": [
-            "note: \`#[warn(unused_imports)]\` on by default",
-            "remove the whole \`use\` item",
-          ],
         },
         {
           "column": 20,
           "filePath": "src/lib.rs",
           "fixable": false,
+          "hints": [
+            "note: expected type \`i32\`",
+            "note: found reference \`&'static str\`",
+          ],
           "line": 12,
           "message": "mismatched types: expected \`i32\`, found \`&str\`",
           "ruleId": "E0308",
@@ -103,15 +107,15 @@ describe("parseCargo", () => {
                     found reference \`&'static str\`
 
       ",
-          "suggestions": [
-            "note: expected type \`i32\`",
-            "note: found reference \`&'static str\`",
-          ],
         },
         {
           "column": 5,
           "filePath": "src/lib.rs",
           "fixable": false,
+          "hints": [
+            "note: \`#[warn(unused_assignments)]\` on by default",
+            "maybe it is overwritten before being read?",
+          ],
           "line": 15,
           "message": "value assigned to \`result\` is never read",
           "ruleId": "unused_assignments",
@@ -126,10 +130,6 @@ describe("parseCargo", () => {
          = help: maybe it is overwritten before being read?
 
       ",
-          "suggestions": [
-            "note: \`#[warn(unused_assignments)]\` on by default",
-            "maybe it is overwritten before being read?",
-          ],
         },
       ]
     `);
@@ -260,7 +260,7 @@ describe("parseCargo", () => {
     });
 
     const result = parseCargo(input);
-    expect(result[0]?.suggestions).toMatchInlineSnapshot(`
+    expect(result[0]?.hints).toMatchInlineSnapshot(`
       [
         "prefix with underscore: \`_x\`",
       ]
@@ -294,7 +294,7 @@ describe("parseCargo", () => {
     });
 
     const result = parseCargo(input);
-    expect(result[0]?.suggestions).toEqual([
+    expect(result[0]?.hints).toEqual([
       "maybe it is overwritten before being read?",
     ]);
   });
@@ -332,7 +332,7 @@ describe("parseCargo", () => {
     });
 
     const result = parseCargo(input);
-    expect(result[0]?.suggestions).toEqual([
+    expect(result[0]?.hints).toEqual([
       "note: expected type `i32`",
       "note: found type `&str`",
     ]);

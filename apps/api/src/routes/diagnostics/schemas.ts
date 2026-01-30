@@ -57,7 +57,7 @@ export const DiagnosticSchema = z
     stack_trace: z.string().optional().openapi({
       description: "Stack trace if available (e.g., for test failures)",
     }),
-    suggestions: z.array(z.string()).optional().openapi({
+    hints: z.array(z.string()).optional().openapi({
       description: "Suggested fixes from the tool",
     }),
     fixable: z.boolean().optional().openapi({

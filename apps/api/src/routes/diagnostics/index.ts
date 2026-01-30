@@ -124,7 +124,7 @@ app.openapi(diagnosticsRoute, (c) => {
         severity: d.severity ?? "error",
         rule_id: d.ruleId,
         stack_trace: d.stackTrace ? scrubSecrets(d.stackTrace) : undefined,
-        suggestions: d.suggestions?.map(scrubSecrets),
+        hints: d.hints?.map(scrubSecrets),
         fixable: d.fixable,
       })),
       summary: result.summary,

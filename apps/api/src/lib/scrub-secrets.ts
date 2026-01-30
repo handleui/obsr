@@ -123,12 +123,12 @@ export const scrubSecrets = (value: string): string => {
 
 /**
  * Scrub secrets from a diagnostic message.
- * Applies scrubbing to message, stack_trace, and suggestions fields.
+ * Applies scrubbing to message, stack_trace, and hints fields.
  */
 export interface DiagnosticLike {
   message: string;
   stack_trace?: string;
-  suggestions?: string[];
+  hints?: string[];
 }
 
 export const scrubDiagnostic = <T extends DiagnosticLike>(
@@ -139,5 +139,5 @@ export const scrubDiagnostic = <T extends DiagnosticLike>(
   stack_trace: diagnostic.stack_trace
     ? scrubSecrets(diagnostic.stack_trace)
     : undefined,
-  suggestions: diagnostic.suggestions?.map(scrubSecrets),
+  hints: diagnostic.hints?.map(scrubSecrets),
 });

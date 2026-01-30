@@ -25,51 +25,51 @@ describe("parseGolangci", () => {
           "column": 8,
           "filePath": "pkg/handler/file.go",
           "fixable": false,
+          "hints": undefined,
           "line": 45,
           "message": "Error return value of \`file.Close\` is not checked",
           "ruleId": "errcheck",
           "severity": "error",
           "stackTrace": "defer file.Close()",
-          "suggestions": undefined,
         },
         {
           "column": 1,
           "filePath": "pkg/service/format.go",
           "fixable": true,
+          "hints": [
+            "Replace with: func foo() {
+      	return",
+          ],
           "line": 10,
           "message": "File is not \`gofmt\`-ed with \`-s\`",
           "ruleId": "gofmt",
           "severity": "warning",
           "stackTrace": "func foo()  {
       return",
-          "suggestions": [
-            "Replace with: func foo() {
-      	return",
-          ],
         },
         {
           "column": undefined,
           "filePath": "pkg/utils/helpers.go",
           "fixable": true,
+          "hints": [
+            "Delete this code",
+          ],
           "line": 25,
           "message": "\`unusedFunc\` is unused",
           "ruleId": "deadcode",
           "severity": "warning",
           "stackTrace": "func unusedFunc() {}",
-          "suggestions": [
-            "Delete this code",
-          ],
         },
         {
           "column": 2,
           "filePath": "pkg/service/process.go",
           "fixable": false,
+          "hints": undefined,
           "line": 123,
           "message": "this value of err is never used (SA4006)",
           "ruleId": "staticcheck",
           "severity": "error",
           "stackTrace": "err := process()",
-          "suggestions": undefined,
         },
       ]
     `);
@@ -83,19 +83,22 @@ describe("parseGolangci", () => {
           "column": 12,
           "filePath": "cmd/main.go",
           "fixable": true,
+          "hints": [
+            "Use %s for string arguments",
+          ],
           "line": 15,
           "message": "printf: fmt.Sprintf format %d has arg str of wrong type string",
           "ruleId": "govet",
           "severity": "error",
           "stackTrace": "fmt.Sprintf("%d", str)",
-          "suggestions": [
-            "Use %s for string arguments",
-          ],
         },
         {
           "column": 2,
           "filePath": "internal/worker/pool.go",
           "fixable": true,
+          "hints": [
+            "Simplify to: <-ch",
+          ],
           "line": 78,
           "message": "S1000: should use a simple channel send/receive instead of \`select\` with a single case",
           "ruleId": "gosimple",
@@ -103,33 +106,30 @@ describe("parseGolangci", () => {
           "stackTrace": "select {
       case <-ch:
       }",
-          "suggestions": [
-            "Simplify to: <-ch",
-          ],
         },
         {
           "column": 1,
           "filePath": "pkg/api/handler.go",
           "fixable": false,
+          "hints": undefined,
           "line": 42,
           "message": "ineffectual assignment to err",
           "ruleId": "ineffassign",
           "severity": "warning",
           "stackTrace": "err = nil",
-          "suggestions": undefined,
         },
         {
           "column": 6,
           "filePath": "pkg/public/api.go",
           "fixable": true,
+          "hints": [
+            "Add documentation comment",
+            "Make function unexported",
+          ],
           "line": 30,
           "message": "exported function DoSomething should have comment or be unexported",
           "ruleId": "revive",
           "severity": "warning",
-          "suggestions": [
-            "Add documentation comment",
-            "Make function unexported",
-          ],
         },
       ]
     `);
@@ -322,7 +322,7 @@ describe("parseGolangci", () => {
       ],
     });
     const result = parseGolangci(input);
-    expect(result[0]?.suggestions).toEqual(["Replace with: line1\nline2"]);
+    expect(result[0]?.hints).toEqual(["Replace with: line1\nline2"]);
   });
 
   test("extracts suggestion from Replacement.NeedOnlyDelete", () => {
@@ -337,7 +337,7 @@ describe("parseGolangci", () => {
       ],
     });
     const result = parseGolangci(input);
-    expect(result[0]?.suggestions).toEqual(["Delete this code"]);
+    expect(result[0]?.hints).toEqual(["Delete this code"]);
   });
 
   test("extracts suggestions from SuggestedFixes messages", () => {
@@ -355,13 +355,10 @@ describe("parseGolangci", () => {
       ],
     });
     const result = parseGolangci(input);
-    expect(result[0]?.suggestions).toEqual([
-      "Add documentation",
-      "Make unexported",
-    ]);
+    expect(result[0]?.hints).toEqual(["Add documentation", "Make unexported"]);
   });
 
-  test("returns undefined for suggestions when none available", () => {
+  test("returns undefined for hints when none available", () => {
     const input = JSON.stringify({
       Issues: [
         {
@@ -372,10 +369,10 @@ describe("parseGolangci", () => {
       ],
     });
     const result = parseGolangci(input);
-    expect(result[0]?.suggestions).toBeUndefined();
+    expect(result[0]?.hints).toBeUndefined();
   });
 
-  test("returns undefined for suggestions when SuggestedFixes has no messages", () => {
+  test("returns undefined for hints when SuggestedFixes has no messages", () => {
     const input = JSON.stringify({
       Issues: [
         {
@@ -387,7 +384,7 @@ describe("parseGolangci", () => {
       ],
     });
     const result = parseGolangci(input);
-    expect(result[0]?.suggestions).toBeUndefined();
+    expect(result[0]?.hints).toBeUndefined();
   });
 
   test("converts SourceLines to stackTrace", () => {
@@ -625,7 +622,7 @@ describe("parseGolangci", () => {
       });
       const result = parseGolangci(input);
       expect(result).toHaveLength(1);
-      expect(result[0]?.suggestions?.length).toBe(100);
+      expect(result[0]?.hints?.length).toBe(100);
     });
 
     test("handles very long SourceLines", () => {

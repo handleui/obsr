@@ -93,6 +93,45 @@ export const getHintsForError = <T extends HintableError>(
  * Create a custom hint matcher with additional rules.
  * Custom rules are checked first, then built-in rules.
  */
+/**
+ * Enriches errors by appending lore hints to their hints array.
+ * Returns new error objects with combined hints (existing + lore-matched).
+ *
+ * Performance: Only creates new objects when hints are actually added.
+ * Errors with no lore matches are returned with their existing hints array.
+ */
+export const enrichErrorsWithHints = <
+  T extends HintableError & { hints?: readonly string[] },
+>(
+  errors: T[]
+): (T & { hints: string[] })[] => {
+  // Batch match all errors at once (more efficient than per-error calls)
+  const matches = matchHints(errors);
+
+  return matches.map(({ error, hints: loreHints }) => {
+    const existingHints = error.hints;
+
+    // Fast path: no lore hints to add
+    if (loreHints.length === 0) {
+      // Return with guaranteed hints array (may be empty)
+      if (existingHints && existingHints.length > 0) {
+        // Existing hints, no lore hints - create new mutable array
+        return { ...error, hints: [...existingHints] };
+      }
+      // No existing hints, no lore hints - normalize undefined to empty array for consistent return type
+      return { ...error, hints: [] as string[] };
+    }
+
+    // Has lore hints - create new combined array
+    if (existingHints && existingHints.length > 0) {
+      return { ...error, hints: [...existingHints, ...loreHints] };
+    }
+
+    // Only lore hints - use them directly (already a new array from matchHints)
+    return { ...error, hints: loreHints };
+  });
+};
+
 export const createHintMatcher = (
   customRules: HintRule[]
 ): {

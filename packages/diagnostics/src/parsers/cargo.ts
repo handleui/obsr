@@ -86,10 +86,10 @@ const findPrimarySpan = (spans: CargoSpan[]): CargoSpan | undefined =>
   spans.find((span) => span.is_primary);
 
 /**
- * Extract help suggestions from children diagnostics.
+ * Extract help hints from children diagnostics.
  */
-const extractSuggestions = (children: CargoDiagnostic[]): string[] => {
-  const suggestions: string[] = [];
+const extractHints = (children: CargoDiagnostic[]): string[] => {
+  const hints: string[] = [];
 
   for (const child of children) {
     if (child.level === "help" && child.message) {
@@ -100,18 +100,18 @@ const extractSuggestions = (children: CargoDiagnostic[]): string[] => {
           s.suggested_replacement !== undefined
       );
       if (spanWithReplacement?.suggested_replacement) {
-        suggestions.push(
+        hints.push(
           `${child.message}: \`${spanWithReplacement.suggested_replacement}\``
         );
       } else {
-        suggestions.push(child.message);
+        hints.push(child.message);
       }
     } else if (child.level === "note" && child.message) {
-      suggestions.push(`note: ${child.message}`);
+      hints.push(`note: ${child.message}`);
     }
   }
 
-  return suggestions;
+  return hints;
 };
 
 /**
@@ -167,7 +167,7 @@ const tryParseJson = (line: string): CargoMessage | null => {
  */
 const diagnosticToError = (diagnostic: CargoDiagnostic): Diagnostic => {
   const primarySpan = findPrimarySpan(diagnostic.spans);
-  const suggestions = extractSuggestions(diagnostic.children);
+  const hints = extractHints(diagnostic.children);
   const fixable = hasMachineApplicableFix(
     diagnostic.spans,
     diagnostic.children
@@ -187,7 +187,7 @@ const diagnosticToError = (diagnostic: CargoDiagnostic): Diagnostic => {
     severity: diagnostic.level === "warning" ? "warning" : "error",
     ruleId: diagnostic.code?.code,
     stackTrace: diagnostic.rendered ?? undefined,
-    suggestions: suggestions.length > 0 ? suggestions : undefined,
+    hints: hints.length > 0 ? hints : undefined,
     fixable,
   };
 };

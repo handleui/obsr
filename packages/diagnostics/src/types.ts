@@ -8,7 +8,7 @@ export interface Diagnostic {
   severity?: Severity;
   ruleId?: string;
   stackTrace?: string;
-  suggestions?: string[];
+  hints?: string[];
   fixable?: boolean;
 }
 

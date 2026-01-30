@@ -519,8 +519,8 @@ const calculateErrorPriority = (error: ParsedError): number => {
     score += 15;
   }
 
-  // Has hint/suggestion - actionable (+10)
-  if (error.hint) {
+  // Has hints - actionable (+10)
+  if (error.hints && error.hints.length > 0) {
     score += 10;
   }
 
@@ -592,7 +592,7 @@ const mergeIntoExisting = (
 
   // Merge metadata (keep first non-empty value)
   existing.ruleId = existing.ruleId ?? error.ruleId;
-  existing.hint = existing.hint ?? error.hint;
+  existing.hints = existing.hints ?? error.hints;
   existing.source = existing.source ?? error.source;
 };
 
@@ -814,9 +814,10 @@ const createAnnotation = (error: DeduplicatedError): CheckRunAnnotation => {
     }
   }
 
-  // Add hint inline if short enough and no multiple messages
-  if (error.hint && error.hint.length < 100 && !error.combinedMessages) {
-    message = `${message}\n\nHint: ${error.hint}`;
+  // Add first hint inline if short enough and no multiple messages
+  const firstHint = error.hints?.[0];
+  if (firstHint && firstHint.length < 100 && !error.combinedMessages) {
+    message = `${message}\n\nHint: ${firstHint}`;
   }
 
   // Truncate message (API allows 64 KB but keep it readable)

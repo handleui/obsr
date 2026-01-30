@@ -5,8 +5,8 @@ import type {
 } from "./types.js";
 
 export interface FormatOptions {
-  /** Include suggestions if present (default: false) */
-  suggestions?: boolean;
+  /** Include hints if present (default: false) */
+  hints?: boolean;
   /** Include stack traces if present (default: false) */
   stackTrace?: boolean;
   /** Show fixable indicator (default: false) */
@@ -34,11 +34,11 @@ const formatMessage = (d: Diagnostic, options?: FormatOptions): string => {
   return `${severity}${rule}: ${d.message}${fixableTag}`;
 };
 
-const formatSuggestions = (d: Diagnostic): string[] => {
-  if (!d.suggestions?.length) {
+const formatHints = (d: Diagnostic): string[] => {
+  if (!d.hints?.length) {
     return [];
   }
-  return d.suggestions.map((s) => `  💡 ${s}`);
+  return d.hints.map((s) => `  💡 ${s}`);
 };
 
 const formatStackTrace = (d: Diagnostic): string[] => {
@@ -69,7 +69,7 @@ const formatSummary = (summary: DiagnosticSummary): string => {
  *
  * @example With options
  * ```ts
- * formatDiagnostics(result, { suggestions: true, stackTrace: true })
+ * formatDiagnostics(result, { hints: true, stackTrace: true })
  * ```
  */
 export const formatDiagnostics = (
@@ -87,8 +87,8 @@ export const formatDiagnostics = (
     const msg = formatMessage(d, options);
     lines.push(loc ? `${loc} - ${msg}` : msg);
 
-    if (options?.suggestions) {
-      lines.push(...formatSuggestions(d));
+    if (options?.hints) {
+      lines.push(...formatHints(d));
     }
     if (options?.stackTrace) {
       lines.push(...formatStackTrace(d));

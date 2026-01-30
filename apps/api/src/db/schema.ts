@@ -469,24 +469,18 @@ export const runErrors = pgTable(
     ruleId: varchar("rule_id", { length: 255 }),
     source: varchar("source", { length: 64 }),
     stackTrace: text("stack_trace"),
-    suggestions: jsonb("suggestions").$type<string[]>(),
-    hint: text("hint"),
+    hints: jsonb("hints").$type<string[]>(),
     workflowJob: varchar("workflow_job", { length: 255 }),
     workflowStep: varchar("workflow_step", { length: 255 }),
     workflowAction: varchar("workflow_action", { length: 255 }),
     unknownPattern: boolean("unknown_pattern"),
     lineKnown: boolean("line_known"),
-    columnKnown: boolean("column_known"),
-    messageTruncated: boolean("message_truncated"),
-    stackTraceTruncated: boolean("stack_trace_truncated"),
     codeSnippet: jsonb("code_snippet").$type<{
       lines: string[];
       startLine: number;
       errorLine: number;
       language: string;
     }>(),
-    exitCode: integer("exit_code"),
-    isInfrastructure: boolean("is_infrastructure"),
     possiblyTestOutput: boolean("possibly_test_output"),
     fixable: boolean("fixable"),
     signatureId: varchar("signature_id", { length: 36 }).references(

@@ -12,7 +12,6 @@ export interface ParsedError {
   ruleId?: string;
   source?: string;
   stackTrace?: string;
-  hint?: string;
   workflowJob?: string;
   workflowStep?: string;
   workflowAction?: string;
@@ -20,8 +19,8 @@ export interface ParsedError {
   unknownPattern?: boolean;
   /** True if error may be test output noise (vitest/jest progress, etc.) */
   possiblyTestOutput?: boolean;
-  /** Full suggestions array from parser */
-  suggestions?: string[];
+  /** Hints for fixing the error (merged from legacy suggestions + hint fields) */
+  hints?: string[];
   /** Code snippet with surrounding context */
   codeSnippet?: {
     lines: string[];
@@ -29,14 +28,8 @@ export interface ParsedError {
     errorLine: number;
     language: string;
   };
-  /** Confidence flags */
+  /** Confidence flag for line number */
   lineKnown?: boolean;
-  columnKnown?: boolean;
-  messageTruncated?: boolean;
-  stackTraceTruncated?: boolean;
-  /** Infrastructure error context */
-  exitCode?: number;
-  isInfrastructure?: boolean;
   /** True if error can be auto-fixed by the tool */
   fixable?: boolean;
 }

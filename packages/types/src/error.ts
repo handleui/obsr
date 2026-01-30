@@ -47,26 +47,12 @@ export interface ExtractedError {
   // AI-optimized fields for enhanced context
   /** Source code context around error */
   readonly codeSnippet?: CodeSnippet;
-  /** Fix suggestions from tools (Rust notes, TS hints) */
-  readonly suggestions?: readonly string[];
+  /** Hints for fixing the error (merged from suggestions + hint) */
+  readonly hints?: readonly string[];
   /** True if line is a real value, false if line=0 means unknown */
   readonly lineKnown?: boolean;
-  /** True if column is a real value, false if column=0 means unknown */
-  readonly columnKnown?: boolean;
-  /** True if stack trace was truncated due to size limits */
-  readonly stackTraceTruncated?: boolean;
-  /** True if message was truncated due to size limits */
-  readonly messageTruncated?: boolean;
   /** True if error can be auto-fixed by the tool (e.g., biome check --write) */
   readonly fixable?: boolean;
-
-  // Infrastructure error fields
-  /** Actionable hint for fixing the error */
-  readonly hint?: string;
-  /** Exit code if this was a process failure */
-  readonly exitCode?: number;
-  /** Whether this is CI configuration vs code error */
-  readonly isInfrastructure?: boolean;
   /** True if error may be test output noise (vitest/jest progress, etc.) */
   readonly possiblyTestOutput?: boolean;
 }
@@ -90,14 +76,8 @@ export interface MutableExtractedError {
   source?: ErrorSource;
   unknownPattern?: boolean;
   codeSnippet?: CodeSnippet;
-  suggestions?: string[];
+  hints?: string[];
   lineKnown?: boolean;
-  columnKnown?: boolean;
-  stackTraceTruncated?: boolean;
-  messageTruncated?: boolean;
   fixable?: boolean;
-  hint?: string;
-  exitCode?: number;
-  isInfrastructure?: boolean;
   possiblyTestOutput?: boolean;
 }

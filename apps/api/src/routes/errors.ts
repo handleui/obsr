@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import { createDb } from "../db/client";
 import { projects, runErrors, runs } from "../db/schema";
 import { verifyOrgAccess } from "../lib/org-access";
+import { scrubSecrets } from "../lib/scrub-secrets";
 import type { Env } from "../types/env";
 
 // Validation patterns
@@ -153,16 +154,12 @@ app.get("/", async (c) => {
               severity: runErrors.severity,
               source: runErrors.source,
               ruleId: runErrors.ruleId,
-              hint: runErrors.hint,
-              suggestions: runErrors.suggestions,
+              hints: runErrors.hints,
               stackTrace: runErrors.stackTrace,
               codeSnippet: runErrors.codeSnippet,
               workflowJob: runErrors.workflowJob,
               lineKnown: runErrors.lineKnown,
-              columnKnown: runErrors.columnKnown,
               unknownPattern: runErrors.unknownPattern,
-              isInfrastructure: runErrors.isInfrastructure,
-              exitCode: runErrors.exitCode,
             })
             .from(runErrors)
             .where(inArray(runErrors.runId, runIds))
@@ -181,26 +178,24 @@ app.get("/", async (c) => {
         headBranch: r.headBranch,
         completedAt: r.runCompletedAt?.toISOString() ?? null,
       })),
+      // SECURITY: Scrub secrets from user-facing fields to prevent credential leakage
+      // CI logs may contain API keys, tokens, or credentials in error messages/hints
       errors: errors.map((e) => ({
         id: e.id,
         filePath: e.filePath,
         line: e.line,
         column: e.column,
-        message: e.message,
+        message: scrubSecrets(e.message),
         category: e.category,
         severity: e.severity,
         source: e.source,
         ruleId: e.ruleId,
-        hint: e.hint,
-        suggestions: e.suggestions,
-        stackTrace: e.stackTrace,
+        hints: e.hints?.map(scrubSecrets),
+        stackTrace: e.stackTrace ? scrubSecrets(e.stackTrace) : null,
         codeSnippet: e.codeSnippet,
         workflowJob: e.workflowJob,
         lineKnown: e.lineKnown,
-        columnKnown: e.columnKnown,
         unknownPattern: e.unknownPattern,
-        isInfrastructure: e.isInfrastructure,
-        exitCode: e.exitCode,
       })),
     });
   } finally {

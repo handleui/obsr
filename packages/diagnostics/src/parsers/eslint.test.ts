@@ -25,46 +25,46 @@ describe("parseEslint", () => {
           "column": 10,
           "filePath": "/project/src/utils.ts",
           "fixable": false,
+          "hints": [
+            "Remove unused variable 'addOne'.",
+          ],
           "line": 1,
           "message": "'addOne' is defined but never used.",
           "ruleId": "no-unused-vars",
           "severity": "error",
-          "suggestions": [
-            "Remove unused variable 'addOne'.",
-          ],
         },
         {
           "column": 20,
           "filePath": "/project/src/utils.ts",
           "fixable": true,
+          "hints": undefined,
           "line": 3,
           "message": "Missing semicolon.",
           "ruleId": "semi",
           "severity": "warning",
-          "suggestions": undefined,
         },
         {
           "column": 1,
           "filePath": "/project/src/utils.ts",
           "fixable": false,
+          "hints": undefined,
           "line": 5,
           "message": "Parsing error: Unexpected token",
           "ruleId": undefined,
           "severity": "error",
-          "suggestions": undefined,
         },
         {
           "column": 9,
           "filePath": "/project/src/index.ts",
           "fixable": false,
+          "hints": [
+            "Replace with Number.isNaN.",
+            "Replace with Number.isNaN and cast to a Number.",
+          ],
           "line": 2,
           "message": "Use the isNaN function to compare with NaN.",
           "ruleId": "use-isnan",
           "severity": "error",
-          "suggestions": [
-            "Replace with Number.isNaN.",
-            "Replace with Number.isNaN and cast to a Number.",
-          ],
         },
       ]
     `);
@@ -78,24 +78,24 @@ describe("parseEslint", () => {
           "column": 25,
           "filePath": "/project/src/components/Button.tsx",
           "fixable": false,
+          "hints": [
+            "Use 'unknown' instead, this will force you to explicitly, and safely assert the type is correct.",
+            "Use 'never' instead, this is useful when instantiating generic type parameters that you don't need to know the type of.",
+          ],
           "line": 15,
           "message": "Unexpected any. Specify a different type.",
           "ruleId": "@typescript-eslint/no-explicit-any",
           "severity": "error",
-          "suggestions": [
-            "Use 'unknown' instead, this will force you to explicitly, and safely assert the type is correct.",
-            "Use 'never' instead, this is useful when instantiating generic type parameters that you don't need to know the type of.",
-          ],
         },
         {
           "column": 1,
           "filePath": "/project/src/components/Button.tsx",
           "fixable": false,
+          "hints": undefined,
           "line": 20,
           "message": "Expected indentation of 4 spaces but found 2.",
           "ruleId": "indent",
           "severity": "warning",
-          "suggestions": undefined,
         },
       ]
     `);
@@ -239,13 +239,13 @@ describe("parseEslint", () => {
       },
     ]);
     const result = parseEslint(input);
-    expect(result[0]?.suggestions).toEqual([
+    expect(result[0]?.hints).toEqual([
       "Replace with Number.isNaN",
       "Use global isNaN",
     ]);
   });
 
-  test("returns undefined for suggestions when empty array", () => {
+  test("returns undefined for hints when empty array", () => {
     const input = JSON.stringify([
       {
         filePath: "/test.ts",
@@ -262,10 +262,10 @@ describe("parseEslint", () => {
       },
     ]);
     const result = parseEslint(input);
-    expect(result[0]?.suggestions).toBeUndefined();
+    expect(result[0]?.hints).toBeUndefined();
   });
 
-  test("returns undefined for suggestions when not present", () => {
+  test("returns undefined for hints when not present", () => {
     const input = JSON.stringify([
       {
         filePath: "/test.ts",
@@ -275,7 +275,7 @@ describe("parseEslint", () => {
       },
     ]);
     const result = parseEslint(input);
-    expect(result[0]?.suggestions).toBeUndefined();
+    expect(result[0]?.hints).toBeUndefined();
   });
 
   test("sets fixable to true when fix is present", () => {

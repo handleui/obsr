@@ -1,8 +1,6 @@
-import { and, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { createDb } from "../db/client";
-import { organizationMembers, organizations, projects } from "../db/schema";
+import { getConvexClient } from "../db/convex";
 import type { Env } from "../types/env";
 
 const PROVIDER_MAP = {
@@ -72,43 +70,38 @@ const validateHandle = (handle: string): { valid: boolean; error?: string } => {
   return { valid: true };
 };
 
-type DbClient = Awaited<ReturnType<typeof createDb>>["db"];
+interface OrganizationDoc {
+  _id: string;
+  name: string;
+  slug: string;
+  provider: "github" | "gitlab";
+  providerAccountId: string;
+  providerAccountLogin: string;
+  providerAccountType: "organization" | "user";
+  providerAvatarUrl?: string;
+  providerInstallationId?: string;
+  suspendedAt?: number;
+  deletedAt?: number;
+  createdAt: number;
+}
 
-/**
- * Fetch org and membership in a single query using LEFT JOIN
- * Reduces 2 sequential queries to 1 for authorization checks
- */
-const getOrgWithMembership = async (
-  db: DbClient,
-  provider: "github" | "gitlab",
-  slug: string,
-  userId: string
-) => {
-  const result = await db
-    .select({
-      org: organizations,
-      member: organizationMembers,
-    })
-    .from(organizations)
-    .leftJoin(
-      organizationMembers,
-      and(
-        eq(organizationMembers.organizationId, organizations.id),
-        eq(organizationMembers.userId, userId),
-        isNull(organizationMembers.removedAt)
-      )
-    )
-    .where(
-      and(
-        eq(organizations.provider, provider),
-        eq(organizations.providerAccountLogin, slug),
-        isNull(organizations.deletedAt)
-      )
-    )
-    .limit(1);
+interface OrganizationMemberDoc {
+  role: string;
+  userId: string;
+  removedAt?: number;
+}
 
-  return result[0] ?? null;
-};
+interface ProjectDoc {
+  _id: string;
+  handle: string;
+  providerRepoId: string;
+  providerRepoName: string;
+  providerRepoFullName: string;
+  providerDefaultBranch?: string;
+  isPrivate: boolean;
+  createdAt: number;
+  removedAt?: number;
+}
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -129,35 +122,39 @@ app.get("/:provider/:slug", async (c) => {
 
   const slug = slugParam.toLowerCase();
 
-  const { db, client } = await createDb(c.env);
-  try {
-    const result = await getOrgWithMembership(db, provider, slug, auth.userId);
+  const convex = getConvexClient(c.env);
+  const org = (await convex.query("organizations:getByProviderAccountLogin", {
+    provider,
+    providerAccountLogin: slug,
+  })) as OrganizationDoc | null;
 
-    if (!result?.org) {
-      return c.json({ error: "Organization not found" }, 404);
-    }
-
-    if (!result.member) {
-      return c.json({ error: "Not a member of this organization" }, 403);
-    }
-
-    const { org } = result;
-
-    return c.json({
-      id: org.id,
-      name: org.name,
-      slug: org.slug,
-      provider: org.provider,
-      provider_account_login: org.providerAccountLogin,
-      provider_account_type: org.providerAccountType,
-      provider_avatar_url: org.providerAvatarUrl,
-      app_installed: Boolean(org.providerInstallationId),
-      suspended_at: org.suspendedAt?.toISOString() ?? null,
-      created_at: org.createdAt.toISOString(),
-    });
-  } finally {
-    await client.end();
+  if (!org || org.deletedAt) {
+    return c.json({ error: "Organization not found" }, 404);
   }
+
+  const member = (await convex.query("organization-members:getByOrgUser", {
+    organizationId: org._id,
+    userId: auth.userId,
+  })) as OrganizationMemberDoc | null;
+
+  if (!member || member.removedAt) {
+    return c.json({ error: "Not a member of this organization" }, 403);
+  }
+
+  return c.json({
+    id: org._id,
+    name: org.name,
+    slug: org.slug,
+    provider: org.provider,
+    provider_account_login: org.providerAccountLogin,
+    provider_account_type: org.providerAccountType,
+    provider_avatar_url: org.providerAvatarUrl,
+    app_installed: Boolean(org.providerInstallationId),
+    suspended_at: org.suspendedAt
+      ? new Date(org.suspendedAt).toISOString()
+      : null,
+    created_at: new Date(org.createdAt).toISOString(),
+  });
 });
 
 /**
@@ -177,26 +174,30 @@ app.get("/:provider/:slug/membership", async (c) => {
 
   const slug = slugParam.toLowerCase();
 
-  const { db, client } = await createDb(c.env);
-  try {
-    const result = await getOrgWithMembership(db, provider, slug, auth.userId);
+  const convex = getConvexClient(c.env);
+  const org = (await convex.query("organizations:getByProviderAccountLogin", {
+    provider,
+    providerAccountLogin: slug,
+  })) as OrganizationDoc | null;
 
-    if (!result?.org) {
-      return c.json({ error: "Organization not found" }, 404);
-    }
-
-    if (!result.member) {
-      return c.json({ error: "Not a member of this organization" }, 403);
-    }
-
-    return c.json({
-      role: result.member.role,
-      user_id: result.member.userId,
-      organization_id: result.org.id,
-    });
-  } finally {
-    await client.end();
+  if (!org || org.deletedAt) {
+    return c.json({ error: "Organization not found" }, 404);
   }
+
+  const member = (await convex.query("organization-members:getByOrgUser", {
+    organizationId: org._id,
+    userId: auth.userId,
+  })) as OrganizationMemberDoc | null;
+
+  if (!member || member.removedAt) {
+    return c.json({ error: "Not a member of this organization" }, 403);
+  }
+
+  return c.json({
+    role: member.role,
+    user_id: member.userId,
+    organization_id: org._id,
+  });
 });
 
 /**
@@ -216,52 +217,43 @@ app.get("/:provider/:slug/projects", async (c) => {
 
   const slug = slugParam.toLowerCase();
 
-  const { db, client } = await createDb(c.env);
-  try {
-    const result = await getOrgWithMembership(db, provider, slug, auth.userId);
+  const convex = getConvexClient(c.env);
+  const org = (await convex.query("organizations:getByProviderAccountLogin", {
+    provider,
+    providerAccountLogin: slug,
+  })) as OrganizationDoc | null;
 
-    if (!result?.org) {
-      return c.json({ error: "Organization not found" }, 404);
-    }
-
-    if (!result.member) {
-      return c.json({ error: "Not a member of this organization" }, 403);
-    }
-
-    const orgProjects = await db
-      .select({
-        id: projects.id,
-        handle: projects.handle,
-        providerRepoId: projects.providerRepoId,
-        providerRepoName: projects.providerRepoName,
-        providerRepoFullName: projects.providerRepoFullName,
-        providerDefaultBranch: projects.providerDefaultBranch,
-        isPrivate: projects.isPrivate,
-        createdAt: projects.createdAt,
-      })
-      .from(projects)
-      .where(
-        and(
-          eq(projects.organizationId, result.org.id),
-          isNull(projects.removedAt)
-        )
-      );
-
-    return c.json({
-      projects: orgProjects.map((p) => ({
-        id: p.id,
-        handle: p.handle,
-        provider_repo_id: p.providerRepoId,
-        provider_repo_name: p.providerRepoName,
-        provider_repo_full_name: p.providerRepoFullName,
-        provider_default_branch: p.providerDefaultBranch,
-        is_private: p.isPrivate,
-        created_at: p.createdAt.toISOString(),
-      })),
-    });
-  } finally {
-    await client.end();
+  if (!org || org.deletedAt) {
+    return c.json({ error: "Organization not found" }, 404);
   }
+
+  const member = (await convex.query("organization-members:getByOrgUser", {
+    organizationId: org._id,
+    userId: auth.userId,
+  })) as OrganizationMemberDoc | null;
+
+  if (!member || member.removedAt) {
+    return c.json({ error: "Not a member of this organization" }, 403);
+  }
+
+  const orgProjects = (await convex.query("projects:listByOrg", {
+    organizationId: org._id,
+  })) as ProjectDoc[];
+
+  const activeProjects = orgProjects.filter((project) => !project.removedAt);
+
+  return c.json({
+    projects: activeProjects.map((p) => ({
+      id: p._id,
+      handle: p.handle,
+      provider_repo_id: p.providerRepoId,
+      provider_repo_name: p.providerRepoName,
+      provider_repo_full_name: p.providerRepoFullName,
+      provider_default_branch: p.providerDefaultBranch,
+      is_private: p.isPrivate,
+      created_at: new Date(p.createdAt).toISOString(),
+    })),
+  });
 });
 
 /**
@@ -288,43 +280,44 @@ app.get("/:provider/:slug/projects/:handle", async (c) => {
   const slug = slugParam.toLowerCase();
   const handle = handleParam.toLowerCase();
 
-  const { db, client } = await createDb(c.env);
-  try {
-    const result = await getOrgWithMembership(db, provider, slug, auth.userId);
+  const convex = getConvexClient(c.env);
+  const org = (await convex.query("organizations:getByProviderAccountLogin", {
+    provider,
+    providerAccountLogin: slug,
+  })) as OrganizationDoc | null;
 
-    if (!result?.org) {
-      return c.json({ error: "Organization not found" }, 404);
-    }
-
-    if (!result.member) {
-      return c.json({ error: "Not a member of this organization" }, 403);
-    }
-
-    const project = await db.query.projects.findFirst({
-      where: and(
-        eq(projects.organizationId, result.org.id),
-        eq(projects.handle, handle),
-        isNull(projects.removedAt)
-      ),
-    });
-
-    if (!project) {
-      return c.json({ error: "Project not found" }, 404);
-    }
-
-    return c.json({
-      id: project.id,
-      handle: project.handle,
-      provider_repo_id: project.providerRepoId,
-      provider_repo_name: project.providerRepoName,
-      provider_repo_full_name: project.providerRepoFullName,
-      provider_default_branch: project.providerDefaultBranch,
-      is_private: project.isPrivate,
-      created_at: project.createdAt.toISOString(),
-    });
-  } finally {
-    await client.end();
+  if (!org || org.deletedAt) {
+    return c.json({ error: "Organization not found" }, 404);
   }
+
+  const member = (await convex.query("organization-members:getByOrgUser", {
+    organizationId: org._id,
+    userId: auth.userId,
+  })) as OrganizationMemberDoc | null;
+
+  if (!member || member.removedAt) {
+    return c.json({ error: "Not a member of this organization" }, 403);
+  }
+
+  const project = (await convex.query("projects:getByOrgHandle", {
+    organizationId: org._id,
+    handle,
+  })) as ProjectDoc | null;
+
+  if (!project || project.removedAt) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  return c.json({
+    id: project._id,
+    handle: project.handle,
+    provider_repo_id: project.providerRepoId,
+    provider_repo_name: project.providerRepoName,
+    provider_repo_full_name: project.providerRepoFullName,
+    provider_default_branch: project.providerDefaultBranch,
+    is_private: project.isPrivate,
+    created_at: new Date(project.createdAt).toISOString(),
+  });
 });
 
 export default app;

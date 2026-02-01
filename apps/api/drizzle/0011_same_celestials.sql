@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX "runs_repository_commit_run_unique_idx" ON "runs" USING btree ("repository","commit_sha","run_id");

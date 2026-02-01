@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { timeout } from "hono/timeout";
 import pkg from "../../package.json";
-import { createDb } from "../db/client";
+import { getConvexClient } from "../db/convex";
 import type { Env } from "../types/env";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -21,15 +21,13 @@ const healthTimeoutException = () =>
 const checkDatabaseWithTimeout = async (
   env: Env
 ): Promise<"operational" | "down"> => {
-  let client: Awaited<ReturnType<typeof createDb>>["client"] | undefined;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   try {
     return await Promise.race([
       (async () => {
-        const { client: dbClient } = await createDb(env);
-        client = dbClient;
-        await client.query("SELECT 1");
+        const convex = getConvexClient(env);
+        await convex.query("organizations:list", { limit: 1 });
         return "operational" as const;
       })(),
       new Promise<never>((_, reject) => {
@@ -41,9 +39,6 @@ const checkDatabaseWithTimeout = async (
     ]);
   } finally {
     clearTimeout(timeoutId);
-    if (client) {
-      await client.end();
-    }
   }
 };
 

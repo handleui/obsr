@@ -17,10 +17,9 @@
  */
 
 import type { KVNamespace } from "@cloudflare/workers-types";
-import { eq } from "drizzle-orm";
+import type { ConvexHttpClient } from "convex/browser";
 import type { Context, Next } from "hono";
-import { createDb } from "../db/client";
-import { apiKeys } from "../db/schema";
+import { getConvexClient } from "../db/convex";
 import { hashApiKey } from "../lib/crypto";
 import type { Env } from "../types/env";
 
@@ -47,7 +46,7 @@ const API_KEY_CACHE_PREFIX = "api-key-v2:";
 const API_KEY_CACHE_TTL_SECONDS = 300;
 
 interface CachedApiKey {
-  id: string;
+  _id: string;
   organizationId: string;
   keyHash: string;
 }
@@ -60,7 +59,7 @@ interface CachedApiKey {
 const lookupApiKey = async (
   tokenHash: string,
   kv: KVNamespace,
-  db: Awaited<ReturnType<typeof createDb>>["db"]
+  convex: ConvexHttpClient
 ): Promise<CachedApiKey | null> => {
   // Cache key uses hash - never store plaintext tokens in KV
   const cacheKey = `${API_KEY_CACHE_PREFIX}${tokenHash}`;
@@ -72,21 +71,16 @@ const lookupApiKey = async (
   }
 
   // Cache miss: lookup in database by hash (select only needed columns)
-  const apiKey = await db.query.apiKeys.findFirst({
-    where: eq(apiKeys.keyHash, tokenHash),
-    columns: {
-      id: true,
-      organizationId: true,
-      keyHash: true,
-    },
-  });
+  const apiKey = (await convex.query("api-keys:getByKeyHash", {
+    keyHash: tokenHash,
+  })) as CachedApiKey | null;
 
   if (!apiKey) {
     return null;
   }
 
   const result: CachedApiKey = {
-    id: apiKey.id,
+    _id: apiKey._id,
     organizationId: apiKey.organizationId,
     keyHash: apiKey.keyHash,
   };
@@ -125,12 +119,12 @@ export const apiKeyAuthMiddleware = async (
   }
 
   const kv = c.env["detent-idempotency"];
-  const { db, client } = await createDb(c.env);
+  const convex = getConvexClient(c.env);
 
   try {
     // Hash the provided token for lookup
     const tokenHash = await hashApiKey(token);
-    const apiKey = await lookupApiKey(tokenHash, kv, db);
+    const apiKey = await lookupApiKey(tokenHash, kv, convex);
 
     if (!apiKey) {
       return c.json({ error: "Authentication failed" }, 401);
@@ -139,19 +133,14 @@ export const apiKeyAuthMiddleware = async (
     // Update lastUsedAt in background using waitUntil
     // This doesn't block the response and uses a separate connection
     c.executionCtx.waitUntil(
-      (async () => {
-        const { db: bgDb, client: bgClient } = await createDb(c.env);
-        try {
-          await bgDb
-            .update(apiKeys)
-            .set({ lastUsedAt: new Date() })
-            .where(eq(apiKeys.id, apiKey.id));
-        } catch (err) {
+      convex
+        .mutation("api-keys:updateLastUsedAt", {
+          id: apiKey._id,
+          lastUsedAt: Date.now(),
+        })
+        .catch((err) => {
           console.error("[api-key-auth] lastUsedAt update failed:", err);
-        } finally {
-          await bgClient.end();
-        }
-      })()
+        })
     );
 
     c.set("apiKeyAuth", {
@@ -160,8 +149,12 @@ export const apiKeyAuthMiddleware = async (
 
     await next();
     return undefined;
-  } finally {
-    await client.end();
+  } catch (error) {
+    console.error(
+      "[api-key-auth] Authentication error:",
+      error instanceof Error ? error.message : String(error)
+    );
+    return c.json({ error: "Authentication failed" }, 401);
   }
 };
 

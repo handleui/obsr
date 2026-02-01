@@ -8,7 +8,8 @@ export interface Env {
   VERCEL_TEAM_ID?: string;
   VERCEL_PROJECT_ID?: string;
   AI_GATEWAY_API_KEY: string;
-  DATABASE_URL: string;
+  CONVEX_URL: string;
+  CONVEX_SERVICE_TOKEN: string;
   GITHUB_APP_ID: string;
   GITHUB_APP_PRIVATE_KEY: string;
   /** Navigator (web app) base URL for dashboard links, e.g., https://navigator.detent.sh */
@@ -50,7 +51,7 @@ const loadEnv = (): Env => {
   }
 
   // Default 20 concurrent heals. Adjust via env var based on Railway memory/CPU allocation.
-  // Each heal uses ~512MB RAM (sandbox) + 1 DB connection from the pool (POOL_SIZE=5).
+  // Each heal uses ~512MB RAM (sandbox) plus Convex + GitHub API calls.
   const maxConcurrentHeals = Number.parseInt(
     process.env.MAX_CONCURRENT_HEALS ?? "20",
     10
@@ -92,7 +93,11 @@ const loadEnv = (): Env => {
       "AI_GATEWAY_API_KEY",
       process.env.AI_GATEWAY_API_KEY
     ),
-    DATABASE_URL: validateRequired("DATABASE_URL", process.env.DATABASE_URL),
+    CONVEX_URL: validateRequired("CONVEX_URL", process.env.CONVEX_URL),
+    CONVEX_SERVICE_TOKEN: validateRequired(
+      "CONVEX_SERVICE_TOKEN",
+      process.env.CONVEX_SERVICE_TOKEN
+    ),
     GITHUB_APP_ID: validateRequired("GITHUB_APP_ID", process.env.GITHUB_APP_ID),
     GITHUB_APP_PRIVATE_KEY: validateRequired(
       "GITHUB_APP_PRIVATE_KEY",

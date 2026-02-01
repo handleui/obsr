@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockEnv } from "../test-helpers/mock-env";
 import type { Env } from "../types/env";
 
 // Mock the GitHub service
@@ -38,52 +39,35 @@ const mockValues = vi.fn();
 const mockUpdate = vi.fn();
 const mockSet = vi.fn();
 
-const mockDb = {
-  query: {
-    organizationMembers: {
-      findFirst: mockFindFirst,
-    },
-    organizations: {
-      findFirst: mockOrgFindFirst,
-    },
-  },
-  select: mockSelect,
-  insert: mockInsert,
-  update: mockUpdate,
-};
+const mockQuery = vi.fn();
+const mockMutation = vi.fn();
+const mockConvex = { query: mockQuery, mutation: mockMutation };
 
-const mockClient = {
-  end: vi.fn(),
-};
-
-vi.mock("../db/client", () => ({
-  createDb: vi.fn(() => Promise.resolve({ db: mockDb, client: mockClient })),
+vi.mock("../db/convex", () => ({
+  getConvexClient: vi.fn(() => mockConvex),
 }));
 
-// Test UUIDs (valid UUID v4 format)
+// Test IDs
 const TEST_ORG_ID = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d";
 const TEST_PROJECT_ID = "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e";
 const TEST_MEMBER_ID = "c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f";
 const NEW_PROJECT_UUID = "d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f8a";
 
-// Mock crypto.randomUUID for deterministic IDs
+// Mock crypto.randomUUID for deterministic IDs (slug suffixes)
 vi.spyOn(crypto, "randomUUID").mockImplementation(() => NEW_PROJECT_UUID);
 
 // Mock environment
-const MOCK_ENV = {
+const MOCK_ENV = createMockEnv({
   GITHUB_APP_ID: "123456",
   GITHUB_APP_PRIVATE_KEY: "test-private-key",
-  HYPERDRIVE: {
-    connectionString: "postgres://test:test@localhost:5432/test",
-  },
   WORKOS_CLIENT_ID: "test-workos-client",
   WORKOS_API_KEY: "test-workos-key",
-};
+});
 
 // Factory for organization data
 const createOrganization = (
   overrides: Partial<{
-    id: string;
+    _id: string;
     name: string;
     slug: string;
     provider: "github" | "gitlab";
@@ -93,7 +77,7 @@ const createOrganization = (
     lastSyncedAt: Date | null;
   }> = {}
 ) => ({
-  id: overrides.id ?? TEST_ORG_ID,
+  _id: overrides._id ?? TEST_ORG_ID,
   name: overrides.name ?? "test-org",
   slug: overrides.slug ?? "gh/test-org",
   provider: overrides.provider ?? "github",
@@ -117,8 +101,8 @@ const createMember = (
   role: "owner" | "admin" | "member" = "owner",
   organization = createOrganization()
 ) => ({
-  id: TEST_MEMBER_ID,
-  organizationId: organization.id,
+  _id: TEST_MEMBER_ID,
+  organizationId: organization._id,
   userId: "user-123",
   role,
   organization,
@@ -127,7 +111,7 @@ const createMember = (
 // Factory for project data
 const createProject = (
   overrides: Partial<{
-    id: string;
+    _id: string;
     providerRepoId: string;
     providerRepoName: string;
     providerRepoFullName: string;
@@ -136,7 +120,7 @@ const createProject = (
     removedAt: Date | null;
   }> = {}
 ) => ({
-  id: overrides.id ?? TEST_PROJECT_ID,
+  _id: overrides._id ?? TEST_PROJECT_ID,
   organizationId: TEST_ORG_ID,
   providerRepoId: overrides.providerRepoId ?? "repo-123",
   providerRepoName: overrides.providerRepoName ?? "my-repo",
@@ -246,6 +230,138 @@ describe("organizations - POST /:organizationId/sync", () => {
 
     // Default organization lookup - return a valid org
     mockOrgFindFirst.mockResolvedValue(createOrganization());
+
+    mockQuery.mockReset();
+    mockMutation.mockReset();
+
+    mockQuery.mockImplementation(async (name: string) => {
+      if (name === "organizations:getById") {
+        return await mockOrgFindFirst();
+      }
+      if (name === "organizations:getBySlug") {
+        return await mockOrgFindFirst();
+      }
+      if (name === "organization-members:getByOrgUser") {
+        return await mockFindFirst();
+      }
+      if (name === "organization-members:paginateByOrg") {
+        return { page: [], isDone: true, continueCursor: "" };
+      }
+      if (name === "organization-members:listByOrg") {
+        return [];
+      }
+      if (name === "projects:countByOrg") {
+        const projects = (await mockWhere()) as unknown[];
+        return projects.length;
+      }
+      return [];
+    });
+
+    mockMutation.mockImplementation(
+      async (name: string, args: Record<string, unknown>) => {
+        if (name === "organizations:update") {
+          mockUpdate();
+          mockSet(args);
+          return args.id ?? null;
+        }
+        if (name === "organization-members:update") {
+          mockUpdate();
+          mockSet(args);
+          return args.id ?? null;
+        }
+        if (name === "projects:syncFromGitHub") {
+          const repos =
+            (args.repos as Array<{
+              id: string;
+              name: string;
+              fullName: string;
+              defaultBranch?: string;
+              isPrivate: boolean;
+            }>) ?? [];
+          const existingProjects =
+            ((await mockWhere()) as Array<{
+              _id: string;
+              providerRepoId: string;
+              providerRepoName: string;
+              providerRepoFullName: string;
+              providerDefaultBranch?: string | null;
+              handle: string;
+              isPrivate: boolean;
+              removedAt: Date | null;
+            }>) ?? [];
+
+          const existingByRepoId = new Map(
+            existingProjects.map((project) => [
+              String(project.providerRepoId),
+              project,
+            ])
+          );
+          const repoIds = new Set(repos.map((repo) => String(repo.id)));
+
+          let added = 0;
+          let removed = 0;
+          let updated = 0;
+
+          for (const repo of repos) {
+            const existing = existingByRepoId.get(String(repo.id));
+            if (!existing) {
+              added += 1;
+              mockInsert();
+              mockValues({
+                organizationId: args.organizationId,
+                providerRepoId: String(repo.id),
+                providerRepoName: repo.name,
+                providerRepoFullName: repo.fullName,
+                handle: repo.name,
+                isPrivate: repo.isPrivate,
+                providerDefaultBranch: repo.defaultBranch ?? null,
+              });
+              continue;
+            }
+
+            const update: Record<string, unknown> = {};
+            if (existing.removedAt) {
+              update.removedAt = null;
+            }
+            if (existing.providerRepoName !== repo.name) {
+              update.providerRepoName = repo.name;
+            }
+            if (existing.providerRepoFullName !== repo.fullName) {
+              update.providerRepoFullName = repo.fullName;
+            }
+            if (existing.isPrivate !== repo.isPrivate) {
+              update.isPrivate = repo.isPrivate;
+            }
+            const existingBranch = existing.providerDefaultBranch ?? null;
+            const nextBranch = repo.defaultBranch ?? null;
+            if (existingBranch !== nextBranch) {
+              update.providerDefaultBranch = nextBranch;
+            }
+
+            if (Object.keys(update).length > 0) {
+              updated += 1;
+              mockUpdate();
+              mockSet(update);
+            }
+          }
+
+          if (args.syncRemoved) {
+            for (const existing of existingProjects) {
+              const repoId = String(existing.providerRepoId);
+              if (!(repoIds.has(repoId) || existing.removedAt)) {
+                removed += 1;
+                mockUpdate();
+                mockSet({ removedAt: Date.now() });
+              }
+            }
+          }
+
+          return { added, removed, updated };
+        }
+
+        return null;
+      }
+    );
   });
 
   describe("authorization", () => {
@@ -359,9 +475,9 @@ describe("organizations - POST /:organizationId/sync", () => {
       expect(mockUpdate).toHaveBeenCalled();
       expect(mockSet).toHaveBeenCalledWith(
         expect.objectContaining({
-          deletedAt: expect.any(Date),
-          lastSyncedAt: expect.any(Date),
-          updatedAt: expect.any(Date),
+          deletedAt: expect.any(Number),
+          lastSyncedAt: expect.any(Number),
+          updatedAt: expect.any(Number),
         })
       );
     });
@@ -376,7 +492,7 @@ describe("organizations - POST /:organizationId/sync", () => {
       // Verify that lastSyncedAt is specifically set
       expect(mockSet).toHaveBeenCalledWith(
         expect.objectContaining({
-          lastSyncedAt: expect.any(Date),
+          lastSyncedAt: expect.any(Number),
         })
       );
     });
@@ -406,7 +522,7 @@ describe("organizations - POST /:organizationId/sync", () => {
       // Verify suspendedAt was set
       expect(mockSet).toHaveBeenCalledWith(
         expect.objectContaining({
-          suspendedAt: expect.any(Date),
+          suspendedAt: expect.any(Number),
         })
       );
     });
@@ -505,12 +621,12 @@ describe("organizations - POST /:organizationId/sync", () => {
       // Detent has 2 active projects
       mockWhere.mockResolvedValue([
         createProject({
-          id: "proj-1",
+          _id: "proj-1",
           providerRepoId: "100",
           providerRepoName: "repo-a",
         }),
         createProject({
-          id: "proj-2",
+          _id: "proj-2",
           providerRepoId: "200",
           providerRepoName: "repo-b",
         }),
@@ -528,7 +644,7 @@ describe("organizations - POST /:organizationId/sync", () => {
       // Verify update was called with removedAt
       expect(mockSet).toHaveBeenCalledWith(
         expect.objectContaining({
-          removedAt: expect.any(Date),
+          removedAt: expect.any(Number),
         })
       );
     });
@@ -554,7 +670,7 @@ describe("organizations - POST /:organizationId/sync", () => {
       // Detent has the project but it was soft-deleted
       mockWhere.mockResolvedValue([
         createProject({
-          id: "proj-1",
+          _id: "proj-1",
           providerRepoId: "100",
           providerRepoName: "restored-repo",
           removedAt: new Date("2024-05-01"),
@@ -600,7 +716,7 @@ describe("organizations - POST /:organizationId/sync", () => {
 
       mockWhere.mockResolvedValue([
         createProject({
-          id: existingProjectId,
+          _id: existingProjectId,
           providerRepoId: "100",
           removedAt: new Date("2024-05-01"),
         }),
@@ -640,7 +756,7 @@ describe("organizations - POST /:organizationId/sync", () => {
       // Detent has project with old name
       mockWhere.mockResolvedValue([
         createProject({
-          id: "proj-1",
+          _id: "proj-1",
           providerRepoId: "100",
           providerRepoName: "old-name",
           providerRepoFullName: "test-org/old-name",
@@ -688,7 +804,7 @@ describe("organizations - POST /:organizationId/sync", () => {
       // Detent has it as public
       mockWhere.mockResolvedValue([
         createProject({
-          id: "proj-1",
+          _id: "proj-1",
           providerRepoId: "100",
           isPrivate: false,
         }),
@@ -733,7 +849,7 @@ describe("organizations - POST /:organizationId/sync", () => {
       // Detent has project with custom handle
       mockWhere.mockResolvedValue([
         createProject({
-          id: "proj-1",
+          _id: "proj-1",
           providerRepoId: "100",
           providerRepoName: "old-repo-name",
           handle: "custom-handle",
@@ -810,30 +926,6 @@ describe("organizations - POST /:organizationId/sync", () => {
       expect(json).toEqual({ error: "Organization not found" });
     });
 
-    it("closes database connection on success", async () => {
-      const org = createOrganization();
-      mockFindFirst.mockResolvedValue(createMember("owner", org));
-      mockGetInstallationInfo.mockResolvedValue({
-        id: 123,
-        suspended_at: null,
-        account: { login: "test-org" },
-      });
-      mockGetInstallationRepos.mockResolvedValue([]);
-      mockWhere.mockResolvedValue([]);
-
-      await makeRequest("POST", `/organizations/${TEST_ORG_ID}/sync`);
-
-      expect(mockClient.end).toHaveBeenCalled();
-    });
-
-    it("closes database connection on error", async () => {
-      mockFindFirst.mockRejectedValue(new Error("Database error"));
-
-      await makeRequest("POST", `/organizations/${TEST_ORG_ID}/sync`);
-
-      expect(mockClient.end).toHaveBeenCalled();
-    });
-
     it("returns 500 on GitHub API error", async () => {
       const org = createOrganization();
       mockFindFirst.mockResolvedValue(createMember("owner", org));
@@ -881,13 +973,13 @@ describe("organizations - POST /:organizationId/sync", () => {
       // Detent has: repo-a (old name), repo-b (will be removed)
       mockWhere.mockResolvedValue([
         createProject({
-          id: "proj-a",
+          _id: "proj-a",
           providerRepoId: "100",
           providerRepoName: "repo-a",
           providerRepoFullName: "test-org/repo-a",
         }),
         createProject({
-          id: "proj-b",
+          _id: "proj-b",
           providerRepoId: "200",
           providerRepoName: "repo-b",
           providerRepoFullName: "test-org/repo-b",
@@ -928,7 +1020,7 @@ describe("organizations - POST /:organizationId/sync", () => {
       // Existing project with same name but different repo ID
       mockWhere.mockResolvedValue([
         createProject({
-          id: "proj-1",
+          _id: "proj-1",
           providerRepoId: "100",
           providerRepoName: "my-repo",
         }),

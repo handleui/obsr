@@ -1,28 +1,14 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockEnv } from "../test-helpers/mock-env";
 import type { Env } from "../types/env";
 
-// Mock the database client
-const mockFindFirst = vi.fn();
-const mockDb = {
-  query: {
-    organizations: {
-      findFirst: mockFindFirst,
-    },
-  },
-  update: vi.fn().mockReturnValue({
-    set: vi.fn().mockReturnValue({
-      where: vi.fn().mockResolvedValue([]),
-    }),
-  }),
-};
+const mockQuery = vi.fn();
+const mockMutation = vi.fn();
+const mockConvex = { query: mockQuery, mutation: mockMutation };
 
-const mockClient = {
-  end: vi.fn(),
-};
-
-vi.mock("../db/client", () => ({
-  createDb: vi.fn(() => Promise.resolve({ db: mockDb, client: mockClient })),
+vi.mock("../db/convex", () => ({
+  getConvexClient: vi.fn(() => mockConvex),
 }));
 
 // Mock polar services
@@ -56,18 +42,15 @@ vi.mock("../middleware/github-org-access", () => ({
 }));
 
 // Mock environment
-const MOCK_ENV = {
+const MOCK_ENV = createMockEnv({
   POLAR_ACCESS_TOKEN: "polar_test_token",
   POLAR_ORGANIZATION_ID: "polar-org-123",
-  HYPERDRIVE: {
-    connectionString: "postgres://test:test@localhost:5432/test",
-  },
-};
+});
 
 // Factory for org access context
-const createOrgAccessContext = (overrides: Partial<{ id: string }> = {}) => ({
+const createOrgAccessContext = (overrides: Partial<{ _id: string }> = {}) => ({
   organization: {
-    id: overrides.id ?? "org-123",
+    _id: overrides._id ?? "org-123",
     slug: "test-org",
     name: "Test Org",
     provider: "github" as const,
@@ -120,9 +103,17 @@ const makeRequest = async (
 describe("billing routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFindFirst.mockReset();
+    mockQuery.mockReset();
+    mockMutation.mockReset();
     mockCreatePolarClient.mockReturnValue({});
     mockGetPolarOrgId.mockReturnValue("polar-org-123");
+
+    mockQuery.mockImplementation((name: string) => {
+      if (name === "organizations:getById") {
+        return Promise.resolve({ _id: "org-123", polarCustomerId: null });
+      }
+      return Promise.resolve([]);
+    });
   });
 
   // ============================================================================
@@ -252,7 +243,12 @@ describe("billing routes", () => {
 
   describe("POST /:orgId/customer - authorization edge cases", () => {
     it("returns 404 when organization not found in database", async () => {
-      mockFindFirst.mockResolvedValue(undefined);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve(null);
+        }
+        return Promise.resolve([]);
+      });
 
       const res = await makeRequest("POST", "/billing/org-123/customer", {
         email: "valid@email.com",
@@ -263,9 +259,14 @@ describe("billing routes", () => {
     });
 
     it("rejects when organization already has a billing customer", async () => {
-      mockFindFirst.mockResolvedValue({
-        id: "org-123",
-        polarCustomerId: "existing-customer-id",
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve({
+            _id: "org-123",
+            polarCustomerId: "existing-customer-id",
+          });
+        }
+        return Promise.resolve([]);
       });
 
       const res = await makeRequest("POST", "/billing/org-123/customer", {
@@ -425,7 +426,12 @@ describe("billing routes", () => {
     });
 
     it("allows https:// URLs", async () => {
-      mockFindFirst.mockResolvedValue({ id: "org-123", polarCustomerId: null });
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve({ _id: "org-123", polarCustomerId: null });
+        }
+        return Promise.resolve([]);
+      });
       mockCreatePolarClient.mockReturnValue({
         checkouts: {
           create: vi
@@ -443,7 +449,12 @@ describe("billing routes", () => {
     });
 
     it("allows localhost URLs (for development)", async () => {
-      mockFindFirst.mockResolvedValue({ id: "org-123", polarCustomerId: null });
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve({ _id: "org-123", polarCustomerId: null });
+        }
+        return Promise.resolve([]);
+      });
       mockCreatePolarClient.mockReturnValue({
         checkouts: {
           create: vi
@@ -461,7 +472,12 @@ describe("billing routes", () => {
     });
 
     it("allows 127.0.0.1 URLs (for development)", async () => {
-      mockFindFirst.mockResolvedValue({ id: "org-123", polarCustomerId: null });
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve({ _id: "org-123", polarCustomerId: null });
+        }
+        return Promise.resolve([]);
+      });
       mockCreatePolarClient.mockReturnValue({
         checkouts: {
           create: vi
@@ -479,7 +495,12 @@ describe("billing routes", () => {
     });
 
     it("allows undefined successUrl (optional field)", async () => {
-      mockFindFirst.mockResolvedValue({ id: "org-123", polarCustomerId: null });
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve({ _id: "org-123", polarCustomerId: null });
+        }
+        return Promise.resolve([]);
+      });
       mockCreatePolarClient.mockReturnValue({
         checkouts: {
           create: vi
@@ -502,7 +523,12 @@ describe("billing routes", () => {
 
   describe("POST /:orgId/checkout - error cases", () => {
     it("returns 404 when organization not found", async () => {
-      mockFindFirst.mockResolvedValue(undefined);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve(null);
+        }
+        return Promise.resolve([]);
+      });
 
       const res = await makeRequest("POST", "/billing/org-123/checkout", {
         productId: "prod-123",
@@ -519,7 +545,12 @@ describe("billing routes", () => {
 
   describe("GET /:orgId/portal - authorization edge cases", () => {
     it("returns 404 when organization not found", async () => {
-      mockFindFirst.mockResolvedValue(undefined);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve(null);
+        }
+        return Promise.resolve([]);
+      });
 
       const res = await makeRequest("GET", "/billing/org-123/portal");
 
@@ -528,9 +559,14 @@ describe("billing routes", () => {
     });
 
     it("returns 400 when no billing customer configured", async () => {
-      mockFindFirst.mockResolvedValue({
-        id: "org-123",
-        polarCustomerId: null,
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve({
+            _id: "org-123",
+            polarCustomerId: null,
+          });
+        }
+        return Promise.resolve([]);
       });
 
       const res = await makeRequest("GET", "/billing/org-123/portal");
@@ -542,9 +578,11 @@ describe("billing routes", () => {
     });
 
     it("returns 400 when polarCustomerId is undefined", async () => {
-      mockFindFirst.mockResolvedValue({
-        id: "org-123",
-        // polarCustomerId not set at all
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve({ _id: "org-123" });
+        }
+        return Promise.resolve([]);
       });
 
       const res = await makeRequest("GET", "/billing/org-123/portal");

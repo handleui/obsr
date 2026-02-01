@@ -1,10 +1,8 @@
-import { and, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
-import { createDb } from "../db/client";
-import { DatabaseError } from "../db/errors";
-import { projects, runErrors, runs } from "../db/schema";
+import { getConvexClient } from "../db/convex";
 import { apiKeyAuthMiddleware } from "../middleware/api-key-auth";
 import { apiKeyRateLimitMiddleware } from "../middleware/api-key-rate-limit";
+import type { DbClient } from "../services/webhooks/types";
 import type { Env } from "../types/env";
 
 interface ReportStep {
@@ -207,7 +205,6 @@ const createErrorRow = (
   prefix: string,
   warnings: TruncationWarning[]
 ) => ({
-  id: crypto.randomUUID(),
   runId,
   message: truncateWithTracking(
     error.message,
@@ -266,6 +263,7 @@ const createErrorRow = (
   hints: mergeHints(error),
   unknownPattern: error.unknownPattern ?? null,
   lineKnown: error.lineKnown ?? null,
+  createdAt: Date.now(),
 });
 
 /**
@@ -686,8 +684,6 @@ const validatePayload = (body: unknown): ValidationResult => {
   };
 };
 
-type Database = Awaited<ReturnType<typeof createDb>>["db"];
-
 // Import job tracking functions
 import { checkAndTriggerAggregation } from "../services/webhooks/job-aggregation";
 import {
@@ -701,7 +697,7 @@ import {
  */
 const handleJobCompletion = async (
   env: Env,
-  db: Database,
+  db: DbClient,
   repository: string,
   commitSha: string,
   workflowJob: string,
@@ -773,27 +769,23 @@ app.post("/", async (c) => {
 
   const payload = validation.payload;
 
-  const { db, client } = await createDb(c.env);
+  const convex = getConvexClient(c.env);
   try {
-    // Performance: fetch project with organization in single query to avoid N+1
-    const project = await db.query.projects.findFirst({
-      where: and(
-        eq(projects.providerRepoFullName, payload.repository),
-        eq(projects.organizationId, organizationId),
-        isNull(projects.removedAt)
-      ),
-      with: {
-        organization: {
-          columns: { providerInstallationId: true },
-        },
-      },
-    });
+    const project = (await convex.query("projects:getByRepoFullName", {
+      providerRepoFullName: payload.repository,
+    })) as {
+      _id: string;
+      organizationId: string;
+      removedAt?: number | null;
+    } | null;
 
-    if (!project) {
+    if (
+      !project ||
+      project.removedAt ||
+      project.organizationId !== organizationId
+    ) {
       return c.json({ error: "Project not found" }, 404);
     }
-
-    // Note: installationId no longer needed here - aggregation handles GitHub API calls
 
     const runRecordId = crypto.randomUUID();
     const runIdStr = String(payload.runId);
@@ -801,90 +793,58 @@ app.post("/", async (c) => {
     const hasFailure = payload.steps.some((s) => s.conclusion === "failure");
     const conclusion = hasFailure ? "failure" : "success";
 
-    const result = await db.transaction(async (tx) => {
-      const [upsertedRun] = await tx
-        .insert(runs)
-        .values({
-          id: runRecordId,
-          projectId: project.id,
-          provider: "github",
-          source: "job-report",
-          runId: runIdStr,
-          repository: payload.repository,
-          commitSha: payload.commitSha,
-          headBranch: payload.headBranch,
-          workflowName: payload.workflowName,
-          runAttempt: payload.runAttempt,
-          errorCount: payload.errors.length,
-          conclusion,
-        })
-        .onConflictDoUpdate({
-          target: [runs.repository, runs.runId, runs.runAttempt],
-          set: {
-            errorCount: payload.errors.length,
-            conclusion,
-          },
-        })
-        .returning({ id: runs.id });
-
-      if (!upsertedRun?.id) {
-        throw new Error("Failed to upsert run");
-      }
-
-      const allWarnings: TruncationWarning[] = [];
-
-      if (payload.errors.length > 0) {
-        // Delete existing errors for this run/job to avoid duplicates on retry
-        await tx
-          .delete(runErrors)
-          .where(
-            and(
-              eq(runErrors.runId, upsertedRun.id),
-              eq(runErrors.workflowJob, payload.workflowJob),
-              eq(runErrors.source, "job-report")
-            )
-          );
-
-        const errorRows = payload.errors.map((error, index) => {
-          const { row, warnings } = toErrorRow(
-            error,
-            upsertedRun.id,
-            payload.workflowJob,
-            index
-          );
-          allWarnings.push(...warnings);
-          return row;
-        });
-        await tx.insert(runErrors).values(errorRows);
-      }
-
-      return {
-        stored: payload.errors.length,
-        runId: upsertedRun.id,
-        projectId: project.id,
-        warnings: allWarnings,
-      };
+    const allWarnings: TruncationWarning[] = [];
+    const errorRows = payload.errors.map((error, index) => {
+      const { row, warnings } = toErrorRow(
+        error,
+        runRecordId,
+        payload.workflowJob,
+        index
+      );
+      allWarnings.push(...warnings);
+      return row;
     });
 
-    // Log truncation warnings for monitoring
-    if (result.warnings.length > 0) {
+    const storeResult = (await convex.mutation("run-ingest:storeJobReport", {
+      run: {
+        id: runRecordId,
+        projectId: project._id,
+        provider: "github",
+        source: "job-report",
+        runId: runIdStr,
+        repository: payload.repository,
+        commitSha: payload.commitSha,
+        headBranch: payload.headBranch,
+        workflowName: payload.workflowName,
+        runAttempt: payload.runAttempt,
+        errorCount: payload.errors.length,
+        conclusion,
+        receivedAt: Date.now(),
+      },
+      errors: errorRows,
+      workflowJob: payload.workflowJob,
+      source: "job-report",
+    })) as { runId: string };
+
+    if (allWarnings.length > 0) {
       console.warn(
-        `[report] Truncation occurred for run ${result.runId}:`,
-        JSON.stringify(result.warnings)
+        `[report] Truncation occurred for run ${storeResult.runId}:`,
+        JSON.stringify(allWarnings)
       );
     }
 
+    const stored = payload.errors.length;
+
     // Handle job completion: mark as Detent-enabled and check aggregation
-    // Comment is only posted when ALL jobs for the commit are complete
     const { commentPosted } =
-      payload.isComplete === true && result.stored > 0
+      payload.isComplete === true && stored > 0
         ? await handleJobCompletion(
             c.env,
-            db,
+            convex,
             payload.repository,
             payload.commitSha,
             payload.workflowJob,
-            result.stored
+            stored
           )
         : { commentPosted: false };
 
@@ -894,11 +854,11 @@ app.post("/", async (c) => {
       warnings?: TruncationWarning[];
       commentPosted?: boolean;
     } = {
-      stored: result.stored,
-      runId: result.runId,
+      stored,
+      runId: storeResult.runId,
     };
-    if (result.warnings.length > 0) {
-      response.warnings = result.warnings;
+    if (allWarnings.length > 0) {
+      response.warnings = allWarnings;
     }
     if (payload.isComplete === true) {
       response.commentPosted = commentPosted;
@@ -906,28 +866,14 @@ app.post("/", async (c) => {
 
     return c.json(response);
   } catch (error) {
-    // Classify the error for actionable messages
-    const dbError = new DatabaseError(error, "transaction", "runs");
-
-    // Log full details for debugging
-    console.error("[report] Database error:", dbError.toLogEntry());
-
-    // Return appropriate status code based on error type
-    if (dbError.isPermanent) {
-      // 400 for constraint violations, bad data, etc.
-      return c.json(dbError.toApiResponse(), 400);
-    }
-
-    if (dbError.isTransient) {
-      // 503 for transient errors - client should retry
-      c.header("Retry-After", "3");
-      return c.json(dbError.toApiResponse(), 503);
-    }
-
-    // 500 for unknown errors
-    return c.json(dbError.toApiResponse(), 500);
-  } finally {
-    await client.end();
+    console.error("[report] Error processing report:", error);
+    return c.json(
+      {
+        message: "report error",
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
+      500
+    );
   }
 });
 

@@ -1,6 +1,4 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
-import { createDb } from "../../../db/client";
-import { organizationMembers, organizations } from "../../../db/schema";
+import { getConvexClient } from "../../../db/convex";
 import { cacheKey, deleteFromCache } from "../../../lib/cache";
 import { captureWebhookError } from "../../../lib/sentry";
 import { classifyError } from "../../../services/webhooks/error-classifier";
@@ -11,6 +9,21 @@ interface MemberSyncResult {
   status: string;
   memberDemoted?: boolean;
   memberAdded?: boolean;
+}
+
+interface OrganizationDoc {
+  _id: string;
+}
+
+interface OrganizationMemberDoc {
+  _id: string;
+  userId: string;
+  role: "owner" | "admin" | "member" | "visitor";
+  providerUserId?: string | null;
+  providerUsername?: string | null;
+  membershipSource?: string | null;
+  removedAt?: number | null;
+  removalReason?: string | null;
 }
 
 /**
@@ -26,18 +39,13 @@ const tryDemoteToVisitor = async (
   orgLogin: string,
   deliveryId: string
 ): Promise<MemberSyncResult> => {
-  const { db, client } = await createDb(env);
+  const convex = getConvexClient(env);
   try {
     // Find the organization by GitHub org ID
-    const org = await db.query.organizations.findFirst({
-      where: and(
-        eq(organizations.provider, "github"),
-        eq(organizations.providerAccountId, String(githubOrgId))
-      ),
-      columns: {
-        id: true,
-      },
-    });
+    const org = (await convex.query("organizations:getByProviderAccount", {
+      provider: "github",
+      providerAccountId: String(githubOrgId),
+    })) as OrganizationDoc | null;
 
     if (!org) {
       console.log(
@@ -49,30 +57,39 @@ const tryDemoteToVisitor = async (
     // Demote member to visitor role
     // Only demote auto-joined members, not manually invited
     // Security: Exclude owners (should not be auto-demoted) and visitors (no change needed)
-    const updateResult = await db
-      .update(organizationMembers)
-      .set({
-        role: "visitor",
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(organizationMembers.organizationId, org.id),
-          eq(organizationMembers.providerUserId, githubUserId),
-          isNull(organizationMembers.removedAt),
-          inArray(organizationMembers.membershipSource, [
-            "github_sync",
-            "github_webhook",
-            "github_access",
-          ]),
-          // Security: Never demote owners automatically
-          // Exclude visitors (no change needed)
-          inArray(organizationMembers.role, ["member", "admin"])
-        )
-      )
-      .returning({ id: organizationMembers.id });
+    const members = (await convex.query(
+      "organization-members:listByOrgProviderUser",
+      {
+        organizationId: org._id,
+        providerUserId: githubUserId,
+      }
+    )) as OrganizationMemberDoc[];
 
-    if (updateResult.length > 0) {
+    let memberDemoted = false;
+    for (const member of members) {
+      if (member.removedAt) {
+        continue;
+      }
+      if (
+        member.membershipSource !== "github_sync" &&
+        member.membershipSource !== "github_webhook" &&
+        member.membershipSource !== "github_access"
+      ) {
+        continue;
+      }
+      if (member.role !== "member" && member.role !== "admin") {
+        continue;
+      }
+
+      await convex.mutation("organization-members:update", {
+        id: member._id,
+        role: "visitor",
+        updatedAt: Date.now(),
+      });
+      memberDemoted = true;
+    }
+
+    if (memberDemoted) {
       console.log(
         `[webhook/organization] Demoted to visitor: ${githubUsername} (GitHub ID: ${githubUserId}) in ${orgLogin} [delivery: ${deliveryId}]`
       );
@@ -96,14 +113,6 @@ const tryDemoteToVisitor = async (
     });
     // Don't fail the webhook - cache was still invalidated
     return { status: "cache_invalidated", memberDemoted: false };
-  } finally {
-    // Non-blocking connection close for faster webhook response
-    client.end().catch((err) => {
-      console.error(
-        `[webhook/organization] Connection close error [delivery: ${deliveryId}]:`,
-        err
-      );
-    });
   }
 };
 
@@ -119,18 +128,13 @@ const tryAutoAddMember = async (
   orgLogin: string,
   deliveryId: string
 ): Promise<MemberSyncResult> => {
-  const { db, client } = await createDb(env);
+  const convex = getConvexClient(env);
   try {
     // Find the organization by GitHub org ID
-    const org = await db.query.organizations.findFirst({
-      where: and(
-        eq(organizations.provider, "github"),
-        eq(organizations.providerAccountId, String(githubOrgId))
-      ),
-      columns: {
-        id: true,
-      },
-    });
+    const org = (await convex.query("organizations:getByProviderAccount", {
+      provider: "github",
+      providerAccountId: String(githubOrgId),
+    })) as OrganizationDoc | null;
 
     if (!org) {
       console.log(
@@ -141,19 +145,13 @@ const tryAutoAddMember = async (
 
     // Single query to check all membership states for this user in this org
     // Replaces 3 separate queries with one
-    const existingMemberships = await db
-      .select({
-        id: organizationMembers.id,
-        removedAt: organizationMembers.removedAt,
-        removalReason: organizationMembers.removalReason,
-      })
-      .from(organizationMembers)
-      .where(
-        and(
-          eq(organizationMembers.organizationId, org.id),
-          eq(organizationMembers.providerUserId, githubUserId)
-        )
-      );
+    const existingMemberships = (await convex.query(
+      "organization-members:listByOrgProviderUser",
+      {
+        organizationId: org._id,
+        providerUserId: githubUserId,
+      }
+    )) as OrganizationMemberDoc[];
 
     // Check for blocked (admin-removed or user-left), mirror-removed, or active membership
     type MembershipRecord = (typeof existingMemberships)[number];
@@ -190,16 +188,14 @@ const tryAutoAddMember = async (
       // SECURITY: Reset role to "member" on reactivation to prevent privilege escalation.
       // Previously elevated users (admin/owner) who left GitHub org and rejoin
       // should not automatically regain their elevated role.
-      await db
-        .update(organizationMembers)
-        .set({
-          removedAt: null,
-          removalReason: null,
-          removedBy: null,
-          role: "member",
-          updatedAt: new Date(),
-        })
-        .where(eq(organizationMembers.id, mirrorRemovedMember.id));
+      await convex.mutation("organization-members:update", {
+        id: mirrorRemovedMember._id,
+        removedAt: null,
+        removalReason: null,
+        removedBy: null,
+        role: "member",
+        updatedAt: Date.now(),
+      });
       console.log(
         `[webhook/organization] Reactivated member ${githubUsername} in ${orgLogin} (role reset to member) [delivery: ${deliveryId}]`
       );
@@ -214,13 +210,13 @@ const tryAutoAddMember = async (
     }
 
     // Find user in Detent system by providerUserId (in any org)
-    const existingUser = await db.query.organizationMembers.findFirst({
-      where: eq(organizationMembers.providerUserId, githubUserId),
-      columns: {
-        userId: true,
-        providerUsername: true,
-      },
-    });
+    const existingUsers = (await convex.query(
+      "organization-members:listByProviderUserId",
+      {
+        providerUserId: githubUserId,
+      }
+    )) as OrganizationMemberDoc[];
+    const existingUser = existingUsers[0];
 
     if (!existingUser) {
       // User doesn't exist in Detent - they'll join via sync-user on login
@@ -234,28 +230,21 @@ const tryAutoAddMember = async (
     // Use onConflictDoNothing to handle race conditions gracefully:
     // - Concurrent webhook requests for same user
     // - User already has membership via different path (e.g., manual invite)
-    const insertResult = await db
-      .insert(organizationMembers)
-      .values({
-        id: crypto.randomUUID(),
-        organizationId: org.id,
+    const created = (await convex.mutation(
+      "organization-members:createIfMissing",
+      {
+        organizationId: org._id,
         userId: existingUser.userId,
         role: "member",
         providerUserId: githubUserId,
         providerUsername: githubUsername,
-        providerLinkedAt: new Date(),
-        providerVerifiedAt: new Date(),
+        providerLinkedAt: Date.now(),
+        providerVerifiedAt: Date.now(),
         membershipSource: "github_webhook",
-      })
-      .onConflictDoNothing({
-        target: [
-          organizationMembers.organizationId,
-          organizationMembers.userId,
-        ],
-      })
-      .returning({ id: organizationMembers.id });
+      }
+    )) as OrganizationMemberDoc | null;
 
-    if (insertResult.length > 0) {
+    if (created && !created.removedAt) {
       console.log(
         `[webhook/organization] Auto-added member ${githubUsername} (GitHub ID: ${githubUserId}) to ${orgLogin} [delivery: ${deliveryId}]`
       );
@@ -278,13 +267,6 @@ const tryAutoAddMember = async (
       deliveryId,
     });
     return { status: "cache_invalidated", memberAdded: false };
-  } finally {
-    client.end().catch((err) => {
-      console.error(
-        `[webhook/organization] Connection close error [delivery: ${deliveryId}]:`,
-        err
-      );
-    });
   }
 };
 

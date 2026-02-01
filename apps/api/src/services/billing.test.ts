@@ -1,34 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockEnv } from "../test-helpers/mock-env";
 import type { Env } from "../types/env";
 
 // ============================================================================
 // Mocks
 // ============================================================================
 
-const mockInsert = vi.fn();
-const mockUpdate = vi.fn();
-const mockSelect = vi.fn();
-const mockFindFirst = vi.fn();
-const mockFindMany = vi.fn();
-const mockValues = vi.fn();
-const mockSet = vi.fn();
-const mockWhere = vi.fn();
-const mockFrom = vi.fn();
+const mockQuery = vi.fn();
+const mockMutation = vi.fn();
+const mockConvex = { query: mockQuery, mutation: mockMutation };
 
-const mockDb = {
-  insert: mockInsert,
-  update: mockUpdate,
-  select: mockSelect,
-  query: {
-    organizations: { findFirst: mockFindFirst },
-    usageEvents: { findMany: mockFindMany },
-  },
-};
-
-const mockClient = { end: vi.fn() };
-
-vi.mock("../db/client", () => ({
-  createDb: vi.fn(() => Promise.resolve({ db: mockDb, client: mockClient })),
+vi.mock("../db/convex", () => ({
+  getConvexClient: vi.fn(() => mockConvex),
 }));
 
 const mockIngestUsageEvents = vi.fn();
@@ -40,35 +23,16 @@ vi.mock("./polar", () => ({
     mockGetCustomerStateByExternalId(...args),
 }));
 
-// Mock environment
-const createMockEnv = (overrides: Partial<Env> = {}): Env =>
-  ({
-    HYPERDRIVE: {
-      connectionString: "postgres://test:test@localhost:5432/test",
-    },
-    POLAR_ACCESS_TOKEN: "polar_test_token",
-    POLAR_ORGANIZATION_ID: "polar_org_123",
-    ...overrides,
-  }) as Env;
-
 // ============================================================================
 // Test Setup
 // ============================================================================
 
-const setupMockChains = () => {
-  // Insert chain: insert().values()
-  mockInsert.mockReturnValue({ values: mockValues });
-  mockValues.mockResolvedValue([]);
-
-  // Update chain: update().set().where()
-  mockUpdate.mockReturnValue({ set: mockSet });
-  mockSet.mockReturnValue({ where: mockWhere });
-  mockWhere.mockResolvedValue([]);
-
-  // Select chain: select().from().where()
-  mockSelect.mockReturnValue({ from: mockFrom });
-  mockFrom.mockReturnValue({ where: mockWhere });
-};
+const createBillingEnv = (overrides: Partial<Env> = {}): Env =>
+  createMockEnv({
+    POLAR_ACCESS_TOKEN: "polar_test_token",
+    POLAR_ORGANIZATION_ID: "polar_org_123",
+    ...overrides,
+  });
 
 // Helper to get billing functions with fresh imports
 const getBilling = async () => import("./billing");
@@ -79,7 +43,9 @@ const flushPromises = () => new Promise((resolve) => setImmediate(resolve));
 describe("billing service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    setupMockChains();
+    mockQuery.mockReset();
+    mockMutation.mockReset();
+    mockQuery.mockImplementation(() => Promise.resolve([]));
     mockIngestUsageEvents.mockResolvedValue(undefined);
   });
 
@@ -90,7 +56,7 @@ describe("billing service", () => {
   describe("recordUsage - BYOK behavior", () => {
     it("skips recording when byok=true for AI usage", async () => {
       const { recordUsage } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       await recordUsage(
         env,
@@ -109,16 +75,14 @@ describe("billing service", () => {
       );
 
       // Should NOT insert to database
-      expect(mockInsert).not.toHaveBeenCalled();
+      expect(mockMutation).not.toHaveBeenCalled();
       // Should NOT ingest to Polar
       expect(mockIngestUsageEvents).not.toHaveBeenCalled();
-      // Should NOT close db connection (never opened)
-      expect(mockClient.end).not.toHaveBeenCalled();
     });
 
     it("records sandbox usage even when byok=true (byok only applies to AI)", async () => {
       const { recordUsage } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       await recordUsage(
         env,
@@ -132,15 +96,16 @@ describe("billing service", () => {
         true // byok=true - should be ignored for sandbox
       );
 
-      // Should insert to database
-      expect(mockInsert).toHaveBeenCalled();
-      // DB connection should be closed
-      expect(mockClient.end).toHaveBeenCalled();
+      // Should create a usage event
+      expect(mockMutation).toHaveBeenCalledWith(
+        "usage-events:create",
+        expect.objectContaining({ eventName: "sandbox" })
+      );
     });
 
     it("records AI usage when byok=false", async () => {
       const { recordUsage } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       await recordUsage(
         env,
@@ -158,8 +123,10 @@ describe("billing service", () => {
         false // byok=false
       );
 
-      expect(mockInsert).toHaveBeenCalled();
-      expect(mockClient.end).toHaveBeenCalled();
+      expect(mockMutation).toHaveBeenCalledWith(
+        "usage-events:create",
+        expect.objectContaining({ eventName: "ai" })
+      );
     });
   });
 
@@ -170,7 +137,7 @@ describe("billing service", () => {
   describe("recordUsage - metadata building", () => {
     it("builds correct local metadata for AI usage", async () => {
       const { recordUsage } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       await recordUsage(
         env,
@@ -188,10 +155,11 @@ describe("billing service", () => {
         false
       );
 
-      // Check the metadata passed to insert
-      const insertCall = mockValues.mock.calls[0]?.[0];
-      expect(insertCall.eventName).toBe("ai");
-      expect(insertCall.metadata).toMatchObject({
+      const createCall = mockMutation.mock.calls.find(
+        ([name]) => name === "usage-events:create"
+      )?.[1] as Record<string, unknown> | undefined;
+      expect(createCall?.eventName).toBe("ai");
+      expect(createCall?.metadata).toMatchObject({
         runId: "run-456",
         model: "claude-sonnet-4-20250514",
         inputTokens: 1000,
@@ -204,7 +172,7 @@ describe("billing service", () => {
 
     it("builds correct local metadata for sandbox usage", async () => {
       const { recordUsage } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       await recordUsage(
         env,
@@ -218,9 +186,11 @@ describe("billing service", () => {
         false
       );
 
-      const insertCall = mockValues.mock.calls[0]?.[0];
-      expect(insertCall.eventName).toBe("sandbox");
-      expect(insertCall.metadata).toMatchObject({
+      const createCall = mockMutation.mock.calls.find(
+        ([name]) => name === "usage-events:create"
+      )?.[1] as Record<string, unknown> | undefined;
+      expect(createCall?.eventName).toBe("sandbox");
+      expect(createCall?.metadata).toMatchObject({
         runId: "run-456",
         durationMinutes: 15,
         costUSD: 0.25,
@@ -229,7 +199,7 @@ describe("billing service", () => {
 
     it("builds correct Polar metadata for AI usage with unified event name", async () => {
       const { recordUsage } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       await recordUsage(
         env,
@@ -269,7 +239,7 @@ describe("billing service", () => {
 
     it("builds correct Polar metadata for sandbox usage", async () => {
       const { recordUsage } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       await recordUsage(
         env,
@@ -310,19 +280,24 @@ describe("billing service", () => {
   describe("canRunHeal", () => {
     it("allows heal when POLAR_ACCESS_TOKEN is not configured (dev mode)", async () => {
       const { canRunHeal } = await getBilling();
-      const env = createMockEnv({ POLAR_ACCESS_TOKEN: undefined });
+      const env = createBillingEnv({ POLAR_ACCESS_TOKEN: undefined });
 
       const result = await canRunHeal(env, "org-123");
 
       expect(result).toEqual({ allowed: true });
       // Should not query database when Polar is not configured
-      expect(mockFindFirst).not.toHaveBeenCalled();
+      expect(mockQuery).not.toHaveBeenCalled();
     });
 
     it("denies heal when organization is not found", async () => {
       const { canRunHeal } = await getBilling();
-      const env = createMockEnv();
-      mockFindFirst.mockResolvedValue(undefined);
+      const env = createBillingEnv();
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve(null);
+        }
+        return Promise.resolve([]);
+      });
 
       const result = await canRunHeal(env, "nonexistent-org");
 
@@ -330,13 +305,17 @@ describe("billing service", () => {
         allowed: false,
         reason: "Organization not found",
       });
-      expect(mockClient.end).toHaveBeenCalled();
     });
 
     it("denies heal when customer not found in Polar", async () => {
       const { canRunHeal } = await getBilling();
-      const env = createMockEnv();
-      mockFindFirst.mockResolvedValue({ id: "org-123", name: "Test Org" });
+      const env = createBillingEnv();
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve({ _id: "org-123", name: "Test Org" });
+        }
+        return Promise.resolve([]);
+      });
       mockGetCustomerStateByExternalId.mockResolvedValue(null);
 
       const result = await canRunHeal(env, "org-123");
@@ -345,13 +324,17 @@ describe("billing service", () => {
         allowed: false,
         reason: "No active subscription. Please subscribe to use healing.",
       });
-      expect(mockClient.end).toHaveBeenCalled();
     });
 
     it("allows heal when customer has active subscription", async () => {
       const { canRunHeal } = await getBilling();
-      const env = createMockEnv();
-      mockFindFirst.mockResolvedValue({ id: "org-123", name: "Test Org" });
+      const env = createBillingEnv();
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve({ _id: "org-123", name: "Test Org" });
+        }
+        return Promise.resolve([]);
+      });
       mockGetCustomerStateByExternalId.mockResolvedValue({
         activeSubscriptions: [{ id: "sub-1", status: "active" }],
         activeMeters: [],
@@ -360,13 +343,17 @@ describe("billing service", () => {
       const result = await canRunHeal(env, "org-123");
 
       expect(result).toEqual({ allowed: true });
-      expect(mockClient.end).toHaveBeenCalled();
     });
 
     it("allows heal when customer has meter credits", async () => {
       const { canRunHeal } = await getBilling();
-      const env = createMockEnv();
-      mockFindFirst.mockResolvedValue({ id: "org-123", name: "Test Org" });
+      const env = createBillingEnv();
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve({ _id: "org-123", name: "Test Org" });
+        }
+        return Promise.resolve([]);
+      });
       mockGetCustomerStateByExternalId.mockResolvedValue({
         activeSubscriptions: [],
         activeMeters: [{ meterId: "meter-1", balance: 50 }],
@@ -375,13 +362,17 @@ describe("billing service", () => {
       const result = await canRunHeal(env, "org-123");
 
       expect(result).toEqual({ allowed: true });
-      expect(mockClient.end).toHaveBeenCalled();
     });
 
     it("denies heal when no active subscription and no credits", async () => {
       const { canRunHeal } = await getBilling();
-      const env = createMockEnv();
-      mockFindFirst.mockResolvedValue({ id: "org-123", name: "Test Org" });
+      const env = createBillingEnv();
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organizations:getById") {
+          return Promise.resolve({ _id: "org-123", name: "Test Org" });
+        }
+        return Promise.resolve([]);
+      });
       mockGetCustomerStateByExternalId.mockResolvedValue({
         activeSubscriptions: [{ id: "sub-1", status: "canceled" }],
         activeMeters: [{ meterId: "meter-1", balance: 0 }],
@@ -393,7 +384,6 @@ describe("billing service", () => {
         allowed: false,
         reason: "No credits remaining. Please add more credits to continue.",
       });
-      expect(mockClient.end).toHaveBeenCalled();
     });
   });
 
@@ -404,58 +394,64 @@ describe("billing service", () => {
   describe("getCreditUsageSummary", () => {
     it("handles division by zero when total cost is 0", async () => {
       const { getCreditUsageSummary } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
-      // Mock aggregates with zero costs
-      mockWhere.mockResolvedValueOnce([
-        {
-          totalCostUSD: 0,
-          aiCostUSD: 0,
-          sandboxCostUSD: 0,
-          eventCount: 0,
-        },
-      ]);
-      // Mock recent events
-      mockFindMany.mockResolvedValueOnce([]);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "usage-events:listByOrgSince") {
+          return Promise.resolve([]);
+        }
+        return Promise.resolve([]);
+      });
 
       const result = await getCreditUsageSummary(env, "org-123");
 
       expect(result.breakdown.ai.percentage).toBe(0);
       expect(result.breakdown.sandbox.percentage).toBe(0);
       expect(result.totalCostUSD).toBe(0);
-      expect(mockClient.end).toHaveBeenCalled();
     });
 
     it("calculates correct percentages for mixed usage", async () => {
       const { getCreditUsageSummary } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
-      // 75% AI, 25% sandbox
-      mockWhere.mockResolvedValueOnce([
-        {
-          totalCostUSD: 1.0,
-          aiCostUSD: 0.75,
-          sandboxCostUSD: 0.25,
-          eventCount: 10,
-        },
-      ]);
-      mockFindMany.mockResolvedValueOnce([]);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "usage-events:listByOrgSince") {
+          return Promise.resolve([
+            {
+              _id: "event-1",
+              eventName: "ai",
+              metadata: { costUSD: 0.75 },
+              createdAt: Date.now(),
+            },
+            {
+              _id: "event-2",
+              eventName: "sandbox",
+              metadata: { costUSD: 0.25 },
+              createdAt: Date.now(),
+            },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       const result = await getCreditUsageSummary(env, "org-123");
 
       expect(result.breakdown.ai.percentage).toBe(75);
       expect(result.breakdown.sandbox.percentage).toBe(25);
       expect(result.totalCostUSD).toBe(1.0);
-      expect(result.eventCount).toBe(10);
+      expect(result.eventCount).toBe(2);
     });
 
     it("handles empty aggregate result gracefully", async () => {
       const { getCreditUsageSummary } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
-      // Empty result from aggregation
-      mockWhere.mockResolvedValueOnce([]);
-      mockFindMany.mockResolvedValueOnce([]);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "usage-events:listByOrgSince") {
+          return Promise.resolve([]);
+        }
+        return Promise.resolve([]);
+      });
 
       const result = await getCreditUsageSummary(env, "org-123");
 
@@ -473,50 +469,59 @@ describe("billing service", () => {
   describe("retryFailedPolarIngestions", () => {
     it("returns zeros when no failed events exist", async () => {
       const { retryFailedPolarIngestions } = await getBilling();
-      const env = createMockEnv();
-      mockFindMany.mockResolvedValue([]);
+      const env = createBillingEnv();
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "usage-events:listByPolarIngested") {
+          return Promise.resolve([]);
+        }
+        return Promise.resolve([]);
+      });
 
       const result = await retryFailedPolarIngestions(env);
 
       expect(result).toEqual({ processed: 0, succeeded: 0, failed: 0 });
       expect(mockIngestUsageEvents).not.toHaveBeenCalled();
-      expect(mockClient.end).toHaveBeenCalled();
     });
 
     it("batches events by organization for efficient ingestion", async () => {
       const { retryFailedPolarIngestions } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
-      mockFindMany.mockResolvedValue([
-        {
-          id: "event-1",
-          organizationId: "org-A",
-          eventName: "ai",
-          metadata: {
-            model: "claude-3",
-            inputTokens: 100,
-            outputTokens: 50,
-            costUSD: 0.01,
-          },
-        },
-        {
-          id: "event-2",
-          organizationId: "org-A",
-          eventName: "sandbox",
-          metadata: { durationMinutes: 5, costUSD: 0.05 },
-        },
-        {
-          id: "event-3",
-          organizationId: "org-B",
-          eventName: "ai",
-          metadata: {
-            model: "claude-3",
-            inputTokens: 200,
-            outputTokens: 100,
-            costUSD: 0.02,
-          },
-        },
-      ]);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "usage-events:listByPolarIngested") {
+          return Promise.resolve([
+            {
+              _id: "event-1",
+              organizationId: "org-A",
+              eventName: "ai",
+              metadata: {
+                model: "claude-3",
+                inputTokens: 100,
+                outputTokens: 50,
+                costUSD: 0.01,
+              },
+            },
+            {
+              _id: "event-2",
+              organizationId: "org-A",
+              eventName: "sandbox",
+              metadata: { durationMinutes: 5, costUSD: 0.05 },
+            },
+            {
+              _id: "event-3",
+              organizationId: "org-B",
+              eventName: "ai",
+              metadata: {
+                model: "claude-3",
+                inputTokens: 200,
+                outputTokens: 100,
+                costUSD: 0.02,
+              },
+            },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       await retryFailedPolarIngestions(env);
 
@@ -543,32 +548,37 @@ describe("billing service", () => {
 
     it("continues processing other orgs when one org fails", async () => {
       const { retryFailedPolarIngestions } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
-      mockFindMany.mockResolvedValue([
-        {
-          id: "event-1",
-          organizationId: "org-A",
-          eventName: "ai",
-          metadata: {
-            model: "claude-3",
-            inputTokens: 100,
-            outputTokens: 50,
-            costUSD: 0.01,
-          },
-        },
-        {
-          id: "event-2",
-          organizationId: "org-B",
-          eventName: "ai",
-          metadata: {
-            model: "claude-3",
-            inputTokens: 200,
-            outputTokens: 100,
-            costUSD: 0.02,
-          },
-        },
-      ]);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "usage-events:listByPolarIngested") {
+          return Promise.resolve([
+            {
+              _id: "event-1",
+              organizationId: "org-A",
+              eventName: "ai",
+              metadata: {
+                model: "claude-3",
+                inputTokens: 100,
+                outputTokens: 50,
+                costUSD: 0.01,
+              },
+            },
+            {
+              _id: "event-2",
+              organizationId: "org-B",
+              eventName: "ai",
+              metadata: {
+                model: "claude-3",
+                inputTokens: 200,
+                outputTokens: 100,
+                costUSD: 0.02,
+              },
+            },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       // First org fails after all retries, second succeeds
       mockIngestUsageEvents
@@ -587,21 +597,26 @@ describe("billing service", () => {
 
     it("builds retry metadata correctly for AI events", async () => {
       const { retryFailedPolarIngestions } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
-      mockFindMany.mockResolvedValue([
-        {
-          id: "event-1",
-          organizationId: "org-A",
-          eventName: "ai",
-          metadata: {
-            model: "claude-sonnet-4-20250514",
-            inputTokens: 1000,
-            outputTokens: 500,
-            costUSD: 0.05,
-          },
-        },
-      ]);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "usage-events:listByPolarIngested") {
+          return Promise.resolve([
+            {
+              _id: "event-1",
+              organizationId: "org-A",
+              eventName: "ai",
+              metadata: {
+                model: "claude-sonnet-4-20250514",
+                inputTokens: 1000,
+                outputTokens: 500,
+                costUSD: 0.05,
+              },
+            },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       await retryFailedPolarIngestions(env);
 
@@ -621,19 +636,24 @@ describe("billing service", () => {
 
     it("builds retry metadata correctly for sandbox events", async () => {
       const { retryFailedPolarIngestions } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
-      mockFindMany.mockResolvedValue([
-        {
-          id: "event-1",
-          organizationId: "org-A",
-          eventName: "sandbox",
-          metadata: {
-            durationMinutes: 10,
-            costUSD: 0.2,
-          },
-        },
-      ]);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "usage-events:listByPolarIngested") {
+          return Promise.resolve([
+            {
+              _id: "event-1",
+              organizationId: "org-A",
+              eventName: "sandbox",
+              metadata: {
+                durationMinutes: 10,
+                costUSD: 0.2,
+              },
+            },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       await retryFailedPolarIngestions(env);
 
@@ -652,16 +672,21 @@ describe("billing service", () => {
 
     it("handles missing metadata fields with defaults", async () => {
       const { retryFailedPolarIngestions } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
-      mockFindMany.mockResolvedValue([
-        {
-          id: "event-1",
-          organizationId: "org-A",
-          eventName: "ai",
-          metadata: { costUSD: 0.01 }, // Missing model, inputTokens, outputTokens
-        },
-      ]);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "usage-events:listByPolarIngested") {
+          return Promise.resolve([
+            {
+              _id: "event-1",
+              organizationId: "org-A",
+              eventName: "ai",
+              metadata: { costUSD: 0.01 }, // Missing model, inputTokens, outputTokens
+            },
+          ]);
+        }
+        return Promise.resolve([]);
+      });
 
       await retryFailedPolarIngestions(env);
 
@@ -686,10 +711,14 @@ describe("billing service", () => {
   describe("getUsageSummary", () => {
     it("returns zero runs when org has no projects", async () => {
       const { getUsageSummary } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
-      // Mock select().from().where() for projects query - returns empty
-      mockWhere.mockResolvedValueOnce([]);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "projects:listByOrg") {
+          return Promise.resolve([]);
+        }
+        return Promise.resolve([]);
+      });
 
       const result = await getUsageSummary(env, "org-123");
 
@@ -700,7 +729,6 @@ describe("billing service", () => {
       // Period should still be set
       expect(result.period.start).toBeDefined();
       expect(result.period.end).toBeDefined();
-      expect(mockClient.end).toHaveBeenCalled();
     });
   });
 });

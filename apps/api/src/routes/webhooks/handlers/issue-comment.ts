@@ -1,12 +1,9 @@
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
-import { createDb } from "../../../db/client";
+import { getConvexClient } from "../../../db/convex";
+import { getHealsByPr, triggerHeal } from "../../../db/operations/heals";
 import {
   getOrgSettings,
-  heals,
-  projects,
-  runErrors,
-  runs,
-} from "../../../db/schema";
+  type OrganizationSettings,
+} from "../../../lib/org-settings";
 import { captureWebhookError } from "../../../lib/sentry";
 import { orchestrateHeals } from "../../../services/autofix/orchestrator";
 import { formatNoHealCandidatesComment } from "../../../services/comment-formatter";
@@ -51,6 +48,35 @@ export const PROMPT_INJECTION_PATTERNS = [
   /SYSTEM:/i,
   /Human:/i,
 ];
+
+interface HealProject {
+  _id: string;
+  organizationId: string;
+  removedAt?: number | null;
+}
+
+interface HealOrganization {
+  providerInstallationId?: string | null;
+  settings?: Record<string, unknown> | null;
+}
+
+interface HealProjectContext {
+  project: HealProject;
+  organization: HealOrganization;
+}
+
+interface HealRun {
+  _id: string;
+  commitSha?: string | null;
+  headBranch?: string | null;
+}
+
+interface HealError {
+  _id: string;
+  source?: string | null;
+  signatureId?: string | null;
+  fixable?: boolean | null;
+}
 
 // SECURITY: Control character pattern for sanitization (built from char codes to avoid lint errors)
 // Matches: \x00-\x08, \x0B, \x0C, \x0E-\x1F, \x7F (excludes \t=0x09, \n=0x0A, \r=0x0D)
@@ -140,6 +166,197 @@ const parseDetentCommand = (body: string): DetentCommand | null => {
   return { type: "heal" };
 };
 
+const loadHealProjectContext = async (
+  c: WebhookContext,
+  convex: ReturnType<typeof getConvexClient>,
+  github: ReturnType<typeof createGitHubService>,
+  token: string,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  repositoryFullName: string
+): Promise<HealProjectContext | Response> => {
+  const project = (await convex.query("projects:getByRepoFullName", {
+    providerRepoFullName: repositoryFullName,
+  })) as HealProject | null;
+
+  if (!project || project.removedAt) {
+    await github.postComment(
+      token,
+      owner,
+      repo,
+      prNumber,
+      "This repository is not connected to Detent."
+    );
+    return c.json({
+      message: "heal command failed",
+      reason: "project_not_found",
+    });
+  }
+
+  const organization = (await convex.query("organizations:getById", {
+    id: project.organizationId,
+  })) as HealOrganization | null;
+
+  if (!organization) {
+    await github.postComment(
+      token,
+      owner,
+      repo,
+      prNumber,
+      "Organization not found for this repository."
+    );
+    return c.json({
+      message: "heal command failed",
+      reason: "organization_not_found",
+    });
+  }
+
+  return { project, organization };
+};
+
+const loadLatestRun = async (
+  c: WebhookContext,
+  convex: ReturnType<typeof getConvexClient>,
+  github: ReturnType<typeof createGitHubService>,
+  token: string,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  projectId: string
+): Promise<HealRun | Response> => {
+  const run = (await convex.query("runs:getLatestByProjectPr", {
+    projectId,
+    prNumber,
+  })) as HealRun | null;
+  if (!run) {
+    await github.postComment(
+      token,
+      owner,
+      repo,
+      prNumber,
+      "No CI runs found for this PR."
+    );
+    return c.json({ message: "heal command failed", reason: "no_runs" });
+  }
+
+  return run;
+};
+
+const loadFixableErrors = async (
+  c: WebhookContext,
+  convex: ReturnType<typeof getConvexClient>,
+  github: ReturnType<typeof createGitHubService>,
+  token: string,
+  owner: string,
+  repo: string,
+  repositoryFullName: string,
+  prNumber: number,
+  runId: string
+): Promise<HealError[] | Response> => {
+  const errors = (await convex.query("run-errors:listFixableByRunId", {
+    runId,
+  })) as HealError[];
+
+  if (errors.length === 0) {
+    const commentBody = formatNoHealCandidatesComment();
+    const appId = Number.parseInt(c.env.GITHUB_APP_ID, 10);
+    await deleteAndPostComment({
+      github,
+      token,
+      kv: c.env["detent-idempotency"],
+      db: convex,
+      owner,
+      repo,
+      repository: repositoryFullName,
+      prNumber,
+      commentBody,
+      appId,
+    });
+    return c.json({
+      message: "heal command completed",
+      reason: "no_fixable_errors",
+    });
+  }
+
+  return errors;
+};
+
+const filterActiveHeals = (heals: Awaited<ReturnType<typeof getHealsByPr>>) => {
+  return heals.filter(
+    (heal) => heal.status === "found" || heal.status === "pending"
+  );
+};
+
+const maybeCreateMissingHeals = async (
+  c: WebhookContext,
+  organization: HealOrganization,
+  projectId: string,
+  prNumber: number,
+  run: HealRun,
+  errors: HealError[],
+  command: DetentCommand,
+  repositoryFullName: string
+): Promise<Awaited<ReturnType<typeof getHealsByPr>> | Response> => {
+  let existingHeals = filterActiveHeals(
+    await getHealsByPr(c.env, projectId, prNumber)
+  );
+
+  if (existingHeals.length > 0) {
+    return existingHeals;
+  }
+
+  if (!run.commitSha) {
+    return c.json({
+      message: "heal command failed",
+      reason: "no_commit_sha",
+    });
+  }
+
+  const installationId = organization.providerInstallationId;
+  if (!installationId) {
+    return existingHeals;
+  }
+
+  const orgSettings = getOrgSettings(
+    organization.settings as OrganizationSettings | null | undefined
+  );
+
+  console.log(
+    `[issue_comment] Creating heals for ${errors.length} errors on PR #${prNumber}`
+  );
+
+  const result = await orchestrateHeals({
+    env: c.env,
+    projectId,
+    runId: run._id,
+    commitSha: run.commitSha,
+    prNumber,
+    branch: run.headBranch ?? "main",
+    repoFullName: repositoryFullName,
+    installationId: Number.parseInt(installationId, 10),
+    errors: errors.map((e) => ({
+      id: e._id,
+      source: e.source ?? undefined,
+      signatureId: e.signatureId ?? undefined,
+      fixable: e.fixable ?? false,
+    })),
+    orgSettings,
+    userInstructions: command.userInstructions,
+  });
+
+  if (result.healsCreated > 0) {
+    console.log(
+      `[issue_comment] Created ${result.healsCreated} heals for PR #${prNumber}`
+    );
+    existingHeals = filterActiveHeals(
+      await getHealsByPr(c.env, projectId, prNumber)
+    );
+  }
+
+  return existingHeals;
+};
+
 // Handle @detentsh heal command
 const handleHealCommand = async (
   c: WebhookContext,
@@ -153,93 +370,59 @@ const handleHealCommand = async (
   const owner = repository.owner.login;
   const repo = repository.name;
 
-  const { db, client } = await createDb(c.env);
+  const convex = getConvexClient(c.env);
 
   try {
-    // Find the project by repository full name (with organization for settings)
-    const project = await db.query.projects.findFirst({
-      where: and(
-        eq(projects.providerRepoFullName, repository.full_name),
-        isNull(projects.removedAt)
-      ),
-      with: { organization: true },
-    });
-
-    if (!project) {
-      await github.postComment(
-        token,
-        owner,
-        repo,
-        prNumber,
-        "This repository is not connected to Detent."
-      );
-      return c.json({
-        message: "heal command failed",
-        reason: "project_not_found",
-      });
+    const projectContextResult = await loadHealProjectContext(
+      c,
+      convex,
+      github,
+      token,
+      owner,
+      repo,
+      prNumber,
+      repository.full_name
+    );
+    if (projectContextResult instanceof Response) {
+      return projectContextResult;
     }
+    const { project, organization } = projectContextResult;
 
-    // Get the latest run for this PR (include headBranch for orchestration)
-    const latestRun = await db
-      .select({
-        id: runs.id,
-        commitSha: runs.commitSha,
-        headBranch: runs.headBranch,
-      })
-      .from(runs)
-      .where(and(eq(runs.projectId, project.id), eq(runs.prNumber, prNumber)))
-      .orderBy(desc(runs.receivedAt))
-      .limit(1);
-
-    const run = latestRun[0];
-    if (!run) {
-      await github.postComment(
-        token,
-        owner,
-        repo,
-        prNumber,
-        "No CI runs found for this PR."
-      );
-      return c.json({ message: "heal command failed", reason: "no_runs" });
+    const runResult = await loadLatestRun(
+      c,
+      convex,
+      github,
+      token,
+      owner,
+      repo,
+      prNumber,
+      project._id
+    );
+    if (runResult instanceof Response) {
+      return runResult;
     }
+    const run = runResult;
 
-    // Get fixable errors from that run (include fixable for orchestration)
-    const errors = await db
-      .select({
-        id: runErrors.id,
-        source: runErrors.source,
-        signatureId: runErrors.signatureId,
-        fixable: runErrors.fixable,
-      })
-      .from(runErrors)
-      .where(and(eq(runErrors.runId, run.id), eq(runErrors.fixable, true)));
-
-    if (errors.length === 0) {
-      // Post "no heal candidates" comment
-      const commentBody = formatNoHealCandidatesComment();
-      const appId = Number.parseInt(c.env.GITHUB_APP_ID, 10);
-      await deleteAndPostComment({
-        github,
-        token,
-        kv: c.env["detent-idempotency"],
-        db,
-        owner,
-        repo,
-        repository: repository.full_name,
-        prNumber,
-        commentBody,
-        appId,
-      });
-      return c.json({
-        message: "heal command completed",
-        reason: "no_fixable_errors",
-      });
+    const errorsResult = await loadFixableErrors(
+      c,
+      convex,
+      github,
+      token,
+      owner,
+      repo,
+      repository.full_name,
+      prNumber,
+      run._id
+    );
+    if (errorsResult instanceof Response) {
+      return errorsResult;
     }
+    const errors = errorsResult;
 
     // Acquire lock to prevent race condition when two heal commands fire simultaneously
     // This ensures only one orchestration runs at a time per PR
     const kv = c.env["detent-idempotency"];
-    const lockResult = await acquireHealCommandLock(kv, project.id, prNumber);
+    const lockResult = await acquireHealCommandLock(kv, project._id, prNumber);
     if (!lockResult.acquired) {
       console.log(
         `[issue_comment] Heal command already processing for PR #${prNumber}, skipping`
@@ -251,75 +434,20 @@ const handleHealCommand = async (
     }
 
     try {
-      // Check for existing pending/found heals for this PR and trigger them
-      let existingHeals = await db
-        .select({ id: heals.id, status: heals.status })
-        .from(heals)
-        .where(
-          and(
-            eq(heals.projectId, project.id),
-            eq(heals.prNumber, prNumber),
-            inArray(heals.status, ["found", "pending"])
-          )
-        );
-
-      // If no heals exist yet but we have fixable errors, create them via orchestrateHeals
-      // This fixes the logic gap where users see "no fixable errors" when heals haven't been created yet
-      if (existingHeals.length === 0 && errors.length > 0) {
-        // Cannot orchestrate heals without a commit SHA (needed for check runs and matching)
-        if (!run.commitSha) {
-          return c.json({
-            message: "heal command failed",
-            reason: "no_commit_sha",
-          });
-        }
-
-        const installationId = project.organization.providerInstallationId;
-        if (installationId) {
-          const orgSettings = getOrgSettings(project.organization.settings);
-
-          console.log(
-            `[issue_comment] Creating heals for ${errors.length} errors on PR #${prNumber}`
-          );
-
-          const result = await orchestrateHeals({
-            env: c.env,
-            projectId: project.id,
-            runId: run.id,
-            commitSha: run.commitSha,
-            prNumber,
-            branch: run.headBranch ?? "main",
-            repoFullName: repository.full_name,
-            installationId: Number.parseInt(installationId, 10),
-            errors: errors.map((e) => ({
-              id: e.id,
-              source: e.source ?? undefined,
-              signatureId: e.signatureId ?? undefined,
-              fixable: e.fixable ?? false,
-            })),
-            orgSettings,
-            userInstructions: command.userInstructions,
-          });
-
-          if (result.healsCreated > 0) {
-            console.log(
-              `[issue_comment] Created ${result.healsCreated} heals for PR #${prNumber}`
-            );
-
-            // Re-fetch existing heals after orchestration
-            existingHeals = await db
-              .select({ id: heals.id, status: heals.status })
-              .from(heals)
-              .where(
-                and(
-                  eq(heals.projectId, project.id),
-                  eq(heals.prNumber, prNumber),
-                  inArray(heals.status, ["found", "pending"])
-                )
-              );
-          }
-        }
+      const existingHealsResult = await maybeCreateMissingHeals(
+        c,
+        organization,
+        project._id,
+        prNumber,
+        run,
+        errors,
+        command,
+        repository.full_name
+      );
+      if (existingHealsResult instanceof Response) {
+        return existingHealsResult;
       }
+      const existingHeals = existingHealsResult;
 
       // Trigger all found heals by updating their status to pending
       const healIdsToTrigger = existingHeals
@@ -327,10 +455,9 @@ const handleHealCommand = async (
         .map((h) => h.id);
 
       if (healIdsToTrigger.length > 0) {
-        await db
-          .update(heals)
-          .set({ status: "pending", updatedAt: new Date() })
-          .where(inArray(heals.id, healIdsToTrigger));
+        for (const healId of healIdsToTrigger) {
+          await triggerHeal(c.env, healId);
+        }
 
         console.log(
           `[issue_comment] Triggered ${healIdsToTrigger.length} heals for PR #${prNumber}`
@@ -348,7 +475,7 @@ const handleHealCommand = async (
           github,
           token,
           kv: c.env["detent-idempotency"],
-          db,
+          db: convex,
           owner,
           repo,
           repository: repository.full_name,
@@ -371,10 +498,20 @@ const handleHealCommand = async (
       });
     } finally {
       // Release the heal command lock
-      await releaseHealCommandLock(kv, project.id, prNumber);
+      await releaseHealCommandLock(kv, project._id, prNumber);
     }
-  } finally {
-    await client.end();
+  } catch (error) {
+    console.error(
+      "[issue_comment] Heal command error:",
+      error instanceof Error ? error.message : String(error)
+    );
+    return c.json(
+      {
+        message: "heal command failed",
+        reason: "internal_error",
+      },
+      500
+    );
   }
 };
 

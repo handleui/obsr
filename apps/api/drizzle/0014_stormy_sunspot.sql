@@ -1,1 +1,0 @@
-CREATE INDEX "runs_repository_commit_idx" ON "runs" USING btree ("repository","commit_sha");

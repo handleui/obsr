@@ -1,4 +1,4 @@
-import type { Hyperdrive, KVNamespace } from "@cloudflare/workers-types";
+import type { KVNamespace } from "@cloudflare/workers-types";
 
 // Cloudflare Worker environment bindings
 // Set these via: npx wrangler secret put <NAME>
@@ -12,11 +12,6 @@ export interface Env {
   // GitHub App Client Secret (for OAuth token refresh)
   // Required to refresh user OAuth tokens when they expire
   GITHUB_CLIENT_SECRET?: string;
-
-  // Database connection via Cloudflare Hyperdrive
-  HYPERDRIVE: Hyperdrive;
-  // Fallback for local dev / migrations
-  DATABASE_URL?: string;
 
   // WorkOS User Management credentials
   WORKOS_CLIENT_ID: string;
@@ -82,4 +77,9 @@ export interface Env {
   // Modal executor URL for triggering autofix jobs
   // e.g., https://xxx--detent-executor-run-autofix.modal.run
   MODAL_EXECUTOR_URL?: string;
+
+  // Convex deployment URL
+  CONVEX_URL: string;
+  // Service token for Convex function access
+  CONVEX_SERVICE_TOKEN: string;
 }

@@ -1,1 +1,0 @@
-ALTER TYPE "public"."heal_status" ADD VALUE 'found' BEFORE 'pending';

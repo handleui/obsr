@@ -1,5 +1,4 @@
-import { and, eq, isNotNull, sql } from "drizzle-orm";
-import { commitJobStats, jobs, runs } from "../../db/schema";
+import { fetchAllPages } from "../../lib/convex-pagination";
 import type { DbClient } from "./types";
 
 // ============================================================================
@@ -16,19 +15,13 @@ export const lookupPrNumberFromRuns = async (
   repository: string,
   commitSha: string
 ): Promise<number | undefined> => {
-  const result = await db
-    .select({ prNumber: runs.prNumber })
-    .from(runs)
-    .where(
-      and(
-        eq(runs.repository, repository),
-        eq(runs.commitSha, commitSha),
-        isNotNull(runs.prNumber)
-      )
-    )
-    .limit(1);
+  const runs = (await db.query("runs:listByRepoCommit", {
+    repository,
+    commitSha,
+  })) as Array<{ prNumber?: number | null }>;
 
-  return result[0]?.prNumber ?? undefined;
+  const match = runs.find((run) => typeof run.prNumber === "number");
+  return match?.prNumber ?? undefined;
 };
 
 type JobStatus =
@@ -75,41 +68,28 @@ export const upsertJob = async (
   db: DbClient,
   data: UpsertJobData
 ): Promise<void> => {
-  await db
-    .insert(jobs)
-    .values({
-      id: crypto.randomUUID(),
+  await db.mutation("jobs:upsertByRepoJob", {
+    repository: data.repository,
+    providerJobId: data.providerJobId,
+    data: {
       providerJobId: data.providerJobId,
       repository: data.repository,
       commitSha: data.commitSha,
       prNumber: data.prNumber,
       name: data.name,
-      workflowName: data.workflowName,
+      workflowName: data.workflowName ?? undefined,
       status: data.status,
-      conclusion: data.conclusion,
+      conclusion: data.conclusion ?? undefined,
+      hasDetent: false,
+      errorCount: 0,
       htmlUrl: data.htmlUrl,
-      runnerName: data.runnerName,
-      headBranch: data.headBranch,
-      queuedAt: data.queuedAt,
-      startedAt: data.startedAt,
-      completedAt: data.completedAt,
-    })
-    .onConflictDoUpdate({
-      target: [jobs.repository, jobs.providerJobId],
-      set: {
-        name: data.name,
-        workflowName: data.workflowName,
-        status: data.status,
-        conclusion: data.conclusion,
-        htmlUrl: data.htmlUrl,
-        runnerName: data.runnerName,
-        headBranch: data.headBranch,
-        startedAt: data.startedAt,
-        completedAt: data.completedAt,
-        prNumber: data.prNumber,
-        updatedAt: new Date(),
-      },
-    });
+      runnerName: data.runnerName ?? undefined,
+      headBranch: data.headBranch ?? undefined,
+      queuedAt: data.queuedAt ? data.queuedAt.getTime() : undefined,
+      startedAt: data.startedAt ? data.startedAt.getTime() : undefined,
+      completedAt: data.completedAt ? data.completedAt.getTime() : undefined,
+    },
+  });
 };
 
 /**
@@ -127,22 +107,13 @@ export const markJobAsDetent = async (
   jobName: string,
   errorCount: number
 ): Promise<boolean> => {
-  const result = await db
-    .update(jobs)
-    .set({
-      hasDetent: true,
-      errorCount,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(jobs.repository, repository),
-        eq(jobs.commitSha, commitSha),
-        eq(jobs.name, jobName)
-      )
-    );
-
-  return (result.rowCount ?? 0) > 0;
+  const updated = (await db.mutation("jobs:markDetentByRepoCommitName", {
+    repository,
+    commitSha,
+    name: jobName,
+    errorCount,
+  })) as number;
+  return updated > 0;
 };
 
 /**
@@ -155,47 +126,45 @@ export const updateCommitJobStats = async (
   commitSha: string,
   prNumber?: number
 ): Promise<void> => {
-  // Aggregate stats from jobs table
-  const jobStats = await db
-    .select({
-      totalJobs: sql<number>`count(*)::int`,
-      completedJobs: sql<number>`count(*) filter (where ${jobs.status} = 'completed')::int`,
-      failedJobs: sql<number>`count(*) filter (where ${jobs.conclusion} = 'failure')::int`,
-      detentJobs: sql<number>`count(*) filter (where ${jobs.hasDetent} = true)::int`,
-      totalErrors: sql<number>`coalesce(sum(${jobs.errorCount}) filter (where ${jobs.hasDetent} = true), 0)::int`,
-    })
-    .from(jobs)
-    .where(and(eq(jobs.repository, repository), eq(jobs.commitSha, commitSha)));
+  const jobs = await fetchAllPages<{
+    status: string;
+    conclusion?: string | null;
+    hasDetent?: boolean;
+    errorCount?: number;
+  }>(db, "jobs:paginateByRepoCommit", { repository, commitSha });
 
-  const stats = jobStats[0];
-  if (!stats) {
+  if (jobs.length === 0) {
     return;
   }
 
-  // Upsert stats record
-  await db
-    .insert(commitJobStats)
-    .values({
-      id: crypto.randomUUID(),
-      repository,
-      commitSha,
-      prNumber,
-      totalJobs: stats.totalJobs,
-      completedJobs: stats.completedJobs,
-      failedJobs: stats.failedJobs,
-      detentJobs: stats.detentJobs,
-      totalErrors: stats.totalErrors,
-    })
-    .onConflictDoUpdate({
-      target: [commitJobStats.repository, commitJobStats.commitSha],
-      set: {
-        totalJobs: stats.totalJobs,
-        completedJobs: stats.completedJobs,
-        failedJobs: stats.failedJobs,
-        detentJobs: stats.detentJobs,
-        totalErrors: stats.totalErrors,
-        prNumber: prNumber ?? sql`${commitJobStats.prNumber}`,
-        updatedAt: new Date(),
-      },
-    });
+  const totalJobs = jobs.length;
+  const completedJobs = jobs.filter((job) => job.status === "completed").length;
+  const failedJobs = jobs.filter((job) => job.conclusion === "failure").length;
+  const detentJobs = jobs.filter((job) => job.hasDetent).length;
+  const totalErrors = jobs.reduce((sum, job) => {
+    if (!job.hasDetent) {
+      return sum;
+    }
+    return sum + (job.errorCount ?? 0);
+  }, 0);
+
+  const existing = (await db.query("commit-job-stats:getByRepoCommit", {
+    repository,
+    commitSha,
+  })) as { commentPosted?: boolean } | null;
+
+  const now = Date.now();
+  await db.mutation("commit-job-stats:upsert", {
+    repository,
+    commitSha,
+    prNumber,
+    totalJobs,
+    completedJobs,
+    failedJobs,
+    detentJobs,
+    totalErrors,
+    commentPosted: existing?.commentPosted ?? false,
+    createdAt: now,
+    updatedAt: now,
+  });
 };

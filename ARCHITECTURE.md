@@ -38,23 +38,10 @@ A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to autom
 │              ┌────────────────────────┼────────────────────────┐                │
 │              ▼                        ▼                        ▼                │
 │  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐          │
-│  │  Cloudflare KV   │    │    Hyperdrive    │    │  Upstash Redis   │          │
-│  │  (idempotency)   │    │   (DB proxy)     │    │  (rate limit)    │          │
-│  └──────────────────┘    └────────┬─────────┘    └──────────────────┘          │
-└──────────────────────────────────┼──────────────────────────────────────────────┘
-                                   │
-                                   ▼
-                    ┌──────────────────────────────┐
-                    │      Neon PostgreSQL         │
-                    │         (Database)           │
-                    │  ┌────────┐ ┌─────────────┐  │
-                    │  │  Runs  │ │ RunErrors   │  │
-                    │  ├────────┤ ├─────────────┤  │
-                    │  │  Orgs  │ │  Members    │  │
-                    │  ├────────┤ ├─────────────┤  │
-                    │  │Projects│ │ Invitations │  │
-                    │  └────────┘ └─────────────┘  │
-                    └──────────────────────────────┘
+│  │  Cloudflare KV   │    │     Convex       │    │  Upstash Redis   │          │
+│  │  (idempotency)   │    │ (DB + functions) │    │  (rate limit)    │          │
+│  └──────────────────┘    └──────────────────┘    └──────────────────┘          │
+└─────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                              WEB APPS (Vercel)                                   │
@@ -208,9 +195,8 @@ detent/
 │   │   │   │   ├── auth.ts           # JWT verification
 │   │   │   │   └── rate-limit.ts     # Upstash Redis rate limiting
 │   │   │   └── db/
-│   │   │       ├── schema.ts         # Drizzle schema (source of truth)
-│   │   │       └── index.ts          # DB client setup
-│   │   ├── drizzle/                  # Generated migrations (DO NOT EDIT)
+│   │   │       ├── convex.ts         # Convex client helpers
+│   │   │       └── index.ts          # DB exports
 │   │   └── wrangler.jsonc            # Cloudflare Workers config
 │   │
 │   ├── cli/                          # Command-line interface
@@ -247,11 +233,13 @@ detent/
 │   │   └── src/
 │   │       ├── index.ts              # Hono app, graceful shutdown
 │   │       ├── services/
-│   │       │   └── poller/           # Poll DB for pending heals
+│   │       │   └── poller/           # Poll Convex for pending heals
 │   │       ├── adapters/             # E2B sandbox adapter
 │   │       └── routes/               # Health check routes
 │   │
 │   └── docs/                         # Documentation site
+│
+├── convex/                           # Convex schema + functions
 │
 ├── packages/
 │   ├── action/                       # GitHub Action for parsing
@@ -299,24 +287,24 @@ detent/
 
 ---
 
-## Database Schema
+## Data Model (Convex)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           DATABASE TABLES                                    │
+│                           CONVEX COLLECTIONS                                 │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
 │   enterprises    │     │  organizations   │     │     projects     │
 ├──────────────────┤     ├──────────────────┤     ├──────────────────┤
-│ id (uuid)        │◄────│ enterpriseId?    │◄────│ organizationId   │
-│ name             │     │ id (uuid)        │     │ id (uuid)        │
+│ id               │◄────│ enterpriseId?    │◄────│ organizationId   │
+│ name             │     │ id               │     │ id               │
 │ slug             │     │ name, slug       │     │ handle           │
 │ suspendedAt?     │     │ provider         │     │ providerRepoId   │
 │ deletedAt?       │     │ providerAcctId   │     │ providerRepoName │
 └──────────────────┘     │ providerAcctLogin│     │ isPrivate        │
                          │ installationId   │     │ removedAt?       │
-                         │ settings (jsonb) │     └────────┬─────────┘
+                         │ settings         │     └────────┬─────────┘
                          └────────┬─────────┘              │
                                   │                        │
                                   ▼                        ▼
@@ -408,11 +396,6 @@ bun run lint              # Check with Ultracite/Biome
 bun run fix               # Auto-fix issues
 bun run check-types       # TypeScript type checking
 
-# Database (from apps/api/)
-bun run db:generate       # Create migration from schema.ts
-bun run db:migrate        # Apply pending migrations
-bun run db:studio         # Open Drizzle Studio GUI
-
 # CLI Commands
 dt auth                   # Authenticate with Detent
 dt link                   # Link repo to organization
@@ -431,7 +414,7 @@ dt org                    # Organization management
 | CLI         | TypeScript, Citty, Ink (React)        |
 | API         | Hono, Cloudflare Workers              |
 | Healer      | Hono, Bun, Railway                    |
-| Database    | Neon PostgreSQL, Drizzle, Hyperdrive  |
+| Database    | Convex                               |
 | Web Apps    | Next.js 16, React 19, Tailwind        |
 | Auth        | WorkOS, JWT (Jose), OAuth 2.0         |
 | AI          | Codex 5.2 via Vercel AI Gateway       |

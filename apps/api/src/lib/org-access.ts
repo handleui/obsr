@@ -5,10 +5,7 @@
  * Used across multiple routes to ensure consistent access control.
  */
 
-import { and, eq, isNull } from "drizzle-orm";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
-import type * as schema from "../db/schema";
-import { organizationMembers } from "../db/schema";
+import { getConvexClient } from "../db/convex";
 import type { Env } from "../types/env";
 import { getVerifiedGitHubIdentity } from "./github-identity";
 import { verifyGitHubMembership } from "./github-membership";
@@ -18,13 +15,13 @@ import { verifyGitHubMembership } from "./github-membership";
  * Can be satisfied by organization records or project.organization relations.
  */
 export interface OrgForVerification {
-  id: string;
+  _id: string;
   provider: string;
   providerAccountLogin: string;
-  providerInstallationId: string | null;
+  providerInstallationId?: string | null;
   providerAccountType: string;
   providerAccountId: string;
-  installerGithubId: string | null;
+  installerGithubId?: string | null;
 }
 
 export interface OrgAccessResult {
@@ -38,13 +35,22 @@ interface GitHubIdentity {
   username: string;
 }
 
+interface OrganizationMemberDoc {
+  _id: string;
+  organizationId: string;
+  userId: string;
+  role: "owner" | "admin" | "member" | "visitor";
+  providerUserId?: string;
+  providerUsername?: string;
+  removedAt?: number;
+}
+
 /**
  * Verify user has access to an organization via on-demand GitHub membership check.
  * Uses stored GitHub identity from membership records as fallback when WorkOS
  * doesn't have GitHub linked (e.g., user logged in via email/password).
  */
 export const verifyOrgAccess = async (
-  db: NodePgDatabase<typeof schema>,
   userId: string,
   org: OrgForVerification,
   env: Env
@@ -55,13 +61,16 @@ export const verifyOrgAccess = async (
   }
 
   // Check for existing membership with stored GitHub identity (active members only)
-  const existingMember = await db.query.organizationMembers.findFirst({
-    where: and(
-      eq(organizationMembers.userId, userId),
-      eq(organizationMembers.organizationId, org.id),
-      isNull(organizationMembers.removedAt)
-    ),
-  });
+  const convex = getConvexClient(env);
+  const existingMember = (await convex.query(
+    "organization-members:getByOrgUser",
+    {
+      organizationId: org._id,
+      userId,
+    }
+  )) as OrganizationMemberDoc | null;
+  const activeMember =
+    existingMember && !existingMember.removedAt ? existingMember : null;
 
   // Try WorkOS for GitHub identity first
   let githubIdentity: GitHubIdentity | null = await getVerifiedGitHubIdentity(
@@ -73,12 +82,12 @@ export const verifyOrgAccess = async (
   // Require both providerUserId and providerUsername to avoid empty username in API calls
   if (
     !githubIdentity &&
-    existingMember?.providerUserId &&
-    existingMember.providerUsername
+    activeMember?.providerUserId &&
+    activeMember.providerUsername
   ) {
     githubIdentity = {
-      userId: existingMember.providerUserId,
-      username: existingMember.providerUsername,
+      userId: activeMember.providerUserId,
+      username: activeMember.providerUsername,
     };
   }
 
@@ -100,8 +109,8 @@ export const verifyOrgAccess = async (
   // org retain Detent access until their membership record is removed (via org
   // admin or periodic cleanup). The middleware version (github-org-access.ts)
   // does re-verify on every request for stricter security.
-  if (existingMember?.providerUserId) {
-    return { allowed: true, role: existingMember.role };
+  if (activeMember?.providerUserId) {
+    return { allowed: true, role: activeMember.role };
   }
 
   // New access: verify GitHub org membership

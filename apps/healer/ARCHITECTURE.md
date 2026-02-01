@@ -319,7 +319,6 @@ interface HealResponse {
 ```
 MAX_CONCURRENT_HEALS = 5
 POLL_INTERVAL_MS = 5000
-DB_POOL_SIZE = 5
 ```
 
 Active heals tracked in-memory. New heals only fetched when slots available.
@@ -335,7 +334,7 @@ Active heals tracked in-memory. New heals only fetched when slots available.
 | `VERCEL_TEAM_ID` | No | Vercel team ID (required for Vercel Sandboxes) |
 | `VERCEL_PROJECT_ID` | No | Vercel project ID (required for Vercel Sandboxes) |
 | `AI_GATEWAY_API_KEY` | Yes | AI Gateway access |
-| `DATABASE_URL` | Yes | Neon PostgreSQL connection |
+| `CONVEX_URL` | Yes | Convex deployment URL |
 | `GITHUB_APP_ID` | Yes | GitHub App ID |
 | `GITHUB_APP_PRIVATE_KEY` | Yes | GitHub App private key (PEM) |
 

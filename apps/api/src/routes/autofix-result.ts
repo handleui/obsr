@@ -5,20 +5,15 @@
  * Authenticated via API key (X-Detent-Token header).
  */
 
-import { and, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
-import { createDb, type Database } from "../db/client";
+import { getConvexClient } from "../db/convex";
 import {
   applyHeal,
   getHealByPrAndSource,
+  type HealRecord,
   updateHealStatus,
 } from "../db/operations/heals";
-import {
-  getOrgSettings,
-  type Heal,
-  type OrganizationSettings,
-  projects,
-} from "../db/schema";
+import { getOrgSettings, type OrganizationSettings } from "../lib/org-settings";
 import { apiKeyAuthMiddleware } from "../middleware/api-key-auth";
 import { apiKeyRateLimitMiddleware } from "../middleware/api-key-rate-limit";
 import { generateAutofixCommitMessage } from "../services/autofix/commit-message";
@@ -58,8 +53,6 @@ interface ProcessedResult {
 // Validation Constants
 // ============================================================================
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_RESULTS = 50;
 const MAX_SOURCE_LENGTH = 64;
 const MAX_PATCH_LENGTH = 1_000_000; // 1MB
@@ -82,14 +75,14 @@ const validateTopLevelFields = (
   if (typeof b.projectId !== "string") {
     return { valid: false, error: "projectId must be a string" };
   }
-  if (!UUID_PATTERN.test(b.projectId)) {
-    return { valid: false, error: "projectId must be a valid UUID" };
+  if (!b.projectId.trim() || b.projectId.length > 128) {
+    return { valid: false, error: "projectId must be a valid ID" };
   }
   if (typeof b.runId !== "string") {
     return { valid: false, error: "runId must be a string" };
   }
-  if (!UUID_PATTERN.test(b.runId)) {
-    return { valid: false, error: "runId must be a valid UUID" };
+  if (!b.runId.trim() || b.runId.length > 128) {
+    return { valid: false, error: "runId must be a valid ID" };
   }
   if (
     typeof b.prNumber !== "number" ||
@@ -316,8 +309,8 @@ interface AutoCommitContext {
 }
 
 const autoCommitHeal = async (
-  db: Database,
-  heal: Heal,
+  env: Env,
+  heal: HealRecord,
   filesChanged: Array<{ path: string; content: string | null }>,
   ctx: AutoCommitContext
 ): Promise<ProcessedResult> => {
@@ -340,7 +333,7 @@ const autoCommitHeal = async (
   const commitMessage =
     heal.commitMessage ??
     generateAutofixCommitMessage(
-      heal.autofixSource,
+      heal.autofixSource ?? null,
       heal.errorIds?.length ?? 0
     );
 
@@ -355,7 +348,7 @@ const autoCommitHeal = async (
     verifyBaseSha: true,
   });
 
-  await applyHeal(db, heal.id, commitResult.sha);
+  await applyHeal(env, heal.id, commitResult.sha);
 
   console.log(
     `[autofix-result] Auto-committed heal ${heal.id} with SHA ${commitResult.sha}`
@@ -370,14 +363,14 @@ const autoCommitHeal = async (
 };
 
 const processSuccessResult = async (
-  db: Database,
-  heal: Heal,
+  env: Env,
+  heal: HealRecord,
   result: AutofixResultItem,
   orgSettings: Required<OrganizationSettings>,
   autoCommitCtx: AutoCommitContext | null
 ): Promise<ProcessedResult> => {
   // Update heal to completed with patch and files
-  await updateHealStatus(db, heal.id, "completed", {
+  await updateHealStatus(env, heal.id, "completed", {
     patch: result.patch,
     filesChanged: result.filesChanged?.map((f) => f.path),
     filesChangedWithContent: result.filesChanged,
@@ -394,7 +387,12 @@ const processSuccessResult = async (
     autoCommitCtx
   ) {
     try {
-      return await autoCommitHeal(db, heal, result.filesChanged, autoCommitCtx);
+      return await autoCommitHeal(
+        env,
+        heal,
+        result.filesChanged,
+        autoCommitCtx
+      );
     } catch (commitError) {
       console.error(
         `[autofix-result] Failed to auto-commit heal ${heal.id}:`,
@@ -420,11 +418,11 @@ const processSuccessResult = async (
 };
 
 const processFailedResult = async (
-  db: Database,
-  heal: Heal,
+  env: Env,
+  heal: HealRecord,
   result: AutofixResultItem
 ): Promise<ProcessedResult> => {
-  await updateHealStatus(db, heal.id, "failed", {
+  await updateHealStatus(env, heal.id, "failed", {
     failedReason: result.error ?? "Autofix failed",
   });
 
@@ -441,7 +439,7 @@ const processFailedResult = async (
 };
 
 const processSingleResult = async (
-  db: Database,
+  env: Env,
   result: AutofixResultItem,
   projectId: string,
   prNumber: number,
@@ -449,7 +447,7 @@ const processSingleResult = async (
   autoCommitCtx: AutoCommitContext | null
 ): Promise<ProcessedResult> => {
   const heal = await getHealByPrAndSource(
-    db,
+    env,
     projectId,
     prNumber,
     result.source
@@ -472,14 +470,14 @@ const processSingleResult = async (
   try {
     if (result.success) {
       return await processSuccessResult(
-        db,
+        env,
         heal,
         result,
         orgSettings,
         autoCommitCtx
       );
     }
-    return await processFailedResult(db, heal, result);
+    return await processFailedResult(env, heal, result);
   } catch (error) {
     // Handle database constraint violations (e.g., concurrent updates)
     const errorMessage =
@@ -543,25 +541,41 @@ app.post("/", async (c) => {
 
   const { projectId, prNumber, results } = validation.payload;
 
-  const { db, client } = await createDb(c.env);
   try {
-    // Verify project exists and belongs to the organization
-    const project = await db.query.projects.findFirst({
-      where: and(
-        eq(projects.id, projectId),
-        eq(projects.organizationId, organizationId),
-        isNull(projects.removedAt)
-      ),
-      with: { organization: true },
-    });
+    const convex = getConvexClient(c.env);
 
-    if (!project) {
+    // Verify project exists and belongs to the organization
+    const project = (await convex.query("projects:getById", {
+      id: projectId,
+    })) as {
+      id: string;
+      organizationId: string;
+      providerRepoFullName: string;
+      removedAt?: number;
+    } | null;
+
+    if (
+      !project ||
+      project.removedAt ||
+      project.organizationId !== organizationId
+    ) {
       return c.json({ error: "Project not found" }, 404);
     }
 
-    const orgSettings = getOrgSettings(project.organization.settings);
+    const organization = (await convex.query("organizations:getById", {
+      id: project.organizationId,
+    })) as {
+      settings?: OrganizationSettings | null;
+      providerInstallationId?: string | null;
+    } | null;
+
+    if (!organization) {
+      return c.json({ error: "Organization not found" }, 404);
+    }
+
+    const orgSettings = getOrgSettings(organization.settings);
     const github = createGitHubService(c.env);
-    const installationId = project.organization.providerInstallationId;
+    const installationId = organization.providerInstallationId;
 
     // Validate repo format is exactly "owner/repo" (no extra slashes)
     const repoFullName = project.providerRepoFullName;
@@ -595,7 +609,7 @@ app.post("/", async (c) => {
     const processed: ProcessedResult[] = [];
     for (const result of results) {
       const processedResult = await processSingleResult(
-        db,
+        c.env,
         result,
         projectId,
         prNumber,
@@ -615,8 +629,6 @@ app.post("/", async (c) => {
       },
       500
     );
-  } finally {
-    await client.end();
   }
 });
 

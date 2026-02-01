@@ -8,10 +8,8 @@
  * - Personal accounts: Must use repo-level secrets via separate endpoint
  */
 
-import { eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { createDb } from "../db/client";
-import { apiKeys } from "../db/schema";
+import { getConvexClient } from "../db/convex";
 import { generateApiKey, hashApiKey } from "../lib/crypto";
 import { encryptSecretForGitHub } from "../lib/github-crypto";
 import { getOrgPublicKey, putOrgSecret } from "../lib/github-secrets-helper";
@@ -114,23 +112,22 @@ app.post(
     const installationId = Number(organization.providerInstallationId);
     const token = await github.getInstallationToken(installationId);
 
-    const { db, client } = await createDb(c.env);
+    const convex = getConvexClient(c.env);
     let keyId: string | undefined;
 
     try {
       // Create a new API key for this injection
-      keyId = crypto.randomUUID();
       const apiKey = generateApiKey();
       const keyHash = await hashApiKey(apiKey);
       const keyPrefix = apiKey.substring(0, 8); // "dtk_XXXX"
 
-      await db.insert(apiKeys).values({
-        id: keyId,
-        organizationId: organization.id,
+      keyId = (await convex.mutation("api-keys:create", {
+        organizationId: organization._id,
         keyHash,
         keyPrefix,
         name: `GitHub Actions (${secretName})`,
-      });
+        createdAt: Date.now(),
+      })) as string;
 
       // Get GitHub's public key and encrypt the API key
       const publicKey = await getOrgPublicKey(
@@ -164,11 +161,11 @@ app.post(
       // Clean up the API key if creation failed
       if (keyId) {
         try {
-          await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
+          await convex.mutation("api-keys:remove", { id: keyId });
         } catch (deleteError) {
           // CRITICAL: Orphaned API key - key exists in DB but no corresponding GitHub secret
           console.error(
-            `[github-secrets] ORPHAN_KEY: Failed to delete API key after error. keyId=${keyId}, orgId=${organization.id}`,
+            `[github-secrets] ORPHAN_KEY: Failed to delete API key after error. keyId=${keyId}, orgId=${organization._id}`,
             deleteError
           );
         }
@@ -184,8 +181,6 @@ app.post(
       // Classify error for appropriate HTTP status code
       const { statusCode, message } = classifySecretCreationError(error);
       return c.json({ error: message }, statusCode);
-    } finally {
-      await client.end();
     }
   }
 );

@@ -5,10 +5,9 @@
  * with GitHub identity information obtained during authentication.
  */
 
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import type { ConvexHttpClient } from "convex/browser";
 import { Hono } from "hono";
-import { createDb, type Database } from "../db/client";
-import { organizationMembers, organizations } from "../db/schema";
+import { getConvexClient } from "../db/convex";
 import { verifyGitHubMembership } from "../lib/github-membership";
 import type { Env } from "../types/env";
 
@@ -56,6 +55,31 @@ interface WorkOSUser {
   first_name?: string;
   last_name?: string;
   profile_picture_url?: string;
+}
+
+interface OrganizationDoc {
+  _id: string;
+  name: string;
+  slug: string;
+  provider: "github" | "gitlab";
+  providerAccountId: string;
+  providerAccountLogin: string;
+  providerAccountType: "organization" | "user";
+  providerInstallationId?: string;
+  installerGithubId?: string;
+  deletedAt?: number;
+  settings?: Record<string, unknown> | null;
+}
+
+interface OrganizationMemberDoc {
+  _id: string;
+  organizationId: string;
+  userId: string;
+  role: "owner" | "admin" | "member" | "visitor";
+  providerUserId?: string;
+  providerUsername?: string;
+  removedAt?: number | null;
+  removalReason?: string | null;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -243,7 +267,7 @@ const resolveGitHubIdentity = async (
  * Verifies current GitHub org membership before granting owner access
  */
 const linkInstallerOrganizations = async (
-  db: Database,
+  convex: ConvexHttpClient,
   userId: string,
   githubUserId: string,
   githubUsername: string | null,
@@ -254,35 +278,38 @@ const linkInstallerOrganizations = async (
     return 0;
   }
 
-  const installerOrgs = await db.query.organizations.findMany({
-    where: and(
-      eq(organizations.installerGithubId, githubUserId),
-      isNull(organizations.deletedAt)
-    ),
-  });
+  const installerOrgs = (await convex.query(
+    "organizations:listByInstallerGithubId",
+    {
+      installerGithubId: githubUserId,
+    }
+  )) as OrganizationDoc[];
+  const activeInstallerOrgs = installerOrgs.filter((org) => !org.deletedAt);
 
-  if (installerOrgs.length === 0) {
+  if (activeInstallerOrgs.length === 0) {
     return 0;
   }
 
-  const orgIds = installerOrgs.map((org) => org.id);
+  const orgIds = activeInstallerOrgs.map((org) => org._id);
 
   // Get active memberships only - soft-deleted users must go through invitation flow
-  const activeMemberships = await db.query.organizationMembers.findMany({
-    where: and(
-      eq(organizationMembers.userId, userId),
-      inArray(organizationMembers.organizationId, orgIds),
-      isNull(organizationMembers.removedAt)
-    ),
-  });
+  const activeMemberships = (
+    (await convex.query("organization-members:listByUser", {
+      userId,
+      limit: 500,
+    })) as OrganizationMemberDoc[]
+  ).filter(
+    (membership) =>
+      orgIds.includes(membership.organizationId) && !membership.removedAt
+  );
 
   const activeMemberOrgIds = new Set(
     activeMemberships.map((m) => m.organizationId)
   );
 
   // Filter to orgs that need linking (no active membership)
-  const orgsToLink = installerOrgs.filter(
-    (org) => !activeMemberOrgIds.has(org.id)
+  const orgsToLink = activeInstallerOrgs.filter(
+    (org) => !activeMemberOrgIds.has(org._id)
   );
 
   // Verify current GitHub membership before granting owner access
@@ -325,33 +352,33 @@ const linkInstallerOrganizations = async (
   let linked = 0;
 
   for (const org of verifiedOrgs) {
-    // Create new membership - soft-deleted users must go through invitation flow
-    const result = await db
-      .insert(organizationMembers)
-      .values({
-        id: crypto.randomUUID(),
-        organizationId: org.id,
-        userId,
-        role: "owner",
-        providerUserId: githubUserId,
-        providerUsername: githubUsername,
-        providerLinkedAt: new Date(),
-        membershipSource: "installer",
-      })
-      .onConflictDoNothing({
-        target: [
-          organizationMembers.organizationId,
-          organizationMembers.userId,
-        ],
-      })
-      .returning({ id: organizationMembers.id });
+    const existing = (await convex.query("organization-members:getByOrgUser", {
+      organizationId: org._id,
+      userId,
+    })) as OrganizationMemberDoc | null;
 
-    if (result.length > 0) {
-      console.log(
-        `[sync-user] Auto-linked installer ${githubUsername} as owner to ${org.slug}`
-      );
-      linked++;
+    if (existing) {
+      continue;
     }
+
+    const now = Date.now();
+    await convex.mutation("organization-members:create", {
+      organizationId: org._id,
+      userId,
+      role: "owner",
+      providerUserId: githubUserId,
+      providerUsername: githubUsername,
+      providerLinkedAt: now,
+      providerVerifiedAt: now,
+      membershipSource: "installer",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    console.log(
+      `[sync-user] Auto-linked installer ${githubUsername} as owner to ${org.slug}`
+    );
+    linked++;
   }
 
   return linked;
@@ -398,13 +425,11 @@ const fetchAllGitHubOrgs = async (
 };
 
 // Type for organization with required fields for membership operations
-type DetentOrg = Awaited<
-  ReturnType<Database["query"]["organizations"]["findMany"]>
->[number];
+type DetentOrg = OrganizationDoc;
 
 // Type for soft-deleted membership info
 interface SoftDeletedMembership {
-  id: string;
+  _id: string;
   removalReason: string | null;
   role: string;
 }
@@ -414,7 +439,7 @@ interface SoftDeletedMembership {
  * Returns orgs that don't have an active membership for the user.
  */
 const fetchMatchingDetentOrgs = async (
-  db: Database,
+  convex: ConvexHttpClient,
   userId: string,
   githubOrgs: { id: number; login: string }[]
 ): Promise<{
@@ -422,25 +447,26 @@ const fetchMatchingDetentOrgs = async (
   softDeletedByOrg: Map<string, SoftDeletedMembership>;
 } | null> => {
   const githubOrgIds = githubOrgs.map((o) => String(o.id));
-  const detentOrgs = await db.query.organizations.findMany({
-    where: and(
-      eq(organizations.provider, "github"),
-      inArray(organizations.providerAccountId, githubOrgIds),
-      isNull(organizations.deletedAt)
-    ),
-  });
+  const detentOrgs = (await convex.query(
+    "organizations:listByProviderAccountIds",
+    {
+      provider: "github",
+      providerAccountIds: githubOrgIds,
+      includeDeleted: false,
+    }
+  )) as DetentOrg[];
 
   if (detentOrgs.length === 0) {
     return null;
   }
 
-  const detentOrgIds = detentOrgs.map((o) => o.id);
-  const allMemberships = await db.query.organizationMembers.findMany({
-    where: and(
-      eq(organizationMembers.userId, userId),
-      inArray(organizationMembers.organizationId, detentOrgIds)
-    ),
-  });
+  const detentOrgIds = detentOrgs.map((o) => o._id);
+  const allMemberships = (
+    (await convex.query("organization-members:listByUser", {
+      userId,
+      limit: 500,
+    })) as OrganizationMemberDoc[]
+  ).filter((membership) => detentOrgIds.includes(membership.organizationId));
 
   // Build maps for different membership states
   const activeMemberOrgIds = new Set<string>();
@@ -449,8 +475,8 @@ const fetchMatchingDetentOrgs = async (
   for (const m of allMemberships) {
     if (m.removedAt) {
       softDeletedByOrg.set(m.organizationId, {
-        id: m.id,
-        removalReason: m.removalReason,
+        _id: m._id,
+        removalReason: m.removalReason ?? null,
         role: m.role,
       });
     } else {
@@ -459,7 +485,7 @@ const fetchMatchingDetentOrgs = async (
   }
 
   const orgsToJoin = detentOrgs.filter(
-    (org) => !activeMemberOrgIds.has(org.id)
+    (org) => !activeMemberOrgIds.has(org._id)
   );
 
   if (orgsToJoin.length === 0) {
@@ -474,7 +500,7 @@ const fetchMatchingDetentOrgs = async (
  * Returns true if membership was reactivated, false if blocked.
  */
 const handleExistingMembership = async (
-  db: Database,
+  convex: ConvexHttpClient,
   softDeleted: SoftDeletedMembership,
   role: "admin" | "member",
   githubUserId: string,
@@ -488,21 +514,20 @@ const handleExistingMembership = async (
     return false;
   }
 
-  await db
-    .update(organizationMembers)
-    .set({
-      removedAt: null,
-      removalReason: null,
-      removedBy: null,
-      role,
-      providerUserId: githubUserId,
-      providerUsername: githubUsername,
-      providerLinkedAt: new Date(),
-      providerVerifiedAt: new Date(),
-      membershipSource: "github_sync",
-      updatedAt: new Date(),
-    })
-    .where(eq(organizationMembers.id, softDeleted.id));
+  const now = Date.now();
+  await convex.mutation("organization-members:update", {
+    id: softDeleted._id,
+    removedAt: null,
+    removalReason: null,
+    removedBy: null,
+    role,
+    providerUserId: githubUserId,
+    providerUsername: githubUsername,
+    providerLinkedAt: now,
+    providerVerifiedAt: now,
+    membershipSource: "github_sync",
+    updatedAt: now,
+  });
 
   console.log(
     `[sync-user] Reactivated ${githubUsername} to ${orgSlug} as ${role}`
@@ -515,7 +540,7 @@ const handleExistingMembership = async (
  * Returns true if membership was created, false otherwise.
  */
 const createNewMembership = async (
-  db: Database,
+  convex: ConvexHttpClient,
   orgId: string,
   userId: string,
   role: "admin" | "member",
@@ -523,30 +548,33 @@ const createNewMembership = async (
   githubUsername: string,
   orgSlug: string | null
 ): Promise<boolean> => {
-  const result = await db
-    .insert(organizationMembers)
-    .values({
-      id: crypto.randomUUID(),
-      organizationId: orgId,
-      userId,
-      role,
-      providerUserId: githubUserId,
-      providerUsername: githubUsername,
-      providerLinkedAt: new Date(),
-      membershipSource: "github_sync",
-    })
-    .onConflictDoNothing({
-      target: [organizationMembers.organizationId, organizationMembers.userId],
-    })
-    .returning({ id: organizationMembers.id });
+  const existing = (await convex.query("organization-members:getByOrgUser", {
+    organizationId: orgId,
+    userId,
+  })) as OrganizationMemberDoc | null;
 
-  if (result.length > 0) {
-    console.log(
-      `[sync-user] Auto-joined ${githubUsername} to ${orgSlug} as ${role}`
-    );
-    return true;
+  if (existing) {
+    return false;
   }
-  return false;
+
+  const now = Date.now();
+  await convex.mutation("organization-members:create", {
+    organizationId: orgId,
+    userId,
+    role,
+    providerUserId: githubUserId,
+    providerUsername: githubUsername,
+    providerLinkedAt: now,
+    providerVerifiedAt: now,
+    membershipSource: "github_sync",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  console.log(
+    `[sync-user] Auto-joined ${githubUsername} to ${orgSlug} as ${role}`
+  );
+  return true;
 };
 
 /**
@@ -555,7 +583,7 @@ const createNewMembership = async (
  * Returns true if a membership was created or reactivated.
  */
 const processOrgMembership = async (
-  db: Database,
+  convex: ConvexHttpClient,
   org: DetentOrg,
   userId: string,
   githubUserId: string,
@@ -578,11 +606,11 @@ const processOrgMembership = async (
   }
 
   const role = membership.role === "admin" ? "admin" : "member";
-  const softDeleted = softDeletedByOrg.get(org.id);
+  const softDeleted = softDeletedByOrg.get(org._id);
 
   if (softDeleted) {
     return handleExistingMembership(
-      db,
+      convex,
       softDeleted,
       role,
       githubUserId,
@@ -592,8 +620,8 @@ const processOrgMembership = async (
   }
 
   return createNewMembership(
-    db,
-    org.id,
+    convex,
+    org._id,
     userId,
     role,
     githubUserId,
@@ -607,7 +635,7 @@ const processOrgMembership = async (
  * This allows non-installer admins/members to join existing orgs.
  */
 const linkGitHubMemberOrganizations = async (
-  db: Database,
+  convex: ConvexHttpClient,
   userId: string,
   githubUserId: string,
   githubUsername: string,
@@ -619,7 +647,7 @@ const linkGitHubMemberOrganizations = async (
     return 0;
   }
 
-  const matchResult = await fetchMatchingDetentOrgs(db, userId, githubOrgs);
+  const matchResult = await fetchMatchingDetentOrgs(convex, userId, githubOrgs);
   if (!matchResult) {
     return 0;
   }
@@ -630,7 +658,7 @@ const linkGitHubMemberOrganizations = async (
   for (const org of orgsToJoin) {
     try {
       const success = await processOrgMembership(
-        db,
+        convex,
         org,
         userId,
         githubUserId,
@@ -697,58 +725,60 @@ app.post("/sync-user", async (c) => {
     });
   }
 
-  const { db, client } = await createDb(c.env);
+  const convex = getConvexClient(c.env);
 
-  try {
-    // Update all organization memberships with GitHub identity
-    const updatedMembers = await db
-      .update(organizationMembers)
-      .set({
+  const memberships = (await convex.query("organization-members:listByUser", {
+    userId: auth.userId,
+    limit: 500,
+  })) as OrganizationMemberDoc[];
+
+  const now = Date.now();
+  await Promise.all(
+    memberships.map((membership) =>
+      convex.mutation("organization-members:update", {
+        id: membership._id,
         providerUserId: identity.userId,
-        providerUsername: identity.username,
-        providerLinkedAt: new Date(),
-        updatedAt: new Date(),
+        providerUsername: identity.username ?? undefined,
+        providerLinkedAt: now,
+        updatedAt: now,
       })
-      .where(eq(organizationMembers.userId, auth.userId))
-      .returning({ organizationId: organizationMembers.organizationId });
+    )
+  );
 
-    // Auto-link installer organizations (with membership verification)
-    const autoLinkedCount = await linkInstallerOrganizations(
-      db,
+  // Auto-link installer organizations (with membership verification)
+  const autoLinkedCount = await linkInstallerOrganizations(
+    convex,
+    auth.userId,
+    identity.userId,
+    identity.username,
+    c.env
+  );
+
+  // Auto-join GitHub orgs where app is already installed (non-installer path)
+  let autoJoinedCount = 0;
+  if (providedGitHubToken && identity.username) {
+    autoJoinedCount = await linkGitHubMemberOrganizations(
+      convex,
       auth.userId,
       identity.userId,
       identity.username,
+      providedGitHubToken,
       c.env
     );
-
-    // Auto-join GitHub orgs where app is already installed (non-installer path)
-    let autoJoinedCount = 0;
-    if (providedGitHubToken && identity.username) {
-      autoJoinedCount = await linkGitHubMemberOrganizations(
-        db,
-        auth.userId,
-        identity.userId,
-        identity.username,
-        providedGitHubToken,
-        c.env
-      );
-    }
-
-    return c.json({
-      user_id: auth.userId,
-      email: user.email,
-      first_name: user.first_name,
-      last_name: user.last_name,
-      github_synced: true,
-      github_user_id: identity.userId,
-      github_username: identity.username,
-      organizations_updated: updatedMembers.length,
-      installer_orgs_linked: autoLinkedCount,
-      github_orgs_joined: autoJoinedCount,
-    });
-  } finally {
-    await client.end();
   }
+
+  return c.json({
+    user_id: auth.userId,
+    email: user.email,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    github_synced: true,
+    github_user_id: identity.userId,
+    github_username: identity.username,
+    organizations_updated: memberships.length,
+    installer_orgs_linked: autoLinkedCount,
+    github_orgs_joined: autoJoinedCount,
+  });
 });
 
 /**
@@ -758,73 +788,71 @@ app.post("/sync-user", async (c) => {
 app.get("/me", async (c) => {
   const auth = c.get("auth");
 
-  // Fetch user details from WorkOS and check DB membership in parallel
-  const { db, client } = await createDb(c.env);
-  try {
-    const [userResponse, membership] = await Promise.all([
-      fetch(`https://api.workos.com/user_management/users/${auth.userId}`, {
+  // Fetch user details from WorkOS and check membership in parallel
+  const convex = getConvexClient(c.env);
+  const [userResponse, memberships] = await Promise.all([
+    fetch(`https://api.workos.com/user_management/users/${auth.userId}`, {
+      headers: {
+        Authorization: `Bearer ${c.env.WORKOS_API_KEY}`,
+      },
+    }),
+    convex.query("organization-members:listByUser", {
+      userId: auth.userId,
+      limit: 1,
+    }) as Promise<OrganizationMemberDoc[]>,
+  ]);
+
+  if (!userResponse.ok) {
+    console.error(
+      `Failed to fetch user from WorkOS: ${userResponse.status} ${userResponse.statusText}`
+    );
+    return c.json({ error: "Failed to fetch user details" }, 500);
+  }
+
+  const user = (await userResponse.json()) as WorkOSUser;
+  const membership = memberships[0] ?? null;
+
+  // If no organization membership found, also check WorkOS identities directly
+  // This handles the case where a user authenticated via GitHub but has no organization yet
+  let githubUserId: string | null = membership?.providerUserId ?? null;
+  const githubUsername: string | null = membership?.providerUsername ?? null;
+  let githubLinked = Boolean(githubUserId);
+
+  if (!githubLinked) {
+    // Check WorkOS identities for GitHub OAuth
+    const identitiesResponse = await fetch(
+      `https://api.workos.com/user_management/users/${auth.userId}/identities`,
+      {
         headers: {
           Authorization: `Bearer ${c.env.WORKOS_API_KEY}`,
         },
-      }),
-      db.query.organizationMembers.findFirst({
-        where: eq(organizationMembers.userId, auth.userId),
-      }),
-    ]);
+      }
+    );
 
-    if (!userResponse.ok) {
-      console.error(
-        `Failed to fetch user from WorkOS: ${userResponse.status} ${userResponse.statusText}`
-      );
-      return c.json({ error: "Failed to fetch user details" }, 500);
-    }
-
-    const user = (await userResponse.json()) as WorkOSUser;
-
-    // If no organization membership found, also check WorkOS identities directly
-    // This handles the case where a user authenticated via GitHub but has no organization yet
-    let githubUserId: string | null = membership?.providerUserId ?? null;
-    const githubUsername: string | null = membership?.providerUsername ?? null;
-    let githubLinked = Boolean(githubUserId);
-
-    if (!githubLinked) {
-      // Check WorkOS identities for GitHub OAuth
-      const identitiesResponse = await fetch(
-        `https://api.workos.com/user_management/users/${auth.userId}/identities`,
-        {
-          headers: {
-            Authorization: `Bearer ${c.env.WORKOS_API_KEY}`,
-          },
-        }
+    if (identitiesResponse.ok) {
+      const identities =
+        (await identitiesResponse.json()) as WorkOSIdentitiesResponse;
+      const githubIdentity = identities.data?.find(
+        (identity) => identity.provider === "GitHubOAuth"
       );
 
-      if (identitiesResponse.ok) {
-        const identities =
-          (await identitiesResponse.json()) as WorkOSIdentitiesResponse;
-        const githubIdentity = identities.data?.find(
-          (identity) => identity.provider === "GitHubOAuth"
-        );
-
-        if (githubIdentity) {
-          githubUserId = githubIdentity.idp_id;
-          githubLinked = true;
-          // Note: username not available from WorkOS identity, would need GitHub API call
-        }
+      if (githubIdentity) {
+        githubUserId = githubIdentity.idp_id;
+        githubLinked = true;
+        // Note: username not available from WorkOS identity, would need GitHub API call
       }
     }
-
-    return c.json({
-      user_id: auth.userId,
-      email: user.email,
-      first_name: user.first_name,
-      last_name: user.last_name,
-      github_linked: githubLinked,
-      github_user_id: githubUserId,
-      github_username: githubUsername,
-    });
-  } finally {
-    await client.end();
   }
+
+  return c.json({
+    user_id: auth.userId,
+    email: user.email,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    github_linked: githubLinked,
+    github_user_id: githubUserId,
+    github_username: githubUsername,
+  });
 });
 
 // GitHub OAuth token format validation
@@ -1190,42 +1218,38 @@ app.get("/github-orgs", async (c) => {
   const membershipMap = new Map(memberships.map((m) => [m.org, m.membership]));
 
   // Query our database to find which orgs are already installed
-  const { db, client } = await createDb(c.env);
-  try {
-    const githubOrgIds = githubOrgs.map((org) => String(org.id));
-    const installedOrgs = await db.query.organizations.findMany({
-      where: (orgs, { and, eq, inArray, isNull }) =>
-        and(
-          eq(orgs.provider, "github"),
-          inArray(orgs.providerAccountId, githubOrgIds),
-          isNull(orgs.deletedAt)
-        ),
-    });
+  const convex = getConvexClient(c.env);
+  const githubOrgIds = githubOrgs.map((org) => String(org.id));
+  const installedOrgs = (await convex.query(
+    "organizations:listByProviderAccountIds",
+    {
+      provider: "github",
+      providerAccountIds: githubOrgIds,
+      includeDeleted: false,
+    }
+  )) as OrganizationDoc[];
 
-    const installedOrgMap = new Map(
-      installedOrgs.map((org) => [org.providerAccountId, org])
-    );
+  const installedOrgMap = new Map(
+    installedOrgs.map((org) => [org.providerAccountId, org])
+  );
 
-    // Build response
-    const orgsWithStatus: GitHubOrgWithStatus[] = githubOrgs.map((org) => {
-      const membership = membershipMap.get(org.login);
-      const installedOrg = installedOrgMap.get(String(org.id));
+  // Build response
+  const orgsWithStatus: GitHubOrgWithStatus[] = githubOrgs.map((org) => {
+    const membership = membershipMap.get(org.login);
+    const installedOrg = installedOrgMap.get(String(org.id));
 
-      return {
-        id: org.id,
-        login: org.login,
-        avatar_url: org.avatar_url,
-        can_install:
-          membership?.role === "admin" && membership?.state === "active",
-        already_installed: Boolean(installedOrg),
-        ...(installedOrg && { detent_org_id: installedOrg.id }),
-      };
-    });
+    return {
+      id: org.id,
+      login: org.login,
+      avatar_url: org.avatar_url,
+      can_install:
+        membership?.role === "admin" && membership?.state === "active",
+      already_installed: Boolean(installedOrg),
+      ...(installedOrg && { detent_org_id: installedOrg._id }),
+    };
+  });
 
-    return c.json({ orgs: orgsWithStatus });
-  } finally {
-    await client.end();
-  }
+  return c.json({ orgs: orgsWithStatus });
 });
 
 // GitHub token refresh response
@@ -1429,33 +1453,48 @@ app.get("/install-url", (c) => {
 app.get("/organizations", async (c) => {
   const auth = c.get("auth");
 
-  const { db, client } = await createDb(c.env);
-  try {
-    const memberships = await db.query.organizationMembers.findMany({
-      where: and(
-        eq(organizationMembers.userId, auth.userId),
-        isNull(organizationMembers.removedAt)
-      ),
-      with: { organization: true },
-    });
+  const convex = getConvexClient(c.env);
+  const memberships = (await convex.query("organization-members:listByUser", {
+    userId: auth.userId,
+    limit: 500,
+  })) as OrganizationMemberDoc[];
 
-    return c.json({
-      organizations: memberships
-        .filter((m) => m.organization.deletedAt === null)
-        .map((m) => ({
-          organization_id: m.organizationId,
-          organization_name: m.organization.name,
-          organization_slug: m.organization.slug,
-          github_org: m.organization.providerAccountLogin,
-          provider_account_type: m.organization.providerAccountType,
-          role: m.role,
-          github_linked: Boolean(m.providerUserId),
-          github_username: m.providerUsername,
-        })),
-    });
-  } finally {
-    await client.end();
+  const activeMemberships = memberships.filter((m) => !m.removedAt);
+  const orgIds = Array.from(
+    new Set(activeMemberships.map((m) => m.organizationId))
+  );
+
+  const orgs = await Promise.all(
+    orgIds.map((id) => convex.query("organizations:getById", { id }))
+  );
+
+  const orgById = new Map<string, OrganizationDoc>();
+  for (const org of orgs) {
+    if (org) {
+      orgById.set((org as OrganizationDoc)._id, org as OrganizationDoc);
+    }
   }
+
+  return c.json({
+    organizations: activeMemberships
+      .map((membership) => {
+        const org = orgById.get(membership.organizationId);
+        if (!org || org.deletedAt) {
+          return null;
+        }
+        return {
+          organization_id: membership.organizationId,
+          organization_name: org.name,
+          organization_slug: org.slug,
+          github_org: org.providerAccountLogin,
+          provider_account_type: org.providerAccountType,
+          role: membership.role,
+          github_linked: Boolean(membership.providerUserId),
+          github_username: membership.providerUsername,
+        };
+      })
+      .filter((value): value is NonNullable<typeof value> => value !== null),
+  });
 });
 
 export default app;

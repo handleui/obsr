@@ -1,7 +1,5 @@
-import { eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { createDb } from "../db/client";
-import { organizations } from "../db/schema";
+import { getConvexClient } from "../db/convex";
 import {
   githubOrgAccessMiddleware,
   type OrgAccessContext,
@@ -99,11 +97,11 @@ app.post(
       );
     }
 
-    const { db, client } = await createDb(c.env);
     try {
-      const org = await db.query.organizations.findFirst({
-        where: eq(organizations.id, organization.id),
-      });
+      const convex = getConvexClient(c.env);
+      const org = (await convex.query("organizations:getById", {
+        id: organization._id,
+      })) as { polarCustomerId?: string | null } | null;
 
       if (!org) {
         return c.json({ error: "Organization not found" }, 404);
@@ -122,22 +120,21 @@ app.post(
       const customer = await createPolarCustomer(
         polar,
         polarOrgId,
-        organization.id,
+        organization._id,
         email,
         name
       );
 
-      await db
-        .update(organizations)
-        .set({ polarCustomerId: customer.id })
-        .where(eq(organizations.id, organization.id));
+      await convex.mutation("organizations:update", {
+        id: organization._id,
+        polarCustomerId: customer.id,
+        updatedAt: Date.now(),
+      });
 
       return c.json({ customerId: customer.id });
     } catch (error) {
       console.error(`${LOG_PREFIX} Failed to create Polar customer:`, error);
       return c.json({ error: "Failed to create billing customer" }, 500);
-    } finally {
-      await client.end();
     }
   }
 );
@@ -149,7 +146,7 @@ app.get("/:orgId/usage", githubOrgAccessMiddleware, async (c) => {
   const { organization } = orgAccess;
 
   try {
-    const summary = await getUsageSummary(c.env, organization.id);
+    const summary = await getUsageSummary(c.env, organization._id);
     return c.json(summary);
   } catch (error) {
     console.error(`${LOG_PREFIX} Failed to get usage summary:`, error);
@@ -164,7 +161,7 @@ app.get("/:orgId/credits", githubOrgAccessMiddleware, async (c) => {
   const { organization } = orgAccess;
 
   try {
-    const summary = await getCreditUsageSummary(c.env, organization.id);
+    const summary = await getCreditUsageSummary(c.env, organization._id);
     return c.json(summary);
   } catch (error) {
     console.error(`${LOG_PREFIX} Failed to get credit usage:`, error);
@@ -215,11 +212,11 @@ app.post(
       return c.json({ error: "allowDiscountCodes must be a boolean" }, 400);
     }
 
-    const { db, client } = await createDb(c.env);
     try {
-      const org = await db.query.organizations.findFirst({
-        where: eq(organizations.id, organization.id),
-      });
+      const convex = getConvexClient(c.env);
+      const org = (await convex.query("organizations:getById", {
+        id: organization._id,
+      })) as { polarCustomerId?: string | null } | null;
 
       if (!org) {
         return c.json({ error: "Organization not found" }, 404);
@@ -232,7 +229,7 @@ app.post(
         successUrl,
         allowDiscountCodes: allowDiscountCodes ?? true,
         metadata: {
-          detentOrgId: organization.id,
+          detentOrgId: organization._id,
         },
         ...(org.polarCustomerId ? { customerId: org.polarCustomerId } : {}),
         ...(customerEmail ? { customerEmail } : {}),
@@ -242,8 +239,6 @@ app.post(
     } catch (error) {
       console.error(`${LOG_PREFIX} Failed to create checkout:`, error);
       return c.json({ error: "Failed to create checkout" }, 500);
-    } finally {
-      await client.end();
     }
   }
 );
@@ -258,11 +253,11 @@ app.get(
     const orgAccess = c.get("orgAccess") as OrgAccessContext;
     const { organization } = orgAccess;
 
-    const { db, client } = await createDb(c.env);
     try {
-      const org = await db.query.organizations.findFirst({
-        where: eq(organizations.id, organization.id),
-      });
+      const convex = getConvexClient(c.env);
+      const org = (await convex.query("organizations:getById", {
+        id: organization._id,
+      })) as { polarCustomerId?: string | null } | null;
 
       if (!org) {
         return c.json({ error: "Organization not found" }, 404);
@@ -282,8 +277,6 @@ app.get(
     } catch (error) {
       console.error(`${LOG_PREFIX} Failed to create portal session:`, error);
       return c.json({ error: "Failed to create portal session" }, 500);
-    } finally {
-      await client.end();
     }
   }
 );

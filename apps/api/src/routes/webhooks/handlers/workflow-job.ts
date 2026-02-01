@@ -1,4 +1,4 @@
-import { createDb } from "../../../db/client";
+import { getConvexClient } from "../../../db/convex";
 import { checkAndTriggerAggregation } from "../../../services/webhooks/job-aggregation";
 import {
   lookupPrNumberFromRuns,
@@ -88,49 +88,45 @@ export const handleWorkflowJobQueued = async (
     `[workflow_job] Queued: ${safeLogValue(repository.full_name)} / ${safeLogValue(workflow_job.name)} (job ${workflow_job.id}) [delivery: ${safeLogValue(deliveryId)}]`
   );
 
-  const { db, client } = await createDb(c.env);
-  try {
-    const normalizedSha = workflow_job.head_sha.toLowerCase();
+  const convex = getConvexClient(c.env);
+  const normalizedSha = workflow_job.head_sha.toLowerCase();
 
-    // Look up PR number from runs table since workflow_job webhook doesn't include it
-    const prNumber = await lookupPrNumberFromRuns(
-      db,
-      repository.full_name,
-      normalizedSha
-    );
+  // Look up PR number from runs table since workflow_job webhook doesn't include it
+  const prNumber = await lookupPrNumberFromRuns(
+    convex,
+    repository.full_name,
+    normalizedSha
+  );
 
-    await upsertJob(db, {
-      providerJobId: String(workflow_job.id),
-      repository: repository.full_name,
-      commitSha: normalizedSha,
-      prNumber,
-      name: workflow_job.name,
-      workflowName: workflow_job.workflow_name,
-      status: "queued",
-      conclusion: null,
-      htmlUrl: workflow_job.html_url,
-      runnerName: null,
-      headBranch: workflow_job.head_branch,
-      queuedAt: new Date(),
-      startedAt: null,
-      completedAt: null,
-    });
+  await upsertJob(convex, {
+    providerJobId: String(workflow_job.id),
+    repository: repository.full_name,
+    commitSha: normalizedSha,
+    prNumber,
+    name: workflow_job.name,
+    workflowName: workflow_job.workflow_name,
+    status: "queued",
+    conclusion: null,
+    htmlUrl: workflow_job.html_url,
+    runnerName: null,
+    headBranch: workflow_job.head_branch,
+    queuedAt: new Date(),
+    startedAt: null,
+    completedAt: null,
+  });
 
-    await updateCommitJobStats(
-      db,
-      repository.full_name,
-      normalizedSha,
-      prNumber
-    );
+  await updateCommitJobStats(
+    convex,
+    repository.full_name,
+    normalizedSha,
+    prNumber
+  );
 
-    return c.json({
-      message: "job queued",
-      jobId: workflow_job.id,
-      repository: repository.full_name,
-    });
-  } finally {
-    await client.end();
-  }
+  return c.json({
+    message: "job queued",
+    jobId: workflow_job.id,
+    repository: repository.full_name,
+  });
 };
 
 // ============================================================================
@@ -168,51 +164,47 @@ export const handleWorkflowJobInProgress = async (
     `[workflow_job] In progress: ${safeLogValue(repository.full_name)} / ${safeLogValue(workflow_job.name)} (job ${workflow_job.id}) [delivery: ${safeLogValue(deliveryId)}]`
   );
 
-  const { db, client } = await createDb(c.env);
-  try {
-    const normalizedSha = workflow_job.head_sha.toLowerCase();
+  const convex = getConvexClient(c.env);
+  const normalizedSha = workflow_job.head_sha.toLowerCase();
 
-    // Look up PR number from runs table since workflow_job webhook doesn't include it
-    const prNumber = await lookupPrNumberFromRuns(
-      db,
-      repository.full_name,
-      normalizedSha
-    );
+  // Look up PR number from runs table since workflow_job webhook doesn't include it
+  const prNumber = await lookupPrNumberFromRuns(
+    convex,
+    repository.full_name,
+    normalizedSha
+  );
 
-    await upsertJob(db, {
-      providerJobId: String(workflow_job.id),
-      repository: repository.full_name,
-      commitSha: normalizedSha,
-      prNumber,
-      name: workflow_job.name,
-      workflowName: workflow_job.workflow_name,
-      status: "in_progress",
-      conclusion: null,
-      htmlUrl: workflow_job.html_url,
-      runnerName: workflow_job.runner_name,
-      headBranch: workflow_job.head_branch,
-      queuedAt: null,
-      startedAt: workflow_job.started_at
-        ? new Date(workflow_job.started_at)
-        : new Date(),
-      completedAt: null,
-    });
+  await upsertJob(convex, {
+    providerJobId: String(workflow_job.id),
+    repository: repository.full_name,
+    commitSha: normalizedSha,
+    prNumber,
+    name: workflow_job.name,
+    workflowName: workflow_job.workflow_name,
+    status: "in_progress",
+    conclusion: null,
+    htmlUrl: workflow_job.html_url,
+    runnerName: workflow_job.runner_name,
+    headBranch: workflow_job.head_branch,
+    queuedAt: null,
+    startedAt: workflow_job.started_at
+      ? new Date(workflow_job.started_at)
+      : new Date(),
+    completedAt: null,
+  });
 
-    await updateCommitJobStats(
-      db,
-      repository.full_name,
-      normalizedSha,
-      prNumber
-    );
+  await updateCommitJobStats(
+    convex,
+    repository.full_name,
+    normalizedSha,
+    prNumber
+  );
 
-    return c.json({
-      message: "job in_progress",
-      jobId: workflow_job.id,
-      repository: repository.full_name,
-    });
-  } finally {
-    await client.end();
-  }
+  return c.json({
+    message: "job in_progress",
+    jobId: workflow_job.id,
+    repository: repository.full_name,
+  });
 };
 
 // ============================================================================
@@ -250,65 +242,61 @@ export const handleWorkflowJobCompleted = async (
     `[workflow_job] Completed: ${safeLogValue(repository.full_name)} / ${safeLogValue(workflow_job.name)} (${workflow_job.conclusion}) [delivery: ${safeLogValue(deliveryId)}]`
   );
 
-  const { db, client } = await createDb(c.env);
-  try {
-    // Map GitHub conclusion to our enum
-    const conclusion = mapConclusion(workflow_job.conclusion);
-    const normalizedSha = workflow_job.head_sha.toLowerCase();
+  const convex = getConvexClient(c.env);
+  // Map GitHub conclusion to our enum
+  const conclusion = mapConclusion(workflow_job.conclusion);
+  const normalizedSha = workflow_job.head_sha.toLowerCase();
 
-    // Look up PR number from runs table since workflow_job webhook doesn't include it
-    const prNumber = await lookupPrNumberFromRuns(
-      db,
-      repository.full_name,
-      normalizedSha
-    );
+  // Look up PR number from runs table since workflow_job webhook doesn't include it
+  const prNumber = await lookupPrNumberFromRuns(
+    convex,
+    repository.full_name,
+    normalizedSha
+  );
 
-    await upsertJob(db, {
-      providerJobId: String(workflow_job.id),
-      repository: repository.full_name,
-      commitSha: normalizedSha,
-      prNumber,
-      name: workflow_job.name,
-      workflowName: workflow_job.workflow_name,
-      status: "completed",
-      conclusion,
-      htmlUrl: workflow_job.html_url,
-      runnerName: workflow_job.runner_name,
-      headBranch: workflow_job.head_branch,
-      queuedAt: null,
-      startedAt: workflow_job.started_at
-        ? new Date(workflow_job.started_at)
-        : null,
-      completedAt: workflow_job.completed_at
-        ? new Date(workflow_job.completed_at)
-        : new Date(),
-    });
+  await upsertJob(convex, {
+    providerJobId: String(workflow_job.id),
+    repository: repository.full_name,
+    commitSha: normalizedSha,
+    prNumber,
+    name: workflow_job.name,
+    workflowName: workflow_job.workflow_name,
+    status: "completed",
+    conclusion,
+    htmlUrl: workflow_job.html_url,
+    runnerName: workflow_job.runner_name,
+    headBranch: workflow_job.head_branch,
+    queuedAt: null,
+    startedAt: workflow_job.started_at
+      ? new Date(workflow_job.started_at)
+      : null,
+    completedAt: workflow_job.completed_at
+      ? new Date(workflow_job.completed_at)
+      : new Date(),
+  });
 
-    await updateCommitJobStats(
-      db,
-      repository.full_name,
-      normalizedSha,
-      prNumber
-    );
+  await updateCommitJobStats(
+    convex,
+    repository.full_name,
+    normalizedSha,
+    prNumber
+  );
 
-    // Check if all jobs for this commit are complete
-    const aggregation = await checkAndTriggerAggregation(
-      c.env,
-      db,
-      repository.full_name,
-      normalizedSha
-    );
+  // Check if all jobs for this commit are complete
+  const aggregation = await checkAndTriggerAggregation(
+    c.env,
+    convex,
+    repository.full_name,
+    normalizedSha
+  );
 
-    return c.json({
-      message: "job completed",
-      jobId: workflow_job.id,
-      conclusion: workflow_job.conclusion,
-      repository: repository.full_name,
-      aggregation,
-    });
-  } finally {
-    await client.end();
-  }
+  return c.json({
+    message: "job completed",
+    jobId: workflow_job.id,
+    conclusion: workflow_job.conclusion,
+    repository: repository.full_name,
+    aggregation,
+  });
 };
 
 // ============================================================================
@@ -346,49 +334,45 @@ export const handleWorkflowJobWaiting = async (
     `[workflow_job] Waiting: ${safeLogValue(repository.full_name)} / ${safeLogValue(workflow_job.name)} (job ${workflow_job.id}) [delivery: ${safeLogValue(deliveryId)}]`
   );
 
-  const { db, client } = await createDb(c.env);
-  try {
-    const normalizedSha = workflow_job.head_sha.toLowerCase();
+  const convex = getConvexClient(c.env);
+  const normalizedSha = workflow_job.head_sha.toLowerCase();
 
-    // Look up PR number from runs table since workflow_job webhook doesn't include it
-    const prNumber = await lookupPrNumberFromRuns(
-      db,
-      repository.full_name,
-      normalizedSha
-    );
+  // Look up PR number from runs table since workflow_job webhook doesn't include it
+  const prNumber = await lookupPrNumberFromRuns(
+    convex,
+    repository.full_name,
+    normalizedSha
+  );
 
-    await upsertJob(db, {
-      providerJobId: String(workflow_job.id),
-      repository: repository.full_name,
-      commitSha: normalizedSha,
-      prNumber,
-      name: workflow_job.name,
-      workflowName: workflow_job.workflow_name,
-      status: "waiting",
-      conclusion: null,
-      htmlUrl: workflow_job.html_url,
-      runnerName: null,
-      headBranch: workflow_job.head_branch,
-      queuedAt: null,
-      startedAt: null,
-      completedAt: null,
-    });
+  await upsertJob(convex, {
+    providerJobId: String(workflow_job.id),
+    repository: repository.full_name,
+    commitSha: normalizedSha,
+    prNumber,
+    name: workflow_job.name,
+    workflowName: workflow_job.workflow_name,
+    status: "waiting",
+    conclusion: null,
+    htmlUrl: workflow_job.html_url,
+    runnerName: null,
+    headBranch: workflow_job.head_branch,
+    queuedAt: null,
+    startedAt: null,
+    completedAt: null,
+  });
 
-    await updateCommitJobStats(
-      db,
-      repository.full_name,
-      normalizedSha,
-      prNumber
-    );
+  await updateCommitJobStats(
+    convex,
+    repository.full_name,
+    normalizedSha,
+    prNumber
+  );
 
-    return c.json({
-      message: "job waiting",
-      jobId: workflow_job.id,
-      repository: repository.full_name,
-    });
-  } finally {
-    await client.end();
-  }
+  return c.json({
+    message: "job waiting",
+    jobId: workflow_job.id,
+    repository: repository.full_name,
+  });
 };
 
 // ============================================================================

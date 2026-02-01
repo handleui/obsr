@@ -1,4 +1,5 @@
 import type { Polar } from "@polar-sh/sdk";
+import { ResourceNotFound } from "@polar-sh/sdk/models/errors/resourcenotfound.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../types/env";
 import {
@@ -23,7 +24,7 @@ const createMockPolar = (overrides?: Partial<Polar>): Polar => {
   return {
     customers: {
       create: vi.fn(),
-      list: vi.fn(),
+      getExternal: vi.fn(),
     },
     events: {
       ingest: vi.fn(),
@@ -42,6 +43,7 @@ const createMockPolar = (overrides?: Partial<Polar>): Polar => {
 // Factory for mock environment
 const createMockEnv = (overrides?: Partial<Env>): Env =>
   ({
+    CONVEX_URL: "https://test.convex.cloud",
     POLAR_ACCESS_TOKEN: "test-polar-token",
     POLAR_ORGANIZATION_ID: "polar-org-123",
     ...overrides,
@@ -109,38 +111,34 @@ describe("polar service", () => {
   describe("getCustomerByExternalId", () => {
     it("returns null when customer not found in results", async () => {
       const mockPolar = createMockPolar();
-      (mockPolar.customers.list as ReturnType<typeof vi.fn>).mockResolvedValue({
-        result: { items: [] },
-      });
-
-      const result = await getCustomerByExternalId(
-        mockPolar,
-        "polar-org-123",
-        "detent-org-456"
+      const error = new ResourceNotFound(
+        { error: "ResourceNotFound", detail: "Not found" },
+        {
+          request: new Request(
+            "https://api.polar.sh/v1/customers/external/test"
+          ),
+          response: new Response("", { status: 404 }),
+          body: "",
+        }
       );
+      (
+        mockPolar.customers.getExternal as ReturnType<typeof vi.fn>
+      ).mockRejectedValue(error);
+
+      const result = await getCustomerByExternalId(mockPolar, "detent-org-456");
 
       expect(result).toBeNull();
     });
 
-    it("returns null when query matches but externalId differs", async () => {
+    it("throws on unexpected errors", async () => {
       const mockPolar = createMockPolar();
-      // API returns results but none match the exact externalId
-      (mockPolar.customers.list as ReturnType<typeof vi.fn>).mockResolvedValue({
-        result: {
-          items: [
-            { id: "cust-1", externalId: "detent-org-999", email: "a@b.com" },
-            { id: "cust-2", externalId: null, email: "c@d.com" },
-          ],
-        },
-      });
+      (
+        mockPolar.customers.getExternal as ReturnType<typeof vi.fn>
+      ).mockRejectedValue(new Error("Polar API error"));
 
-      const result = await getCustomerByExternalId(
-        mockPolar,
-        "polar-org-123",
-        "detent-org-456"
-      );
-
-      expect(result).toBeNull();
+      await expect(
+        getCustomerByExternalId(mockPolar, "detent-org-456")
+      ).rejects.toThrow("Polar API error");
     });
 
     it("finds customer when externalId matches exactly", async () => {
@@ -152,20 +150,11 @@ describe("polar service", () => {
         name: "Found Customer",
       };
 
-      (mockPolar.customers.list as ReturnType<typeof vi.fn>).mockResolvedValue({
-        result: {
-          items: [
-            { id: "cust-1", externalId: "detent-org-999", email: "a@b.com" },
-            expectedCustomer,
-          ],
-        },
-      });
+      (
+        mockPolar.customers.getExternal as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(expectedCustomer);
 
-      const result = await getCustomerByExternalId(
-        mockPolar,
-        "polar-org-123",
-        "detent-org-456"
-      );
+      const result = await getCustomerByExternalId(mockPolar, "detent-org-456");
 
       expect(result).toEqual(expectedCustomer);
     });

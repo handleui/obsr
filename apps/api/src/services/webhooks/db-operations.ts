@@ -2,10 +2,11 @@ import { generateFingerprints, sanitizeSensitiveData } from "@detent/lore";
 import type { ErrorCategory, ErrorSource } from "@detent/types";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK official pattern
 import * as Sentry from "@sentry/cloudflare";
-import { and, eq, inArray, isNull } from "drizzle-orm";
-import { createDb } from "../../db/client";
-import { DatabaseError } from "../../db/errors";
-import { bulkUpsertSignaturesAndOccurrences } from "../../db/operations/signatures";
+import { getConvexClient } from "../../db/convex";
+import {
+  getOrgSettings,
+  type OrganizationSettings,
+} from "../../lib/org-settings";
 import { formatErrorsFoundComment } from "../comment-formatter";
 import { createGitHubService } from "../github";
 import { deleteAndPostComment } from "../github/comments";
@@ -24,15 +25,6 @@ const asSource = (s: string | undefined): ErrorSource | undefined =>
 const asCategory = (c: string | undefined): ErrorCategory | undefined =>
   c as ErrorCategory | undefined;
 
-import {
-  getOrgSettings,
-  type OrganizationSettings,
-  organizations,
-  prComments,
-  projects,
-  runErrors,
-  runs,
-} from "../../db/schema";
 import { CACHE_TTL, cacheKey, getFromCache, setInCache } from "../../lib/cache";
 import type { Env } from "../../types/env";
 import type {
@@ -169,174 +161,168 @@ export const bulkStoreRunsAndErrors = async (
     return;
   }
 
-  const { db, client } = await createDb(env);
-  const completedAt = new Date();
+  const convex = getConvexClient(env);
+  const completedAt = Date.now();
 
-  try {
-    await db.transaction(async (tx) => {
-      // Bulk insert all runs in a single query
-      const runRows = preparedRuns.map((data) => ({
-        id: data.runRecordId,
-        provider: "github" as const,
-        source: "github",
-        format: "github-actions",
-        runId: String(data.runId),
-        repository: data.repository,
-        commitSha: data.headSha,
-        prNumber: data.prNumber,
-        checkRunId: data.checkRunId ? String(data.checkRunId) : null,
-        errorCount: data.errors.length,
-        workflowName: data.runName,
-        conclusion: data.conclusion,
-        headBranch: data.headBranch,
-        runAttempt: data.runAttempt,
-        runStartedAt: data.runStartedAt,
-        runCompletedAt: completedAt,
-      }));
+  const errorsWithFingerprints: Array<{
+    error: ParsedError;
+    fingerprints: ReturnType<typeof generateFingerprints>;
+    runRecordId: string;
+    runName: string;
+  }> = [];
 
-      await tx.insert(runs).values(runRows).onConflictDoNothing();
+  for (const data of preparedRuns) {
+    for (const error of data.errors) {
+      const fingerprints = generateFingerprints({
+        message: error.message,
+        filePath: error.filePath,
+        line: error.line,
+        column: error.column,
+        source: asSource(error.source),
+        ruleId: error.ruleId,
+        category: asCategory(error.category),
+      });
+      errorsWithFingerprints.push({
+        error,
+        fingerprints,
+        runRecordId: data.runRecordId,
+        runName: data.runName,
+      });
+    }
+  }
 
-      // Compute fingerprints for all errors and prepare for signature upsert
-      const errorsWithFingerprints: Array<{
-        error: ParsedError;
-        fingerprints: ReturnType<typeof generateFingerprints>;
-        runRecordId: string;
-        runName: string;
-      }> = [];
+  const firstRun = preparedRuns[0];
+  let projectId = firstRun?.projectId;
+  let commitSha: string | undefined;
+  if (firstRun) {
+    commitSha = firstRun.headSha;
+  }
 
-      for (const data of preparedRuns) {
-        for (const error of data.errors) {
-          const fingerprints = generateFingerprints({
-            message: error.message,
-            filePath: error.filePath,
-            line: error.line,
-            column: error.column,
-            source: asSource(error.source),
-            ruleId: error.ruleId,
-            category: asCategory(error.category),
-          });
-          errorsWithFingerprints.push({
-            error,
-            fingerprints,
-            runRecordId: data.runRecordId,
-            runName: data.runName,
-          });
-        }
-      }
+  if (!projectId && firstRun) {
+    const project = (await convex.query("projects:getByRepoFullName", {
+      providerRepoFullName: firstRun.repository,
+    })) as { _id: string; removedAt?: number } | null;
 
-      // Get projectId for occurrence tracking
-      // Prefer projectId from PreparedRunData to avoid extra DB query
-      const firstRun = preparedRuns[0];
-      let projectId: string | undefined;
-      let commitSha: string | undefined;
-
-      if (firstRun) {
-        commitSha = firstRun.headSha;
-        projectId = firstRun.projectId;
-
-        // Only query DB if projectId wasn't provided in PreparedRunData
-        if (!projectId) {
-          const projectResult = await tx
-            .select({ id: projects.id })
-            .from(projects)
-            .where(eq(projects.providerRepoFullName, firstRun.repository))
-            .limit(1);
-          projectId = projectResult[0]?.id;
-
-          // Capture missing projectId for observability
-          if (!projectId && errorsWithFingerprints.length > 0) {
-            Sentry.captureMessage(
-              "Project not found for repository during error tracking",
-              {
-                level: "warning",
-                extra: {
-                  repository: firstRun.repository,
-                  errorCount: errorsWithFingerprints.length,
-                },
-              }
-            );
+    if (!project || project.removedAt) {
+      if (errorsWithFingerprints.length > 0) {
+        Sentry.captureMessage(
+          "Project not found for repository during error tracking",
+          {
+            level: "warning",
+            extra: {
+              repository: firstRun.repository,
+              errorCount: errorsWithFingerprints.length,
+            },
           }
-        }
-      }
-
-      // Upsert signatures and occurrences
-      let fingerprintToSignatureId = new Map<string, string>();
-
-      if (errorsWithFingerprints.length > 0 && projectId && commitSha) {
-        const signatureData = errorsWithFingerprints.map((e) => ({
-          fingerprint: e.fingerprints.lore,
-          source: e.error.source,
-          ruleId: e.error.ruleId,
-          category: e.error.category,
-          normalizedPattern: e.fingerprints.normalizedPattern,
-          // SECURITY: Sanitize sensitive data (secrets, PII) from example message
-          exampleMessage: sanitizeSensitiveData(e.error.message).slice(0, 500),
-          filePath: e.error.filePath,
-        }));
-
-        fingerprintToSignatureId = await bulkUpsertSignaturesAndOccurrences(
-          tx,
-          projectId,
-          commitSha,
-          signatureData
         );
       }
-
-      // Build error rows with signatureId
-      const allErrorRows = errorsWithFingerprints.map((e) => ({
-        id: crypto.randomUUID(),
-        runId: e.runRecordId,
-        signatureId: fingerprintToSignatureId.get(e.fingerprints.lore) ?? null,
-        filePath: truncateString(e.error.filePath, MAX_FILE_PATH_LENGTH),
-        line: validatePositiveInt(e.error.line, MAX_LINE_NUMBER),
-        column: validatePositiveInt(e.error.column, MAX_COLUMN_NUMBER),
-        message:
-          truncateString(e.error.message, MAX_ERROR_MESSAGE_LENGTH) ??
-          "Unknown error",
-        category: truncateString(e.error.category, 100),
-        severity: truncateString(e.error.severity, 50),
-        ruleId: truncateString(e.error.ruleId, 200),
-        source: truncateString(e.error.source, 100),
-        stackTrace: truncateString(e.error.stackTrace, MAX_STACK_TRACE_LENGTH),
-        hints: e.error.hints ?? null,
-        codeSnippet: e.error.codeSnippet ?? null,
-        workflowJob:
-          truncateString(e.error.workflowJob, MAX_WORKFLOW_NAME_LENGTH) ??
-          e.runName,
-        workflowStep: truncateString(
-          e.error.workflowStep,
-          MAX_WORKFLOW_NAME_LENGTH
-        ),
-        workflowAction: truncateString(
-          e.error.workflowAction,
-          MAX_WORKFLOW_NAME_LENGTH
-        ),
-        unknownPattern: e.error.unknownPattern ?? null,
-        lineKnown: e.error.lineKnown ?? null,
-        possiblyTestOutput: e.error.possiblyTestOutput ?? null,
-        fixable: e.error.fixable ?? null,
-      }));
-
-      if (allErrorRows.length > 0) {
-        await tx.insert(runErrors).values(allErrorRows);
-      }
-    });
-
-    const totalErrors = preparedRuns.reduce(
-      (sum, r) => sum + r.errors.length,
-      0
-    );
-    console.log(
-      `[workflow_run] Bulk stored ${preparedRuns.length} runs with ${totalErrors} total errors in single transaction`
-    );
-  } catch (error) {
-    // Classify and re-throw with actionable error message
-    const dbError = new DatabaseError(error, "transaction", "runs");
-    console.error("[workflow_run] Database error:", dbError.toLogEntry());
-    throw dbError;
-  } finally {
-    await client.end();
+      return;
+    }
+    projectId = project._id;
   }
+
+  if (!projectId) {
+    return;
+  }
+
+  const signatureInputs = new Map<
+    string,
+    {
+      fingerprint: string;
+      source?: string;
+      ruleId?: string;
+      category?: string;
+      normalizedPattern?: string;
+      exampleMessage?: string;
+      filePath?: string;
+    }
+  >();
+
+  for (const entry of errorsWithFingerprints) {
+    const fingerprint = entry.fingerprints.lore;
+    if (!signatureInputs.has(fingerprint)) {
+      signatureInputs.set(fingerprint, {
+        fingerprint,
+        source: entry.error.source,
+        ruleId: entry.error.ruleId,
+        category: entry.error.category,
+        normalizedPattern: entry.fingerprints.normalizedPattern,
+        exampleMessage: sanitizeSensitiveData(entry.error.message).slice(
+          0,
+          500
+        ),
+        filePath: entry.error.filePath,
+      });
+    }
+  }
+
+  const runRows = preparedRuns.map((data) => ({
+    id: data.runRecordId,
+    projectId: data.projectId ?? projectId,
+    provider: "github" as const,
+    source: "github",
+    format: "github-actions",
+    runId: String(data.runId),
+    repository: data.repository,
+    commitSha: data.headSha,
+    prNumber: data.prNumber,
+    checkRunId: data.checkRunId ? String(data.checkRunId) : undefined,
+    errorCount: data.errors.length,
+    workflowName: data.runName,
+    conclusion: data.conclusion ?? undefined,
+    headBranch: data.headBranch,
+    runAttempt: data.runAttempt,
+    runStartedAt: data.runStartedAt ? data.runStartedAt.getTime() : undefined,
+    runCompletedAt: completedAt,
+    receivedAt: completedAt,
+  }));
+
+  const errorRows = errorsWithFingerprints.map((entry) => ({
+    runId: entry.runRecordId,
+    fingerprint: entry.fingerprints.lore,
+    filePath: truncateString(entry.error.filePath, MAX_FILE_PATH_LENGTH),
+    line: validatePositiveInt(entry.error.line, MAX_LINE_NUMBER),
+    column: validatePositiveInt(entry.error.column, MAX_COLUMN_NUMBER),
+    message:
+      truncateString(entry.error.message, MAX_ERROR_MESSAGE_LENGTH) ??
+      "Unknown error",
+    category: truncateString(entry.error.category, 100),
+    severity: truncateString(entry.error.severity, 50),
+    ruleId: truncateString(entry.error.ruleId, 200),
+    source: truncateString(entry.error.source, 100),
+    stackTrace: truncateString(entry.error.stackTrace, MAX_STACK_TRACE_LENGTH),
+    hints: entry.error.hints ?? undefined,
+    codeSnippet: entry.error.codeSnippet ?? undefined,
+    workflowJob:
+      truncateString(entry.error.workflowJob, MAX_WORKFLOW_NAME_LENGTH) ??
+      entry.runName,
+    workflowStep: truncateString(
+      entry.error.workflowStep,
+      MAX_WORKFLOW_NAME_LENGTH
+    ),
+    workflowAction: truncateString(
+      entry.error.workflowAction,
+      MAX_WORKFLOW_NAME_LENGTH
+    ),
+    unknownPattern: entry.error.unknownPattern ?? undefined,
+    lineKnown: entry.error.lineKnown ?? undefined,
+    possiblyTestOutput: entry.error.possiblyTestOutput ?? undefined,
+    fixable: entry.error.fixable ?? undefined,
+    createdAt: completedAt,
+  }));
+
+  await convex.mutation("run-ingest:bulkStore", {
+    runs: runRows,
+    errors: errorRows,
+    signatures: Array.from(signatureInputs.values()),
+    projectId,
+    commitSha,
+  });
+
+  const totalErrors = preparedRuns.reduce((sum, r) => sum + r.errors.length, 0);
+  console.log(
+    `[workflow_run] Bulk stored ${preparedRuns.length} runs with ${totalErrors} total errors`
+  );
 };
 
 // ============================================================================
@@ -373,76 +359,49 @@ export const checkRunsAndLoadOrgSettings = async (
     };
   }
 
-  const { db, client } = await createDb(env);
-  try {
-    // Execute both queries in parallel for better performance
-    // Org settings query is wrapped to capture failures while still using defaults
-    const [existingRunsResult, orgResult] = await Promise.all([
-      // Query 1: Check existing run attempts
-      runIdentifiers.length > 0
-        ? db
-            .select({
-              runId: runs.runId,
-              runAttempt: runs.runAttempt,
-            })
-            .from(runs)
-            .where(
-              and(
-                eq(runs.repository, repository),
-                inArray(
-                  runs.runId,
-                  runIdentifiers.map((r) => String(r.runId))
-                )
-              )
-            )
-        : Promise.resolve([]),
+  const convex = getConvexClient(env);
 
-      // Query 2: Load org settings (skip if cached)
-      cachedSettings
-        ? Promise.resolve(null)
-        : db.query.organizations
-            .findFirst({
-              where: eq(
-                organizations.providerInstallationId,
-                String(installationId)
-              ),
-              columns: { settings: true },
-            })
-            .catch((error) => {
-              // Capture org settings query failure but continue with defaults
-              Sentry.captureException(error, {
-                extra: { installationId, repository },
-                tags: { operation: "org_settings_query" },
-              });
-              return null;
-            }),
-    ]);
+  const runIds = runIdentifiers.map((r) => String(r.runId));
+  const existingRunsResult =
+    runIds.length > 0
+      ? ((await convex.query("runs:listByRepositoryRunIds", {
+          repository,
+          runIds,
+        })) as Array<{ runId: string; runAttempt: number }>)
+      : [];
 
-    // Process run results
-    const existingSet = new Set(
-      existingRunsResult.map((r) => `${r.runId}:${r.runAttempt ?? 1}`)
-    );
-    const allExist =
-      runIdentifiers.length === 0 ||
-      runIdentifiers.every((r) =>
-        existingSet.has(`${r.runId}:${r.runAttempt}`)
-      );
+  const existingSet = new Set(
+    existingRunsResult.map((r) => `${r.runId}:${r.runAttempt ?? 1}`)
+  );
+  const allExist =
+    runIdentifiers.length === 0 ||
+    runIdentifiers.every((r) => existingSet.has(`${r.runId}:${r.runAttempt}`));
 
-    // Get org settings (from cache or DB result)
-    let orgSettings: Required<OrganizationSettings>;
-    if (cachedSettings) {
-      orgSettings = getOrgSettings(cachedSettings);
-    } else {
-      const settings = orgResult?.settings ?? null;
-      orgSettings = getOrgSettings(settings);
-      // Cache the raw settings for future requests
-      setInCache(settingsCacheKey, settings, CACHE_TTL.ORG_SETTINGS);
+  let orgSettings: Required<OrganizationSettings>;
+  if (cachedSettings) {
+    orgSettings = getOrgSettings(cachedSettings);
+  } else {
+    let settings: OrganizationSettings | null = null;
+    try {
+      const orgs = (await convex.query(
+        "organizations:listByProviderInstallationId",
+        {
+          providerInstallationId: String(installationId),
+        }
+      )) as Array<{ settings?: OrganizationSettings | null }>;
+      settings = orgs[0]?.settings ?? null;
+    } catch (error) {
+      Sentry.captureException(error, {
+        extra: { installationId, repository },
+        tags: { operation: "org_settings_query" },
+      });
     }
 
-    return { allExist, existingRuns: existingSet, orgSettings };
-  } finally {
-    await client.end();
+    orgSettings = getOrgSettings(settings);
+    setInCache(settingsCacheKey, settings, CACHE_TTL.ORG_SETTINGS);
   }
+
+  return { allExist, existingRuns: existingSet, orgSettings };
 };
 
 // ============================================================================
@@ -461,23 +420,15 @@ export const getCommentIdFromDb = async (
   prNumber: number
 ): Promise<string | null> => {
   try {
-    const result = await db
-      .select({ commentId: prComments.commentId })
-      .from(prComments)
-      .where(
-        and(
-          eq(prComments.repository, repository.toLowerCase()),
-          eq(prComments.prNumber, prNumber)
-        )
-      )
-      .limit(1);
-    return result[0]?.commentId ?? null;
+    const result = (await db.query("pr-comments:getByRepoPr", {
+      repository: repository.toLowerCase(),
+      prNumber,
+    })) as { commentId: string } | null;
+    return result?.commentId ?? null;
   } catch (error) {
-    // Classify error for actionable logging
-    const dbError = new DatabaseError(error, "select", "pr_comments");
     console.error(
       `[pr-comments] getCommentIdFromDb failed for ${repository}#${prNumber}:`,
-      dbError.toLogEntry()
+      error
     );
     return null;
   }
@@ -500,34 +451,19 @@ export const upsertCommentIdInDb = async (
   const normalizedRepo = repository.toLowerCase();
 
   try {
-    // Single upsert query using ON CONFLICT DO UPDATE
-    // Uses the unique index on (repository, prNumber) for conflict detection
-    await db
-      .insert(prComments)
-      .values({
-        id: crypto.randomUUID(),
-        repository: normalizedRepo,
-        prNumber,
-        commentId,
-      })
-      .onConflictDoUpdate({
-        target: [prComments.repository, prComments.prNumber],
-        set: {
-          commentId,
-          updatedAt: new Date(),
-        },
-      });
-
+    await db.mutation("pr-comments:upsertByRepoPr", {
+      repository: normalizedRepo,
+      prNumber,
+      commentId,
+    });
     console.log(
       `[pr-comments] Upserted comment ID in DB for ${repository}#${prNumber}: ${commentId}`
     );
   } catch (error) {
     // Non-critical: KV is also storing this, and we have the unique constraint as safety
-    // Classify error for actionable logging
-    const dbError = new DatabaseError(error, "upsert", "pr_comments");
     console.error(
       `[pr-comments] upsertCommentIdInDb failed for ${repository}#${prNumber}:`,
-      dbError.toLogEntry()
+      error
     );
   }
 };
@@ -564,55 +500,56 @@ export const checkForJobReportedErrors = async (
     return null;
   }
 
-  const { db, client } = await createDb(env);
-  try {
-    // Optimized query: filter errors at DB level instead of loading all errors
-    // and filtering in JS. Also select only needed columns to reduce data transfer.
-    const jobReportedErrors = await db
-      .select({
-        message: runErrors.message,
-        filePath: runErrors.filePath,
-        line: runErrors.line,
-        column: runErrors.column,
-        category: runErrors.category,
-        severity: runErrors.severity,
-        ruleId: runErrors.ruleId,
-        stackTrace: runErrors.stackTrace,
-        workflowJob: runErrors.workflowJob,
-        source: runErrors.source,
-      })
-      .from(runErrors)
-      .innerJoin(runs, eq(runErrors.runId, runs.id))
-      .where(
-        and(
-          eq(runs.repository, repository),
-          inArray(
-            runs.runId,
-            runsToCheck.map((r) => String(r.id))
-          ),
-          eq(runErrors.source, "job-report")
-        )
-      );
+  const convex = getConvexClient(env);
+  const runIds = runsToCheck.map((r) => String(r.id));
+  const runs = (await convex.query("runs:listByRepositoryRunIds", {
+    repository,
+    runIds,
+  })) as Array<{ _id: string }>;
 
-    if (jobReportedErrors.length === 0) {
-      return null;
-    }
-
-    return jobReportedErrors.map((e) => ({
-      message: e.message,
-      filePath: e.filePath ?? undefined,
-      line: e.line ?? undefined,
-      column: e.column ?? undefined,
-      category: e.category ?? undefined,
-      severity: e.severity as "error" | "warning" | undefined,
-      ruleId: e.ruleId ?? undefined,
-      stackTrace: e.stackTrace ?? undefined,
-      workflowJob: e.workflowJob ?? undefined,
-      source: e.source ?? undefined,
-    }));
-  } finally {
-    await client.end();
+  if (runs.length === 0) {
+    return null;
   }
+
+  const errorsByRun = await Promise.all(
+    runs.map((run) =>
+      convex.query("run-errors:listByRunIdSource", {
+        runId: run._id,
+        source: "job-report",
+        limit: 1000,
+      })
+    )
+  );
+
+  const jobReportedErrors = errorsByRun.flat() as Array<{
+    message: string;
+    filePath?: string;
+    line?: number;
+    column?: number;
+    category?: string;
+    severity?: string;
+    ruleId?: string;
+    stackTrace?: string;
+    workflowJob?: string;
+    source?: string;
+  }>;
+
+  if (jobReportedErrors.length === 0) {
+    return null;
+  }
+
+  return jobReportedErrors.map((e) => ({
+    message: e.message,
+    filePath: e.filePath ?? undefined,
+    line: e.line ?? undefined,
+    column: e.column ?? undefined,
+    category: e.category ?? undefined,
+    severity: e.severity as "error" | "warning" | undefined,
+    ruleId: e.ruleId ?? undefined,
+    stackTrace: e.stackTrace ?? undefined,
+    workflowJob: e.workflowJob ?? undefined,
+    source: e.source ?? undefined,
+  }));
 };
 
 // ============================================================================
@@ -679,24 +616,20 @@ export const postErrorsFoundCommentForRun = async (
     installationId = projectContext.installationId;
   } else {
     // Fallback: fetch project and org from DB (legacy path)
-    const project = await db.query.projects.findFirst({
-      where: and(
-        eq(projects.providerRepoFullName, repository),
-        isNull(projects.removedAt)
-      ),
-    });
+    const project = (await db.query("projects:getByRepoFullName", {
+      providerRepoFullName: repository,
+    })) as { _id: string; organizationId: string; removedAt?: number } | null;
 
-    if (!project) {
+    if (!project || project.removedAt) {
       console.log(
         `[report] Project not found for ${repository}, skipping comment`
       );
       return;
     }
 
-    const org = await db.query.organizations.findFirst({
-      where: eq(organizations.id, project.organizationId),
-      columns: { providerInstallationId: true },
-    });
+    const org = (await db.query("organizations:getById", {
+      id: project.organizationId,
+    })) as { providerInstallationId?: string | null } | null;
 
     if (!org?.providerInstallationId) {
       console.log(
@@ -705,7 +638,7 @@ export const postErrorsFoundCommentForRun = async (
       return;
     }
 
-    projectId = project.id;
+    projectId = project._id;
     installationId = Number.parseInt(org.providerInstallationId, 10);
   }
 
@@ -749,29 +682,24 @@ export const getProjectContextForComment = async (
   db: DbClient,
   repository: string
 ): Promise<{ projectId: string; installationId: number } | null> => {
-  // Single query with JOIN - avoids N+1 pattern
-  const result = await db
-    .select({
-      projectId: projects.id,
-      providerInstallationId: organizations.providerInstallationId,
-    })
-    .from(projects)
-    .innerJoin(organizations, eq(projects.organizationId, organizations.id))
-    .where(
-      and(
-        eq(projects.providerRepoFullName, repository),
-        isNull(projects.removedAt)
-      )
-    )
-    .limit(1);
+  const project = (await db.query("projects:getByRepoFullName", {
+    providerRepoFullName: repository,
+  })) as { _id: string; organizationId: string; removedAt?: number } | null;
 
-  const row = result[0];
-  if (!row?.providerInstallationId) {
+  if (!project || project.removedAt) {
+    return null;
+  }
+
+  const org = (await db.query("organizations:getById", {
+    id: project.organizationId,
+  })) as { providerInstallationId?: string | null } | null;
+
+  if (!org?.providerInstallationId) {
     return null;
   }
 
   return {
-    projectId: row.projectId,
-    installationId: Number.parseInt(row.providerInstallationId, 10),
+    projectId: project._id,
+    installationId: Number.parseInt(org.providerInstallationId, 10),
   };
 };

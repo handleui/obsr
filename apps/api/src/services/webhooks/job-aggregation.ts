@@ -1,5 +1,3 @@
-import { and, eq } from "drizzle-orm";
-import { commitJobStats } from "../../db/schema";
 import type { Env } from "../../types/env";
 import { formatErrorsFoundComment } from "../comment-formatter";
 import { createGitHubService } from "../github";
@@ -47,12 +45,18 @@ export const checkAndTriggerAggregation = async (
   commitSha: string
 ): Promise<AggregationResult> => {
   // Single query: stats + prNumber are both on commitJobStats table
-  const stats = await db.query.commitJobStats.findFirst({
-    where: and(
-      eq(commitJobStats.repository, repository),
-      eq(commitJobStats.commitSha, commitSha)
-    ),
-  });
+  const stats = (await db.query("commit-job-stats:getByRepoCommit", {
+    repository,
+    commitSha,
+  })) as {
+    prNumber?: number;
+    totalJobs: number;
+    completedJobs: number;
+    failedJobs: number;
+    detentJobs: number;
+    totalErrors: number;
+    commentPosted?: boolean;
+  } | null;
 
   if (!stats) {
     // No stats record yet - likely first job event
@@ -149,15 +153,11 @@ export const checkAndTriggerAggregation = async (
 
   if (posted) {
     // Mark as posted to prevent duplicates
-    await db
-      .update(commitJobStats)
-      .set({ commentPosted: true, updatedAt: new Date() })
-      .where(
-        and(
-          eq(commitJobStats.repository, repository),
-          eq(commitJobStats.commitSha, commitSha)
-        )
-      );
+    await db.mutation("commit-job-stats:setCommentPostedByRepoCommit", {
+      repository,
+      commitSha,
+      commentPosted: true,
+    });
   }
 
   return {

@@ -8,7 +8,6 @@
  * Focus on autofix only (type='autofix'), not AI heals.
  */
 
-import { createDb } from "../db/client";
 import { markStaleHealsAsFailed } from "../db/operations/heals";
 import type { Env } from "../types/env";
 
@@ -25,23 +24,17 @@ export interface CleanupJobResult {
 export const cleanupStaleHeals = async (
   env: Env
 ): Promise<CleanupJobResult> => {
-  const { db, client } = await createDb(env);
+  const cleaned = await markStaleHealsAsFailed(
+    env,
+    STALE_TIMEOUT_MINUTES,
+    "autofix"
+  );
 
-  try {
-    const cleaned = await markStaleHealsAsFailed(
-      db,
-      STALE_TIMEOUT_MINUTES,
-      "autofix"
+  if (cleaned > 0) {
+    console.log(
+      `[cleanup-stale-heals] Marked ${cleaned} stale heals as failed`
     );
-
-    if (cleaned > 0) {
-      console.log(
-        `[cleanup-stale-heals] Marked ${cleaned} stale heals as failed`
-      );
-    }
-
-    return { cleaned };
-  } finally {
-    await client.end();
   }
+
+  return { cleaned };
 };

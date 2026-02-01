@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockEnv, createMockKv } from "../test-helpers/mock-env";
 
 // Mock the webhook signature middleware to bypass signature verification in tests
 // vi.mock must be defined before dynamic import
@@ -56,17 +57,14 @@ const mockUUID = "test-uuid-1234-5678-9abc-def012345678";
 vi.spyOn(crypto, "randomUUID").mockImplementation(() => mockUUID);
 
 // Mock environment
-const MOCK_ENV = {
+const MOCK_ENV = createMockEnv({
   GITHUB_WEBHOOK_SECRET: "test-webhook-secret",
   GITHUB_APP_ID: "123456",
   GITHUB_CLIENT_ID: "test-client-id",
   GITHUB_APP_PRIVATE_KEY: "test-private-key",
-  HYPERDRIVE: {
-    connectionString: "postgres://test:test@localhost:5432/test",
-  },
   WORKOS_CLIENT_ID: "test-workos-client",
   WORKOS_API_KEY: "test-workos-key",
-};
+});
 
 // Factory for installation payloads
 const createInstallationPayload = (
@@ -2112,12 +2110,13 @@ describe("webhooks - organization member events", () => {
     mockKvDelete.mockResolvedValue(undefined);
   });
 
-  const MOCK_ENV_WITH_KV = {
+  const MOCK_ENV_WITH_KV = createMockEnv({
     ...MOCK_ENV,
     "detent-idempotency": {
+      ...createMockKv(),
       delete: mockKvDelete,
     },
-  };
+  });
 
   describe("ignored actions", () => {
     it("ignores member_invited action", async () => {

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockEnv } from "../test-helpers/mock-env";
 import type { Env } from "../types/env";
 
 const mockQuery = vi.fn();
@@ -14,13 +15,10 @@ vi.mock("../db/convex", () => ({
 const mockFetch = vi.fn();
 
 // Mock environment
-const MOCK_ENV = {
+const MOCK_ENV = createMockEnv({
   WORKOS_API_KEY: "sk_test_workos_key",
   WORKOS_CLIENT_ID: "client_123",
-  HYPERDRIVE: {
-    connectionString: "postgres://test:test@localhost:5432/test",
-  },
-};
+});
 
 // Helper to make request with a fresh app instance
 const makeRequest = async (

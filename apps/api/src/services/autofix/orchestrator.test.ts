@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockEnv, createMockKv } from "../../test-helpers/mock-env";
 import type { Env } from "../../types/env";
 
 // ============================================================================
@@ -34,11 +35,16 @@ vi.mock("../../db/operations/heals", () => ({
 const mockKvGet = vi.fn();
 const mockKvPut = vi.fn();
 const mockKvDelete = vi.fn();
+const mockKvList = vi.fn();
+const mockKvGetWithMetadata = vi.fn();
 
 const mockKv = {
+  ...createMockKv(),
   get: mockKvGet,
   put: mockKvPut,
   delete: mockKvDelete,
+  list: mockKvList,
+  getWithMetadata: mockKvGetWithMetadata,
 };
 
 // Mock idempotency functions
@@ -52,16 +58,11 @@ vi.mock("../idempotency", () => ({
     mockReleaseHealCreationLock(...args),
 }));
 
-// Mock environment
-const createMockEnv = (overrides: Partial<Env> = {}): Env =>
-  ({
-    HYPERDRIVE: {
-      connectionString: "postgres://test:test@localhost:5432/test",
-    },
+const createTestEnv = (overrides: Partial<Env> = {}): Env =>
+  createMockEnv({
     "detent-idempotency": mockKv,
-    CONVEX_URL: "https://test.convex.cloud",
     ...overrides,
-  }) as Env;
+  });
 
 // ============================================================================
 // Test Setup
@@ -87,7 +88,7 @@ const defaultOrgSettings = {
 
 // Helper to create test context
 const createTestContext = (overrides = {}) => ({
-  env: createMockEnv(),
+  env: createTestEnv(),
   projectId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   runId: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
   commitSha: "abc123def456",

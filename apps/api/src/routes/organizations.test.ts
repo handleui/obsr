@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockEnv } from "../test-helpers/mock-env";
 import type { Env } from "../types/env";
 
 // Mock the GitHub service
@@ -56,15 +57,12 @@ const NEW_PROJECT_UUID = "d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f8a";
 vi.spyOn(crypto, "randomUUID").mockImplementation(() => NEW_PROJECT_UUID);
 
 // Mock environment
-const MOCK_ENV = {
+const MOCK_ENV = createMockEnv({
   GITHUB_APP_ID: "123456",
   GITHUB_APP_PRIVATE_KEY: "test-private-key",
-  HYPERDRIVE: {
-    connectionString: "postgres://test:test@localhost:5432/test",
-  },
   WORKOS_CLIENT_ID: "test-workos-client",
   WORKOS_API_KEY: "test-workos-key",
-};
+});
 
 // Factory for organization data
 const createOrganization = (

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockEnv } from "../test-helpers/mock-env";
 
 interface Organization {
   _id: string;
@@ -123,13 +124,12 @@ const createMember = (
   ...overrides,
 });
 
-const MOCK_ENV = {
+const MOCK_ENV = createMockEnv({
   WORKOS_API_KEY: "sk_test_workos_key",
   WORKOS_CLIENT_ID: "client_123",
-  HYPERDRIVE: { connectionString: "postgres://test:test@localhost:5432/test" },
   GITHUB_APP_ID: "123",
-  GITHUB_PRIVATE_KEY: "key",
-};
+  GITHUB_APP_PRIVATE_KEY: "key",
+});
 
 describe("github-org-access middleware", () => {
   beforeEach(() => {

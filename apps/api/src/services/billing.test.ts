@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Env } from "../types/env";
+import { createMockEnv } from "../test-helpers/mock-env";
 
 // ============================================================================
 // Mocks
@@ -21,18 +21,6 @@ vi.mock("./polar", () => ({
   getCustomerStateByExternalId: (...args: unknown[]) =>
     mockGetCustomerStateByExternalId(...args),
 }));
-
-// Mock environment
-const createMockEnv = (overrides: Partial<Env> = {}): Env =>
-  ({
-    HYPERDRIVE: {
-      connectionString: "postgres://test:test@localhost:5432/test",
-    },
-    CONVEX_URL: "https://test.convex.cloud",
-    POLAR_ACCESS_TOKEN: "polar_test_token",
-    POLAR_ORGANIZATION_ID: "polar_org_123",
-    ...overrides,
-  }) as Env;
 
 // ============================================================================
 // Test Setup

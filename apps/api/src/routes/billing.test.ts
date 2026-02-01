@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockEnv } from "../test-helpers/mock-env";
 import type { Env } from "../types/env";
 
 const mockQuery = vi.fn();
@@ -41,13 +42,10 @@ vi.mock("../middleware/github-org-access", () => ({
 }));
 
 // Mock environment
-const MOCK_ENV = {
+const MOCK_ENV = createMockEnv({
   POLAR_ACCESS_TOKEN: "polar_test_token",
   POLAR_ORGANIZATION_ID: "polar-org-123",
-  HYPERDRIVE: {
-    connectionString: "postgres://test:test@localhost:5432/test",
-  },
-};
+});
 
 // Factory for org access context
 const createOrgAccessContext = (overrides: Partial<{ _id: string }> = {}) => ({

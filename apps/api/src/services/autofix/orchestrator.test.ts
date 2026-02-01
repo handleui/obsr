@@ -5,22 +5,7 @@ import type { Env } from "../../types/env";
 // Mocks
 // ============================================================================
 
-const mockSelect = vi.fn();
-const mockFrom = vi.fn();
-const mockWhere = vi.fn();
-const mockInsert = vi.fn();
-const mockValues = vi.fn();
-
-const mockDb = {
-  select: mockSelect,
-  insert: mockInsert,
-};
-
-const mockClient = { end: vi.fn() };
-
-vi.mock("../../db/client", () => ({
-  createDb: vi.fn(() => Promise.resolve({ db: mockDb, client: mockClient })),
-}));
+const mockGetHealsByPr = vi.fn();
 
 // Mock createHeal to return predictable IDs
 let healIdCounter = 0;
@@ -36,12 +21,13 @@ interface HealData {
   commitSha: string;
   prNumber: number;
 }
-const mockCreateHeal = vi.fn((_db: unknown, _data: HealData) =>
+const mockCreateHeal = vi.fn((_env: unknown, _data: HealData) =>
   Promise.resolve(`heal-${++healIdCounter}`)
 );
 
 vi.mock("../../db/operations/heals", () => ({
-  createHeal: (db: unknown, data: HealData) => mockCreateHeal(db, data),
+  createHeal: (env: unknown, data: HealData) => mockCreateHeal(env, data),
+  getHealsByPr: (...args: unknown[]) => mockGetHealsByPr(...args),
 }));
 
 // Mock KV namespace
@@ -73,23 +59,13 @@ const createMockEnv = (overrides: Partial<Env> = {}): Env =>
       connectionString: "postgres://test:test@localhost:5432/test",
     },
     "detent-idempotency": mockKv,
+    CONVEX_URL: "https://test.convex.cloud",
     ...overrides,
   }) as Env;
 
 // ============================================================================
 // Test Setup
 // ============================================================================
-
-const setupMockChains = () => {
-  // Select chain: select().from().where()
-  mockSelect.mockReturnValue({ from: mockFrom });
-  mockFrom.mockReturnValue({ where: mockWhere });
-  mockWhere.mockResolvedValue([]);
-
-  // Insert chain: insert().values()
-  mockInsert.mockReturnValue({ values: mockValues });
-  mockValues.mockResolvedValue([]);
-};
 
 // Helper to get orchestrator with fresh imports
 const getOrchestrator = async () => import("./orchestrator");
@@ -127,12 +103,12 @@ const createTestContext = (overrides = {}) => ({
 describe("orchestrateHeals", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    setupMockChains();
     healIdCounter = 0;
 
     // Default mock behaviors
     mockAcquireHealCreationLock.mockResolvedValue({ acquired: true });
     mockReleaseHealCreationLock.mockResolvedValue(undefined);
+    mockGetHealsByPr.mockResolvedValue([]);
   });
 
   // ==========================================================================
@@ -378,8 +354,13 @@ describe("orchestrateHeals", () => {
       const { orchestrateHeals } = await getOrchestrator();
 
       // Existing pending heal for biome
-      mockWhere.mockResolvedValueOnce([
-        { id: "existing-heal", autofixSource: "biome", status: "pending" },
+      mockGetHealsByPr.mockResolvedValueOnce([
+        {
+          id: "existing-heal",
+          autofixSource: "biome",
+          status: "pending",
+          type: "autofix",
+        },
       ]);
 
       const result = await orchestrateHeals(
@@ -407,8 +388,13 @@ describe("orchestrateHeals", () => {
       const { orchestrateHeals } = await getOrchestrator();
 
       // Existing running heal for eslint
-      mockWhere.mockResolvedValueOnce([
-        { id: "existing-heal", autofixSource: "eslint", status: "running" },
+      mockGetHealsByPr.mockResolvedValueOnce([
+        {
+          id: "existing-heal",
+          autofixSource: "eslint",
+          status: "running",
+          type: "autofix",
+        },
       ]);
 
       const result = await orchestrateHeals(
@@ -428,10 +414,25 @@ describe("orchestrateHeals", () => {
       const { orchestrateHeals } = await getOrchestrator();
 
       // Existing completed heal for biome (should not block new heal)
-      mockWhere.mockResolvedValueOnce([
-        { id: "old-heal-1", autofixSource: "biome", status: "completed" },
-        { id: "old-heal-2", autofixSource: "biome", status: "failed" },
-        { id: "old-heal-3", autofixSource: "biome", status: "rejected" },
+      mockGetHealsByPr.mockResolvedValueOnce([
+        {
+          id: "old-heal-1",
+          autofixSource: "biome",
+          status: "completed",
+          type: "autofix",
+        },
+        {
+          id: "old-heal-2",
+          autofixSource: "biome",
+          status: "failed",
+          type: "autofix",
+        },
+        {
+          id: "old-heal-3",
+          autofixSource: "biome",
+          status: "rejected",
+          type: "autofix",
+        },
       ]);
 
       const result = await orchestrateHeals(
@@ -500,16 +501,12 @@ describe("orchestrateHeals", () => {
       const { orchestrateHeals } = await getOrchestrator();
 
       const ctx = createTestContext({
-        projectId: "proj-123-uuid-uuid-uuid-uuid12",
-        runId: "run-456-uuid-uuid-uuid-uuid123",
+        projectId: "project-123",
+        runId: "run-456",
         commitSha: "abc123",
         prNumber: 99,
         errors: [{ id: "err-1", source: "eslint", fixable: true }],
       });
-
-      // Fix projectId and runId to be valid UUIDs
-      ctx.projectId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
-      ctx.runId = "b2c3d4e5-f6a7-8901-bcde-f12345678901";
 
       await orchestrateHeals(ctx);
       await flushPromises();
@@ -517,8 +514,8 @@ describe("orchestrateHeals", () => {
       expect(mockCreateHeal).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          projectId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-          runId: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+          projectId: "project-123",
+          runId: "run-456",
           commitSha: "abc123",
           prNumber: 99,
         })
@@ -728,10 +725,8 @@ describe("orchestrateHeals", () => {
   // ==========================================================================
 
   describe("graceful degradation", () => {
-    it("returns empty result when database connection fails", async () => {
-      const dbClient = await import("../../db/client");
-      const mockCreateDb = dbClient.createDb as ReturnType<typeof vi.fn>;
-      mockCreateDb.mockRejectedValueOnce(new Error("DB connection failed"));
+    it("returns empty result when Convex query fails", async () => {
+      mockGetHealsByPr.mockRejectedValueOnce(new Error("Convex query failed"));
 
       const { orchestrateHeals } = await getOrchestrator();
 
@@ -747,20 +742,6 @@ describe("orchestrateHeals", () => {
         autofixes: [],
         partialFailures: [],
       });
-    });
-
-    it("closes database connection in finally block", async () => {
-      const { orchestrateHeals } = await getOrchestrator();
-
-      await orchestrateHeals(
-        createTestContext({
-          errors: [{ id: "err-1", source: "biome", fixable: true }],
-        })
-      );
-
-      await flushPromises();
-
-      expect(mockClient.end).toHaveBeenCalled();
     });
   });
 });

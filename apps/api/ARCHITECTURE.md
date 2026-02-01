@@ -6,8 +6,7 @@ Cloudflare Workers API for the Detent self-healing CI/CD platform.
 
 - **Runtime**: Cloudflare Workers
 - **Framework**: Hono
-- **Database**: Neon PostgreSQL via Cloudflare Hyperdrive
-- **ORM**: Drizzle
+- **Data Store**: Convex (database + functions)
 - **Caching**: Cloudflare KV (idempotency, rate limiting)
 - **Observability**: Sentry
 
@@ -29,10 +28,10 @@ Cloudflare Workers API for the Detent self-healing CI/CD platform.
 +------------------+        |       +-----------------+   +--------+
                             |                                  |
                             v                                  v
-                    +-------+--------+                  +------+------+
+                    +-------+--------+                  +-------------+
                     |                |                  |             |
-                    |   Cloudflare   |<---------------->|   Neon DB   |
-                    |    Workers     |                  |  (Postgres) |
+                    |   Cloudflare   |<---------------->|   Convex    |
+                    |    Workers     |                  | (DB + funcs)|
                     |     (API)      |                  |             |
                     +-------+--------+                  +-------------+
                             |
@@ -113,7 +112,7 @@ GitHub OAuth --> WorkOS --> JWT --> githubOrgAccessMiddleware
                                                      |
                                             +--------+--------+
                                             |                 |
-                                      Existing DB        New Member
+                                     Existing record     New Member
                                        Member           (verify via API)
                                             |                 |
                                       Use cached         Create record
@@ -122,7 +121,7 @@ GitHub OAuth --> WorkOS --> JWT --> githubOrgAccessMiddleware
 
 Role hierarchy: `owner > admin > member > visitor`
 
-## Database Schema
+## Data Model (Convex)
 
 ### Core Entities
 
@@ -157,7 +156,7 @@ pr_comments (deduplication table)
 ### Key Design Decisions
 
 1. **Soft deletes**: `removedAt` timestamp instead of hard delete
-2. **JSONB settings**: Flexible org settings without migrations
+2. **Flexible settings**: Org settings stored as a structured object
 3. **Run tracking**: Store ALL workflow runs (not just failures)
 4. **Error signatures**: Fingerprinting for deduplication and analytics
 
@@ -312,23 +311,6 @@ Cron triggers in `wrangler.toml`:
 
 ## Error Handling
 
-### Database Errors
-
-```
-DatabaseError class
-       |
-       +-- isTransient: true --> 503 + Retry-After
-       |
-       +-- isPermanent: true --> 400
-       |
-       +-- unknown --> 500
-```
-
-Pattern matching for classification:
-- Connection errors -> transient
-- Constraint violations -> permanent
-- Timeout -> transient
-
 ### Webhook Error Classification
 
 Error codes returned to GitHub:
@@ -343,9 +325,8 @@ All errors captured to Sentry with context.
 
 1. **Token caching**: Installation tokens cached in-memory per isolate
 2. **KV caching**: Org members, API keys cached with TTL
-3. **Hyperdrive**: Connection pooling for Postgres
-4. **Background tasks**: `waitUntil` for non-critical operations
-5. **Batch processing**: Sync job processes orgs in batches with delays
+3. **Background tasks**: `waitUntil` for non-critical operations
+4. **Batch processing**: Sync job processes orgs in batches with delays
 
 ## Security Measures
 

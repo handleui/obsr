@@ -2,36 +2,12 @@ import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../types/env";
 
-// Mock the database client
-const mockFindFirst = vi.fn();
-const mockFindMany = vi.fn();
-const mockUpdate = vi.fn();
-const mockInsert = vi.fn();
-const mockSet = vi.fn();
-const mockWhere = vi.fn();
-const mockReturning = vi.fn();
-const mockValues = vi.fn();
+const mockQuery = vi.fn();
+const mockMutation = vi.fn();
+const mockConvex = { query: mockQuery, mutation: mockMutation };
 
-const mockDb = {
-  query: {
-    organizationMembers: {
-      findFirst: mockFindFirst,
-      findMany: mockFindMany,
-    },
-    organizations: {
-      findMany: mockFindMany,
-    },
-  },
-  update: mockUpdate,
-  insert: mockInsert,
-};
-
-const mockClient = {
-  end: vi.fn(),
-};
-
-vi.mock("../db/client", () => ({
-  createDb: vi.fn(() => Promise.resolve({ db: mockDb, client: mockClient })),
+vi.mock("../db/convex", () => ({
+  getConvexClient: vi.fn(() => mockConvex),
 }));
 
 // Mock fetch for WorkOS and GitHub API calls
@@ -114,19 +90,27 @@ describe("auth routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetch.mockReset();
+    mockQuery.mockReset();
+    mockMutation.mockReset();
 
-    // Setup mock chain for update
-    mockUpdate.mockReturnValue({ set: mockSet });
-    mockSet.mockReturnValue({ where: mockWhere });
-    mockWhere.mockReturnValue({ returning: mockReturning });
-    mockReturning.mockResolvedValue([]);
-
-    // Setup mock chain for insert
-    mockInsert.mockReturnValue({ values: mockValues });
-    mockValues.mockResolvedValue([]);
-
-    // Setup mock for findMany (organizations and organizationMembers)
-    mockFindMany.mockResolvedValue([]);
+    mockQuery.mockImplementation((name: string) => {
+      if (name === "organization-members:listByUser") {
+        return Promise.resolve([]);
+      }
+      if (name === "organizations:listByInstallerGithubId") {
+        return Promise.resolve([]);
+      }
+      if (name === "organization-members:getByOrgUser") {
+        return Promise.resolve(null);
+      }
+      if (name === "organizations:listByProviderAccountIds") {
+        return Promise.resolve([]);
+      }
+      if (name === "organizations:getById") {
+        return Promise.resolve(null);
+      }
+      return Promise.resolve([]);
+    });
 
     // Replace global fetch with mock
     global.fetch = mockFetch;
@@ -165,10 +149,28 @@ describe("auth routes", () => {
           json: () => Promise.resolve({ login: "testuser" }),
         });
 
-      mockReturning.mockResolvedValue([
-        { organizationId: "organization-1", providerUsername: "testuser" },
-        { organizationId: "organization-2", providerUsername: "testuser" },
-      ]);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organization-members:listByUser") {
+          return Promise.resolve([
+            {
+              id: "member-1",
+              organizationId: "organization-1",
+              userId: "user-123",
+              role: "member",
+            },
+            {
+              id: "member-2",
+              organizationId: "organization-2",
+              userId: "user-123",
+              role: "member",
+            },
+          ]);
+        }
+        if (name === "organizations:listByInstallerGithubId") {
+          return Promise.resolve([]);
+        }
+        return Promise.resolve([]);
+      });
 
       const res = await makeRequest("POST", "/auth/sync-user");
       const json = await res.json();
@@ -187,9 +189,8 @@ describe("auth routes", () => {
         github_orgs_joined: 0,
       });
 
-      // Verify database was updated
-      expect(mockUpdate).toHaveBeenCalled();
-      expect(mockClient.end).toHaveBeenCalled();
+      // Verify memberships were updated via Convex
+      expect(mockMutation).toHaveBeenCalled();
     });
 
     it("returns user info when no GitHub identity linked", async () => {
@@ -216,8 +217,8 @@ describe("auth routes", () => {
         github_username: null,
       });
 
-      // Database should not be updated
-      expect(mockUpdate).not.toHaveBeenCalled();
+      // Memberships should not be updated
+      expect(mockMutation).not.toHaveBeenCalled();
     });
 
     it("returns user info when identities fetch fails", async () => {
@@ -266,9 +267,22 @@ describe("auth routes", () => {
           json: () => Promise.reject(new Error("Unauthorized")),
         });
 
-      mockReturning.mockResolvedValue([
-        { organizationId: "organization-1", providerUsername: null },
-      ]);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organization-members:listByUser") {
+          return Promise.resolve([
+            {
+              id: "member-1",
+              organizationId: "organization-1",
+              userId: "user-123",
+              role: "member",
+            },
+          ]);
+        }
+        if (name === "organizations:listByInstallerGithubId") {
+          return Promise.resolve([]);
+        }
+        return Promise.resolve([]);
+      });
 
       const res = await makeRequest("POST", "/auth/sync-user");
       const json = await res.json();
@@ -312,9 +326,22 @@ describe("auth routes", () => {
           json: () => Promise.reject(new Error("Not found")),
         });
 
-      mockReturning.mockResolvedValue([
-        { organizationId: "organization-1", providerUsername: null },
-      ]);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organization-members:listByUser") {
+          return Promise.resolve([
+            {
+              id: "member-1",
+              organizationId: "organization-1",
+              userId: "user-123",
+              role: "member",
+            },
+          ]);
+        }
+        if (name === "organizations:listByInstallerGithubId") {
+          return Promise.resolve([]);
+        }
+        return Promise.resolve([]);
+      });
 
       const res = await makeRequest("POST", "/auth/sync-user");
       const json = await res.json();
@@ -385,12 +412,20 @@ describe("auth routes", () => {
         json: () => Promise.resolve(createWorkOSUser()),
       });
 
-      mockFindFirst.mockResolvedValue({
-        id: "member-1",
-        organizationId: "organization-1",
-        userId: "user-123",
-        providerUserId: "12345",
-        providerUsername: "testuser",
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organization-members:listByUser") {
+          return Promise.resolve([
+            {
+              id: "member-1",
+              organizationId: "organization-1",
+              userId: "user-123",
+              providerUserId: "12345",
+              providerUsername: "testuser",
+              role: "member",
+            },
+          ]);
+        }
+        return Promise.resolve([]);
       });
 
       const res = await makeRequest("GET", "/auth/me");
@@ -406,8 +441,6 @@ describe("auth routes", () => {
         github_user_id: "12345",
         github_username: "testuser",
       });
-
-      expect(mockClient.end).toHaveBeenCalled();
     });
 
     it("returns user info without GitHub linked", async () => {
@@ -423,12 +456,20 @@ describe("auth routes", () => {
           json: () => Promise.resolve(createIdentitiesResponse([])),
         });
 
-      mockFindFirst.mockResolvedValue({
-        id: "member-1",
-        organizationId: "organization-1",
-        userId: "user-123",
-        providerUserId: null,
-        providerUsername: null,
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organization-members:listByUser") {
+          return Promise.resolve([
+            {
+              id: "member-1",
+              organizationId: "organization-1",
+              userId: "user-123",
+              providerUserId: null,
+              providerUsername: null,
+              role: "member",
+            },
+          ]);
+        }
+        return Promise.resolve([]);
       });
 
       const res = await makeRequest("GET", "/auth/me");
@@ -459,7 +500,12 @@ describe("auth routes", () => {
           json: () => Promise.resolve(createIdentitiesResponse([])),
         });
 
-      mockFindFirst.mockResolvedValue(undefined);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organization-members:listByUser") {
+          return Promise.resolve([]);
+        }
+        return Promise.resolve([]);
+      });
 
       const res = await makeRequest("GET", "/auth/me");
       const json = await res.json();
@@ -506,7 +552,12 @@ describe("auth routes", () => {
           json: () => Promise.resolve(createIdentitiesResponse([])),
         });
 
-      mockFindFirst.mockResolvedValue(undefined);
+      mockQuery.mockImplementation((name: string) => {
+        if (name === "organization-members:listByUser") {
+          return Promise.resolve([]);
+        }
+        return Promise.resolve([]);
+      });
 
       const res = await makeRequest("GET", "/auth/me");
       const json = (await res.json()) as {

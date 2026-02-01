@@ -655,8 +655,7 @@ export interface CreateTokenSecretResult {
   batchResult?: BatchSecretResult;
 }
 
-// Import DbClient type for proper typing
-import type { DbClient } from "../services/webhooks/types";
+import type { ConvexHttpClient } from "convex/browser";
 
 /**
  * Create DETENT_TOKEN secrets with API key lifecycle management.
@@ -670,7 +669,7 @@ import type { DbClient } from "../services/webhooks/types";
  * Used by both installation handlers and the manual injection endpoint.
  */
 export const createTokenSecretWithCleanup = async ({
-  db,
+  convex,
   organizationId,
   providerAccountLogin,
   providerAccountType,
@@ -678,8 +677,8 @@ export const createTokenSecretWithCleanup = async ({
   repositories,
   keyName,
 }: {
-  /** Drizzle database client */
-  db: DbClient;
+  /** Convex client */
+  convex: ConvexHttpClient;
   /** Detent organization ID */
   organizationId: string;
   /** GitHub account login (username or org name) */
@@ -695,21 +694,18 @@ export const createTokenSecretWithCleanup = async ({
 }): Promise<CreateTokenSecretResult> => {
   // Import crypto functions here to avoid circular dependencies
   const { generateApiKey, hashApiKey } = await import("./crypto");
-  const { apiKeys } = await import("../db/schema");
-  const { eq } = await import("drizzle-orm");
 
-  const keyId = crypto.randomUUID();
   const apiKey = generateApiKey();
   const keyHash = await hashApiKey(apiKey);
   const keyPrefix = apiKey.substring(0, 8);
 
-  await db.insert(apiKeys).values({
-    id: keyId,
+  const keyId = (await convex.mutation("api-keys:create", {
     organizationId,
     keyHash,
     keyPrefix,
     name: keyName,
-  });
+    createdAt: Date.now(),
+  })) as string;
 
   let secretsCreated = false;
   let batchResult: BatchSecretResult | undefined;
@@ -726,7 +722,7 @@ export const createTokenSecretWithCleanup = async ({
 
       // If ALL repos failed, clean up the orphaned API key
       if (batchResult.succeeded === 0 && repositories.length > 0) {
-        await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
+        await convex.mutation("api-keys:remove", { id: keyId });
         throw new Error(
           `All ${repositories.length} repo secret creations failed for ${providerAccountLogin}`
         );
@@ -738,9 +734,7 @@ export const createTokenSecretWithCleanup = async ({
     // Only clean up API key if no secrets were created
     if (!secretsCreated) {
       try {
-        const { eq } = await import("drizzle-orm");
-        const { apiKeys } = await import("../db/schema");
-        await db.delete(apiKeys).where(eq(apiKeys.id, keyId));
+        await convex.mutation("api-keys:remove", { id: keyId });
       } catch (deleteError) {
         console.error(
           `[github-secrets] ORPHAN_KEY: Failed to delete API key ${keyId} for org ${organizationId}:`,

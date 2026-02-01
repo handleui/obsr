@@ -1,5 +1,45 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Organization, OrganizationMember } from "../db/schema";
+
+interface Organization {
+  _id: string;
+  name: string;
+  slug: string;
+  enterpriseId: string | null;
+  provider: "github" | "gitlab";
+  providerAccountId: string;
+  providerAccountLogin: string;
+  providerAccountType: "organization" | "user";
+  providerAvatarUrl: string | null;
+  providerInstallationId: string | null;
+  providerAccessTokenEncrypted: string | null;
+  providerAccessTokenExpiresAt: number | null;
+  providerWebhookSecret: string | null;
+  installerGithubId: string | null;
+  suspendedAt: Date | null;
+  deletedAt: Date | null;
+  lastSyncedAt: Date | null;
+  settings: Record<string, unknown>;
+  polarCustomerId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface OrganizationMember {
+  _id: string;
+  organizationId: string;
+  userId: string;
+  role: "owner" | "admin" | "member" | "visitor";
+  providerUserId: string | null;
+  providerUsername: string | null;
+  providerLinkedAt: Date | null;
+  providerVerifiedAt: Date | null;
+  membershipSource: string | null;
+  removedAt: Date | null;
+  removalReason: string | null;
+  removedBy: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 // Separate mocks for each table
 const mockOrgFindFirst = vi.fn();
@@ -15,20 +55,12 @@ const mockSelectWhere = vi.fn();
 const mockOnConflictDoNothing = vi.fn();
 const mockReturning = vi.fn();
 
-const mockDb = {
-  query: {
-    organizations: { findFirst: mockOrgFindFirst },
-    organizationMembers: { findFirst: mockMemberFindFirst },
-  },
-  update: mockUpdate,
-  insert: mockInsert,
-  select: mockSelect,
-};
+const mockQuery = vi.fn();
+const mockMutation = vi.fn();
+const mockConvex = { query: mockQuery, mutation: mockMutation };
 
-const mockClient = { end: vi.fn() };
-
-vi.mock("../db/client", () => ({
-  createDb: vi.fn(() => Promise.resolve({ db: mockDb, client: mockClient })),
+vi.mock("../db/convex", () => ({
+  getConvexClient: vi.fn(() => mockConvex),
 }));
 
 // Mock GitHub identity verification
@@ -47,7 +79,7 @@ vi.mock("../lib/github-membership", () => ({
 
 // Factory helpers
 const createOrg = (overrides: Partial<Organization> = {}): Organization => ({
-  id: "org-123",
+  _id: "org-123",
   name: "Test Org",
   slug: "gh/test-org",
   enterpriseId: null,
@@ -74,7 +106,7 @@ const createOrg = (overrides: Partial<Organization> = {}): Organization => ({
 const createMember = (
   overrides: Partial<OrganizationMember> = {}
 ): OrganizationMember => ({
-  id: "member-123",
+  _id: "member-123",
   organizationId: "org-123",
   userId: "user-abc",
   role: "member",
@@ -112,12 +144,75 @@ describe("github-org-access middleware", () => {
     });
     mockOnConflictDoNothing.mockReturnValue({ returning: mockReturning });
     // Default: insert succeeds (returns inserted row)
-    mockReturning.mockResolvedValue([{ id: "new-member-id", role: "member" }]);
+    mockReturning.mockResolvedValue([{ _id: "new-member-id", role: "member" }]);
     // Set up select chain: db.select().from().where()
     mockSelect.mockReturnValue({ from: mockFrom });
     mockFrom.mockReturnValue({ where: mockSelectWhere });
     // Default: org has owners (count: 1)
     mockSelectWhere.mockResolvedValue([{ count: 1 }]);
+
+    mockQuery.mockReset();
+    mockMutation.mockReset();
+
+    const resolveOwners = async (): Promise<OrganizationMember[]> => {
+      const result = await mockSelectWhere();
+      if (
+        Array.isArray(result) &&
+        result.length > 0 &&
+        typeof (result[0] as { count?: number }).count === "number"
+      ) {
+        const count = (result[0] as { count: number }).count;
+        return Array.from({ length: count }, (_, index) => ({
+          _id: `owner-${index}`,
+          organizationId: "org-123",
+          userId: `user-${index}`,
+          role: "owner",
+          providerUserId: null,
+          providerUsername: null,
+          providerLinkedAt: null,
+          providerVerifiedAt: null,
+          membershipSource: null,
+          removedAt: null,
+          removalReason: null,
+          removedBy: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }));
+      }
+      return (result as OrganizationMember[]) ?? [];
+    };
+
+    mockQuery.mockImplementation(async (name: string) => {
+      if (
+        name === "organizations:getById" ||
+        name === "organizations:getBySlug"
+      ) {
+        return await mockOrgFindFirst();
+      }
+      if (name === "organization-members:getByOrgUser") {
+        return await mockMemberFindFirst();
+      }
+      if (name === "organization-members:listByOrgRole") {
+        return await resolveOwners();
+      }
+      return [];
+    });
+
+    mockMutation.mockImplementation(
+      async (name: string, args: Record<string, unknown>) => {
+        if (name === "organization-members:update") {
+          mockUpdate();
+          return null;
+        }
+        if (name === "organization-members:createIfMissing") {
+          mockInsert();
+          mockValues(args);
+          const returning = await mockReturning();
+          return Array.isArray(returning) ? returning[0] : returning;
+        }
+        return null;
+      }
+    );
   });
 
   describe("seedRoleFromGitHub - role seeding for new members", () => {

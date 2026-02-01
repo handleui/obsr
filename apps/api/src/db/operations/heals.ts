@@ -1,49 +1,98 @@
-import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
-import type { Database } from "../client";
-import { type Heal, heals } from "../schema";
+import type { Env } from "../../types/env";
+import { getConvexClient } from "../convex";
 
-// Type for database operations that works with both Database and Transaction
-type DbOrTx = Pick<Database, "insert" | "select" | "update">;
+export interface HealRecord {
+  id: string;
+  type: "autofix" | "heal";
+  status:
+    | "found"
+    | "pending"
+    | "running"
+    | "completed"
+    | "applied"
+    | "rejected"
+    | "failed";
+  runId?: string;
+  projectId: string;
+  commitSha?: string;
+  prNumber?: number;
+  checkRunId?: string;
+  errorIds?: string[];
+  signatureIds?: string[];
+  patch?: string;
+  commitMessage?: string;
+  filesChanged?: string[];
+  filesChangedWithContent?: Array<{ path: string; content: string | null }>;
+  autofixSource?: string;
+  autofixCommand?: string;
+  userInstructions?: string;
+  healResult?: {
+    model?: string;
+    patchApplied?: boolean;
+    verificationPassed?: boolean;
+    toolCalls?: number;
+  };
+  costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  appliedAt?: Date;
+  appliedCommitSha?: string;
+  rejectedAt?: Date;
+  rejectedBy?: string;
+  rejectionReason?: string;
+  failedReason?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
-// ============================================================================
-// Input Validation Constants
-// ============================================================================
+interface ConvexHealDoc {
+  _id: string;
+  _creationTime: number;
+  type: HealRecord["type"];
+  status: HealRecord["status"];
+  runId?: string;
+  projectId: string;
+  commitSha?: string;
+  prNumber?: number;
+  checkRunId?: string;
+  errorIds?: string[];
+  signatureIds?: string[];
+  patch?: string;
+  commitMessage?: string;
+  filesChanged?: string[];
+  filesChangedWithContent?: Array<{ path: string; content: string | null }>;
+  autofixSource?: string;
+  autofixCommand?: string;
+  userInstructions?: string;
+  healResult?: HealRecord["healResult"];
+  costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  appliedAt?: number;
+  appliedCommitSha?: string;
+  rejectedAt?: number;
+  rejectedBy?: string;
+  rejectionReason?: string;
+  failedReason?: string;
+  updatedAt: number;
+}
 
-// UUID validation regex (module-level for performance)
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-// Maximum lengths for text fields
 const MAX_COMMIT_LENGTH = 64;
 const MAX_SOURCE_LENGTH = 64;
 const MAX_COMMAND_LENGTH = 500;
 const MAX_COMMIT_MESSAGE_LENGTH = 500;
-// DB-layer safety limit for user instructions. Larger than the webhook handler limit
-// (500 in issue-comment.ts) to serve as a secondary safety net for any code paths
-// that bypass the webhook layer. The webhook handler truncates earlier for efficiency.
 const MAX_USER_INSTRUCTIONS_LENGTH = 2000;
 const MAX_REJECTION_REASON_LENGTH = 2000;
 const MAX_FAILED_REASON_LENGTH = 2000;
-const MAX_PATCH_LENGTH = 1_000_000; // 1MB for patches
+const MAX_PATCH_LENGTH = 1_000_000;
 const MAX_REJECTED_BY_LENGTH = 255;
+const MAX_HEAL_ID_LENGTH = 128;
+const MAX_CONVEX_DOC_BYTES = 900_000;
 
 // ============================================================================
 // Validation Helpers
 // ============================================================================
 
-/** Validate and normalize UUID format */
-const isValidUUID = (id: string): boolean => UUID_REGEX.test(id);
-
-/** Validate array of UUIDs, filtering out invalid ones */
-const validateUUIDs = (ids: string[] | undefined): string[] | undefined => {
-  if (!ids || ids.length === 0) {
-    return undefined;
-  }
-  const valid = ids.filter(isValidUUID);
-  return valid.length > 0 ? valid : undefined;
-};
-
-/** Truncate string to max length, returning undefined for empty/whitespace-only */
 const truncate = (
   value: string | undefined,
   maxLength: number
@@ -58,14 +107,91 @@ const truncate = (
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 };
 
-/**
- * Create a new heal record.
- * Returns the heal ID.
- *
- * Security: Validates UUIDs and truncates text fields.
- */
+const getByteLength = (value: string): number => {
+  return new TextEncoder().encode(value).length;
+};
+
+const estimateFilesChangedWithContentSize = (
+  files: Array<{ path: string; content: string | null }> | undefined
+): number => {
+  if (!files) {
+    return 0;
+  }
+  let total = 0;
+  for (const file of files) {
+    total += getByteLength(file.path);
+    if (typeof file.content === "string") {
+      total += getByteLength(file.content);
+    }
+  }
+  return total;
+};
+
+const validateHealId = (id: string): void => {
+  if (!id || typeof id !== "string") {
+    throw new Error("Invalid healId format");
+  }
+  if (id.trim() !== id) {
+    throw new Error("Invalid healId format");
+  }
+  if (id.length > MAX_HEAL_ID_LENGTH) {
+    throw new Error("Invalid healId format: too long");
+  }
+};
+
+// ============================================================================
+// Convex Client
+// ============================================================================
+
+const getClient = (env: Env) => getConvexClient(env);
+
+const toDate = (value: number | undefined): Date | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  return new Date(value);
+};
+
+const normalizeHeal = (heal: ConvexHealDoc): HealRecord => {
+  return {
+    id: heal._id,
+    type: heal.type,
+    status: heal.status,
+    runId: heal.runId,
+    projectId: heal.projectId,
+    commitSha: heal.commitSha,
+    prNumber: heal.prNumber,
+    checkRunId: heal.checkRunId,
+    errorIds: heal.errorIds,
+    signatureIds: heal.signatureIds,
+    patch: heal.patch,
+    commitMessage: heal.commitMessage,
+    filesChanged: heal.filesChanged,
+    filesChangedWithContent: heal.filesChangedWithContent,
+    autofixSource: heal.autofixSource,
+    autofixCommand: heal.autofixCommand,
+    userInstructions: heal.userInstructions,
+    healResult: heal.healResult,
+    costUsd: heal.costUsd,
+    inputTokens: heal.inputTokens,
+    outputTokens: heal.outputTokens,
+    appliedAt: toDate(heal.appliedAt),
+    appliedCommitSha: heal.appliedCommitSha,
+    rejectedAt: toDate(heal.rejectedAt),
+    rejectedBy: heal.rejectedBy,
+    rejectionReason: heal.rejectionReason,
+    failedReason: heal.failedReason,
+    createdAt: new Date(heal._creationTime),
+    updatedAt: new Date(heal.updatedAt),
+  };
+};
+
+// ============================================================================
+// Operations
+// ============================================================================
+
 export const createHeal = async (
-  db: DbOrTx,
+  env: Env,
   data: {
     type: "autofix" | "heal";
     projectId: string;
@@ -81,28 +207,15 @@ export const createHeal = async (
     userInstructions?: string;
   }
 ): Promise<string> => {
-  // SECURITY: Validate required UUIDs
-  if (!isValidUUID(data.projectId)) {
-    throw new Error("Invalid projectId format: expected UUID");
-  }
-  if (data.runId && !isValidUUID(data.runId)) {
-    throw new Error("Invalid runId format: expected UUID");
-  }
-
-  const id = crypto.randomUUID();
-  const now = new Date();
-
-  // SECURITY: Truncate text fields and validate UUID arrays
   const sanitizedData = {
-    id,
     type: data.type,
     status: data.status ?? "pending",
     projectId: data.projectId,
     runId: data.runId,
     commitSha: truncate(data.commitSha, MAX_COMMIT_LENGTH),
     prNumber: data.prNumber,
-    errorIds: validateUUIDs(data.errorIds),
-    signatureIds: validateUUIDs(data.signatureIds),
+    errorIds: data.errorIds,
+    signatureIds: data.signatureIds,
     autofixSource: truncate(data.autofixSource, MAX_SOURCE_LENGTH),
     autofixCommand: truncate(data.autofixCommand, MAX_COMMAND_LENGTH),
     commitMessage: truncate(data.commitMessage, MAX_COMMIT_MESSAGE_LENGTH),
@@ -110,45 +223,24 @@ export const createHeal = async (
       data.userInstructions,
       MAX_USER_INSTRUCTIONS_LENGTH
     ),
-    createdAt: now,
-    updatedAt: now,
   };
 
-  await db.insert(heals).values(sanitizedData);
-
+  const client = getClient(env);
+  const id = await client.mutation("heals:create", sanitizedData);
+  if (typeof id !== "string") {
+    throw new Error("Failed to create heal");
+  }
   return id;
 };
 
-/**
- * Trigger a heal by moving it from found to pending.
- *
- * Security: Validates UUID.
- */
-export const triggerHeal = async (
-  db: DbOrTx,
-  healId: string
-): Promise<void> => {
-  // SECURITY: Validate UUID
-  if (!isValidUUID(healId)) {
-    throw new Error("Invalid healId format: expected UUID");
-  }
-
-  await db
-    .update(heals)
-    .set({
-      status: "pending",
-      updatedAt: new Date(),
-    })
-    .where(and(eq(heals.id, healId), eq(heals.status, "found")));
+export const triggerHeal = async (env: Env, healId: string): Promise<void> => {
+  validateHealId(healId);
+  const client = getClient(env);
+  await client.mutation("heals:trigger", { id: healId });
 };
 
-/**
- * Update heal status and associated data.
- *
- * Security: Validates UUID and truncates text fields.
- */
 export const updateHealStatus = async (
-  db: DbOrTx,
+  env: Env,
   healId: string,
   status: "running" | "completed" | "applied" | "rejected" | "failed",
   data?: {
@@ -163,242 +255,168 @@ export const updateHealStatus = async (
     failedReason?: string;
   }
 ): Promise<void> => {
-  // SECURITY: Validate UUID
-  if (!isValidUUID(healId)) {
-    throw new Error("Invalid healId format: expected UUID");
+  validateHealId(healId);
+
+  const sanitizedHealResult =
+    data?.healResult && typeof data.healResult === "object"
+      ? {
+          model: (data.healResult as { model?: string }).model,
+          patchApplied: (data.healResult as { patchApplied?: boolean })
+            .patchApplied,
+          verificationPassed: (
+            data.healResult as { verificationPassed?: boolean }
+          ).verificationPassed,
+          toolCalls: (data.healResult as { toolCalls?: number }).toolCalls,
+        }
+      : undefined;
+
+  const patchBytes = data?.patch ? getByteLength(data.patch) : 0;
+  const filesBytes = estimateFilesChangedWithContentSize(
+    data?.filesChangedWithContent
+  );
+  if (patchBytes + filesBytes > MAX_CONVEX_DOC_BYTES) {
+    throw new Error("Heal payload exceeds Convex document size limit");
   }
 
-  const now = new Date();
-
-  // SECURITY: Truncate text fields including large patch data
   const sanitizedData = {
     status,
     patch: truncate(data?.patch, MAX_PATCH_LENGTH),
     commitMessage: truncate(data?.commitMessage, MAX_COMMIT_MESSAGE_LENGTH),
     filesChanged: data?.filesChanged,
     filesChangedWithContent: data?.filesChangedWithContent,
-    healResult: data?.healResult,
+    healResult: sanitizedHealResult,
     costUsd: data?.costUsd,
     inputTokens: data?.inputTokens,
     outputTokens: data?.outputTokens,
     failedReason: truncate(data?.failedReason, MAX_FAILED_REASON_LENGTH),
-    updatedAt: now,
   };
 
-  await db.update(heals).set(sanitizedData).where(eq(heals.id, healId));
+  const client = getClient(env);
+  await client.mutation("heals:updateStatus", {
+    id: healId,
+    ...sanitizedData,
+  });
 };
 
-/**
- * Apply a heal (mark as applied with commit SHA).
- *
- * Security: Validates UUIDs and truncates commit hash.
- */
 export const applyHeal = async (
-  db: DbOrTx,
+  env: Env,
   healId: string,
   appliedCommitSha: string
 ): Promise<void> => {
-  // SECURITY: Validate UUID
-  if (!isValidUUID(healId)) {
-    throw new Error("Invalid healId format: expected UUID");
+  validateHealId(healId);
+  const sanitizedCommitSha = truncate(appliedCommitSha, MAX_COMMIT_LENGTH);
+  if (!sanitizedCommitSha) {
+    throw new Error("Invalid appliedCommitSha");
   }
-
-  const now = new Date();
-
-  await db
-    .update(heals)
-    .set({
-      status: "applied",
-      appliedAt: now,
-      appliedCommitSha: truncate(appliedCommitSha, MAX_COMMIT_LENGTH),
-      updatedAt: now,
-    })
-    .where(eq(heals.id, healId));
+  const client = getClient(env);
+  await client.mutation("heals:apply", {
+    id: healId,
+    appliedCommitSha: sanitizedCommitSha,
+  });
 };
 
-/**
- * Reject a heal.
- *
- * Security: Validates UUIDs and truncates text fields.
- */
 export const rejectHeal = async (
-  db: DbOrTx,
+  env: Env,
   healId: string,
   rejectedBy: string,
   reason?: string
 ): Promise<void> => {
-  // SECURITY: Validate UUID
-  if (!isValidUUID(healId)) {
-    throw new Error("Invalid healId format: expected UUID");
+  validateHealId(healId);
+  const sanitizedRejectedBy = truncate(rejectedBy, MAX_REJECTED_BY_LENGTH);
+  if (!sanitizedRejectedBy) {
+    throw new Error("Invalid rejectedBy");
   }
-
-  const now = new Date();
-
-  // SECURITY: Truncate rejectedBy and reason fields
-  await db
-    .update(heals)
-    .set({
-      status: "rejected",
-      rejectedAt: now,
-      rejectedBy: truncate(rejectedBy, MAX_REJECTED_BY_LENGTH),
-      rejectionReason: truncate(reason, MAX_REJECTION_REASON_LENGTH),
-      updatedAt: now,
-    })
-    .where(eq(heals.id, healId));
+  const client = getClient(env);
+  await client.mutation("heals:reject", {
+    id: healId,
+    rejectedBy: sanitizedRejectedBy,
+    reason: truncate(reason, MAX_REJECTION_REASON_LENGTH),
+  });
 };
 
-/**
- * Get heals by project and PR number.
- *
- * Security: Validates UUID.
- */
 export const getHealsByPr = async (
-  db: DbOrTx,
+  env: Env,
   projectId: string,
   prNumber: number
-): Promise<Heal[]> => {
-  // SECURITY: Validate UUID
-  if (!isValidUUID(projectId)) {
-    throw new Error("Invalid projectId format: expected UUID");
-  }
+): Promise<HealRecord[]> => {
+  const client = getClient(env);
+  const heals = (await client.query("heals:getByPr", {
+    projectId,
+    prNumber,
+  })) as ConvexHealDoc[];
 
-  return await db
-    .select()
-    .from(heals)
-    .where(and(eq(heals.projectId, projectId), eq(heals.prNumber, prNumber)))
-    .orderBy(desc(heals.createdAt));
+  return heals.map(normalizeHeal);
 };
 
-/**
- * Get heal by ID.
- *
- * Security: Validates UUID.
- */
 export const getHealById = async (
-  db: DbOrTx,
+  env: Env,
   healId: string
-): Promise<Heal | null> => {
-  // SECURITY: Validate UUID
-  if (!isValidUUID(healId)) {
-    throw new Error("Invalid healId format: expected UUID");
-  }
+): Promise<HealRecord | null> => {
+  validateHealId(healId);
 
-  const result = await db
-    .select()
-    .from(heals)
-    .where(eq(heals.id, healId))
-    .limit(1);
+  const client = getClient(env);
+  const heal = (await client.query("heals:get", {
+    id: healId,
+  })) as ConvexHealDoc | null;
 
-  return result[0] ?? null;
+  return heal ? normalizeHeal(heal) : null;
 };
 
-/**
- * Get pending heals for a project.
- *
- * Security: Validates UUID.
- */
 export const getPendingHeals = async (
-  db: DbOrTx,
+  env: Env,
   projectId: string
-): Promise<Heal[]> => {
-  // SECURITY: Validate UUID
-  if (!isValidUUID(projectId)) {
-    throw new Error("Invalid projectId format: expected UUID");
-  }
+): Promise<HealRecord[]> => {
+  const client = getClient(env);
+  const heals = (await client.query("heals:getByProjectStatus", {
+    projectId,
+    status: "pending",
+  })) as ConvexHealDoc[];
 
-  return await db
-    .select()
-    .from(heals)
-    .where(and(eq(heals.projectId, projectId), eq(heals.status, "pending")))
-    .orderBy(desc(heals.createdAt));
+  return heals.map(normalizeHeal);
 };
 
-/**
- * Check if a heal already exists for a specific PR and autofix source.
- * Used for deduplication to prevent creating duplicate heals.
- *
- * Security: Validates UUID.
- */
 export const healExistsForPrAndSource = async (
-  db: DbOrTx,
+  env: Env,
   projectId: string,
   prNumber: number,
   autofixSource: string
 ): Promise<boolean> => {
-  // SECURITY: Validate UUID
-  if (!isValidUUID(projectId)) {
-    throw new Error("Invalid projectId format: expected UUID");
-  }
+  const heals = await getHealsByPr(env, projectId, prNumber);
 
-  const result = await db
-    .select({ id: heals.id })
-    .from(heals)
-    .where(
-      and(
-        eq(heals.projectId, projectId),
-        eq(heals.prNumber, prNumber),
-        eq(heals.autofixSource, autofixSource),
-        // Only consider active heals (not rejected/failed)
-        eq(heals.status, "pending")
-      )
-    )
-    .limit(1);
-
-  return result.length > 0;
+  return (
+    heals.find(
+      (heal) =>
+        heal.autofixSource === autofixSource && heal.status === "pending"
+    ) !== undefined
+  );
 };
 
-/**
- * Find pending or running heal for a specific PR and autofix source.
- * Used by autofix-result endpoint to update the correct heal record.
- *
- * Security: Validates UUID.
- */
 export const getHealByPrAndSource = async (
-  db: DbOrTx,
+  env: Env,
   projectId: string,
   prNumber: number,
   autofixSource: string
-): Promise<Heal | null> => {
-  // SECURITY: Validate UUID
-  if (!isValidUUID(projectId)) {
-    throw new Error("Invalid projectId format: expected UUID");
+): Promise<HealRecord | null> => {
+  const heals = await getHealsByPr(env, projectId, prNumber);
+  const candidates = heals.filter(
+    (heal) =>
+      heal.autofixSource === autofixSource &&
+      (heal.status === "pending" || heal.status === "running")
+  );
+
+  if (candidates.length === 0) {
+    return null;
   }
 
-  const result = await db
-    .select()
-    .from(heals)
-    .where(
-      and(
-        eq(heals.projectId, projectId),
-        eq(heals.prNumber, prNumber),
-        eq(heals.autofixSource, autofixSource),
-        // Only consider active heals (pending or running)
-        inArray(heals.status, ["pending", "running"])
-      )
-    )
-    .orderBy(desc(heals.createdAt))
-    .limit(1);
-
-  return result[0] ?? null;
+  candidates.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  return candidates[0] ?? null;
 };
 
-/**
- * Mark stale heals as failed after a timeout period.
- * Returns the count of heals that were marked as failed.
- *
- * @param db - Database client
- * @param timeoutMinutes - Heals older than this many minutes will be marked as failed
- * @param healType - Type of heal to clean up ("autofix" or "heal")
- */
 export const markStaleHealsAsFailed = async (
-  db: DbOrTx,
+  env: Env,
   timeoutMinutes: number,
   healType: "autofix" | "heal"
 ): Promise<number> => {
-  // SECURITY: Validate timeoutMinutes to prevent SQL injection via sql.raw()
-  // The validation below is CRITICAL - sql.raw() bypasses parameterization,
-  // so we must ensure timeoutMinutes is strictly an integer between 1-1440.
-  // Do NOT weaken this validation without updating the SQL construction.
   if (
     !Number.isInteger(timeoutMinutes) ||
     timeoutMinutes < 1 ||
@@ -409,29 +427,15 @@ export const markStaleHealsAsFailed = async (
     );
   }
 
-  // SECURITY NOTE: sql.raw() is used here because Drizzle doesn't support
-  // parameterized INTERVAL syntax. This is safe because:
-  // 1. timeoutMinutes is validated above as an integer in range [1, 1440]
-  // 2. String(timeoutMinutes) can only produce decimal digit characters
-  // 3. No user input reaches this function without validation
-  const result = await db
-    .update(heals)
-    .set({
-      status: "failed",
-      failedReason: "Autofix timed out",
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(heals.type, healType),
-        inArray(heals.status, ["pending", "running"]),
-        lt(
-          heals.updatedAt,
-          sql`NOW() - INTERVAL '${sql.raw(String(timeoutMinutes))} minutes'`
-        )
-      )
-    )
-    .returning({ id: heals.id });
+  const client = getClient(env);
+  const failedReason =
+    healType === "autofix" ? "Autofix timed out" : "Heal timed out";
+
+  const result = (await client.mutation("heals:markStaleAsFailed", {
+    timeoutMinutes,
+    healType,
+    failedReason,
+  })) as Array<{ id: string }>;
 
   return result.length;
 };

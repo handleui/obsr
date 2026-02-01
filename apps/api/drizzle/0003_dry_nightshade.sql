@@ -1,1 +1,0 @@
-ALTER TABLE "organizations" ADD COLUMN "installer_github_id" varchar(255);

@@ -1,9 +1,6 @@
 import type { KVNamespace } from "@cloudflare/workers-types";
-import { and, eq } from "drizzle-orm";
-import { createDb } from "../../db/client";
-import { TRANSIENT_MESSAGE_PATTERNS as DB_TRANSIENT_PATTERNS } from "../../db/errors";
-import { createHeal } from "../../db/operations/heals";
-import { heals, type OrganizationSettings } from "../../db/schema";
+import { createHeal, getHealsByPr } from "../../db/operations/heals";
+import type { OrganizationSettings } from "../../lib/org-settings";
 import type { Env } from "../../types/env";
 import {
   acquireHealCreationLock,
@@ -66,8 +63,7 @@ interface OrchestrationResult {
  * - 413: request_too_large
  * - billing_error
  *
- * NOTE: Connection/database patterns are shared with TRANSIENT_MESSAGE_PATTERNS
- * in db/errors.ts for consistency. API-specific patterns are defined here.
+ * NOTE: API retry patterns are defined here to keep retry logic self-contained.
  */
 const API_RETRYABLE_PATTERNS = [
   // Rate limiting
@@ -98,9 +94,9 @@ const classifyError = (
 ): { message: string; retryable: boolean } => {
   const message = error instanceof Error ? error.message : String(error);
   // Check both API-specific and shared database transient patterns
-  const retryable =
-    API_RETRYABLE_PATTERNS.some((pattern) => pattern.test(message)) ||
-    DB_TRANSIENT_PATTERNS.some((pattern) => pattern.test(message));
+  const retryable = API_RETRYABLE_PATTERNS.some((pattern) =>
+    pattern.test(message)
+  );
   return { message, retryable };
 };
 
@@ -166,17 +162,13 @@ export const orchestrateHeals = async (
     return { healsCreated: 0, healIds: [], partialFailures: [], autofixes: [] };
   }
 
-  // Graceful degradation: if DB connection fails, return empty result
-  const dbResult = await createDb(env).catch((error) => {
-    console.error("[autofix] Failed to connect to database:", error);
-    return null;
-  });
-
-  if (!dbResult) {
+  let existingHeals: Awaited<ReturnType<typeof getHealsByPr>> = [];
+  try {
+    existingHeals = await getHealsByPr(env, projectId, prNumber);
+  } catch (error) {
+    console.error("[autofix] Failed to query heals:", error);
     return { healsCreated: 0, healIds: [], partialFailures: [], autofixes: [] };
   }
-
-  const { db, client } = dbResult;
   const kv = env["detent-idempotency"] as KVNamespace;
 
   const healIds: string[] = [];
@@ -184,28 +176,15 @@ export const orchestrateHeals = async (
   const autofixes: OrchestrationResult["autofixes"] = [];
 
   try {
-    // Check for existing pending/running heals for this PR to avoid duplicates
-    const existingHeals = await db
-      .select({
-        id: heals.id,
-        autofixSource: heals.autofixSource,
-        status: heals.status,
-      })
-      .from(heals)
-      .where(
-        and(
-          eq(heals.projectId, projectId),
-          eq(heals.prNumber, prNumber),
-          eq(heals.type, "autofix")
-        )
-      );
-
-    // Build a set of sources that already have pending/running heals
     const existingSources = new Set(
       existingHeals
-        .filter((h) => h.status === "pending" || h.status === "running")
-        .map((h) => h.autofixSource)
-        .filter((s): s is string => s !== null)
+        .filter(
+          (heal) =>
+            heal.type === "autofix" &&
+            (heal.status === "pending" || heal.status === "running")
+        )
+        .map((heal) => heal.autofixSource)
+        .filter((source): source is string => source !== undefined)
     );
 
     // Get autofix configs sorted by priority
@@ -250,7 +229,7 @@ export const orchestrateHeals = async (
           errorIds.length
         );
 
-        const healId = await createHeal(db, {
+        const healId = await createHeal(env, {
           type: "autofix",
           projectId,
           runId,
@@ -318,7 +297,13 @@ export const orchestrateHeals = async (
       partialFailures,
       autofixes,
     };
-  } finally {
-    await client.end();
+  } catch (error) {
+    console.error("[autofix] Orchestration failed:", error);
+    return {
+      healsCreated: healIds.length,
+      healIds,
+      partialFailures,
+      autofixes,
+    };
   }
 };

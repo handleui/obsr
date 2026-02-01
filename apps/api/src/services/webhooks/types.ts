@@ -1,6 +1,6 @@
-import type { createDb } from "../../db/client";
+import type { ConvexHttpClient } from "convex/browser";
 
-export type DbClient = Awaited<ReturnType<typeof createDb>>["db"];
+export type DbClient = ConvexHttpClient;
 
 export interface ParsedError {
   filePath?: string;

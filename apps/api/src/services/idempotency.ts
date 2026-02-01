@@ -634,10 +634,6 @@ const HEAL_CREATION_LOCK_TTL_SECONDS = 5 * 60;
 // Stale threshold for heal creation locks (2 minutes)
 const HEAL_CREATION_LOCK_STALE_MS = 2 * 60 * 1000;
 
-// UUID format for project IDs
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 // Autofix source should be alphanumeric with optional hyphens/underscores
 const AUTOFIX_SOURCE_REGEX = /^[a-zA-Z0-9_-]{1,50}$/;
 
@@ -662,7 +658,13 @@ const validateHealCreationInputs = (
   prNumber: number,
   autofixSource: string
 ): { projectId: string; prNumber: number; autofixSource: string } | null => {
-  if (!UUID_REGEX.test(projectId)) {
+  if (!projectId || typeof projectId !== "string") {
+    console.warn("[heal-creation-lock] Missing project ID");
+    return null;
+  }
+
+  const trimmedProjectId = projectId.trim();
+  if (!trimmedProjectId || trimmedProjectId.length > 128) {
     console.warn(
       `[heal-creation-lock] Invalid project ID format rejected: ${projectId.substring(0, 20)}...`
     );
@@ -689,7 +691,7 @@ const validateHealCreationInputs = (
   }
 
   return {
-    projectId: projectId.toLowerCase(),
+    projectId: trimmedProjectId,
     prNumber,
     autofixSource: autofixSource.toLowerCase(),
   };
@@ -838,7 +840,13 @@ const validateHealCommandInputs = (
   projectId: string,
   prNumber: number
 ): { projectId: string; prNumber: number } | null => {
-  if (!UUID_REGEX.test(projectId)) {
+  if (!projectId || typeof projectId !== "string") {
+    console.warn("[heal-command-lock] Missing project ID");
+    return null;
+  }
+
+  const trimmedProjectId = projectId.trim();
+  if (!trimmedProjectId || trimmedProjectId.length > 128) {
     console.warn(
       `[heal-command-lock] Invalid project ID format rejected: ${projectId.substring(0, 20)}...`
     );
@@ -855,7 +863,7 @@ const validateHealCommandInputs = (
   }
 
   return {
-    projectId: projectId.toLowerCase(),
+    projectId: trimmedProjectId,
     prNumber,
   };
 };

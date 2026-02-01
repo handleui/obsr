@@ -1,10 +1,5 @@
-import { and, eq } from "drizzle-orm";
-import { createDb } from "../../../db/client";
-import {
-  createProviderSlug,
-  organizations,
-  projects,
-} from "../../../db/schema";
+import { getConvexClient } from "../../../db/convex";
+import { createProviderSlug } from "../../../lib/org-settings";
 import { captureWebhookError } from "../../../lib/sentry";
 import { classifyError } from "../../../services/webhooks/error-classifier";
 import type {
@@ -30,23 +25,19 @@ export const handleRepositoryEvent = async (
     `[repository] ${action}: ${repository.full_name} (repo ID: ${repository.id}) [delivery: ${deliveryId}]`
   );
 
-  const { db, client } = await createDb(c.env);
+  const convex = getConvexClient(c.env);
 
   try {
     // Find the project by provider repo ID
-    const existingProject = await db
-      .select({
-        id: projects.id,
-        handle: projects.handle,
-        providerRepoName: projects.providerRepoName,
-        providerRepoFullName: projects.providerRepoFullName,
-        isPrivate: projects.isPrivate,
-      })
-      .from(projects)
-      .where(eq(projects.providerRepoId, String(repository.id)))
-      .limit(1);
-
-    const project = existingProject[0];
+    const project = (await convex.query("projects:getByRepoId", {
+      providerRepoId: String(repository.id),
+    })) as {
+      _id: string;
+      handle: string;
+      providerRepoName: string;
+      providerRepoFullName: string;
+      isPrivate: boolean;
+    } | null;
     if (!project) {
       console.log(
         `[repository] Project not found for repo ID ${repository.id}, skipping`
@@ -60,22 +51,20 @@ export const handleRepositoryEvent = async (
     switch (action) {
       case "renamed": {
         // Update repo name and full_name, but preserve custom handle
-        await db
-          .update(projects)
-          .set({
-            providerRepoName: repository.name,
-            providerRepoFullName: repository.full_name,
-            updatedAt: new Date(),
-          })
-          .where(eq(projects.id, project.id));
+        await convex.mutation("projects:update", {
+          id: project._id,
+          providerRepoName: repository.name,
+          providerRepoFullName: repository.full_name,
+          updatedAt: Date.now(),
+        });
 
         console.log(
-          `[repository] Updated project ${project.id}: ${project.providerRepoFullName} -> ${repository.full_name}`
+          `[repository] Updated project ${project._id}: ${project.providerRepoFullName} -> ${repository.full_name}`
         );
 
         return c.json({
           message: "repository renamed",
-          project_id: project.id,
+          project_id: project._id,
           old_name: project.providerRepoFullName,
           new_name: repository.full_name,
         });
@@ -84,21 +73,19 @@ export const handleRepositoryEvent = async (
       case "privatized":
       case "publicized": {
         const isPrivate = action === "privatized";
-        await db
-          .update(projects)
-          .set({
-            isPrivate,
-            updatedAt: new Date(),
-          })
-          .where(eq(projects.id, project.id));
+        await convex.mutation("projects:update", {
+          id: project._id,
+          isPrivate,
+          updatedAt: Date.now(),
+        });
 
         console.log(
-          `[repository] Updated project ${project.id} visibility: private=${isPrivate}`
+          `[repository] Updated project ${project._id} visibility: private=${isPrivate}`
         );
 
         return c.json({
           message: `repository ${action}`,
-          project_id: project.id,
+          project_id: project._id,
           is_private: isPrivate,
         });
       }
@@ -106,13 +93,11 @@ export const handleRepositoryEvent = async (
       case "transferred": {
         // Repository was transferred to another owner
         // The project stays with the original org, but we update the full_name
-        await db
-          .update(projects)
-          .set({
-            providerRepoFullName: repository.full_name,
-            updatedAt: new Date(),
-          })
-          .where(eq(projects.id, project.id));
+        await convex.mutation("projects:update", {
+          id: project._id,
+          providerRepoFullName: repository.full_name,
+          updatedAt: Date.now(),
+        });
 
         console.log(
           `[repository] Repository transferred, updated full_name to ${repository.full_name}`
@@ -120,7 +105,7 @@ export const handleRepositoryEvent = async (
 
         return c.json({
           message: "repository transferred",
-          project_id: project.id,
+          project_id: project._id,
           new_full_name: repository.full_name,
         });
       }
@@ -151,8 +136,6 @@ export const handleRepositoryEvent = async (
       },
       500
     );
-  } finally {
-    await client.end();
   }
 };
 
@@ -194,26 +177,18 @@ export const handleOrganizationEvent = async (
     return c.json({ message: "ignored", reason: "no login change" });
   }
 
-  const { db, client } = await createDb(c.env);
+  const convex = getConvexClient(c.env);
 
   try {
     // Find the organization by provider account ID (immutable)
-    const existingOrg = await db
-      .select({
-        id: organizations.id,
-        slug: organizations.slug,
-        providerAccountLogin: organizations.providerAccountLogin,
-      })
-      .from(organizations)
-      .where(
-        and(
-          eq(organizations.provider, "github"),
-          eq(organizations.providerAccountId, String(organization.id))
-        )
-      )
-      .limit(1);
-
-    const org = existingOrg[0];
+    const org = (await convex.query("organizations:getByProviderAccount", {
+      provider: "github",
+      providerAccountId: String(organization.id),
+    })) as {
+      _id: string;
+      slug: string;
+      providerAccountLogin: string;
+    } | null;
     if (!org) {
       console.log(
         `[organization] Organization not found for GitHub org ID ${organization.id}, skipping`
@@ -228,13 +203,13 @@ export const handleOrganizationEvent = async (
     const updates: {
       providerAccountLogin: string;
       providerAvatarUrl: string | null;
-      updatedAt: Date;
+      updatedAt: number;
       slug?: string;
       name?: string;
     } = {
       providerAccountLogin: organization.login,
       providerAvatarUrl: organization.avatar_url ?? null,
-      updatedAt: new Date(),
+      updatedAt: Date.now(),
     };
 
     // Check if slug matches the provider pattern (gh/old-login)
@@ -246,20 +221,20 @@ export const handleOrganizationEvent = async (
       updates.name = organization.login;
     }
 
-    await db
-      .update(organizations)
-      .set(updates)
-      .where(eq(organizations.id, org.id));
+    await convex.mutation("organizations:update", {
+      id: org._id,
+      ...updates,
+    });
 
     console.log(
-      `[organization] Updated organization ${org.id}: login ${oldLogin} -> ${organization.login}${
+      `[organization] Updated organization ${org._id}: login ${oldLogin} -> ${organization.login}${
         updates.slug ? `, slug ${org.slug} -> ${updates.slug}` : ""
       }`
     );
 
     return c.json({
       message: "organization renamed",
-      organization_id: org.id,
+      organization_id: org._id,
       old_login: oldLogin,
       new_login: organization.login,
       old_slug: org.slug,
@@ -287,7 +262,5 @@ export const handleOrganizationEvent = async (
       },
       500
     );
-  } finally {
-    await client.end();
   }
 };

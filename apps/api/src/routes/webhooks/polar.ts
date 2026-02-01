@@ -1,7 +1,6 @@
-import { eq } from "drizzle-orm";
+import type { ConvexHttpClient } from "convex/browser";
 import { Hono } from "hono";
-import { createDb } from "../../db/client";
-import { organizations } from "../../db/schema";
+import { getConvexClient } from "../../db/convex";
 import type { Env } from "../../types/env";
 
 // ============================================================================
@@ -182,19 +181,18 @@ const getStringField = (
 // Event Handlers
 // ============================================================================
 
-type Db = Awaited<ReturnType<typeof createDb>>["db"];
-
 const handleCustomerCreated = async (
-  db: Db,
+  convex: ConvexHttpClient,
   data: PolarWebhookEvent["data"]
 ) => {
   const externalId = getStringField(data, "externalId");
   const customerId = getStringField(data, "id");
   if (externalId && customerId) {
-    await db
-      .update(organizations)
-      .set({ polarCustomerId: customerId })
-      .where(eq(organizations.id, externalId));
+    await convex.mutation("organizations:update", {
+      id: externalId,
+      polarCustomerId: customerId,
+      updatedAt: Date.now(),
+    });
   }
 };
 
@@ -223,10 +221,13 @@ const handleSubscriptionEnded = (
   );
 };
 
-const processDbEvent = async (db: Db, event: PolarWebhookEvent) => {
+const processDbEvent = async (
+  convex: ConvexHttpClient,
+  event: PolarWebhookEvent
+) => {
   switch (event.type) {
     case "customer.created":
-      await handleCustomerCreated(db, event.data);
+      await handleCustomerCreated(convex, event.data);
       break;
     case "order.paid":
       handleOrderPaid(event.data);
@@ -298,12 +299,8 @@ app.post("/", async (c) => {
 
   try {
     if (DB_REQUIRED_EVENTS.has(event.type)) {
-      const { db, client } = await createDb(c.env);
-      try {
-        await processDbEvent(db, event);
-      } finally {
-        await client.end();
-      }
+      const convex = getConvexClient(c.env);
+      await processDbEvent(convex, event);
     } else {
       processNonDbEvent(event);
     }

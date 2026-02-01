@@ -1,11 +1,9 @@
-import type { Database } from "../db/client";
 import { createHeal } from "../db/operations/heals";
-import type { OrganizationSettings } from "../db/schema";
+import type { OrganizationSettings } from "../lib/org-settings";
 import type { Env } from "../types/env";
 import { canRunHeal } from "./billing";
 
 interface RequestHealOptions {
-  db: Database;
   env: Env;
   projectId: string;
   organizationId: string;
@@ -45,7 +43,7 @@ export const healerService = {
       }
 
       const status = options.orgSettings.healAutoTrigger ? "pending" : "found";
-      const healId = await createHeal(options.db, {
+      const healId = await createHeal(options.env, {
         type: "heal",
         status,
         projectId: options.projectId,

@@ -1,1 +1,0 @@
-CREATE INDEX "organizations_installer_github_id_idx" ON "organizations" USING btree ("installer_github_id");

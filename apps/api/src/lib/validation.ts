@@ -12,10 +12,6 @@ const SLUG_PATTERN = /^[a-z0-9]+(?:[-/][a-z0-9]+)*$/;
 // Handle pattern: same as slug but without forward slashes
 const HANDLE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
-// UUID v4 pattern
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 // Provider values
 const VALID_PROVIDERS = ["github", "gitlab"] as const;
 
@@ -95,24 +91,6 @@ export const validateHandle = (
       valid: false,
       error: `${fieldName} must contain only lowercase letters, numbers, and hyphens`,
     };
-  }
-
-  return { valid: true };
-};
-
-/**
- * Validate a UUID
- */
-export const validateUUID = (
-  id: string,
-  fieldName = "id"
-): ValidationResult => {
-  if (!id || typeof id !== "string") {
-    return { valid: false, error: `${fieldName} is required` };
-  }
-
-  if (!UUID_PATTERN.test(id)) {
-    return { valid: false, error: `${fieldName} must be a valid UUID` };
   }
 
   return { valid: true };

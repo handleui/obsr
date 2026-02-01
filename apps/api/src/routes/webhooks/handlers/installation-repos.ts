@@ -1,11 +1,9 @@
-import { eq, inArray } from "drizzle-orm";
-import { createDb } from "../../../db/client";
-import { organizations, projects } from "../../../db/schema";
+import type { ConvexHttpClient } from "convex/browser";
+import { getConvexClient } from "../../../db/convex";
 import { createTokenSecretWithCleanup } from "../../../lib/github-secrets-helper";
 import { captureWebhookError } from "../../../lib/sentry";
 import { createGitHubService } from "../../../services/github";
 import { classifyError } from "../../../services/webhooks/error-classifier";
-import type { DbClient } from "../../../services/webhooks/types";
 import type { Env } from "../../../types/env";
 import type { InstallationRepositoriesPayload, WebhookContext } from "../types";
 import { createTrackedWaitUntil } from "../utils/tracked-background-task";
@@ -17,7 +15,7 @@ import { createTrackedWaitUntil } from "../utils/tracked-background-task";
  * Uses shared helper for API key lifecycle management.
  */
 const autoCreateSecretsForNewRepos = async (
-  db: DbClient,
+  convex: ConvexHttpClient,
   organizationId: string,
   providerAccountLogin: string,
   installationId: string,
@@ -28,7 +26,7 @@ const autoCreateSecretsForNewRepos = async (
   const token = await github.getInstallationToken(Number(installationId));
 
   const result = await createTokenSecretWithCleanup({
-    db,
+    convex,
     organizationId,
     providerAccountLogin,
     providerAccountType: "user",
@@ -62,22 +60,23 @@ export const handleInstallationRepositoriesEvent = async (
     `[installation_repositories] ${action}: installation ${installation.id}, added=${repositories_added.length}, removed=${repositories_removed.length} [delivery: ${deliveryId}]`
   );
 
-  const { db, client } = await createDb(c.env);
+  const convex = getConvexClient(c.env);
 
   try {
     // Find organization by installation ID
-    const orgResult = await db
-      .select({
-        id: organizations.id,
-        slug: organizations.slug,
-        providerAccountType: organizations.providerAccountType,
-        providerAccountLogin: organizations.providerAccountLogin,
-      })
-      .from(organizations)
-      .where(eq(organizations.providerInstallationId, String(installation.id)))
-      .limit(1);
+    const orgs = (await convex.query(
+      "organizations:listByProviderInstallationId",
+      {
+        providerInstallationId: String(installation.id),
+      }
+    )) as Array<{
+      _id: string;
+      slug: string;
+      providerAccountType: "organization" | "user";
+      providerAccountLogin?: string | null;
+    }>;
 
-    const org = orgResult[0];
+    const org = orgs[0];
     if (!org) {
       console.log(
         `[installation_repositories] Organization not found for installation ${installation.id}`
@@ -90,17 +89,17 @@ export const handleInstallationRepositoriesEvent = async (
 
     // Handle added repositories
     if (repositories_added.length > 0) {
-      const projectValues = repositories_added.map((repo) => ({
-        id: crypto.randomUUID(),
-        organizationId: org.id,
-        handle: repo.name.toLowerCase(), // URL-friendly handle defaults to repo name
-        providerRepoId: String(repo.id),
-        providerRepoName: repo.name,
-        providerRepoFullName: repo.full_name,
-        isPrivate: repo.private,
-      }));
-
-      await db.insert(projects).values(projectValues).onConflictDoNothing();
+      await convex.mutation("projects:syncFromGitHub", {
+        organizationId: org._id,
+        repos: repositories_added.map((repo) => ({
+          id: String(repo.id),
+          name: repo.name,
+          fullName: repo.full_name,
+          defaultBranch: repo.default_branch,
+          isPrivate: repo.private,
+        })),
+        syncRemoved: false,
+      });
 
       console.log(
         `[installation_repositories] Created ${repositories_added.length} projects for organization ${org.slug}`
@@ -118,21 +117,14 @@ export const handleInstallationRepositoriesEvent = async (
 
         waitUntilTracked(
           (async () => {
-            const { db: secretDb, client: secretClient } = await createDb(
+            await autoCreateSecretsForNewRepos(
+              getConvexClient(c.env),
+              org._id,
+              org.providerAccountLogin as string,
+              String(installation.id),
+              repositories_added,
               c.env
             );
-            try {
-              await autoCreateSecretsForNewRepos(
-                secretDb,
-                org.id,
-                org.providerAccountLogin as string,
-                String(installation.id),
-                repositories_added,
-                c.env
-              );
-            } finally {
-              await secretClient.end();
-            }
           })(),
           { operation: "auto_create_secrets_new_repos" }
         );
@@ -142,10 +134,10 @@ export const handleInstallationRepositoriesEvent = async (
     // Handle removed repositories (soft-delete) - batch update for performance
     if (repositories_removed.length > 0) {
       const repoIds = repositories_removed.map((repo) => String(repo.id));
-      await db
-        .update(projects)
-        .set({ removedAt: new Date(), updatedAt: new Date() })
-        .where(inArray(projects.providerRepoId, repoIds));
+      await convex.mutation("projects:softDeleteByRepoIds", {
+        providerRepoIds: repoIds,
+        removedAt: Date.now(),
+      });
 
       console.log(
         `[installation_repositories] Soft-deleted ${repositories_removed.length} projects for organization ${org.slug}`
@@ -154,7 +146,7 @@ export const handleInstallationRepositoriesEvent = async (
 
     return c.json({
       message: "installation_repositories processed",
-      organization_id: org.id,
+      organization_id: org._id,
       organization_slug: org.slug,
       projects_added: repositories_added.length,
       projects_removed: repositories_removed.length,
@@ -181,7 +173,5 @@ export const handleInstallationRepositoriesEvent = async (
       },
       500
     );
-  } finally {
-    await client.end();
   }
 };

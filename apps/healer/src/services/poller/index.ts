@@ -1,118 +1,133 @@
-import { sql } from "drizzle-orm";
-import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
+import type { ConvexHttpClient } from "convex/browser";
+import type { FunctionReference } from "convex/server";
 import type { Env } from "../../env.js";
 import { env } from "../../env.js";
+import { createConvexClient } from "../convex-client.js";
 import { getInstallationToken } from "../github/token.js";
 import { executeHeal } from "../heal-executor.js";
 
 const POLL_INTERVAL_MS = 5000;
-const POOL_SIZE = 5;
+const MAX_PATCH_LENGTH = 1_000_000;
+
+const truncate = (value: string | null, maxLength: number): string | null => {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return value.length > maxLength ? value.slice(0, maxLength) : value;
+};
+
+const asQuery = (name: string) => name as unknown as FunctionReference<"query">;
+
+const asMutation = (name: string) =>
+  name as unknown as FunctionReference<"mutation">;
 
 interface HealRow {
   id: string;
   type: string;
   status: string;
-  run_id: string | null;
-  project_id: string;
-  commit_sha: string | null;
-  pr_number: number | null;
-  check_run_id: string | null;
-  user_instructions: string | null;
-  autofix_source: string | null;
-}
-
-interface ProjectRow {
-  id: string;
-  organization_id: string;
-  provider_repo_full_name: string;
-  provider_default_branch: string | null;
+  runId: string | null;
+  projectId: string;
+  commitSha: string | null;
+  prNumber: number | null;
+  checkRunId: string | null;
+  userInstructions: string | null;
+  autofixSource: string | null;
 }
 
 interface RunRow {
   id: string;
-  commit_sha: string | null;
-  head_branch: string | null;
+  commitSha: string | null;
+  headBranch: string | null;
+}
+
+interface ProjectRow {
+  id: string;
+  organizationId: string;
+  providerRepoFullName: string;
+  providerDefaultBranch: string | null;
 }
 
 interface RunErrorRow {
   id: string;
   message: string;
-  file_path: string | null;
+  filePath: string | null;
   line: number | null;
   column: number | null;
   category: string | null;
   severity: string | null;
-  rule_id: string | null;
+  ruleId: string | null;
   source: string | null;
-  stack_trace: string | null;
+  stackTrace: string | null;
 }
 
 interface OrganizationRow {
-  provider_installation_id: string | null;
+  providerInstallationId: string | null;
 }
-
-type Database = NodePgDatabase<Record<string, never>>;
 
 interface PollerState {
   isRunning: boolean;
   activeHealIds: Set<string>;
-  dbPool: Pool | null;
 }
 
 const state: PollerState = {
   isRunning: false,
   activeHealIds: new Set(),
-  dbPool: null,
 };
 
-const createDatabase = (): Database => {
-  if (!env.DATABASE_URL) {
-    throw new Error("DATABASE_URL is required");
-  }
-
-  const pool = new Pool({
-    connectionString: env.DATABASE_URL,
-    max: POOL_SIZE,
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5000,
-  });
-
-  pool.on("error", (err) => {
-    console.error(`[poller] Database pool error: ${err.message}`);
-  });
-
-  state.dbPool = pool;
-  return drizzle(pool);
+const mapConvexHeal = (heal: Record<string, unknown>): HealRow => {
+  return {
+    id: String(heal._id),
+    type: String(heal.type ?? ""),
+    status: String(heal.status ?? ""),
+    runId: (heal.runId as string | undefined) ?? null,
+    projectId: String(heal.projectId ?? ""),
+    commitSha: (heal.commitSha as string | undefined) ?? null,
+    prNumber:
+      typeof heal.prNumber === "number" ? (heal.prNumber as number) : null,
+    checkRunId: (heal.checkRunId as string | undefined) ?? null,
+    userInstructions: (heal.userInstructions as string | undefined) ?? null,
+    autofixSource: (heal.autofixSource as string | undefined) ?? null,
+  };
 };
 
-const fetchPendingHeals = async (db: Database): Promise<HealRow[]> => {
+const fetchPendingHeals = async (
+  convex: ConvexHttpClient
+): Promise<HealRow[]> => {
   const limit = env.MAX_CONCURRENT_HEALS - state.activeHealIds.size;
   if (limit <= 0) {
     return [];
   }
 
-  const result = await db.execute(sql`
-    SELECT id, type, status, run_id, project_id, commit_sha, pr_number, check_run_id, user_instructions, autofix_source
-    FROM heals
-    WHERE type = 'heal' AND status = 'pending'
-    ORDER BY created_at ASC
-    LIMIT ${limit}
-  `);
+  const result = (await convex.query(asQuery("heals:getPending"), {
+    type: "heal",
+    limit,
+  })) as Record<string, unknown>[];
 
-  return result.rows as unknown as HealRow[];
+  return result.map(mapConvexHeal).filter((heal) => {
+    if (!(heal.id && heal.projectId && heal.status && heal.type)) {
+      console.warn("[poller] Skipping heal with missing required fields");
+      return false;
+    }
+    return true;
+  });
 };
 
-const markHealRunning = async (db: Database, healId: string): Promise<void> => {
-  await db.execute(sql`
-    UPDATE heals
-    SET status = 'running', updated_at = NOW()
-    WHERE id = ${healId}
-  `);
+const markHealRunning = async (
+  convex: ConvexHttpClient,
+  healId: string
+): Promise<void> => {
+  await convex.mutation(asMutation("heals:updateStatus"), {
+    id: healId,
+    status: "running",
+  });
 };
 
 const markHealCompleted = async (
-  db: Database,
+  convex: ConvexHttpClient,
   healId: string,
   data: {
     patch: string | null;
@@ -136,90 +151,131 @@ const markHealCompleted = async (
 
   const costUsdCents = Math.round(data.result.costUSD * 100);
 
-  await db.execute(sql`
-    UPDATE heals
-    SET
-      status = 'completed',
-      patch = ${data.patch},
-      files_changed = ${JSON.stringify(data.filesChanged)}::jsonb,
-      heal_result = ${JSON.stringify(healResult)}::jsonb,
-      cost_usd = ${costUsdCents},
-      input_tokens = ${data.result.inputTokens},
-      output_tokens = ${data.result.outputTokens},
-      updated_at = NOW()
-    WHERE id = ${healId}
-  `);
+  await convex.mutation(asMutation("heals:updateStatus"), {
+    id: healId,
+    status: "completed",
+    patch: truncate(data.patch, MAX_PATCH_LENGTH) ?? undefined,
+    filesChanged: data.filesChanged,
+    healResult,
+    costUsd: costUsdCents,
+    inputTokens: data.result.inputTokens,
+    outputTokens: data.result.outputTokens,
+  });
 };
 
 const markHealFailed = async (
-  db: Database,
+  convex: ConvexHttpClient,
   healId: string,
   reason: string
 ): Promise<void> => {
   const truncatedReason =
     reason.length > 2000 ? `${reason.slice(0, 1997)}...` : reason;
 
-  await db.execute(sql`
-    UPDATE heals
-    SET status = 'failed', failed_reason = ${truncatedReason}, updated_at = NOW()
-    WHERE id = ${healId}
-  `);
+  await convex.mutation(asMutation("heals:updateStatus"), {
+    id: healId,
+    status: "failed",
+    failedReason: truncatedReason,
+  });
 };
 
 const fetchProject = async (
-  db: Database,
+  convex: ConvexHttpClient,
   projectId: string
 ): Promise<ProjectRow | null> => {
-  const result = await db.execute(sql`
-    SELECT id, organization_id, provider_repo_full_name, provider_default_branch
-    FROM projects
-    WHERE id = ${projectId}
-    LIMIT 1
-  `);
+  const project = (await convex.query(asQuery("projects:getById"), {
+    id: projectId,
+  })) as Record<string, unknown> | null;
 
-  return (result.rows[0] as unknown as ProjectRow | undefined) ?? null;
+  if (!project) {
+    return null;
+  }
+
+  const organizationId =
+    typeof project.organizationId === "string" ? project.organizationId : null;
+  const providerRepoFullName =
+    typeof project.providerRepoFullName === "string"
+      ? project.providerRepoFullName
+      : null;
+
+  if (!(organizationId && providerRepoFullName)) {
+    return null;
+  }
+
+  return {
+    id: typeof project._id === "string" ? project._id : projectId,
+    organizationId,
+    providerRepoFullName,
+    providerDefaultBranch:
+      typeof project.providerDefaultBranch === "string"
+        ? project.providerDefaultBranch
+        : null,
+  };
 };
 
 const fetchRun = async (
-  db: Database,
+  convex: ConvexHttpClient,
   runId: string
 ): Promise<RunRow | null> => {
-  const result = await db.execute(sql`
-    SELECT id, commit_sha, head_branch
-    FROM runs
-    WHERE id = ${runId}
-    LIMIT 1
-  `);
+  const run = (await convex.query(asQuery("runs:getById"), {
+    id: runId,
+  })) as Record<string, unknown> | null;
 
-  return (result.rows[0] as unknown as RunRow | undefined) ?? null;
+  if (!run) {
+    return null;
+  }
+
+  return {
+    id: typeof run._id === "string" ? run._id : runId,
+    commitSha: typeof run.commitSha === "string" ? run.commitSha : null,
+    headBranch: typeof run.headBranch === "string" ? run.headBranch : null,
+  };
+};
+
+const mapRunError = (error: Record<string, unknown>): RunErrorRow => {
+  return {
+    id: typeof error.id === "string" ? error.id : String(error._id ?? ""),
+    message: typeof error.message === "string" ? error.message : "",
+    filePath: typeof error.filePath === "string" ? error.filePath : null,
+    line: typeof error.line === "number" ? error.line : null,
+    column: typeof error.column === "number" ? error.column : null,
+    category: typeof error.category === "string" ? error.category : null,
+    severity: typeof error.severity === "string" ? error.severity : null,
+    ruleId: typeof error.ruleId === "string" ? error.ruleId : null,
+    source: typeof error.source === "string" ? error.source : null,
+    stackTrace: typeof error.stackTrace === "string" ? error.stackTrace : null,
+  };
 };
 
 const fetchRunErrors = async (
-  db: Database,
+  convex: ConvexHttpClient,
   runId: string
 ): Promise<RunErrorRow[]> => {
-  const result = await db.execute(sql`
-    SELECT id, message, file_path, line, "column", category, severity, rule_id, source, stack_trace
-    FROM run_errors
-    WHERE run_id = ${runId}
-    ORDER BY id
-  `);
+  const result = (await convex.query(asQuery("run-errors:listByRunId"), {
+    runId,
+    limit: 1000,
+  })) as Record<string, unknown>[];
 
-  return result.rows as unknown as RunErrorRow[];
+  return result.map(mapRunError);
 };
 
 const fetchOrganization = async (
-  db: Database,
+  convex: ConvexHttpClient,
   orgId: string
 ): Promise<OrganizationRow | null> => {
-  const result = await db.execute(sql`
-    SELECT provider_installation_id
-    FROM organizations
-    WHERE id = ${orgId}
-    LIMIT 1
-  `);
+  const organization = (await convex.query(asQuery("organizations:getById"), {
+    id: orgId,
+  })) as Record<string, unknown> | null;
 
-  return (result.rows[0] as unknown as OrganizationRow | undefined) ?? null;
+  if (!organization) {
+    return null;
+  }
+
+  return {
+    providerInstallationId:
+      typeof organization.providerInstallationId === "string"
+        ? organization.providerInstallationId
+        : null,
+  };
 };
 
 const GITHUB_API = "https://api.github.com";
@@ -634,16 +690,15 @@ const createCheckRun = async (
 };
 
 const storeCheckRunId = async (
-  db: Database,
+  convex: ConvexHttpClient,
   healId: string,
   checkRunId: number
 ): Promise<void> => {
   try {
-    await db.execute(sql`
-      UPDATE heals
-      SET check_run_id = ${String(checkRunId)}, updated_at = NOW()
-      WHERE id = ${healId}
-    `);
+    await convex.mutation(asMutation("heals:setCheckRunId"), {
+      id: healId,
+      checkRunId: String(checkRunId),
+    });
   } catch (error) {
     console.error(
       `[poller] Failed to store check run ID ${checkRunId} for heal ${healId}:`,
@@ -736,18 +791,18 @@ const formatErrorsForPrompt = (errors: RunErrorRow[]): string => {
   }
 
   const formatted = errors.map((err) => {
-    const location = err.file_path
-      ? `${err.file_path}:${err.line ?? "-"}:${err.column ?? "-"}`
+    const location = err.filePath
+      ? `${err.filePath}:${err.line ?? "-"}:${err.column ?? "-"}`
       : `line ${err.line ?? "-"}:${err.column ?? "-"}`;
 
     let line = `[${err.category ?? "unknown"}] ${location}: ${err.message}`;
 
-    if (err.rule_id || err.source) {
-      line += `\n  Rule: ${err.rule_id ?? "-"} | Source: ${err.source ?? "-"}`;
+    if (err.ruleId || err.source) {
+      line += `\n  Rule: ${err.ruleId ?? "-"} | Source: ${err.source ?? "-"}`;
     }
 
-    if (err.stack_trace) {
-      const stackLines = err.stack_trace.split("\n").slice(0, 10);
+    if (err.stackTrace) {
+      const stackLines = err.stackTrace.split("\n").slice(0, 10);
       line += `\n  Stack trace:\n    ${stackLines.join("\n    ")}`;
     }
 
@@ -798,7 +853,7 @@ const notifyHealCompletion = async (
   }
 
   // Update check run if present (prefer override for newly created check runs)
-  const effectiveCheckRunId = checkRunIdOverride ?? heal.check_run_id;
+  const effectiveCheckRunId = checkRunIdOverride ?? heal.checkRunId;
   if (effectiveCheckRunId) {
     await updateCheckRun(
       appEnv,
@@ -812,23 +867,23 @@ const notifyHealCompletion = async (
   }
 
   // Post PR comment if PR number present
-  if (heal.pr_number) {
+  if (heal.prNumber) {
     await postPrComment(
       appEnv,
       installationId,
       owner,
       repo,
-      heal.pr_number,
+      heal.prNumber,
       prComment
     );
   }
 };
 
 const processHeal = async (
-  db: Database,
+  convex: ConvexHttpClient,
   heal: HealRow,
   appEnv: Env
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: heal processing requires multiple DB queries and GitHub API calls
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: heal processing requires multiple Convex queries and GitHub API calls
 ): Promise<void> => {
   console.log(`[poller] Processing heal ${heal.id}`);
 
@@ -838,33 +893,33 @@ const processHeal = async (
   let newCheckRunId: string | undefined;
 
   try {
-    await markHealRunning(db, heal.id);
+    await markHealRunning(convex, heal.id);
 
-    const project = await fetchProject(db, heal.project_id);
+    const project = await fetchProject(convex, heal.projectId);
     if (!project) {
-      throw new Error(`Project ${heal.project_id} not found`);
+      throw new Error(`Project ${heal.projectId} not found`);
     }
 
-    repoFullName = project.provider_repo_full_name;
-    const org = await fetchOrganization(db, project.organization_id);
+    repoFullName = project.providerRepoFullName;
+    const org = await fetchOrganization(convex, project.organizationId);
 
-    let branch = project.provider_default_branch ?? "main";
+    let branch = project.providerDefaultBranch ?? "main";
     let errors: RunErrorRow[] = [];
 
-    if (heal.run_id) {
+    if (heal.runId) {
       const [run, runErrors] = await Promise.all([
-        fetchRun(db, heal.run_id),
-        fetchRunErrors(db, heal.run_id),
+        fetchRun(convex, heal.runId),
+        fetchRunErrors(convex, heal.runId),
       ]);
       if (run) {
-        branch = run.head_branch ?? branch;
+        branch = run.headBranch ?? branch;
       }
       errors = runErrors;
     }
 
     let token: string | null = null;
-    if (org?.provider_installation_id) {
-      installationId = Number.parseInt(org.provider_installation_id, 10);
+    if (org?.providerInstallationId) {
+      installationId = Number.parseInt(org.providerInstallationId, 10);
       if (!Number.isNaN(installationId)) {
         token = await getInstallationToken(appEnv, installationId);
       }
@@ -874,27 +929,27 @@ const processHeal = async (
     // Non-blocking: if creation fails, heal still proceeds
     // Guard: only create if errors exist to avoid "Working on 0 errors" display
     if (
-      !heal.check_run_id &&
+      !heal.checkRunId &&
       installationId &&
-      heal.commit_sha &&
+      heal.commitSha &&
       errors.length > 0
     ) {
       const [owner, repo] = repoFullName.split("/");
       if (owner && repo) {
         const detailsUrl = `${appEnv.NAVIGATOR_BASE_URL}/dashboard/${project.id}`;
-        const healName = `Detent Heal: ${heal.autofix_source ?? "AI"}`;
+        const healName = `Detent Heal: ${heal.autofixSource ?? "AI"}`;
         const checkRunId = await createCheckRun(
           appEnv,
           installationId,
           owner,
           repo,
-          heal.commit_sha,
+          heal.commitSha,
           healName,
           errors.length,
           detailsUrl
         );
         if (checkRunId) {
-          await storeCheckRunId(db, heal.id, checkRunId);
+          await storeCheckRunId(convex, heal.id, checkRunId);
           // Track the new checkRunId for notifyHealCompletion (avoids mutating heal parameter)
           newCheckRunId = String(checkRunId);
         }
@@ -902,7 +957,7 @@ const processHeal = async (
     }
 
     const { url: repoUrl, masked: maskedRepoUrl } = buildRepoUrl(
-      project.provider_repo_full_name,
+      project.providerRepoFullName,
       token
     );
 
@@ -912,7 +967,7 @@ const processHeal = async (
     // The clear delimiter helps the model distinguish user content from system directives.
     // Additional prompt injection filtering happens at the API layer (issue-comment.ts).
     // We also escape delimiter patterns in user content to prevent breakout attempts.
-    const userInstructions = heal.user_instructions?.trim();
+    const userInstructions = heal.userInstructions?.trim();
     // SECURITY: Escape delimiter patterns that could break out of the ADDITIONAL CONTEXT section.
     // Markdown section breaks (---/===) must start at beginning of line, so a single regex suffices.
     const sanitizedInstructions = userInstructions?.replace(
@@ -933,7 +988,7 @@ const processHeal = async (
     });
 
     if (result.success) {
-      await markHealCompleted(db, heal.id, {
+      await markHealCompleted(convex, heal.id, {
         patch: result.patch,
         filesChanged: result.filesChanged,
         result: result.result,
@@ -952,14 +1007,14 @@ const processHeal = async (
         },
         prComment: formatHealSuccessComment(
           result.filesChanged.length,
-          heal.project_id,
+          heal.projectId,
           appEnv.NAVIGATOR_BASE_URL
         ),
         checkRunIdOverride: newCheckRunId,
       });
     } else {
       const errorMessage = result.error ?? "Heal failed";
-      await markHealFailed(db, heal.id, errorMessage);
+      await markHealFailed(convex, heal.id, errorMessage);
       console.log(`[poller] Heal ${heal.id} failed: ${result.error}`);
 
       await notifyHealCompletion({
@@ -979,7 +1034,7 @@ const processHeal = async (
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[poller] Error processing heal ${heal.id}: ${message}`);
-    await markHealFailed(db, heal.id, message);
+    await markHealFailed(convex, heal.id, message);
 
     await notifyHealCompletion({
       appEnv,
@@ -997,10 +1052,10 @@ const processHeal = async (
   }
 };
 
-const pollLoop = async (db: Database, appEnv: Env): Promise<void> => {
+const pollLoop = async (appEnv: Env): Promise<void> => {
   while (state.isRunning) {
     try {
-      const pendingHeals = await fetchPendingHeals(db);
+      const pendingHeals = await fetchPendingHeals(createConvexClient());
 
       for (const heal of pendingHeals) {
         if (!state.isRunning) {
@@ -1016,7 +1071,7 @@ const pollLoop = async (db: Database, appEnv: Env): Promise<void> => {
         state.activeHealIds.add(heal.id);
 
         // Process asynchronously with proper cleanup
-        processHeal(db, heal, appEnv)
+        processHeal(createConvexClient(), heal, appEnv)
           .catch((err) => {
             // Log unhandled errors from processHeal (shouldn't happen as it has its own try/catch)
             console.error(
@@ -1038,12 +1093,54 @@ const pollLoop = async (db: Database, appEnv: Env): Promise<void> => {
   }
 };
 
-interface StaleHealWithContext {
+interface StaleHealEntry {
   id: string;
-  check_run_id: string | null;
-  provider_repo_full_name: string | null;
-  provider_installation_id: string | null;
+  projectId: string;
+  checkRunId?: string;
 }
+
+interface StaleHealCheckRunContext {
+  installationId: number;
+  owner: string;
+  repo: string;
+  checkRunId: number;
+}
+
+const resolveStaleHealCheckRunContext = async (
+  convex: ConvexHttpClient,
+  heal: StaleHealEntry
+): Promise<StaleHealCheckRunContext | null> => {
+  if (!heal.checkRunId) {
+    return null;
+  }
+
+  const project = await fetchProject(convex, heal.projectId);
+  if (!project?.providerRepoFullName) {
+    return null;
+  }
+
+  const org = await fetchOrganization(convex, project.organizationId);
+  if (!org?.providerInstallationId) {
+    return null;
+  }
+
+  const installationId = Number.parseInt(org.providerInstallationId, 10);
+  if (Number.isNaN(installationId)) {
+    return null;
+  }
+
+  const [owner, repo] = project.providerRepoFullName.split("/");
+  if (!(owner && repo)) {
+    return null;
+  }
+
+  const checkRunId = Number.parseInt(heal.checkRunId, 10);
+  if (Number.isNaN(checkRunId)) {
+    return null;
+  }
+
+  return { installationId, owner, repo, checkRunId };
+};
 
 /**
  * Mark stale heals as failed and update their GitHub check runs.
@@ -1052,33 +1149,18 @@ interface StaleHealWithContext {
  * avoiding N+1 queries (previously: 2N queries for N stale heals).
  */
 const markStaleHealsAsFailed = async (
-  db: Database,
+  convex: ConvexHttpClient,
   appEnv: Env
 ): Promise<void> => {
   try {
-    // Performance: Single query with JOINs fetches all data needed for GitHub updates
-    // This replaces the previous N+1 pattern (fetchProject + fetchOrganization per heal)
-    const result = await db.execute(sql`
-      UPDATE heals h
-      SET
-        status = 'failed',
-        failed_reason = 'Heal timed out',
-        updated_at = NOW()
-      FROM projects p
-      JOIN organizations o ON o.id = p.organization_id
-      WHERE
-        h.project_id = p.id
-        AND h.type = 'heal'
-        AND h.status IN ('pending', 'running')
-        AND h.updated_at < NOW() - INTERVAL '30 minutes'
-      RETURNING
-        h.id,
-        h.check_run_id,
-        p.provider_repo_full_name,
-        o.provider_installation_id
-    `);
-
-    const staleHeals = result.rows as unknown as StaleHealWithContext[];
+    const staleHeals = (await convex.mutation(
+      asMutation("heals:markStaleAsFailed"),
+      {
+        timeoutMinutes: 30,
+        healType: "heal",
+        failedReason: "Heal timed out",
+      }
+    )) as StaleHealEntry[];
 
     if (staleHeals.length === 0) {
       return;
@@ -1086,25 +1168,15 @@ const markStaleHealsAsFailed = async (
 
     console.log(`[poller] Marked ${staleHeals.length} stale heals as failed`);
 
-    // Update GitHub check runs for stale heals to avoid orphaned "in_progress" status
     for (const heal of staleHeals) {
-      if (!heal.check_run_id) {
+      const checkRunContext = await resolveStaleHealCheckRunContext(
+        convex,
+        heal
+      );
+      if (!checkRunContext) {
         continue;
       }
-
-      if (!(heal.provider_installation_id && heal.provider_repo_full_name)) {
-        continue;
-      }
-
-      const installationId = Number.parseInt(heal.provider_installation_id, 10);
-      if (Number.isNaN(installationId)) {
-        continue;
-      }
-
-      const [owner, repo] = heal.provider_repo_full_name.split("/");
-      if (!(owner && repo)) {
-        continue;
-      }
+      const { installationId, owner, repo, checkRunId } = checkRunContext;
 
       try {
         await updateCheckRun(
@@ -1112,7 +1184,7 @@ const markStaleHealsAsFailed = async (
           installationId,
           owner,
           repo,
-          Number.parseInt(heal.check_run_id, 10),
+          checkRunId,
           "failure",
           {
             title: "Healing timed out",
@@ -1121,10 +1193,9 @@ const markStaleHealsAsFailed = async (
         );
 
         console.log(
-          `[poller] Updated stale check run ${heal.check_run_id} for heal ${heal.id}`
+          `[poller] Updated stale check run ${heal.checkRunId} for heal ${heal.id}`
         );
       } catch (error) {
-        // Log but don't fail the overall operation
         console.error(
           `[poller] Failed to update stale check run for heal ${heal.id}: ${error instanceof Error ? error.message : String(error)}`
         );
@@ -1146,12 +1217,11 @@ export const startPoller = async (): Promise<void> => {
   console.log("[poller] Starting...");
 
   try {
-    const db = createDatabase();
     state.isRunning = true;
 
-    await markStaleHealsAsFailed(db, env);
+    await markStaleHealsAsFailed(createConvexClient(), env);
 
-    pollLoop(db, env).catch((err) => {
+    pollLoop(env).catch((err) => {
       console.error(
         `[poller] Fatal error: ${err instanceof Error ? err.message : String(err)}`
       );
@@ -1180,11 +1250,6 @@ export const stopPoller = async (): Promise<void> => {
       `[poller] Waiting for ${state.activeHealIds.size} active heals to complete`
     );
     await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-
-  if (state.dbPool) {
-    await state.dbPool.end();
-    state.dbPool = null;
   }
 
   console.log("[poller] Stopped");

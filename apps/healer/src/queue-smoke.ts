@@ -1,18 +1,110 @@
-import { type SQL, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
+import { ConvexHttpClient } from "convex/browser";
+import type { FunctionReference } from "convex/server";
+
+const securedFunctions = new Set([
+  "api-keys:create",
+  "api-keys:getById",
+  "api-keys:getByKeyHash",
+  "api-keys:listByOrg",
+  "api-keys:updateLastUsedAt",
+  "api-keys:update",
+  "api-keys:remove",
+  "organizations:create",
+  "organizations:getById",
+  "organizations:getBySlug",
+  "organizations:getByProviderAccount",
+  "organizations:getByProviderAccountLogin",
+  "organizations:listByProviderAccountIds",
+  "organizations:listByInstallerGithubId",
+  "organizations:listByEnterprise",
+  "organizations:listByProviderInstallationId",
+  "organizations:list",
+  "organizations:listActiveGithub",
+  "organizations:update",
+  "projects:create",
+  "projects:getById",
+  "projects:listByOrg",
+  "projects:countByOrg",
+  "projects:getByOrgHandle",
+  "projects:getByOrgRepo",
+  "projects:getByRepoFullName",
+  "projects:getByRepoId",
+  "projects:listByRepoIds",
+  "projects:update",
+  "projects:reactivate",
+  "projects:syncFromGitHub",
+  "projects:clearRemovedByOrg",
+  "projects:softDeleteByRepoIds",
+]);
+
+const withServiceToken = (
+  args: Record<string, unknown> | undefined,
+  serviceToken: string
+): Record<string, unknown> => ({
+  ...(args ?? {}),
+  serviceToken,
+});
+
+const createConvexClient = (
+  url: string,
+  serviceToken: string
+): ConvexHttpClient => {
+  const client = new ConvexHttpClient(url);
+  const baseQuery = client.query.bind(client) as unknown as (
+    name: string,
+    args?: Record<string, unknown>
+  ) => Promise<unknown>;
+  client.query = ((name: string, args?: Record<string, unknown>) => {
+    if (!securedFunctions.has(name)) {
+      return baseQuery(name, args);
+    }
+    return baseQuery(
+      name,
+      withServiceToken(
+        args as Record<string, unknown> | undefined,
+        serviceToken
+      )
+    );
+  }) as unknown as ConvexHttpClient["query"];
+
+  const baseMutation = client.mutation.bind(client) as unknown as (
+    name: string,
+    args?: Record<string, unknown>
+  ) => Promise<unknown>;
+  client.mutation = ((name: string, args?: Record<string, unknown>) => {
+    if (!securedFunctions.has(name)) {
+      return baseMutation(name, args);
+    }
+    return baseMutation(
+      name,
+      withServiceToken(
+        args as Record<string, unknown> | undefined,
+        serviceToken
+      )
+    );
+  }) as unknown as ConvexHttpClient["mutation"];
+
+  return client;
+};
 
 interface RunRow {
   id: string;
-  project_id: string | null;
-  commit_sha: string | null;
-  pr_number: number | null;
+  projectId: string | null;
+  commitSha: string | null;
+  prNumber: number | null;
+  receivedAt: number | null;
 }
 
 interface RunErrorRow {
   id: string;
-  signature_id: string | null;
+  signatureId: string | null;
+  fixable: boolean;
 }
+
+const asQuery = (name: string) => name as unknown as FunctionReference<"query">;
+
+const asMutation = (name: string) =>
+  name as unknown as FunctionReference<"mutation">;
 
 const parseNumber = (
   value: string | undefined,
@@ -28,145 +120,147 @@ const parseNumber = (
   return parsed;
 };
 
+const normalizeRun = (run: Record<string, unknown>): RunRow => {
+  return {
+    id: typeof run._id === "string" ? run._id : String(run.id ?? ""),
+    projectId: typeof run.projectId === "string" ? run.projectId : null,
+    commitSha: typeof run.commitSha === "string" ? run.commitSha : null,
+    prNumber: typeof run.prNumber === "number" ? run.prNumber : null,
+    receivedAt: typeof run.receivedAt === "number" ? run.receivedAt : null,
+  };
+};
+
 const fetchRunById = async (
-  db: ReturnType<typeof drizzle>,
+  convex: ConvexHttpClient,
   runId: string
 ): Promise<RunRow | null> => {
-  const result = await db.execute(sql`
-    SELECT id, project_id, commit_sha, pr_number
-    FROM runs
-    WHERE id = ${runId}
-    LIMIT 1
-  `);
-  return (result.rows[0] as RunRow | undefined) ?? null;
+  const result = (await convex.query(asQuery("runs:getById"), {
+    id: runId,
+  })) as Record<string, unknown> | null;
+  if (!result) {
+    return null;
+  }
+  return normalizeRun(result);
 };
 
 const fetchLatestFixableRun = async (
-  db: ReturnType<typeof drizzle>,
+  convex: ConvexHttpClient,
   projectId?: string,
   prNumber?: number
 ): Promise<RunRow | null> => {
-  const conditions: SQL[] = [sql`e.fixable = true`];
+  let runs: Record<string, unknown>[] = [];
   if (projectId) {
-    conditions.push(sql`r.project_id = ${projectId}`);
-  }
-  if (prNumber) {
-    conditions.push(sql`r.pr_number = ${prNumber}`);
+    runs = (await convex.query(asQuery("runs:listByProject"), {
+      projectId,
+      limit: 200,
+    })) as Record<string, unknown>[];
+  } else if (prNumber) {
+    runs = (await convex.query(asQuery("runs:listByPrNumber"), {
+      prNumber,
+      limit: 200,
+    })) as Record<string, unknown>[];
   }
 
-  const result = await db.execute(sql`
-    SELECT r.id, r.project_id, r.commit_sha, r.pr_number
-    FROM runs r
-    JOIN run_errors e ON e.run_id = r.id
-    WHERE ${sql.join(conditions, sql` AND `)}
-    ORDER BY r.received_at DESC
-    LIMIT 1
-  `);
+  const sorted = runs
+    .map(normalizeRun)
+    .sort((a, b) => (b.receivedAt ?? 0) - (a.receivedAt ?? 0));
 
-  return (result.rows[0] as RunRow | undefined) ?? null;
+  for (const run of sorted) {
+    if (!run.id) {
+      continue;
+    }
+    const errors = await fetchRunErrors(convex, run.id);
+    if (errors.some((error) => error.fixable)) {
+      return run;
+    }
+  }
+
+  return null;
 };
 
 const fetchRunErrors = async (
-  db: ReturnType<typeof drizzle>,
+  convex: ConvexHttpClient,
   runId: string
 ): Promise<RunErrorRow[]> => {
-  const result = await db.execute(sql`
-    SELECT id, signature_id
-    FROM run_errors
-    WHERE run_id = ${runId} AND fixable = true
-    ORDER BY id
-  `);
-  return result.rows as unknown as RunErrorRow[];
+  const result = (await convex.query(asQuery("run-errors:listByRunId"), {
+    runId,
+    limit: 1000,
+  })) as Record<string, unknown>[];
+
+  return result.map((error) => ({
+    id: typeof error._id === "string" ? error._id : String(error.id ?? ""),
+    signatureId:
+      typeof error.signatureId === "string" ? error.signatureId : null,
+    fixable: error.fixable === true,
+  }));
 };
 
 const ensureProjectExists = async (
-  db: ReturnType<typeof drizzle>,
+  convex: ConvexHttpClient,
   projectId: string
 ): Promise<void> => {
-  const result = await db.execute(sql`
-    SELECT id
-    FROM projects
-    WHERE id = ${projectId}
-    LIMIT 1
-  `);
-  if (!result.rows[0]) {
+  const result = (await convex.query(asQuery("projects:getById"), {
+    id: projectId,
+  })) as Record<string, unknown> | null;
+  if (!result) {
     throw new Error(`Project ${projectId} not found`);
   }
 };
 
 const main = async (): Promise<void> => {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL is required");
+  const convexUrl = process.env.CONVEX_URL;
+  if (!convexUrl) {
+    throw new Error("CONVEX_URL is required");
+  }
+  const serviceToken = process.env.CONVEX_SERVICE_TOKEN;
+  if (!serviceToken) {
+    throw new Error("CONVEX_SERVICE_TOKEN is required");
   }
 
   const runId = process.env.RUN_ID;
   const projectId = process.env.PROJECT_ID;
   const prNumber = parseNumber(process.env.PR_NUMBER, "PR_NUMBER");
 
-  const pool = new Pool({ connectionString: databaseUrl });
-  const db = drizzle(pool);
-
-  try {
-    const run = runId
-      ? await fetchRunById(db, runId)
-      : await fetchLatestFixableRun(db, projectId, prNumber);
-
-    if (!run?.project_id) {
-      throw new Error("No run found with fixable errors");
-    }
-
-    await ensureProjectExists(db, run.project_id);
-
-    const runErrors = await fetchRunErrors(db, run.id);
-    if (runErrors.length === 0) {
-      throw new Error("Run has no fixable errors");
-    }
-
-    const errorIds = runErrors.map((err) => err.id);
-    const signatureIds = runErrors
-      .map((err) => err.signature_id)
-      .filter((id): id is string => id !== null);
-
-    const healId = crypto.randomUUID();
-    const errorIdsJson = JSON.stringify(errorIds);
-    const signatureIdsJson = signatureIds.length
-      ? JSON.stringify(signatureIds)
-      : null;
-
-    await db.execute(sql`
-      INSERT INTO heals (
-        id,
-        type,
-        status,
-        project_id,
-        run_id,
-        commit_sha,
-        pr_number,
-        error_ids,
-        signature_ids,
-        created_at,
-        updated_at
-      )
-      VALUES (
-        ${healId},
-        'heal',
-        'pending',
-        ${run.project_id},
-        ${run.id},
-        ${run.commit_sha},
-        ${run.pr_number},
-        ${errorIdsJson}::jsonb,
-        ${signatureIdsJson}::jsonb,
-        NOW(),
-        NOW()
-      )
-    `);
-
-    console.log(`Queued heal ${healId} for run ${run.id}`);
-  } finally {
-    await pool.end();
+  // TODO: Add Convex query to find latest fixable run when no identifiers provided.
+  if (!(runId || projectId || prNumber)) {
+    throw new Error("RUN_ID, PROJECT_ID, or PR_NUMBER is required");
   }
+
+  const convex = createConvexClient(convexUrl, serviceToken);
+
+  const run = runId
+    ? await fetchRunById(convex, runId)
+    : await fetchLatestFixableRun(convex, projectId, prNumber);
+
+  if (!run?.projectId) {
+    throw new Error("No run found with fixable errors");
+  }
+
+  await ensureProjectExists(convex, run.projectId);
+
+  const runErrors = await fetchRunErrors(convex, run.id);
+  const fixableErrors = runErrors.filter((error) => error.fixable);
+  if (fixableErrors.length === 0) {
+    throw new Error("Run has no fixable errors");
+  }
+
+  const errorIds = fixableErrors.map((err) => err.id);
+  const signatureIds = fixableErrors
+    .map((err) => err.signatureId)
+    .filter((id): id is string => id !== null);
+
+  const healId = await convex.mutation(asMutation("heals:create"), {
+    type: "heal",
+    status: "pending",
+    projectId: run.projectId,
+    runId: run.id,
+    commitSha: run.commitSha ?? undefined,
+    prNumber: run.prNumber ?? undefined,
+    errorIds,
+    signatureIds,
+  });
+
+  console.log(`Queued heal ${healId} for run ${run.id}`);
 };
 
 main().catch((error) => {

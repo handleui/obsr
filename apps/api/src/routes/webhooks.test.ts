@@ -36,21 +36,12 @@ const mockValues = vi.fn();
 const mockOnConflictDoNothing = vi.fn();
 const mockUpdate = vi.fn();
 const mockSet = vi.fn();
-const mockClientEnd = vi.fn();
+const mockQuery = vi.fn();
+const mockMutation = vi.fn();
+const mockConvex = { query: mockQuery, mutation: mockMutation };
 
-vi.mock("../db/client", () => ({
-  createDb: vi.fn(() =>
-    Promise.resolve({
-      db: {
-        select: mockSelect,
-        insert: mockInsert,
-        update: mockUpdate,
-      },
-      client: {
-        end: mockClientEnd,
-      },
-    })
-  ),
+vi.mock("../db/convex", () => ({
+  getConvexClient: vi.fn(() => mockConvex),
 }));
 
 // Mock GitHub membership verification for autoLinkInstaller admin check
@@ -60,7 +51,7 @@ vi.mock("../lib/github-membership", () => ({
     mockVerifyGitHubMembership(...args),
 }));
 
-// Mock crypto.randomUUID for deterministic organization IDs
+// Mock crypto.randomUUID for deterministic suffixes
 const mockUUID = "test-uuid-1234-5678-9abc-def012345678";
 vi.spyOn(crypto, "randomUUID").mockImplementation(() => mockUUID);
 
@@ -197,6 +188,107 @@ describe("webhooks - installation events", () => {
     // Setup mock chain for update
     mockUpdate.mockReturnValue({ set: mockSet });
     mockSet.mockReturnValue({ where: mockWhere });
+
+    mockQuery.mockReset();
+    mockMutation.mockReset();
+
+    const resolveQueryResult = async (): Promise<unknown> => {
+      const result = mockWhere();
+      if (
+        result &&
+        typeof (result as { limit?: () => unknown }).limit === "function"
+      ) {
+        return await (result as { limit: () => Promise<unknown> }).limit();
+      }
+      if (result && typeof (result as Promise<unknown>).then === "function") {
+        return await (result as Promise<unknown>);
+      }
+      return result;
+    };
+
+    const singleQueryNames = new Set([
+      "organizations:getByProviderAccount",
+      "organizations:getByProviderAccountLogin",
+      "organizations:getBySlug",
+      "organizations:getById",
+      "projects:getByRepoId",
+      "projects:getByRepoFullName",
+      "runs:getLatestByProjectPr",
+    ]);
+
+    const toPageArray = (value: unknown): unknown[] => {
+      if (Array.isArray(value)) {
+        return value;
+      }
+      if (value) {
+        return [value];
+      }
+      return [];
+    };
+
+    mockQuery.mockImplementation(async (name: string) => {
+      const result = await resolveQueryResult();
+      if (singleQueryNames.has(name)) {
+        return Array.isArray(result) ? (result[0] ?? null) : (result ?? null);
+      }
+      if (name === "jobs:paginateByRepoCommit") {
+        const page = toPageArray(result);
+        return { page, isDone: true, continueCursor: "" };
+      }
+      return toPageArray(result);
+    });
+
+    mockMutation.mockImplementation(
+      (name: string, args: Record<string, unknown>) => {
+        if (
+          name.includes(":create") ||
+          name.includes(":createIfMissing") ||
+          name === "projects:syncFromGitHub"
+        ) {
+          mockInsert();
+
+          if (name === "projects:syncFromGitHub") {
+            const repos =
+              (args.repos as Array<{
+                id: string;
+                name: string;
+                fullName: string;
+                isPrivate: boolean;
+                defaultBranch?: string;
+              }>) ?? [];
+
+            mockValues(
+              repos.map((repo) => ({
+                organizationId: args.organizationId,
+                handle: repo.name.toLowerCase(),
+                providerRepoId: String(repo.id),
+                providerRepoName: repo.name,
+                providerRepoFullName: repo.fullName,
+                isPrivate: repo.isPrivate,
+                providerDefaultBranch: repo.defaultBranch ?? null,
+              }))
+            );
+
+            return { added: repos.length, removed: 0, updated: 0 };
+          }
+
+          mockValues(args);
+          return args.id ?? mockUUID;
+        }
+
+        if (
+          name.includes(":update") ||
+          name.includes(":remove") ||
+          name.includes(":softDelete")
+        ) {
+          mockUpdate();
+          mockSet(args);
+          return args.id ?? null;
+        }
+
+        return null;
+      }
+    );
   });
 
   describe("installation.created", () => {
@@ -217,18 +309,19 @@ describe("webhooks - installation events", () => {
 
       // Verify insert was called with correct values
       expect(mockInsert).toHaveBeenCalled();
-      expect(mockValues).toHaveBeenCalledWith({
-        id: mockUUID,
-        name: "test-org",
-        slug: "gh/test-org",
-        provider: "github",
-        providerAccountId: "98765432",
-        providerAccountLogin: "test-org",
-        providerAccountType: "organization",
-        providerInstallationId: "12345678",
-        providerAvatarUrl: "https://avatars.example.com/u/123",
-        installerGithubId: "11111111",
-      });
+      expect(mockValues).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "test-org",
+          slug: "gh/test-org",
+          provider: "github",
+          providerAccountId: "98765432",
+          providerAccountLogin: "test-org",
+          providerAccountType: "organization",
+          providerInstallationId: "12345678",
+          providerAvatarUrl: "https://avatars.example.com/u/123",
+          installerGithubId: "11111111",
+        })
+      );
     });
 
     it("creates organization for User account type", async () => {
@@ -434,7 +527,7 @@ describe("webhooks - installation events", () => {
       // Mock existing organization found
       mockLimit.mockResolvedValueOnce([
         {
-          id: "existing-organization-id",
+          _id: "existing-organization-id",
           slug: "existing-organization",
           settings: {},
         },
@@ -587,8 +680,8 @@ describe("webhooks - installation events", () => {
       expect(mockUpdate).toHaveBeenCalled();
       expect(mockSet).toHaveBeenCalledWith(
         expect.objectContaining({
-          deletedAt: expect.any(Date),
-          updatedAt: expect.any(Date),
+          deletedAt: expect.any(Number),
+          updatedAt: expect.any(Number),
         })
       );
     });
@@ -610,8 +703,8 @@ describe("webhooks - installation events", () => {
       expect(mockUpdate).toHaveBeenCalled();
       expect(mockSet).toHaveBeenCalledWith(
         expect.objectContaining({
-          suspendedAt: expect.any(Date),
-          updatedAt: expect.any(Date),
+          suspendedAt: expect.any(Number),
+          updatedAt: expect.any(Number),
         })
       );
     });
@@ -644,7 +737,7 @@ describe("webhooks - installation events", () => {
       expect(mockSet).toHaveBeenCalledWith(
         expect.objectContaining({
           suspendedAt: null,
-          updatedAt: expect.any(Date),
+          updatedAt: expect.any(Number),
         })
       );
     });
@@ -669,24 +762,6 @@ describe("webhooks - installation events", () => {
         deliveryId: "test-delivery-id",
         account: "test-org",
       });
-    });
-
-    it("closes database connection on success", async () => {
-      const payload = createInstallationPayload("deleted");
-
-      await makeWebhookRequest("installation", payload);
-
-      expect(mockClientEnd).toHaveBeenCalled();
-    });
-
-    it("closes database connection on error", async () => {
-      mockLimit.mockRejectedValueOnce(new Error("Test error"));
-
-      const payload = createInstallationPayload("created");
-
-      await makeWebhookRequest("installation", payload);
-
-      expect(mockClientEnd).toHaveBeenCalled();
     });
   });
 
@@ -787,7 +862,7 @@ describe("webhooks - repository events", () => {
     // Mock finding the existing project
     mockLimit.mockResolvedValueOnce([
       {
-        id: "project-123",
+        _id: "project-123",
         handle: "old-name",
         providerRepoName: "old-name",
         providerRepoFullName: "test-org/old-name",
@@ -823,7 +898,7 @@ describe("webhooks - repository events", () => {
   it("updates project visibility when repository is privatized", async () => {
     mockLimit.mockResolvedValueOnce([
       {
-        id: "project-123",
+        _id: "project-123",
         handle: "my-repo",
         providerRepoName: "my-repo",
         providerRepoFullName: "test-org/my-repo",
@@ -853,7 +928,7 @@ describe("webhooks - repository events", () => {
   it("updates project visibility when repository is publicized", async () => {
     mockLimit.mockResolvedValueOnce([
       {
-        id: "project-123",
+        _id: "project-123",
         handle: "my-repo",
         providerRepoName: "my-repo",
         providerRepoFullName: "test-org/my-repo",
@@ -958,7 +1033,7 @@ describe("webhooks - new_permissions_accepted", () => {
     expect(mockUpdate).toHaveBeenCalled();
     expect(mockSet).toHaveBeenCalledWith(
       expect.objectContaining({
-        updatedAt: expect.any(Date),
+        updatedAt: expect.any(Number),
       })
     );
   });
@@ -1167,8 +1242,8 @@ describe("webhooks - installation.deleted data integrity", () => {
     expect(mockUpdate).toHaveBeenCalled();
     expect(mockSet).toHaveBeenCalledWith(
       expect.objectContaining({
-        deletedAt: expect.any(Date),
-        updatedAt: expect.any(Date),
+        deletedAt: expect.any(Number),
+        updatedAt: expect.any(Number),
       })
     );
   });
@@ -1189,7 +1264,7 @@ describe("webhooks - repository renamed (critical)", () => {
   it("updates providerRepoName and providerRepoFullName on rename", async () => {
     mockLimit.mockResolvedValueOnce([
       {
-        id: "project-uuid-123",
+        _id: "project-uuid-123",
         handle: "original-handle",
         providerRepoName: "old-repo-name",
         providerRepoFullName: "test-org/old-repo-name",
@@ -1223,7 +1298,7 @@ describe("webhooks - repository renamed (critical)", () => {
       expect.objectContaining({
         providerRepoName: "new-repo-name",
         providerRepoFullName: "test-org/new-repo-name",
-        updatedAt: expect.any(Date),
+        updatedAt: expect.any(Number),
       })
     );
   });
@@ -1232,7 +1307,7 @@ describe("webhooks - repository renamed (critical)", () => {
     // User may have customized their project handle - renaming repo should NOT change it
     mockLimit.mockResolvedValueOnce([
       {
-        id: "project-uuid-456",
+        _id: "project-uuid-456",
         handle: "my-custom-handle", // Custom handle that differs from repo name
         providerRepoName: "old-name",
         providerRepoFullName: "test-org/old-name",
@@ -1256,11 +1331,13 @@ describe("webhooks - repository renamed (critical)", () => {
     expect(res.status).toBe(200);
 
     // The update should NOT include handle - handle must be preserved
-    expect(mockSet).toHaveBeenCalledWith({
-      providerRepoName: "new-name",
-      providerRepoFullName: "test-org/new-name",
-      updatedAt: expect.any(Date),
-    });
+    expect(mockSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerRepoName: "new-name",
+        providerRepoFullName: "test-org/new-name",
+        updatedAt: expect.any(Number),
+      })
+    );
 
     // Verify handle is NOT in the update call
     const setCallArgs = mockSet.mock.calls[0]?.[0] as Record<string, unknown>;
@@ -1272,7 +1349,7 @@ describe("webhooks - repository renamed (critical)", () => {
 
     mockLimit.mockResolvedValueOnce([
       {
-        id: existingProjectId,
+        _id: existingProjectId,
         handle: "my-project",
         providerRepoName: "old-name",
         providerRepoFullName: "test-org/old-name",
@@ -1319,7 +1396,7 @@ describe("webhooks - repository transferred", () => {
   it("updates providerRepoFullName on transfer", async () => {
     mockLimit.mockResolvedValueOnce([
       {
-        id: "project-uuid-transfer",
+        _id: "project-uuid-transfer",
         handle: "my-project",
         providerRepoName: "my-repo",
         providerRepoFullName: "old-org/my-repo",
@@ -1348,10 +1425,12 @@ describe("webhooks - repository transferred", () => {
       new_full_name: "new-org/my-repo",
     });
 
-    expect(mockSet).toHaveBeenCalledWith({
-      providerRepoFullName: "new-org/my-repo",
-      updatedAt: expect.any(Date),
-    });
+    expect(mockSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerRepoFullName: "new-org/my-repo",
+        updatedAt: expect.any(Number),
+      })
+    );
   });
 
   it("keeps project linked to original organization after transfer", async () => {
@@ -1359,7 +1438,7 @@ describe("webhooks - repository transferred", () => {
 
     mockLimit.mockResolvedValueOnce([
       {
-        id: originalProjectId,
+        _id: originalProjectId,
         handle: "transferred-project",
         providerRepoName: "repo",
         providerRepoFullName: "original-org/repo",
@@ -1405,7 +1484,7 @@ describe("webhooks - repository visibility changed", () => {
   it("updates isPrivate to true when privatized", async () => {
     mockLimit.mockResolvedValueOnce([
       {
-        id: "project-visibility",
+        _id: "project-visibility",
         handle: "public-repo",
         providerRepoName: "public-repo",
         providerRepoFullName: "test-org/public-repo",
@@ -1434,16 +1513,18 @@ describe("webhooks - repository visibility changed", () => {
       is_private: true,
     });
 
-    expect(mockSet).toHaveBeenCalledWith({
-      isPrivate: true,
-      updatedAt: expect.any(Date),
-    });
+    expect(mockSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isPrivate: true,
+        updatedAt: expect.any(Number),
+      })
+    );
   });
 
   it("updates isPrivate to false when publicized", async () => {
     mockLimit.mockResolvedValueOnce([
       {
-        id: "project-visibility-2",
+        _id: "project-visibility-2",
         handle: "private-repo",
         providerRepoName: "private-repo",
         providerRepoFullName: "test-org/private-repo",
@@ -1472,10 +1553,12 @@ describe("webhooks - repository visibility changed", () => {
       is_private: false,
     });
 
-    expect(mockSet).toHaveBeenCalledWith({
-      isPrivate: false,
-      updatedAt: expect.any(Date),
-    });
+    expect(mockSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isPrivate: false,
+        updatedAt: expect.any(Number),
+      })
+    );
   });
 });
 
@@ -1500,7 +1583,7 @@ describe("webhooks - installation_repositories (add/remove)", () => {
   it("creates new projects when repositories are added", async () => {
     // Mock finding the organization
     mockLimit.mockResolvedValueOnce([
-      { id: "org-uuid-123", slug: "gh/test-org", settings: {} },
+      { _id: "org-uuid-123", slug: "gh/test-org", settings: {} },
     ]);
 
     const payload = {
@@ -1562,7 +1645,7 @@ describe("webhooks - installation_repositories (add/remove)", () => {
 
   it("soft-deletes projects when repositories are removed (sets removedAt)", async () => {
     mockLimit.mockResolvedValueOnce([
-      { id: "org-uuid-456", slug: "gh/test-org", settings: {} },
+      { _id: "org-uuid-456", slug: "gh/test-org", settings: {} },
     ]);
 
     const payload = {
@@ -1600,15 +1683,16 @@ describe("webhooks - installation_repositories (add/remove)", () => {
 
     // Verify soft-delete (update with removedAt) not hard delete
     expect(mockUpdate).toHaveBeenCalled();
-    expect(mockSet).toHaveBeenCalledWith({
-      removedAt: expect.any(Date),
-      updatedAt: expect.any(Date),
-    });
+    expect(mockSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        removedAt: expect.any(Number),
+      })
+    );
   });
 
   it("handles both added and removed in same event", async () => {
     mockLimit.mockResolvedValueOnce([
-      { id: "org-uuid-789", slug: "gh/test-org", settings: {} },
+      { _id: "org-uuid-789", slug: "gh/test-org", settings: {} },
     ]);
 
     const payload = {
@@ -1707,7 +1791,7 @@ describe("webhooks - organization events", () => {
     // Mock finding existing org
     mockLimit.mockResolvedValueOnce([
       {
-        id: "org-uuid-rename",
+        _id: "org-uuid-rename",
         slug: "gh/old-org-name",
         providerAccountLogin: "old-org-name",
       },

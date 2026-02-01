@@ -39,6 +39,7 @@ const createMockEnv = (apiKey = "test-api-key"): Env =>
   ({
     SANDBOX_PROVIDER: "e2b",
     E2B_API_KEY: apiKey,
+    CONVEX_URL: "https://test.convex.cloud",
   }) as Env;
 
 beforeEach(() => {

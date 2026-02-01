@@ -9,15 +9,9 @@
  * - Individual org failures are isolated via Promise.allSettled
  */
 
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
-import { createDb } from "../db/client";
-import {
-  type OrganizationSettings,
-  organizationMembers,
-  organizations,
-  projects,
-} from "../db/schema";
-import { buildCaseExpression } from "../lib/sql-helpers";
+import { getConvexClient } from "../db/convex";
+import { fetchAllPages } from "../lib/convex-pagination";
+import type { OrganizationSettings } from "../lib/org-settings";
 import { createGitHubService } from "../services/github";
 import {
   getLastKnownRateLimit,
@@ -47,189 +41,37 @@ export interface SyncJobResult {
   durationMs: number;
 }
 
-interface GitHubRepo {
-  id: number;
-  name: string;
-  full_name: string;
-  default_branch: string;
-  private: boolean;
-}
-
-interface ProjectSnapshot {
-  id: string;
-  providerRepoId: string;
-  providerRepoName: string;
-  providerRepoFullName: string;
-  isPrivate: boolean;
-  removedAt: Date | null;
-}
-
-type DbClient = Awaited<ReturnType<typeof createDb>>["db"];
-
-/**
- * Process repos that need to be added or reactivated.
- * Uses batch operations to minimize DB round-trips.
- */
-const processReposToAdd = async (
-  db: DbClient,
-  reposToAdd: GitHubRepo[],
-  projectsByRepoId: Map<string, ProjectSnapshot>,
-  organizationId: string
-): Promise<{ added: number; updated: number }> => {
-  // Separate repos into those needing reactivation vs new inserts
-  const toReactivate: Array<{ id: string; repo: GitHubRepo }> = [];
-  const toInsert: GitHubRepo[] = [];
-
-  for (const repo of reposToAdd) {
-    const existing = projectsByRepoId.get(String(repo.id));
-    if (existing?.removedAt) {
-      toReactivate.push({ id: existing.id, repo });
-    } else if (!existing) {
-      toInsert.push(repo);
-    }
-  }
-
-  // Batch reactivate: update all at once using CASE expressions
-  if (toReactivate.length > 0) {
-    const ids = toReactivate.map((r) => r.id);
-
-    await db
-      .update(projects)
-      .set({
-        removedAt: null,
-        providerRepoName: buildCaseExpression(
-          toReactivate.map(({ id, repo }) => ({ id, value: repo.name })),
-          projects.id
-        ),
-        providerRepoFullName: buildCaseExpression(
-          toReactivate.map(({ id, repo }) => ({ id, value: repo.full_name })),
-          projects.id
-        ),
-        providerDefaultBranch: buildCaseExpression(
-          toReactivate.map(({ id, repo }) => ({
-            id,
-            value: repo.default_branch,
-          })),
-          projects.id
-        ),
-        isPrivate: buildCaseExpression(
-          toReactivate.map(({ id, repo }) => ({ id, value: repo.private })),
-          projects.id
-        ),
-        updatedAt: new Date(),
-      })
-      .where(inArray(projects.id, ids));
-  }
-
-  // Batch insert: single INSERT with multiple values
-  if (toInsert.length > 0) {
-    await db.insert(projects).values(
-      toInsert.map((repo) => ({
-        id: crypto.randomUUID(),
-        organizationId,
-        handle: repo.name.toLowerCase(),
-        providerRepoId: String(repo.id),
-        providerRepoName: repo.name,
-        providerRepoFullName: repo.full_name,
-        providerDefaultBranch: repo.default_branch,
-        isPrivate: repo.private,
-      }))
-    );
-  }
-
-  return { added: toInsert.length, updated: toReactivate.length };
-};
-
-/**
- * Update projects that exist in both GitHub and our DB but have changed.
- * Uses batch update with CASE expressions for efficiency.
- */
-const updateChangedProjects = async (
-  db: DbClient,
-  githubRepos: GitHubRepo[],
-  projectsByRepoId: Map<string, ProjectSnapshot>
-): Promise<number> => {
-  // Collect all projects that need updates
-  const toUpdate: Array<{ id: string; repo: GitHubRepo }> = [];
-
-  for (const repo of githubRepos) {
-    const existing = projectsByRepoId.get(String(repo.id));
-    const hasChanges =
-      existing &&
-      !existing.removedAt &&
-      (existing.providerRepoName !== repo.name ||
-        existing.providerRepoFullName !== repo.full_name ||
-        existing.isPrivate !== repo.private);
-
-    if (hasChanges && existing) {
-      toUpdate.push({ id: existing.id, repo });
-    }
-  }
-
-  if (toUpdate.length === 0) {
-    return 0;
-  }
-
-  // Batch update using CASE expressions
-  const ids = toUpdate.map((u) => u.id);
-
-  await db
-    .update(projects)
-    .set({
-      providerRepoName: buildCaseExpression(
-        toUpdate.map(({ id, repo }) => ({ id, value: repo.name })),
-        projects.id
-      ),
-      providerRepoFullName: buildCaseExpression(
-        toUpdate.map(({ id, repo }) => ({ id, value: repo.full_name })),
-        projects.id
-      ),
-      providerDefaultBranch: buildCaseExpression(
-        toUpdate.map(({ id, repo }) => ({ id, value: repo.default_branch })),
-        projects.id
-      ),
-      isPrivate: buildCaseExpression(
-        toUpdate.map(({ id, repo }) => ({ id, value: repo.private })),
-        projects.id
-      ),
-      updatedAt: new Date(),
-    })
-    .where(inArray(projects.id, ids));
-
-  return toUpdate.length;
-};
+type DbClient = ReturnType<typeof getConvexClient>;
 
 /**
  * Sync a single organization's repos with GitHub
  */
 const syncOrganization = async (
-  db: DbClient,
+  convex: DbClient,
   github: ReturnType<typeof createGitHubService>,
   org: {
-    id: string;
+    _id: string;
     slug: string;
     providerInstallationId: string;
-    suspendedAt: Date | null;
+    suspendedAt: number | null;
     providerAccountType: "organization" | "user";
     providerAccountLogin: string;
     settings: OrganizationSettings | null;
   }
 ): Promise<void> => {
   const installationId = Number(org.providerInstallationId);
+  const now = Date.now();
 
   // Check if installation still exists
   const installationInfo = await github.getInstallationInfo(installationId);
 
   if (!installationInfo) {
-    // Installation was removed - mark organization as deleted
-    await db
-      .update(organizations)
-      .set({
-        deletedAt: new Date(),
-        lastSyncedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(organizations.id, org.id));
+    await convex.mutation("organizations:update", {
+      id: org._id,
+      deletedAt: now,
+      lastSyncedAt: now,
+      updatedAt: now,
+    });
 
     console.log(
       `[sync-job] Installation removed for ${org.slug}, marked as deleted`
@@ -242,167 +84,107 @@ const syncOrganization = async (
   const isSuspended = Boolean(installationInfo.suspended_at);
 
   if (wasSuspended !== isSuspended) {
-    await db
-      .update(organizations)
-      .set({
-        suspendedAt: isSuspended
-          ? new Date(installationInfo.suspended_at as string)
-          : null,
-        updatedAt: new Date(),
-      })
-      .where(eq(organizations.id, org.id));
+    await convex.mutation("organizations:update", {
+      id: org._id,
+      suspendedAt: isSuspended
+        ? new Date(installationInfo.suspended_at as string).getTime()
+        : null,
+      updatedAt: now,
+    });
   }
 
   // Get current repos from GitHub and reconcile with our projects
   const githubRepos = await github.getInstallationRepos(installationId);
-  const githubRepoIds = new Set(githubRepos.map((r) => String(r.id)));
-
-  // Get our current projects
-  const ourProjects = await db
-    .select({
-      id: projects.id,
-      providerRepoId: projects.providerRepoId,
-      providerRepoName: projects.providerRepoName,
-      providerRepoFullName: projects.providerRepoFullName,
-      isPrivate: projects.isPrivate,
-      removedAt: projects.removedAt,
-    })
-    .from(projects)
-    .where(eq(projects.organizationId, org.id));
-
-  const ourProjectsByRepoId = new Map(
-    ourProjects.map((p) => [p.providerRepoId, p])
-  );
-
-  // Find repos to add (in GitHub but not in our DB or were soft-deleted)
-  const reposToAdd = githubRepos.filter((repo) => {
-    const existing = ourProjectsByRepoId.get(String(repo.id));
-    return !existing || existing.removedAt;
+  await convex.mutation("projects:syncFromGitHub", {
+    organizationId: org._id,
+    repos: githubRepos.map((repo) => ({
+      id: String(repo.id),
+      name: repo.name,
+      fullName: repo.full_name,
+      defaultBranch: repo.default_branch,
+      isPrivate: repo.private,
+    })),
+    syncRemoved: true,
   });
-
-  // Process repos to add/reactivate
-  if (reposToAdd.length > 0) {
-    await processReposToAdd(db, reposToAdd, ourProjectsByRepoId, org.id);
-  }
-
-  // Find repos to remove (in our DB but no longer in GitHub)
-  const projectsToRemove = ourProjects.filter(
-    (p) => !(p.removedAt || githubRepoIds.has(p.providerRepoId))
-  );
-
-  if (projectsToRemove.length > 0) {
-    const idsToRemove = projectsToRemove.map((p) => p.id);
-    await db
-      .update(projects)
-      .set({ removedAt: new Date(), updatedAt: new Date() })
-      .where(inArray(projects.id, idsToRemove));
-  }
-
-  // Update projects that exist in both (check for name/visibility changes)
-  await updateChangedProjects(db, githubRepos, ourProjectsByRepoId);
 
   // Member reconciliation - demote stale members to visitor
   if (org.providerAccountType === "organization" && org.providerAccountLogin) {
-    // Get current GitHub org members
     const githubMembers = await github.getOrgMembers(
       installationId,
       org.providerAccountLogin
     );
     const githubUserIds = new Set(githubMembers.map((m) => String(m.id)));
 
-    // Only consider auto-joined members (not manual invites)
-    // Security: Exclude owners (should not be auto-demoted) and visitors (no change needed)
-    const autoMembers = await db
-      .select({
-        id: organizationMembers.id,
-        providerUserId: organizationMembers.providerUserId,
-      })
-      .from(organizationMembers)
-      .where(
-        and(
-          eq(organizationMembers.organizationId, org.id),
-          isNotNull(organizationMembers.providerUserId),
-          isNull(organizationMembers.removedAt),
-          // Only auto-joined sources (not manual_invite or installer)
-          inArray(organizationMembers.membershipSource, [
-            "github_sync",
-            "github_webhook",
-            "github_access",
-          ]),
-          // Security: Never demote owners automatically
-          // Exclude visitors (no change needed)
-          inArray(organizationMembers.role, ["member", "admin"])
-        )
-      );
+    const detentMembers = await fetchAllPages<{
+      _id: string;
+      providerUserId?: string | null;
+      membershipSource?: string | null;
+      role?: string | null;
+      removedAt?: number | null;
+    }>(convex, "organization-members:paginateByOrg", {
+      organizationId: org._id,
+      includeRemoved: true,
+    });
+
+    const autoMembers = detentMembers.filter(
+      (member) =>
+        !member.removedAt &&
+        member.providerUserId &&
+        (member.membershipSource === "github_sync" ||
+          member.membershipSource === "github_webhook" ||
+          member.membershipSource === "github_access") &&
+        (member.role === "member" || member.role === "admin")
+    );
 
     const staleMembers = autoMembers.filter(
-      (m) => m.providerUserId && !githubUserIds.has(m.providerUserId)
+      (member) =>
+        member.providerUserId && !githubUserIds.has(member.providerUserId)
     );
 
     if (staleMembers.length > 0) {
-      await db
-        .update(organizationMembers)
-        .set({
+      for (const member of staleMembers) {
+        await convex.mutation("organization-members:update", {
+          id: member._id,
           role: "visitor",
-          updatedAt: new Date(),
-        })
-        .where(
-          inArray(
-            organizationMembers.id,
-            staleMembers.map((m) => m.id)
-          )
-        );
+          updatedAt: now,
+        });
+      }
       console.log(
         `[sync-job] Demoted ${staleMembers.length} members to visitor in ${org.slug}`
       );
     }
 
-    // Verify manual_invite members who ARE in GitHub org
-    // This upgrades them to github_sync so they're subject to future sync
-    // Note: installers stay protected (they were trusted at install time)
-    const manualMembers = await db
-      .select({
-        id: organizationMembers.id,
-        providerUserId: organizationMembers.providerUserId,
-      })
-      .from(organizationMembers)
-      .where(
-        and(
-          eq(organizationMembers.organizationId, org.id),
-          isNotNull(organizationMembers.providerUserId),
-          isNull(organizationMembers.removedAt),
-          eq(organizationMembers.membershipSource, "manual_invite")
-        )
-      );
+    const manualMembers = detentMembers.filter(
+      (member) =>
+        !member.removedAt &&
+        member.providerUserId &&
+        member.membershipSource === "manual_invite"
+    );
 
     const verifiableMembers = manualMembers.filter(
-      (m) => m.providerUserId && githubUserIds.has(m.providerUserId)
+      (member) =>
+        member.providerUserId && githubUserIds.has(member.providerUserId)
     );
 
     if (verifiableMembers.length > 0) {
-      await db
-        .update(organizationMembers)
-        .set({
+      for (const member of verifiableMembers) {
+        await convex.mutation("organization-members:update", {
+          id: member._id,
           membershipSource: "github_sync",
-          updatedAt: new Date(),
-        })
-        .where(
-          inArray(
-            organizationMembers.id,
-            verifiableMembers.map((m) => m.id)
-          )
-        );
+          updatedAt: now,
+        });
+      }
       console.log(
         `[sync-job] Verified ${verifiableMembers.length} manual members in ${org.slug}`
       );
     }
   }
 
-  // Update lastSyncedAt
-  await db
-    .update(organizations)
-    .set({ lastSyncedAt: new Date(), updatedAt: new Date() })
-    .where(eq(organizations.id, org.id));
+  await convex.mutation("organizations:update", {
+    id: org._id,
+    lastSyncedAt: now,
+    updatedAt: now,
+  });
 };
 
 /**
@@ -472,109 +254,88 @@ export const syncAllOrganizations = async (
   env: Env
 ): Promise<SyncJobResult> => {
   const startTime = Date.now();
-  const { db, client } = await createDb(env);
+  const convex = getConvexClient(env);
 
-  try {
-    // Query all active GitHub orgs with app installed, ordered by lastSyncedAt (oldest first)
-    const allActiveOrgs = await db
-      .select({
-        id: organizations.id,
-        slug: organizations.slug,
-        providerInstallationId: organizations.providerInstallationId,
-        suspendedAt: organizations.suspendedAt,
-        providerAccountType: organizations.providerAccountType,
-        providerAccountLogin: organizations.providerAccountLogin,
-        settings: organizations.settings,
-      })
-      .from(organizations)
-      .where(
-        and(
-          eq(organizations.provider, "github"),
-          isNull(organizations.deletedAt),
-          isNull(organizations.suspendedAt),
-          isNotNull(organizations.providerInstallationId)
-        )
-      )
-      .orderBy(organizations.lastSyncedAt);
+  // Query all active GitHub orgs with app installed, ordered by lastSyncedAt (oldest first)
+  const allActiveOrgs = (await convex.query("organizations:listActiveGithub", {
+    limit: 5000,
+  })) as Array<{
+    _id: string;
+    slug: string;
+    providerInstallationId: string;
+    suspendedAt: number | null;
+    providerAccountType: "organization" | "user";
+    providerAccountLogin: string;
+    settings: OrganizationSettings | null;
+  }>;
 
-    // Limit orgs per run to stay within CPU limits
-    const skipped = Math.max(0, allActiveOrgs.length - MAX_ORGS_PER_RUN);
-    const activeOrgs = allActiveOrgs.slice(0, MAX_ORGS_PER_RUN);
+  // Limit orgs per run to stay within CPU limits
+  const skipped = Math.max(0, allActiveOrgs.length - MAX_ORGS_PER_RUN);
+  const activeOrgs = allActiveOrgs.slice(0, MAX_ORGS_PER_RUN);
 
-    console.log(
-      `[sync-job] Starting sync for ${activeOrgs.length} organizations` +
-        (skipped > 0 ? ` (${skipped} deferred to next run)` : "") +
-        "..."
-    );
+  console.log(
+    `[sync-job] Starting sync for ${activeOrgs.length} organizations` +
+      (skipped > 0 ? ` (${skipped} deferred to next run)` : "") +
+      "..."
+  );
 
-    if (activeOrgs.length === 0) {
-      return {
-        synced: 0,
-        failed: 0,
-        skipped: 0,
-        errors: [],
-        durationMs: Date.now() - startTime,
-      };
-    }
-
-    const github = createGitHubService(env);
-
-    // Process orgs in batches with delay between batches
-    const results = await processBatch(
-      activeOrgs as Array<{
-        id: string;
-        slug: string;
-        providerInstallationId: string;
-        suspendedAt: Date | null;
-        providerAccountType: "organization" | "user";
-        providerAccountLogin: string;
-        settings: OrganizationSettings | null;
-      }>,
-      BATCH_SIZE,
-      BATCH_DELAY_MS,
-      async (org) => {
-        // Check rate limit headroom before each org
-        if (!hasRateLimitHeadroom()) {
-          const rateLimit = getLastKnownRateLimit();
-          throw new Error(
-            `Rate limit low (${rateLimit?.remaining ?? "?"} remaining), skipping to preserve quota`
-          );
-        }
-        await syncOrganization(db, github, org);
-        console.log(`[sync-job] Completed sync for ${org.slug}`);
-      }
-    );
-
-    const synced = results.filter((r) => !r.error).length;
-    const failed = results.filter((r) => r.error).length;
-    const errors = results
-      .filter((r) => r.error)
-      .map((r) => `${r.item.slug}: ${r.error?.message}`);
-
-    // Get final rate limit state for observability
-    const finalRateLimit = getLastKnownRateLimit();
-    const durationMs = Date.now() - startTime;
-
-    if (errors.length > 0) {
-      console.error("[sync-job] Errors:", errors);
-    }
-
-    console.log(
-      `[sync-job] Finished in ${durationMs}ms: ${synced} synced, ${failed} failed, ${skipped} deferred` +
-        (finalRateLimit
-          ? `, rate limit: ${finalRateLimit.remaining}/${finalRateLimit.limit}`
-          : "")
-    );
-
+  if (activeOrgs.length === 0) {
     return {
-      synced,
-      failed,
-      skipped,
-      errors,
-      rateLimitRemaining: finalRateLimit?.remaining,
-      durationMs,
+      synced: 0,
+      failed: 0,
+      skipped: 0,
+      errors: [],
+      durationMs: Date.now() - startTime,
     };
-  } finally {
-    await client.end();
   }
+
+  const github = createGitHubService(env);
+
+  // Process orgs in batches with delay between batches
+  const results = await processBatch(
+    activeOrgs,
+    BATCH_SIZE,
+    BATCH_DELAY_MS,
+    async (org) => {
+      // Check rate limit headroom before each org
+      if (!hasRateLimitHeadroom()) {
+        const rateLimit = getLastKnownRateLimit();
+        throw new Error(
+          `Rate limit low (${rateLimit?.remaining ?? "?"} remaining), skipping to preserve quota`
+        );
+      }
+      await syncOrganization(convex, github, org);
+      console.log(`[sync-job] Completed sync for ${org.slug}`);
+    }
+  );
+
+  const synced = results.filter((r) => !r.error).length;
+  const failed = results.filter((r) => r.error).length;
+  const errors = results
+    .filter((r) => r.error)
+    .map((r) => `${r.item.slug}: ${r.error?.message}`);
+
+  // Get final rate limit state for observability
+  const finalRateLimit = getLastKnownRateLimit();
+  const durationMs = Date.now() - startTime;
+
+  if (errors.length > 0) {
+    console.error("[sync-job] Errors:", errors);
+  }
+
+  console.log(
+    `[sync-job] Finished in ${durationMs}ms: ${synced} synced, ${failed} failed, ${skipped} deferred` +
+      (finalRateLimit
+        ? `, rate limit: ${finalRateLimit.remaining}/${finalRateLimit.limit}`
+        : "")
+  );
+
+  return {
+    synced,
+    failed,
+    skipped,
+    errors,
+    rateLimitRemaining: finalRateLimit?.remaining,
+    durationMs,
+  };
 };

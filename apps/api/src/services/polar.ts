@@ -71,15 +71,17 @@ export const createPolarCustomer = async (
 
 export const getCustomerByExternalId = async (
   polar: Polar,
-  polarOrgId: string,
   externalId: string
 ): Promise<PolarCustomer | null> => {
-  const result = await polar.customers.list({
-    organizationId: polarOrgId,
-    query: externalId,
-  });
-  const customer = result.result.items.find((c) => c.externalId === externalId);
-  return (customer as PolarCustomer) ?? null;
+  try {
+    const customer = await polar.customers.getExternal({ externalId });
+    return customer as PolarCustomer;
+  } catch (error) {
+    if (error instanceof ResourceNotFound) {
+      return null;
+    }
+    throw error;
+  }
 };
 
 // ============================================================================

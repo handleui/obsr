@@ -1,1 +1,0 @@
-ALTER TABLE "heals" ADD COLUMN "check_run_id" varchar(64);

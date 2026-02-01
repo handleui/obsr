@@ -74,6 +74,7 @@ export interface InstallationPayload {
     name: string;
     full_name: string;
     private: boolean;
+    default_branch?: string;
   }>;
 }
 
@@ -92,12 +93,14 @@ export interface InstallationRepositoriesPayload {
     name: string;
     full_name: string;
     private: boolean;
+    default_branch?: string;
   }>;
   repositories_removed: Array<{
     id: number;
     name: string;
     full_name: string;
     private: boolean;
+    default_branch?: string;
   }>;
 }
 

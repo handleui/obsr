@@ -1,1 +1,0 @@
-ALTER TABLE "heals" ADD COLUMN "user_instructions" text;

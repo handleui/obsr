@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/detentsh/detent/compare/diagnostics-v1.1.0...diagnostics-v1.1.1) (2026-02-01)
+
+
+### Bug Fixes
+
+* consolidate error hints into single field ([#152](https://github.com/detentsh/detent/issues/152)) ([00ff56b](https://github.com/detentsh/detent/commit/00ff56b28457057ede704cfc95f11693998e77bd))
+
 ## [1.1.0](https://github.com/detentsh/detent/compare/diagnostics-v1.0.0...diagnostics-v1.1.0) (2026-01-27)
 
 

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockEnv } from "../test-helpers/mock-env";
+import type { Env } from "../types/env";
 
 // ============================================================================
 // Mocks
@@ -26,6 +27,13 @@ vi.mock("./polar", () => ({
 // Test Setup
 // ============================================================================
 
+const createBillingEnv = (overrides: Partial<Env> = {}): Env =>
+  createMockEnv({
+    POLAR_ACCESS_TOKEN: "polar_test_token",
+    POLAR_ORGANIZATION_ID: "polar_org_123",
+    ...overrides,
+  });
+
 // Helper to get billing functions with fresh imports
 const getBilling = async () => import("./billing");
 
@@ -48,7 +56,7 @@ describe("billing service", () => {
   describe("recordUsage - BYOK behavior", () => {
     it("skips recording when byok=true for AI usage", async () => {
       const { recordUsage } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       await recordUsage(
         env,
@@ -74,7 +82,7 @@ describe("billing service", () => {
 
     it("records sandbox usage even when byok=true (byok only applies to AI)", async () => {
       const { recordUsage } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       await recordUsage(
         env,
@@ -97,7 +105,7 @@ describe("billing service", () => {
 
     it("records AI usage when byok=false", async () => {
       const { recordUsage } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       await recordUsage(
         env,
@@ -129,7 +137,7 @@ describe("billing service", () => {
   describe("recordUsage - metadata building", () => {
     it("builds correct local metadata for AI usage", async () => {
       const { recordUsage } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       await recordUsage(
         env,
@@ -164,7 +172,7 @@ describe("billing service", () => {
 
     it("builds correct local metadata for sandbox usage", async () => {
       const { recordUsage } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       await recordUsage(
         env,
@@ -191,7 +199,7 @@ describe("billing service", () => {
 
     it("builds correct Polar metadata for AI usage with unified event name", async () => {
       const { recordUsage } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       await recordUsage(
         env,
@@ -231,7 +239,7 @@ describe("billing service", () => {
 
     it("builds correct Polar metadata for sandbox usage", async () => {
       const { recordUsage } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       await recordUsage(
         env,
@@ -272,7 +280,7 @@ describe("billing service", () => {
   describe("canRunHeal", () => {
     it("allows heal when POLAR_ACCESS_TOKEN is not configured (dev mode)", async () => {
       const { canRunHeal } = await getBilling();
-      const env = createMockEnv({ POLAR_ACCESS_TOKEN: undefined });
+      const env = createBillingEnv({ POLAR_ACCESS_TOKEN: undefined });
 
       const result = await canRunHeal(env, "org-123");
 
@@ -283,7 +291,7 @@ describe("billing service", () => {
 
     it("denies heal when organization is not found", async () => {
       const { canRunHeal } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
       mockQuery.mockImplementation((name: string) => {
         if (name === "organizations:getById") {
           return Promise.resolve(null);
@@ -301,7 +309,7 @@ describe("billing service", () => {
 
     it("denies heal when customer not found in Polar", async () => {
       const { canRunHeal } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
       mockQuery.mockImplementation((name: string) => {
         if (name === "organizations:getById") {
           return Promise.resolve({ _id: "org-123", name: "Test Org" });
@@ -320,7 +328,7 @@ describe("billing service", () => {
 
     it("allows heal when customer has active subscription", async () => {
       const { canRunHeal } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
       mockQuery.mockImplementation((name: string) => {
         if (name === "organizations:getById") {
           return Promise.resolve({ _id: "org-123", name: "Test Org" });
@@ -339,7 +347,7 @@ describe("billing service", () => {
 
     it("allows heal when customer has meter credits", async () => {
       const { canRunHeal } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
       mockQuery.mockImplementation((name: string) => {
         if (name === "organizations:getById") {
           return Promise.resolve({ _id: "org-123", name: "Test Org" });
@@ -358,7 +366,7 @@ describe("billing service", () => {
 
     it("denies heal when no active subscription and no credits", async () => {
       const { canRunHeal } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
       mockQuery.mockImplementation((name: string) => {
         if (name === "organizations:getById") {
           return Promise.resolve({ _id: "org-123", name: "Test Org" });
@@ -386,7 +394,7 @@ describe("billing service", () => {
   describe("getCreditUsageSummary", () => {
     it("handles division by zero when total cost is 0", async () => {
       const { getCreditUsageSummary } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
         if (name === "usage-events:listByOrgSince") {
@@ -404,7 +412,7 @@ describe("billing service", () => {
 
     it("calculates correct percentages for mixed usage", async () => {
       const { getCreditUsageSummary } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
         if (name === "usage-events:listByOrgSince") {
@@ -436,7 +444,7 @@ describe("billing service", () => {
 
     it("handles empty aggregate result gracefully", async () => {
       const { getCreditUsageSummary } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
         if (name === "usage-events:listByOrgSince") {
@@ -461,7 +469,7 @@ describe("billing service", () => {
   describe("retryFailedPolarIngestions", () => {
     it("returns zeros when no failed events exist", async () => {
       const { retryFailedPolarIngestions } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
       mockQuery.mockImplementation((name: string) => {
         if (name === "usage-events:listByPolarIngested") {
           return Promise.resolve([]);
@@ -477,7 +485,7 @@ describe("billing service", () => {
 
     it("batches events by organization for efficient ingestion", async () => {
       const { retryFailedPolarIngestions } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
         if (name === "usage-events:listByPolarIngested") {
@@ -540,7 +548,7 @@ describe("billing service", () => {
 
     it("continues processing other orgs when one org fails", async () => {
       const { retryFailedPolarIngestions } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
         if (name === "usage-events:listByPolarIngested") {
@@ -589,7 +597,7 @@ describe("billing service", () => {
 
     it("builds retry metadata correctly for AI events", async () => {
       const { retryFailedPolarIngestions } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
         if (name === "usage-events:listByPolarIngested") {
@@ -628,7 +636,7 @@ describe("billing service", () => {
 
     it("builds retry metadata correctly for sandbox events", async () => {
       const { retryFailedPolarIngestions } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
         if (name === "usage-events:listByPolarIngested") {
@@ -664,7 +672,7 @@ describe("billing service", () => {
 
     it("handles missing metadata fields with defaults", async () => {
       const { retryFailedPolarIngestions } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
         if (name === "usage-events:listByPolarIngested") {
@@ -703,7 +711,7 @@ describe("billing service", () => {
   describe("getUsageSummary", () => {
     it("returns zero runs when org has no projects", async () => {
       const { getUsageSummary } = await getBilling();
-      const env = createMockEnv();
+      const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
         if (name === "projects:listByOrg") {

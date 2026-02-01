@@ -21,6 +21,7 @@ const securedFunctions = new Set([
   "organizations:list",
   "organizations:listActiveGithub",
   "organizations:update",
+  "organization-members:updateRole",
   "projects:create",
   "projects:getById",
   "projects:listByOrg",

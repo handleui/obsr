@@ -27,6 +27,10 @@ beforeAll(async () => {
   app = module.default;
 });
 
+beforeEach(() => {
+  queryQueue.clear();
+});
+
 // Mock the database client - defined before vi.mock to ensure proper closure capture
 const mockSelect = vi.fn();
 const mockFrom = vi.fn();
@@ -40,6 +44,16 @@ const mockSet = vi.fn();
 const mockQuery = vi.fn();
 const mockMutation = vi.fn();
 const mockConvex = { query: mockQuery, mutation: mockMutation };
+
+const queryQueue = new Map<string, unknown[]>();
+const queueQueryResult = (name: string, ...results: unknown[]): void => {
+  const existing = queryQueue.get(name) ?? [];
+  existing.push(...results);
+  queryQueue.set(name, existing);
+};
+const setQueryResult = (name: string, result: unknown): void => {
+  queryQueue.set(name, [result]);
+};
 
 vi.mock("../db/convex", () => ({
   getConvexClient: vi.fn(() => mockConvex),
@@ -189,6 +203,7 @@ describe("webhooks - installation events", () => {
 
     mockQuery.mockReset();
     mockMutation.mockReset();
+    queryQueue.clear();
 
     const resolveQueryResult = async (): Promise<unknown> => {
       const result = mockWhere();
@@ -225,6 +240,10 @@ describe("webhooks - installation events", () => {
     };
 
     mockQuery.mockImplementation(async (name: string) => {
+      const queued = queryQueue.get(name);
+      if (queued && queued.length > 0) {
+        return queued.shift();
+      }
       const result = await resolveQueryResult();
       if (singleQueryNames.has(name)) {
         return Array.isArray(result) ? (result[0] ?? null) : (result ?? null);
@@ -375,25 +394,13 @@ describe("webhooks - installation events", () => {
     // before granting owner role (for organizations, not personal accounts)
 
     it("auto-links installer as owner when they are a GitHub admin", async () => {
-      // Mock: installer already has a Detent account (found by providerUserId)
-      let queryCount = 0;
-      mockWhere.mockImplementation(() => {
-        queryCount++;
-        if (queryCount === 3) {
-          // Query 3: slug lookup (returns empty - no collision)
-          return Promise.resolve([]);
-        }
-        return { limit: mockLimit };
-      });
-
-      // Query 1: no existing org by account
-      mockLimit.mockResolvedValueOnce([]);
-      // Query 2: no existing org by installation
-      mockLimit.mockResolvedValueOnce([]);
-      // Query 4: autoLinkInstaller - find existing user by providerUserId
-      mockLimit.mockResolvedValueOnce([{ userId: "existing-detent-user" }]);
-      // Query 5: autoLinkInstaller - check if already member of this org
-      mockLimit.mockResolvedValueOnce([]);
+      setQueryResult("organizations:getByProviderAccount", null);
+      setQueryResult("organizations:listByProviderInstallationId", []);
+      setQueryResult("organizations:getBySlug", null);
+      setQueryResult("organization-members:listByProviderUserId", [
+        { userId: "existing-detent-user" },
+      ]);
+      setQueryResult("organization-members:getByOrgUser", null);
 
       // Mock: installer is a GitHub admin
       mockVerifyGitHubMembership.mockResolvedValueOnce({
@@ -430,23 +437,13 @@ describe("webhooks - installation events", () => {
     });
 
     it("does NOT auto-link installer when they are only a GitHub member (not admin)", async () => {
-      let queryCount = 0;
-      mockWhere.mockImplementation(() => {
-        queryCount++;
-        if (queryCount === 3) {
-          return Promise.resolve([]);
-        }
-        return { limit: mockLimit };
-      });
-
-      // Query 1: no existing org by account
-      mockLimit.mockResolvedValueOnce([]);
-      // Query 2: no existing org by installation
-      mockLimit.mockResolvedValueOnce([]);
-      // Query 4: autoLinkInstaller - find existing user by providerUserId
-      mockLimit.mockResolvedValueOnce([{ userId: "existing-detent-user" }]);
-      // Query 5: autoLinkInstaller - check if already member of this org
-      mockLimit.mockResolvedValueOnce([]);
+      setQueryResult("organizations:getByProviderAccount", null);
+      setQueryResult("organizations:listByProviderInstallationId", []);
+      setQueryResult("organizations:getBySlug", null);
+      setQueryResult("organization-members:listByProviderUserId", [
+        { userId: "existing-detent-user" },
+      ]);
+      setQueryResult("organization-members:getByOrgUser", null);
 
       // Mock: installer is only a GitHub member (not admin)
       mockVerifyGitHubMembership.mockResolvedValueOnce({
@@ -479,23 +476,13 @@ describe("webhooks - installation events", () => {
 
     it("auto-links installer for personal accounts WITHOUT admin verification", async () => {
       // Personal accounts don't have membership - installer is owner by definition
-      let queryCount = 0;
-      mockWhere.mockImplementation(() => {
-        queryCount++;
-        if (queryCount === 3) {
-          return Promise.resolve([]);
-        }
-        return { limit: mockLimit };
-      });
-
-      // Query 1: no existing org by account
-      mockLimit.mockResolvedValueOnce([]);
-      // Query 2: no existing org by installation
-      mockLimit.mockResolvedValueOnce([]);
-      // Query 4: autoLinkInstaller - find existing user by providerUserId
-      mockLimit.mockResolvedValueOnce([{ userId: "existing-detent-user" }]);
-      // Query 5: autoLinkInstaller - check if already member of this org
-      mockLimit.mockResolvedValueOnce([]);
+      setQueryResult("organizations:getByProviderAccount", null);
+      setQueryResult("organizations:listByProviderInstallationId", []);
+      setQueryResult("organizations:getBySlug", null);
+      setQueryResult("organization-members:listByProviderUserId", [
+        { userId: "existing-detent-user" },
+      ]);
+      setQueryResult("organization-members:getByOrgUser", null);
 
       const payload = createInstallationPayload("created", {
         accountType: "User", // Personal account
@@ -556,23 +543,14 @@ describe("webhooks - installation events", () => {
     // These tests verify the slug suffix logic works correctly.
 
     it("appends suffix when slug already exists", async () => {
-      // Queries: (1) check by account ID, (2) check by installation ID, (3) slug lookup,
-      // (4) autoLinkInstaller check. Queries 1, 2, 4 use .limit(), query 3 awaits directly.
-      mockLimit.mockResolvedValueOnce([]); // query 1: no existing org by account
-      mockLimit.mockResolvedValueOnce([]); // query 2: no existing org by installation
-      mockLimit.mockResolvedValueOnce([]); // query 4: autoLinkInstaller - no existing user
-
-      // Create a mock for the optimized slug query that returns one conflict
-      let queryCount = 0;
-      mockWhere.mockImplementation(() => {
-        queryCount++;
-        if (queryCount === 3) {
-          // Third call: slug lookup returns one existing slug (awaited directly, no .limit())
-          return Promise.resolve([{ slug: "gh/test-org" }]);
-        }
-        // All other calls need .limit()
-        return { limit: mockLimit };
-      });
+      setQueryResult("organizations:getByProviderAccount", null);
+      setQueryResult("organizations:listByProviderInstallationId", []);
+      setQueryResult("organization-members:listByProviderUserId", []);
+      queueQueryResult(
+        "organizations:getBySlug",
+        { _id: "existing-org" },
+        null
+      );
 
       const payload = createInstallationPayload("created", {
         accountLogin: "test-org",
@@ -586,26 +564,16 @@ describe("webhooks - installation events", () => {
     });
 
     it("increments suffix for multiple collisions", async () => {
-      // Queries: (1) check by account ID, (2) check by installation ID, (3) slug lookup,
-      // (4) autoLinkInstaller check. Queries 1, 2, 4 use .limit(), query 3 awaits directly.
-      mockLimit.mockResolvedValueOnce([]); // query 1: no existing org by account
-      mockLimit.mockResolvedValueOnce([]); // query 2: no existing org by installation
-      mockLimit.mockResolvedValueOnce([]); // query 4: autoLinkInstaller - no existing user
-
-      let queryCount = 0;
-      mockWhere.mockImplementation(() => {
-        queryCount++;
-        if (queryCount === 3) {
-          // Third call: slug lookup returns multiple existing slugs (awaited directly, no .limit())
-          return Promise.resolve([
-            { slug: "gh/popular-name" },
-            { slug: "gh/popular-name-1" },
-            { slug: "gh/popular-name-2" },
-          ]);
-        }
-        // All other calls need .limit()
-        return { limit: mockLimit };
-      });
+      setQueryResult("organizations:getByProviderAccount", null);
+      setQueryResult("organizations:listByProviderInstallationId", []);
+      setQueryResult("organization-members:listByProviderUserId", []);
+      queueQueryResult(
+        "organizations:getBySlug",
+        { _id: "slug-1" },
+        { _id: "slug-2" },
+        { _id: "slug-3" },
+        null
+      );
 
       const payload = createInstallationPayload("created", {
         accountLogin: "popular-name",
@@ -619,34 +587,23 @@ describe("webhooks - installation events", () => {
     });
 
     it("falls back to UUID suffix after max attempts", async () => {
-      // Queries: (1) check by account ID, (2) check by installation ID, (3) slug lookup,
-      // (4) autoLinkInstaller check. Queries 1, 2, 4 use .limit(), query 3 awaits directly.
-      mockLimit.mockResolvedValueOnce([]); // query 1: no existing org by account
-      mockLimit.mockResolvedValueOnce([]); // query 2: no existing org by installation
-      mockLimit.mockResolvedValueOnce([]); // query 4: autoLinkInstaller - no existing user
-
-      let queryCount = 0;
-      mockWhere.mockImplementation(() => {
-        queryCount++;
-        if (queryCount === 3) {
-          // Third call: all 11 potential slugs are taken (awaited directly, no .limit())
-          return Promise.resolve([
-            { slug: "gh/super-popular" },
-            { slug: "gh/super-popular-1" },
-            { slug: "gh/super-popular-2" },
-            { slug: "gh/super-popular-3" },
-            { slug: "gh/super-popular-4" },
-            { slug: "gh/super-popular-5" },
-            { slug: "gh/super-popular-6" },
-            { slug: "gh/super-popular-7" },
-            { slug: "gh/super-popular-8" },
-            { slug: "gh/super-popular-9" },
-            { slug: "gh/super-popular-10" },
-          ]);
-        }
-        // All other calls need .limit()
-        return { limit: mockLimit };
-      });
+      setQueryResult("organizations:getByProviderAccount", null);
+      setQueryResult("organizations:listByProviderInstallationId", []);
+      setQueryResult("organization-members:listByProviderUserId", []);
+      queueQueryResult(
+        "organizations:getBySlug",
+        { _id: "slug-0" },
+        { _id: "slug-1" },
+        { _id: "slug-2" },
+        { _id: "slug-3" },
+        { _id: "slug-4" },
+        { _id: "slug-5" },
+        { _id: "slug-6" },
+        { _id: "slug-7" },
+        { _id: "slug-8" },
+        { _id: "slug-9" },
+        { _id: "slug-10" }
+      );
 
       const payload = createInstallationPayload("created", {
         accountLogin: "super-popular",
@@ -663,6 +620,10 @@ describe("webhooks - installation events", () => {
 
   describe("installation.deleted", () => {
     it("soft-deletes the organization by setting deletedAt", async () => {
+      setQueryResult("organizations:listByProviderInstallationId", [
+        { _id: "org-123" },
+      ]);
+
       const payload = createInstallationPayload("deleted");
 
       const res = await makeWebhookRequest("installation", payload);
@@ -687,6 +648,10 @@ describe("webhooks - installation events", () => {
 
   describe("installation.suspend", () => {
     it("marks organization as suspended by setting suspendedAt", async () => {
+      setQueryResult("organizations:listByProviderInstallationId", [
+        { _id: "org-123" },
+      ]);
+
       const payload = createInstallationPayload("suspend");
 
       const res = await makeWebhookRequest("installation", payload);
@@ -710,6 +675,10 @@ describe("webhooks - installation events", () => {
 
   describe("installation.unsuspend", () => {
     it("clears suspension by setting suspendedAt to null", async () => {
+      setQueryResult("organizations:listByProviderInstallationId", [
+        { _id: "org-123" },
+      ]);
+
       const payload = {
         action: "unsuspend",
         installation: {
@@ -1007,6 +976,10 @@ describe("webhooks - new_permissions_accepted", () => {
   });
 
   it("updates organization updatedAt when permissions are accepted", async () => {
+    setQueryResult("organizations:listByProviderInstallationId", [
+      { _id: "org-123" },
+    ]);
+
     const payload = {
       action: "new_permissions_accepted",
       installation: {
@@ -1218,6 +1191,10 @@ describe("webhooks - installation.deleted data integrity", () => {
   });
 
   it("soft-deletes organization (sets deletedAt, does not hard delete)", async () => {
+    setQueryResult("organizations:listByProviderInstallationId", [
+      { _id: "org-123" },
+    ]);
+
     const payload = {
       action: "deleted",
       installation: {

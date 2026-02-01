@@ -268,6 +268,9 @@ describe("github-org-access middleware", () => {
 
       mockOrgFindFirst.mockResolvedValue(org);
       mockMemberFindFirst.mockResolvedValue(undefined);
+      mockReturning.mockResolvedValue([
+        { _id: "new-member-id", role: "admin" },
+      ]);
 
       mockGetVerifiedGitHubIdentity.mockResolvedValue({
         userId: "admin-user-id",
@@ -308,6 +311,9 @@ describe("github-org-access middleware", () => {
 
       mockOrgFindFirst.mockResolvedValue(org);
       mockMemberFindFirst.mockResolvedValue(undefined);
+      mockReturning.mockResolvedValue([
+        { _id: "new-member-id", role: "owner" },
+      ]);
       // Org has no owners
       mockSelectWhere.mockResolvedValue([{ count: 0 }]);
 

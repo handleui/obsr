@@ -2,6 +2,7 @@ import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { type MutationCtx, mutation, query } from "./_generated/server";
+import { requireServiceAuth } from "./service-auth";
 import {
   buildPatch,
   clampLimit,
@@ -16,6 +17,7 @@ const organizationRole = v.union(
   v.literal("member"),
   v.literal("visitor")
 );
+const serviceToken = v.optional(v.string());
 
 export const create = mutation({
   args: {
@@ -493,8 +495,10 @@ export const updateRole = mutation({
     targetUserId: v.string(),
     actorRole: organizationRole,
     newRole: organizationRole,
+    serviceToken,
   },
   handler: async (ctx, args) => {
+    await requireServiceAuth(ctx, args);
     const target = await ctx.db
       .query("organizationMembers")
       .withIndex("by_org_user", (q) =>

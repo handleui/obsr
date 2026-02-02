@@ -33,15 +33,15 @@ type SecuredMutationRef = FunctionReference<
  *   grep -r "requireServiceAuth" convex/*.ts
  *
  * Source files:
- *   - convex/api-keys.ts
+ *   - convex/api_keys.ts
  *   - convex/organizations.ts
- *   - convex/organization-members.ts
+ *   - convex/organization_members.ts
  *   - convex/projects.ts
  */
 const securedQueries = new Set<SecuredQueryRef>([
-  api["api-keys"].getById,
-  api["api-keys"].getByKeyHash,
-  api["api-keys"].listByOrg,
+  api.api_keys.getById,
+  api.api_keys.getByKeyHash,
+  api.api_keys.listByOrg,
   api.organizations.getById,
   api.organizations.getBySlug,
   api.organizations.getByProviderAccount,
@@ -52,7 +52,7 @@ const securedQueries = new Set<SecuredQueryRef>([
   api.organizations.listByProviderInstallationId,
   api.organizations.list,
   api.organizations.listActiveGithub,
-  api["organization-members"].getByOrgUser,
+  api.organization_members.getByOrgUser,
   api.projects.getById,
   api.projects.listByOrg,
   api.projects.countByOrg,
@@ -68,13 +68,13 @@ const securedQueries = new Set<SecuredQueryRef>([
  * See securedQueries for sync requirements.
  */
 const securedMutations = new Set<SecuredMutationRef>([
-  api["api-keys"].create,
-  api["api-keys"].updateLastUsedAt,
-  api["api-keys"].update,
-  api["api-keys"].remove,
+  api.api_keys.create,
+  api.api_keys.updateLastUsedAt,
+  api.api_keys.update,
+  api.api_keys.remove,
   api.organizations.create,
   api.organizations.update,
-  api["organization-members"].updateRole,
+  api.organization_members.updateRole,
   api.projects.create,
   api.projects.update,
   api.projects.reactivate,

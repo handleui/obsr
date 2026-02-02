@@ -5,7 +5,15 @@
     "build": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$"],
-      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"],
+      "env": [
+        "WORKOS_CLIENT_ID",
+        "JWT_SECRET_KEY",
+        "WORKOS_COOKIE_PASSWORD",
+        "WORKOS_API_KEY",
+        "POLAR_CHECKOUT_TOKEN",
+        "CONVEX_URL"
+      ]
     },
     "@detent/cli#build": {
       "dependsOn": ["@detent/healing#build", "@detent/git#build"],
@@ -37,7 +45,8 @@
         "JWT_SECRET_KEY",
         "CONVEX_URL",
         "NEXT_PUBLIC_APP_URL",
-        "WORKOS_COOKIE_PASSWORD"
+        "WORKOS_COOKIE_PASSWORD",
+        "POLAR_CHECKOUT_TOKEN"
       ]
     },
     "@detent/web#build": {

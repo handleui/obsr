@@ -380,7 +380,7 @@ export const fetchProjects = cache(
 );
 
 export interface OrgMembership {
-  role: "owner" | "admin" | "member";
+  role: "owner" | "admin" | "member" | "visitor";
   user_id: string;
   organization_id: string;
 }

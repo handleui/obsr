@@ -98,7 +98,7 @@ describe("billing service", () => {
 
       // Should create a usage event
       expect(mockMutation).toHaveBeenCalledWith(
-        "usage-events:create",
+        "usage_events:create",
         expect.objectContaining({ eventName: "sandbox" })
       );
     });
@@ -124,7 +124,7 @@ describe("billing service", () => {
       );
 
       expect(mockMutation).toHaveBeenCalledWith(
-        "usage-events:create",
+        "usage_events:create",
         expect.objectContaining({ eventName: "ai" })
       );
     });
@@ -156,7 +156,7 @@ describe("billing service", () => {
       );
 
       const createCall = mockMutation.mock.calls.find(
-        ([name]) => name === "usage-events:create"
+        ([name]) => name === "usage_events:create"
       )?.[1] as Record<string, unknown> | undefined;
       expect(createCall?.eventName).toBe("ai");
       expect(createCall?.metadata).toMatchObject({
@@ -187,7 +187,7 @@ describe("billing service", () => {
       );
 
       const createCall = mockMutation.mock.calls.find(
-        ([name]) => name === "usage-events:create"
+        ([name]) => name === "usage_events:create"
       )?.[1] as Record<string, unknown> | undefined;
       expect(createCall?.eventName).toBe("sandbox");
       expect(createCall?.metadata).toMatchObject({
@@ -397,7 +397,7 @@ describe("billing service", () => {
       const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "usage-events:listByOrgSince") {
+        if (name === "usage_events:listByOrgSince") {
           return Promise.resolve([]);
         }
         return Promise.resolve([]);
@@ -415,7 +415,7 @@ describe("billing service", () => {
       const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "usage-events:listByOrgSince") {
+        if (name === "usage_events:listByOrgSince") {
           return Promise.resolve([
             {
               _id: "event-1",
@@ -447,7 +447,7 @@ describe("billing service", () => {
       const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "usage-events:listByOrgSince") {
+        if (name === "usage_events:listByOrgSince") {
           return Promise.resolve([]);
         }
         return Promise.resolve([]);
@@ -471,7 +471,7 @@ describe("billing service", () => {
       const { retryFailedPolarIngestions } = await getBilling();
       const env = createBillingEnv();
       mockQuery.mockImplementation((name: string) => {
-        if (name === "usage-events:listByPolarIngested") {
+        if (name === "usage_events:listByPolarIngested") {
           return Promise.resolve([]);
         }
         return Promise.resolve([]);
@@ -488,7 +488,7 @@ describe("billing service", () => {
       const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "usage-events:listByPolarIngested") {
+        if (name === "usage_events:listByPolarIngested") {
           return Promise.resolve([
             {
               _id: "event-1",
@@ -551,7 +551,7 @@ describe("billing service", () => {
       const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "usage-events:listByPolarIngested") {
+        if (name === "usage_events:listByPolarIngested") {
           return Promise.resolve([
             {
               _id: "event-1",
@@ -600,7 +600,7 @@ describe("billing service", () => {
       const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "usage-events:listByPolarIngested") {
+        if (name === "usage_events:listByPolarIngested") {
           return Promise.resolve([
             {
               _id: "event-1",
@@ -639,7 +639,7 @@ describe("billing service", () => {
       const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "usage-events:listByPolarIngested") {
+        if (name === "usage_events:listByPolarIngested") {
           return Promise.resolve([
             {
               _id: "event-1",
@@ -675,7 +675,7 @@ describe("billing service", () => {
       const env = createBillingEnv();
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "usage-events:listByPolarIngested") {
+        if (name === "usage_events:listByPolarIngested") {
           return Promise.resolve([
             {
               _id: "event-1",

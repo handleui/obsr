@@ -18,6 +18,16 @@
           }
         }
       }
+    },
+    {
+      "includes": ["convex/**/*.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useFilenamingConvention": "off"
+          }
+        }
+      }
     }
   ]
 }

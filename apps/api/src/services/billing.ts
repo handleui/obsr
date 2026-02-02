@@ -152,7 +152,7 @@ export const recordUsage = async (
   }
 
   const convex = getConvexClient(env);
-  const eventId = (await convex.mutation("usage-events:create", {
+  const eventId = (await convex.mutation("usage_events:create", {
     organizationId: orgId,
     eventName: usage.type,
     metadata: buildLocalMetadata(usage, runId),
@@ -172,7 +172,7 @@ export const recordUsage = async (
     ])
   )
     .then(async () => {
-      await convex.mutation("usage-events:update", {
+      await convex.mutation("usage_events:update", {
         id: eventId,
         polarIngested: true,
       });
@@ -326,7 +326,7 @@ export const getCreditUsageSummary = async (
   orgId: string
 ): Promise<CreditUsageSummary> => {
   const convex = getConvexClient(env);
-  const events = (await convex.query("usage-events:listByOrgSince", {
+  const events = (await convex.query("usage_events:listByOrgSince", {
     organizationId: orgId,
     since: 0,
     limit: 2000,
@@ -410,7 +410,7 @@ export const retryFailedPolarIngestions = async (
   const convex = getConvexClient(env);
 
   // Get failed events that haven't been ingested
-  const failedEvents = (await convex.query("usage-events:listByPolarIngested", {
+  const failedEvents = (await convex.query("usage_events:listByPolarIngested", {
     polarIngested: false,
     limit,
   })) as Array<{
@@ -474,7 +474,7 @@ export const retryFailedPolarIngestions = async (
   if (succeededIds.length > 0) {
     await Promise.all(
       succeededIds.map((id) =>
-        convex.mutation("usage-events:update", {
+        convex.mutation("usage_events:update", {
           id,
           polarIngested: true,
         })

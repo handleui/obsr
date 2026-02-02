@@ -24,6 +24,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun x ultracite check .
+      - name: Verify secured functions sync
+        run: bun scripts/verify-secured-functions.ts
 
   typecheck:
     name: Type Check

@@ -249,6 +249,44 @@ export const getByProjectStatus = query({
   },
 });
 
+export const getActiveByProject = query({
+  args: { projectId: v.id("projects") },
+  handler: async (ctx, args) => {
+    // Fetch active heals (non-terminal states) using the existing index
+    // Active statuses: found, pending, running, completed
+    // Terminal statuses: applied, rejected, failed
+    const activeStatuses = [
+      "found",
+      "pending",
+      "running",
+      "completed",
+    ] as const;
+    const results = await Promise.all(
+      activeStatuses.map((status) =>
+        ctx.db
+          .query("heals")
+          .withIndex("by_project_status", (q) =>
+            q.eq("projectId", args.projectId).eq("status", status)
+          )
+          .order("desc")
+          .collect()
+      )
+    );
+    return results.flat();
+  },
+});
+
+export const getByRunId = query({
+  args: { runId: v.id("runs") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("heals")
+      .withIndex("by_run", (q) => q.eq("runId", args.runId))
+      .order("desc")
+      .collect();
+  },
+});
+
 export const getPending = query({
   args: { type: v.optional(healType), limit: v.optional(nullableNumber) },
   handler: async (ctx, args) => {

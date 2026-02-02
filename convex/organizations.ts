@@ -18,7 +18,6 @@ const organizationSettings = v.object({
   enablePrComments: v.optional(nullableBoolean),
   autofixEnabled: v.optional(nullableBoolean),
   autofixAutoCommit: v.optional(nullableBoolean),
-  healEnabled: v.optional(nullableBoolean),
   healAutoCommit: v.optional(nullableBoolean),
   healAutoTrigger: v.optional(nullableBoolean),
   healBudgetPerRunUsd: v.optional(nullableNumber),

@@ -5,7 +5,6 @@ export interface OrganizationSettings {
   enablePrComments?: boolean;
   autofixEnabled?: boolean;
   autofixAutoCommit?: boolean;
-  healEnabled?: boolean;
   healAutoCommit?: boolean;
   healAutoTrigger?: boolean;
   healBudgetPerRunUsd?: number;
@@ -16,7 +15,6 @@ export const DEFAULT_ORG_SETTINGS: Required<OrganizationSettings> = {
   enablePrComments: true,
   autofixEnabled: true,
   autofixAutoCommit: false,
-  healEnabled: false,
   healAutoCommit: false,
   healAutoTrigger: false,
   healBudgetPerRunUsd: 100,
@@ -34,7 +32,6 @@ export const getOrgSettings = (
     settings?.autofixEnabled ?? DEFAULT_ORG_SETTINGS.autofixEnabled,
   autofixAutoCommit:
     settings?.autofixAutoCommit ?? DEFAULT_ORG_SETTINGS.autofixAutoCommit,
-  healEnabled: settings?.healEnabled ?? DEFAULT_ORG_SETTINGS.healEnabled,
   healAutoCommit:
     settings?.healAutoCommit ?? DEFAULT_ORG_SETTINGS.healAutoCommit,
   healAutoTrigger:

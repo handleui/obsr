@@ -83,7 +83,6 @@ const flushPromises = async () => {
 const defaultOrgSettings = {
   autofixEnabled: true,
   autofixSources: ["biome", "eslint", "prettier"],
-  healEnabled: true,
 };
 
 // Helper to create test context

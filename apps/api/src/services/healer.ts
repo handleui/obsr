@@ -1,3 +1,4 @@
+import type { HealCreateStatus } from "@detent/types";
 import { createHeal } from "../db/operations/heals";
 import type { OrganizationSettings } from "../lib/org-settings";
 import type { Env } from "../types/env";
@@ -21,7 +22,7 @@ interface RequestHealResult {
   healId?: string;
   error?: string;
   code?: "BILLING_REQUIRED" | "INSERT_FAILED";
-  status?: "found" | "pending";
+  status?: HealCreateStatus;
 }
 
 export const healerService = {

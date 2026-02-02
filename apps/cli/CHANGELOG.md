@@ -1,5 +1,12 @@
 # @detent/cli
 
+## [1.3.0](https://github.com/detentsh/detent/compare/cli-v1.2.0...cli-v1.3.0) (2026-02-02)
+
+
+### Features
+
+* migrate navigator data to convex ([#155](https://github.com/detentsh/detent/issues/155)) ([1657f5d](https://github.com/detentsh/detent/commit/1657f5da48dc396024662fee4cb01869c8dc2984))
+
 ## [1.2.0](https://github.com/detentsh/detent/compare/cli-v1.1.0...cli-v1.2.0) (2026-01-27)
 
 

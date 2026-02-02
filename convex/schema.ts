@@ -70,7 +70,6 @@ const organizationSettings = v.object({
   enablePrComments: v.optional(nullableBoolean),
   autofixEnabled: v.optional(nullableBoolean),
   autofixAutoCommit: v.optional(nullableBoolean),
-  healEnabled: v.optional(nullableBoolean),
   healAutoCommit: v.optional(nullableBoolean),
   healAutoTrigger: v.optional(nullableBoolean),
   healBudgetPerRunUsd: v.optional(nullableNumber),
@@ -334,7 +333,8 @@ export default defineSchema({
     .index("by_project_status", ["projectId", "status"])
     .index("by_project_pr", ["projectId", "prNumber"])
     .index("by_status", ["status"])
-    .index("by_status_type_updated_at", ["status", "type", "updatedAt"]),
+    .index("by_status_type_updated_at", ["status", "type", "updatedAt"])
+    .index("by_run", ["runId"]),
 
   jobs: defineTable({
     providerJobId: v.string(),

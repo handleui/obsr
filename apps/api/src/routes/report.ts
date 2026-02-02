@@ -1,7 +1,16 @@
+import type { HealCreateStatus } from "@detent/types";
 import { Hono } from "hono";
 import { getConvexClient } from "../db/convex";
+import {
+  createHeal,
+  getHealsByPr,
+  getHealsByRunId,
+} from "../db/operations/heals";
+import { getOrgSettings, type OrganizationSettings } from "../lib/org-settings";
 import { apiKeyAuthMiddleware } from "../middleware/api-key-auth";
 import { apiKeyRateLimitMiddleware } from "../middleware/api-key-rate-limit";
+import { hasAutofix } from "../services/autofix/registry";
+import { canRunHeal } from "../services/billing";
 import type { DbClient } from "../services/webhooks/types";
 import type { Env } from "../types/env";
 
@@ -49,6 +58,7 @@ interface ReportPayload {
   workflowName: string;
   workflowJob: string;
   runAttempt: number;
+  prNumber?: number;
   matrix?: Record<string, string>;
   steps: ReportStep[];
   errors: ReportError[];
@@ -295,8 +305,7 @@ const validateMatrix = (matrix: unknown): string | null => {
   return null;
 };
 
-const validateRequiredFields = (b: Record<string, unknown>): string | null => {
-  // Validate runId
+const validateRunId = (b: Record<string, unknown>): string | null => {
   if (
     typeof b.runId !== "number" ||
     !Number.isInteger(b.runId) ||
@@ -304,8 +313,10 @@ const validateRequiredFields = (b: Record<string, unknown>): string | null => {
   ) {
     return "runId must be a non-negative integer";
   }
+  return null;
+};
 
-  // Validate repository format (owner/repo)
+const validateRepository = (b: Record<string, unknown>): string | null => {
   if (!isNonEmptyString(b.repository)) {
     return "repository must be a non-empty string";
   }
@@ -315,40 +326,78 @@ const validateRequiredFields = (b: Record<string, unknown>): string | null => {
   if (!REPOSITORY_PATTERN.test(b.repository)) {
     return "repository must be in format owner/repo";
   }
+  return null;
+};
 
-  // Validate commitSha (40 hex chars)
+const validateCommitSha = (b: Record<string, unknown>): string | null => {
   if (!isNonEmptyString(b.commitSha)) {
     return "commitSha must be a non-empty string";
   }
   if (!COMMIT_SHA_PATTERN.test(b.commitSha)) {
     return "commitSha must be a valid 40-character hex string";
   }
+  return null;
+};
 
-  // Validate headBranch
-  if (!isNonEmptyString(b.headBranch)) {
-    return "headBranch must be a non-empty string";
+const validateStringField = (
+  b: Record<string, unknown>,
+  field: string,
+  label: string
+): string | null => {
+  const val = b[field];
+  if (!isNonEmptyString(val)) {
+    return `${label} must be a non-empty string`;
   }
-  if (!isValidLength(b.headBranch, MAX_STRING_LENGTH)) {
-    return "headBranch exceeds maximum length";
+  if (!isValidLength(val, MAX_STRING_LENGTH)) {
+    return `${label} exceeds maximum length`;
+  }
+  return null;
+};
+
+const validatePrNumber = (b: Record<string, unknown>): string | null => {
+  if (b.prNumber === undefined) {
+    return null;
+  }
+  if (typeof b.prNumber !== "number" || !Number.isInteger(b.prNumber)) {
+    return "prNumber must be an integer";
+  }
+  if (b.prNumber <= 0) {
+    return "prNumber must be a positive integer";
+  }
+  return null;
+};
+
+const validateRequiredFields = (b: Record<string, unknown>): string | null => {
+  let error = validateRunId(b);
+  if (error) {
+    return error;
   }
 
-  // Validate workflowName
-  if (!isNonEmptyString(b.workflowName)) {
-    return "workflowName must be a non-empty string";
-  }
-  if (!isValidLength(b.workflowName, MAX_STRING_LENGTH)) {
-    return "workflowName exceeds maximum length";
+  error = validateRepository(b);
+  if (error) {
+    return error;
   }
 
-  // Validate workflowJob
-  if (!isNonEmptyString(b.workflowJob)) {
-    return "workflowJob must be a non-empty string";
-  }
-  if (!isValidLength(b.workflowJob, MAX_STRING_LENGTH)) {
-    return "workflowJob exceeds maximum length";
+  error = validateCommitSha(b);
+  if (error) {
+    return error;
   }
 
-  // Validate runAttempt
+  error = validateStringField(b, "headBranch", "headBranch");
+  if (error) {
+    return error;
+  }
+
+  error = validateStringField(b, "workflowName", "workflowName");
+  if (error) {
+    return error;
+  }
+
+  error = validateStringField(b, "workflowJob", "workflowJob");
+  if (error) {
+    return error;
+  }
+
   if (
     typeof b.runAttempt !== "number" ||
     !Number.isInteger(b.runAttempt) ||
@@ -357,13 +406,16 @@ const validateRequiredFields = (b: Record<string, unknown>): string | null => {
     return "runAttempt must be a positive integer";
   }
 
-  // Validate matrix (optional)
+  error = validatePrNumber(b);
+  if (error) {
+    return error;
+  }
+
   const matrixError = validateMatrix(b.matrix);
   if (matrixError) {
     return matrixError;
   }
 
-  // Validate arrays
   if (!Array.isArray(b.steps)) {
     return "steps must be an array";
   }
@@ -676,6 +728,7 @@ const validatePayload = (body: unknown): ValidationResult => {
       workflowName: b.workflowName as string,
       workflowJob: b.workflowJob as string,
       runAttempt: b.runAttempt as number,
+      prNumber: b.prNumber as number | undefined,
       matrix: b.matrix as Record<string, string> | undefined,
       steps: b.steps as ReportStep[],
       errors: b.errors as ReportError[],
@@ -747,6 +800,110 @@ const handleJobCompletion = async (
   }
 };
 
+const createHealsForErrors = async (
+  env: Env,
+  convex: DbClient,
+  project: { _id: string; organizationId: string },
+  payload: ReportPayload,
+  storeResult: { runId: string }
+): Promise<void> => {
+  if (payload.errors.length === 0) {
+    return;
+  }
+
+  const organization = (await convex.query("organizations:getById", {
+    id: project.organizationId,
+  })) as { settings?: OrganizationSettings | null } | null;
+  const orgSettings = getOrgSettings(organization?.settings);
+
+  const existingHeals = payload.prNumber
+    ? await getHealsByPr(env, project._id, payload.prNumber)
+    : await getHealsByRunId(env, storeResult.runId);
+  const existingErrorIds = new Set(
+    existingHeals
+      .filter((heal) => heal.type === "heal")
+      .flatMap((heal) => heal.errorIds ?? [])
+  );
+
+  const runErrors = (await convex.query("run-errors:listByRunId", {
+    runId: storeResult.runId,
+    limit: 1000,
+  })) as Array<{
+    _id: string;
+    fixable?: boolean | null;
+    category?: string | null;
+    signatureId?: string | null;
+    workflowJob?: string | null;
+  }>;
+
+  const errorsByWorkflowJob = new Map<string, typeof runErrors>();
+  for (const error of runErrors) {
+    if (typeof error.workflowJob !== "string" || !error.workflowJob) {
+      continue;
+    }
+
+    const isAutofixable = (() => {
+      if (error.fixable !== true) {
+        return false;
+      }
+      const category = typeof error.category === "string" ? error.category : "";
+      return category.length > 0 && hasAutofix(category);
+    })();
+
+    if (isAutofixable) {
+      continue;
+    }
+
+    const existingGroup = errorsByWorkflowJob.get(error.workflowJob) ?? [];
+    existingGroup.push(error);
+    errorsByWorkflowJob.set(error.workflowJob, existingGroup);
+  }
+
+  let healStatus: HealCreateStatus = "found";
+  if (orgSettings.healAutoTrigger) {
+    const billingCheck = await canRunHeal(env, project.organizationId);
+    if (billingCheck.allowed) {
+      healStatus = "pending";
+    }
+  }
+
+  const healCreationPromises: Promise<string>[] = [];
+  for (const errors of errorsByWorkflowJob.values()) {
+    const errorIds = errors.map((error) => error._id);
+    if (errorIds.length === 0) {
+      continue;
+    }
+    if (errorIds.every((id) => existingErrorIds.has(id))) {
+      continue;
+    }
+
+    const signatureIds = errors
+      .map((error) => error.signatureId)
+      .filter((id): id is string => typeof id === "string");
+
+    healCreationPromises.push(
+      createHeal(env, {
+        type: "heal",
+        status: healStatus,
+        projectId: project._id,
+        runId: storeResult.runId,
+        commitSha: payload.commitSha,
+        prNumber: payload.prNumber,
+        errorIds,
+        signatureIds,
+      })
+    );
+  }
+
+  if (healCreationPromises.length > 0) {
+    try {
+      await Promise.all(healCreationPromises);
+    } catch (error) {
+      console.error("Failed to create heal records:", error);
+    }
+  }
+};
+
 const app = new Hono<{ Bindings: Env }>();
 
 app.use("*", apiKeyAuthMiddleware);
@@ -815,6 +972,7 @@ app.post("/", async (c) => {
         repository: payload.repository,
         commitSha: payload.commitSha,
         headBranch: payload.headBranch,
+        prNumber: payload.prNumber,
         workflowName: payload.workflowName,
         runAttempt: payload.runAttempt,
         errorCount: payload.errors.length,
@@ -832,6 +990,8 @@ app.post("/", async (c) => {
         JSON.stringify(allWarnings)
       );
     }
+
+    await createHealsForErrors(c.env, convex, project, payload, storeResult);
 
     const stored = payload.errors.length;
 

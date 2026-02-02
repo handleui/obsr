@@ -96,7 +96,9 @@ const parseAndEnrichErrors = (
     try {
       const parsed = parser(content);
       for (const error of parsed) {
-        errors.push(enrichWithSnippet(error));
+        const enriched = enrichWithSnippet(error);
+        const category = enriched.category || tool;
+        errors.push({ ...enriched, category });
       }
       core.debug(`Parsed ${parsed.length} errors from ${tool} (${path})`);
     } catch (err) {
@@ -218,23 +220,6 @@ const validateApiUrl = (url: string): boolean => {
 };
 
 /**
- * Extract PR number from GitHub context.
- * Returns the PR number if running in a pull_request event, otherwise undefined.
- */
-const getPrNumber = (): number | undefined => {
-  const { context } = require("@actions/github");
-  // PR number is available in pull_request event payload
-  if (context.payload.pull_request?.number) {
-    return context.payload.pull_request.number;
-  }
-  // Also check issue_comment events (for PR comments)
-  if (context.payload.issue?.pull_request && context.payload.issue?.number) {
-    return context.payload.issue.number;
-  }
-  return undefined;
-};
-
-/**
  * Run autofixes for detected errors and report results to API.
  * Only runs fixes for errors from sources with autofix support.
  */
@@ -346,12 +331,12 @@ const run = async (): Promise<void> => {
     core.setOutput("project-id", result.projectId);
 
     // Run autofixes for fixable errors (only in PR context)
-    const prNumber = getPrNumber();
+    // Use prNumber from payload which handles all event types (pull_request, workflow_run, issue_comment)
     await runAutofixes(
       payload,
       result.projectId,
       result.runId,
-      prNumber,
+      payload.prNumber,
       token,
       apiUrl
     );

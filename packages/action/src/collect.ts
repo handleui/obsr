@@ -18,6 +18,7 @@ export interface ReportPayload {
   workflowName: string;
   workflowJob: string;
   runAttempt: number;
+  prNumber?: number;
   matrix?: Record<string, string>;
   steps: StepOutcome[];
   isComplete?: boolean;
@@ -58,6 +59,20 @@ const safeJsonParse = <T>(json: string | undefined, fallback: T): T => {
 
 export const collect = (): ReportPayload => {
   const { context } = github;
+  const prNumberFromWorkflowRun = (() => {
+    const pullRequests = context.payload.workflow_run?.pull_requests;
+    if (!Array.isArray(pullRequests) || pullRequests.length === 0) {
+      return undefined;
+    }
+    const candidate = pullRequests[0]?.number;
+    return typeof candidate === "number" ? candidate : undefined;
+  })();
+  const prNumber =
+    context.payload.pull_request?.number ??
+    prNumberFromWorkflowRun ??
+    (context.payload.issue?.pull_request
+      ? context.payload.issue?.number
+      : undefined);
 
   const stepsData = safeJsonParse<
     Record<
@@ -89,6 +104,7 @@ export const collect = (): ReportPayload => {
     workflowName: context.workflow,
     workflowJob: context.job,
     runAttempt: Number.parseInt(process.env.GITHUB_RUN_ATTEMPT || "1", 10),
+    prNumber,
     matrix,
     steps,
     errors: [],

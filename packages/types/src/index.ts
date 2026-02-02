@@ -26,6 +26,14 @@ export type {
   ErrorOccurrence,
   ErrorSignature,
 } from "./fingerprint.js";
+export type {
+  HealCreateStatus,
+  HealStatus,
+  HealSummary,
+  HealType,
+  HealUpdateStatus,
+} from "./heal.js";
+export { HealStatuses, HealTypes } from "./heal.js";
 export type { RedactionPattern } from "./sanitize.js";
 export {
   redactionPatterns,

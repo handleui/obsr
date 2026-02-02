@@ -1,17 +1,17 @@
+import type {
+  HealCreateStatus,
+  HealStatus,
+  HealSummary,
+  HealType,
+  HealUpdateStatus,
+} from "@detent/types";
 import type { Env } from "../../types/env";
 import { getConvexClient } from "../convex";
 
 export interface HealRecord {
   id: string;
-  type: "autofix" | "heal";
-  status:
-    | "found"
-    | "pending"
-    | "running"
-    | "completed"
-    | "applied"
-    | "rejected"
-    | "failed";
+  type: HealType;
+  status: HealStatus;
   runId?: string;
   projectId: string;
   commitSha?: string;
@@ -26,12 +26,7 @@ export interface HealRecord {
   autofixSource?: string;
   autofixCommand?: string;
   userInstructions?: string;
-  healResult?: {
-    model?: string;
-    patchApplied?: boolean;
-    verificationPassed?: boolean;
-    toolCalls?: number;
-  };
+  healResult?: HealSummary;
   costUsd?: number;
   inputTokens?: number;
   outputTokens?: number;
@@ -193,9 +188,9 @@ const normalizeHeal = (heal: ConvexHealDoc): HealRecord => {
 export const createHeal = async (
   env: Env,
   data: {
-    type: "autofix" | "heal";
+    type: HealType;
     projectId: string;
-    status?: "found" | "pending";
+    status?: HealCreateStatus;
     runId?: string;
     commitSha?: string;
     prNumber?: number;
@@ -242,13 +237,13 @@ export const triggerHeal = async (env: Env, healId: string): Promise<void> => {
 export const updateHealStatus = async (
   env: Env,
   healId: string,
-  status: "running" | "completed" | "applied" | "rejected" | "failed",
+  status: HealUpdateStatus,
   data?: {
     patch?: string;
     commitMessage?: string;
     filesChanged?: string[];
     filesChangedWithContent?: Array<{ path: string; content: string | null }>;
-    healResult?: object;
+    healResult?: HealSummary;
     costUsd?: number;
     inputTokens?: number;
     outputTokens?: number;
@@ -257,18 +252,14 @@ export const updateHealStatus = async (
 ): Promise<void> => {
   validateHealId(healId);
 
-  const sanitizedHealResult =
-    data?.healResult && typeof data.healResult === "object"
-      ? {
-          model: (data.healResult as { model?: string }).model,
-          patchApplied: (data.healResult as { patchApplied?: boolean })
-            .patchApplied,
-          verificationPassed: (
-            data.healResult as { verificationPassed?: boolean }
-          ).verificationPassed,
-          toolCalls: (data.healResult as { toolCalls?: number }).toolCalls,
-        }
-      : undefined;
+  const sanitizedHealResult = data?.healResult
+    ? {
+        model: data.healResult.model,
+        patchApplied: data.healResult.patchApplied,
+        verificationPassed: data.healResult.verificationPassed,
+        toolCalls: data.healResult.toolCalls,
+      }
+    : undefined;
 
   const patchBytes = data?.patch ? getByteLength(data.patch) : 0;
   const filesBytes = estimateFilesChangedWithContentSize(
@@ -362,14 +353,46 @@ export const getHealById = async (
   return heal ? normalizeHeal(heal) : null;
 };
 
-export const getPendingHeals = async (
+export const getPendingHeals = (
   env: Env,
   projectId: string
+): Promise<HealRecord[]> => {
+  return getHealsByProjectStatus(env, projectId, "pending");
+};
+
+export const getHealsByProjectStatus = async (
+  env: Env,
+  projectId: string,
+  status: HealStatus
 ): Promise<HealRecord[]> => {
   const client = getClient(env);
   const heals = (await client.query("heals:getByProjectStatus", {
     projectId,
-    status: "pending",
+    status,
+  })) as ConvexHealDoc[];
+
+  return heals.map(normalizeHeal);
+};
+
+export const getActiveHealsByProject = async (
+  env: Env,
+  projectId: string
+): Promise<HealRecord[]> => {
+  const client = getClient(env);
+  const heals = (await client.query("heals:getActiveByProject", {
+    projectId,
+  })) as ConvexHealDoc[];
+
+  return heals.map(normalizeHeal);
+};
+
+export const getHealsByRunId = async (
+  env: Env,
+  runId: string
+): Promise<HealRecord[]> => {
+  const client = getClient(env);
+  const heals = (await client.query("heals:getByRunId", {
+    runId,
   })) as ConvexHealDoc[];
 
   return heals.map(normalizeHeal);
@@ -415,7 +438,7 @@ export const getHealByPrAndSource = async (
 export const markStaleHealsAsFailed = async (
   env: Env,
   timeoutMinutes: number,
-  healType: "autofix" | "heal"
+  healType: HealType
 ): Promise<number> => {
   if (
     !Number.isInteger(timeoutMinutes) ||

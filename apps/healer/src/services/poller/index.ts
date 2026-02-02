@@ -1,3 +1,4 @@
+import { HealTypes } from "@detent/types";
 import type { ConvexHttpClient } from "convex/browser";
 import type { FunctionReference } from "convex/server";
 import type { Env } from "../../env.js";
@@ -1157,7 +1158,7 @@ const markStaleHealsAsFailed = async (
       asMutation("heals:markStaleAsFailed"),
       {
         timeoutMinutes: 30,
-        healType: "heal",
+        healType: HealTypes.Heal,
         failedReason: "Heal timed out",
       }
     )) as StaleHealEntry[];

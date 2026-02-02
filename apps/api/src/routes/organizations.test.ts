@@ -241,13 +241,13 @@ describe("organizations - POST /:organizationId/sync", () => {
       if (name === "organizations:getBySlug") {
         return await mockOrgFindFirst();
       }
-      if (name === "organization-members:getByOrgUser") {
+      if (name === "organization_members:getByOrgUser") {
         return await mockFindFirst();
       }
-      if (name === "organization-members:paginateByOrg") {
+      if (name === "organization_members:paginateByOrg") {
         return { page: [], isDone: true, continueCursor: "" };
       }
-      if (name === "organization-members:listByOrg") {
+      if (name === "organization_members:listByOrg") {
         return [];
       }
       if (name === "projects:countByOrg") {
@@ -264,7 +264,7 @@ describe("organizations - POST /:organizationId/sync", () => {
           mockSet(args);
           return args.id ?? null;
         }
-        if (name === "organization-members:update") {
+        if (name === "organization_members:update") {
           mockUpdate();
           mockSet(args);
           return args.id ?? null;

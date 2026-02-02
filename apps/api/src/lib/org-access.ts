@@ -63,7 +63,7 @@ export const verifyOrgAccess = async (
   // Check for existing membership with stored GitHub identity (active members only)
   const convex = getConvexClient(env);
   const existingMember = (await convex.query(
-    "organization-members:getByOrgUser",
+    "organization_members:getByOrgUser",
     {
       organizationId: org._id,
       userId,

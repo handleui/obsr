@@ -26,7 +26,7 @@ const autoLinkInstaller = async (
 ): Promise<boolean> => {
   // Check if installer already has a Detent account (via any org membership with matching GitHub ID)
   const existingMembers = (await convex.query(
-    "organization-members:listByProviderUserId",
+    "organization_members:listByProviderUserId",
     {
       providerUserId: installerGithubId,
     }
@@ -40,7 +40,7 @@ const autoLinkInstaller = async (
 
   // Check if they already have active membership to this specific org
   const existingMembership = (await convex.query(
-    "organization-members:getByOrgUser",
+    "organization_members:getByOrgUser",
     {
       organizationId,
       userId: existingMember.userId,
@@ -76,7 +76,7 @@ const autoLinkInstaller = async (
   // For personal accounts: installer is the account owner by definition, no verification needed
 
   // Create owner membership for the installer
-  await convex.mutation("organization-members:createIfMissing", {
+  await convex.mutation("organization_members:createIfMissing", {
     organizationId,
     userId: existingMember.userId,
     role: "owner",

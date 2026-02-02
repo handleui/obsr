@@ -50,7 +50,7 @@ app.post(
     const keyHash = await hashApiKey(key);
     const keyPrefix = key.substring(0, 8); // "dtk_XXXX"
 
-    const keyId = (await convex.mutation("api-keys:create", {
+    const keyId = (await convex.mutation("api_keys:create", {
       organizationId: organization._id,
       keyHash,
       keyPrefix,
@@ -85,7 +85,7 @@ app.get(
     const { organization } = orgAccess;
 
     const convex = getConvexClient(c.env);
-    const keys = (await convex.query("api-keys:listByOrg", {
+    const keys = (await convex.query("api_keys:listByOrg", {
       organizationId: organization._id,
     })) as Array<{
       _id: string;
@@ -128,7 +128,7 @@ app.delete(
     const kv = c.env["detent-idempotency"];
 
     const convex = getConvexClient(c.env);
-    const existing = (await convex.query("api-keys:getById", {
+    const existing = (await convex.query("api_keys:getById", {
       id: keyId,
     })) as { _id: string; organizationId: string; keyHash: string } | null;
 
@@ -136,7 +136,7 @@ app.delete(
       return c.json({ error: "API key not found" }, 404);
     }
 
-    await convex.mutation("api-keys:remove", { id: keyId });
+    await convex.mutation("api_keys:remove", { id: keyId });
 
     // Invalidate the cache in background (uses hash-based key)
     c.executionCtx.waitUntil(invalidateApiKeyCache(existing.keyHash, kv));

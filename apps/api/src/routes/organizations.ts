@@ -138,7 +138,7 @@ const batchReactivateMembers = async (
 
   const now = Date.now();
   for (const member of toReactivate) {
-    await convex.mutation("organization-members:update", {
+    await convex.mutation("organization_members:update", {
       id: member.id,
       removedAt: null,
       removalReason: null,
@@ -164,7 +164,7 @@ const batchInsertMembers = async (
 
   const now = Date.now();
   for (const entry of toInsert) {
-    await convex.mutation("organization-members:createIfMissing", {
+    await convex.mutation("organization_members:createIfMissing", {
       organizationId,
       userId: entry.userId,
       role: "member",
@@ -189,7 +189,7 @@ const syncOrganizationMembers = async (
   // Get existing active Detent members for this org
   const detentMembers = await fetchAllPages<OrganizationMemberDoc>(
     convex,
-    "organization-members:paginateByOrg",
+    "organization_members:paginateByOrg",
     { organizationId, includeRemoved: true }
   );
 
@@ -281,7 +281,7 @@ const syncOrganizationMembers = async (
   if (staleMembers.length > 0) {
     const now = Date.now();
     for (const member of staleMembers) {
-      await convex.mutation("organization-members:update", {
+      await convex.mutation("organization_members:update", {
         id: member._id,
         removedAt: now,
         removalReason: "github_left",
@@ -296,7 +296,7 @@ const syncOrganizationMembers = async (
   if (activeMembersInGitHub.length > 0) {
     const now = Date.now();
     for (const member of activeMembersInGitHub) {
-      await convex.mutation("organization-members:update", {
+      await convex.mutation("organization_members:update", {
         id: member._id,
         providerVerifiedAt: now,
         updatedAt: now,
@@ -748,7 +748,7 @@ app.delete(
     const convex = getConvexClient(c.env);
 
     const targetMember = (await convex.query(
-      "organization-members:getByOrgUser",
+      "organization_members:getByOrgUser",
       {
         organizationId: organization._id,
         userId: targetUserId,
@@ -783,7 +783,7 @@ app.delete(
       );
     }
 
-    await convex.mutation("organization-members:update", {
+    await convex.mutation("organization_members:update", {
       id: targetMember._id,
       removedAt: Date.now(),
       removalReason: "admin_action",
@@ -812,7 +812,7 @@ app.get(
     const { organization } = orgAccess;
 
     const convex = getConvexClient(c.env);
-    const members = (await convex.query("organization-members:listByOrg", {
+    const members = (await convex.query("organization_members:listByOrg", {
       organizationId: organization._id,
       limit: 5000,
     })) as Array<{

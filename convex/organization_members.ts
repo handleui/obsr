@@ -2,7 +2,7 @@ import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { type MutationCtx, mutation, query } from "./_generated/server";
-import { requireServiceAuth } from "./service-auth";
+import { requireServiceAuth } from "./service_auth";
 import {
   buildPatch,
   clampLimit,

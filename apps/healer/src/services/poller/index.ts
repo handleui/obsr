@@ -251,7 +251,7 @@ const fetchRunErrors = async (
   convex: ConvexHttpClient,
   runId: string
 ): Promise<RunErrorRow[]> => {
-  const result = (await convex.query(asQuery("run-errors:listByRunId"), {
+  const result = (await convex.query(asQuery("run_errors:listByRunId"), {
     runId,
     limit: 1000,
   })) as Record<string, unknown>[];

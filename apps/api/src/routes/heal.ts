@@ -675,7 +675,7 @@ app.post("/trigger", async (c) => {
   }
 
   // Get fixable errors from that run
-  const runErrors = (await convex.query("run-errors:listByRunId", {
+  const runErrors = (await convex.query("run_errors:listByRunId", {
     runId: run._id,
     limit: 1000,
   })) as RunErrorDoc[];

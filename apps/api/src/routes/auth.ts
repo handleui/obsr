@@ -294,7 +294,7 @@ const linkInstallerOrganizations = async (
 
   // Get active memberships only - soft-deleted users must go through invitation flow
   const activeMemberships = (
-    (await convex.query("organization-members:listByUser", {
+    (await convex.query("organization_members:listByUser", {
       userId,
       limit: 500,
     })) as OrganizationMemberDoc[]
@@ -352,7 +352,7 @@ const linkInstallerOrganizations = async (
   let linked = 0;
 
   for (const org of verifiedOrgs) {
-    const existing = (await convex.query("organization-members:getByOrgUser", {
+    const existing = (await convex.query("organization_members:getByOrgUser", {
       organizationId: org._id,
       userId,
     })) as OrganizationMemberDoc | null;
@@ -362,7 +362,7 @@ const linkInstallerOrganizations = async (
     }
 
     const now = Date.now();
-    await convex.mutation("organization-members:create", {
+    await convex.mutation("organization_members:create", {
       organizationId: org._id,
       userId,
       role: "owner",
@@ -462,7 +462,7 @@ const fetchMatchingDetentOrgs = async (
 
   const detentOrgIds = detentOrgs.map((o) => o._id);
   const allMemberships = (
-    (await convex.query("organization-members:listByUser", {
+    (await convex.query("organization_members:listByUser", {
       userId,
       limit: 500,
     })) as OrganizationMemberDoc[]
@@ -515,7 +515,7 @@ const handleExistingMembership = async (
   }
 
   const now = Date.now();
-  await convex.mutation("organization-members:update", {
+  await convex.mutation("organization_members:update", {
     id: softDeleted._id,
     removedAt: null,
     removalReason: null,
@@ -548,7 +548,7 @@ const createNewMembership = async (
   githubUsername: string,
   orgSlug: string | null
 ): Promise<boolean> => {
-  const existing = (await convex.query("organization-members:getByOrgUser", {
+  const existing = (await convex.query("organization_members:getByOrgUser", {
     organizationId: orgId,
     userId,
   })) as OrganizationMemberDoc | null;
@@ -558,7 +558,7 @@ const createNewMembership = async (
   }
 
   const now = Date.now();
-  await convex.mutation("organization-members:create", {
+  await convex.mutation("organization_members:create", {
     organizationId: orgId,
     userId,
     role,
@@ -727,7 +727,7 @@ app.post("/sync-user", async (c) => {
 
   const convex = getConvexClient(c.env);
 
-  const memberships = (await convex.query("organization-members:listByUser", {
+  const memberships = (await convex.query("organization_members:listByUser", {
     userId: auth.userId,
     limit: 500,
   })) as OrganizationMemberDoc[];
@@ -735,7 +735,7 @@ app.post("/sync-user", async (c) => {
   const now = Date.now();
   await Promise.all(
     memberships.map((membership) =>
-      convex.mutation("organization-members:update", {
+      convex.mutation("organization_members:update", {
         id: membership._id,
         providerUserId: identity.userId,
         providerUsername: identity.username ?? undefined,
@@ -796,7 +796,7 @@ app.get("/me", async (c) => {
         Authorization: `Bearer ${c.env.WORKOS_API_KEY}`,
       },
     }),
-    convex.query("organization-members:listByUser", {
+    convex.query("organization_members:listByUser", {
       userId: auth.userId,
       limit: 1,
     }) as Promise<OrganizationMemberDoc[]>,
@@ -1454,7 +1454,7 @@ app.get("/organizations", async (c) => {
   const auth = c.get("auth");
 
   const convex = getConvexClient(c.env);
-  const memberships = (await convex.query("organization-members:listByUser", {
+  const memberships = (await convex.query("organization_members:listByUser", {
     userId: auth.userId,
     limit: 500,
   })) as OrganizationMemberDoc[];

@@ -40,7 +40,7 @@ app.post("/leave", async (c) => {
 
   const convex = getConvexClient(c.env);
   const result = (await convex.mutation(
-    "organization-members:leaveOrganization",
+    "organization_members:leaveOrganization",
     {
       organizationId,
       userId: auth.userId,
@@ -68,7 +68,7 @@ app.get("/:orgId/members", githubOrgAccessMiddleware, async (c) => {
   const { organization, githubIdentity, role } = orgAccess;
 
   const convex = getConvexClient(c.env);
-  const detentMembers = (await convex.query("organization-members:listByOrg", {
+  const detentMembers = (await convex.query("organization_members:listByOrg", {
     organizationId: organization._id,
   })) as Array<{
     userId: string;
@@ -112,7 +112,7 @@ app.get("/:orgId/me", githubOrgAccessMiddleware, async (c) => {
 
   const convex = getConvexClient(c.env);
   const detentRecord = (await convex.query(
-    "organization-members:getByOrgUser",
+    "organization_members:getByOrgUser",
     {
       organizationId: organization._id,
       userId: auth.userId,
@@ -125,7 +125,7 @@ app.get("/:orgId/me", githubOrgAccessMiddleware, async (c) => {
   } | null;
 
   if (!detentRecord || detentRecord.removedAt) {
-    await convex.mutation("organization-members:createIfMissing", {
+    await convex.mutation("organization_members:createIfMissing", {
       organizationId: organization._id,
       userId: auth.userId,
       role,
@@ -137,7 +137,7 @@ app.get("/:orgId/me", githubOrgAccessMiddleware, async (c) => {
     detentRecord.providerUserId !== githubIdentity.userId ||
     detentRecord.providerUsername !== githubIdentity.username
   ) {
-    await convex.mutation("organization-members:update", {
+    await convex.mutation("organization_members:update", {
       id: detentRecord._id,
       providerUserId: githubIdentity.userId,
       providerUsername: githubIdentity.username,
@@ -204,7 +204,7 @@ app.put(
     }
 
     const convex = getConvexClient(c.env);
-    const result = (await convex.mutation("organization-members:updateRole", {
+    const result = (await convex.mutation("organization_members:updateRole", {
       organizationId: organization._id,
       targetUserId,
       actorRole,

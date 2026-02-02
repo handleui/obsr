@@ -189,10 +189,10 @@ describe("github-org-access middleware", () => {
       ) {
         return await mockOrgFindFirst();
       }
-      if (name === "organization-members:getByOrgUser") {
+      if (name === "organization_members:getByOrgUser") {
         return await mockMemberFindFirst();
       }
-      if (name === "organization-members:listByOrgRole") {
+      if (name === "organization_members:listByOrgRole") {
         return await resolveOwners();
       }
       return [];
@@ -200,11 +200,11 @@ describe("github-org-access middleware", () => {
 
     mockMutation.mockImplementation(
       async (name: string, args: Record<string, unknown>) => {
-        if (name === "organization-members:update") {
+        if (name === "organization_members:update") {
           mockUpdate();
           return null;
         }
-        if (name === "organization-members:createIfMissing") {
+        if (name === "organization_members:createIfMissing") {
           mockInsert();
           mockValues(args);
           const returning = await mockReturning();

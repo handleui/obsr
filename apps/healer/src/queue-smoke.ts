@@ -2,13 +2,13 @@ import { ConvexHttpClient } from "convex/browser";
 import type { FunctionReference } from "convex/server";
 
 const securedFunctions = new Set([
-  "api-keys:create",
-  "api-keys:getById",
-  "api-keys:getByKeyHash",
-  "api-keys:listByOrg",
-  "api-keys:updateLastUsedAt",
-  "api-keys:update",
-  "api-keys:remove",
+  "api_keys:create",
+  "api_keys:getById",
+  "api_keys:getByKeyHash",
+  "api_keys:listByOrg",
+  "api_keys:updateLastUsedAt",
+  "api_keys:update",
+  "api_keys:remove",
   "organizations:create",
   "organizations:getById",
   "organizations:getBySlug",
@@ -182,7 +182,7 @@ const fetchRunErrors = async (
   convex: ConvexHttpClient,
   runId: string
 ): Promise<RunErrorRow[]> => {
-  const result = (await convex.query(asQuery("run-errors:listByRunId"), {
+  const result = (await convex.query(asQuery("run_errors:listByRunId"), {
     runId,
     limit: 1000,
   })) as Record<string, unknown>[];

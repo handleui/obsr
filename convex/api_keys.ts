@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { requireServiceAuth } from "./service-auth";
+import { requireServiceAuth } from "./service_auth";
 import { buildPatch, clampLimit, nullableNumber } from "./validators";
 
 const serviceToken = v.optional(v.string());

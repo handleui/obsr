@@ -139,7 +139,7 @@ app.get("/:provider/:slug", async (c) => {
     return c.json({ error: "Organization not found" }, 404);
   }
 
-  const member = (await convex.query("organization-members:getByOrgUser", {
+  const member = (await convex.query("organization_members:getByOrgUser", {
     organizationId: org._id,
     userId: auth.userId,
   })) as OrganizationMemberDoc | null;
@@ -191,7 +191,7 @@ app.get("/:provider/:slug/membership", async (c) => {
     return c.json({ error: "Organization not found" }, 404);
   }
 
-  const member = (await convex.query("organization-members:getByOrgUser", {
+  const member = (await convex.query("organization_members:getByOrgUser", {
     organizationId: org._id,
     userId: auth.userId,
   })) as OrganizationMemberDoc | null;
@@ -234,7 +234,7 @@ app.get("/:provider/:slug/projects", async (c) => {
     return c.json({ error: "Organization not found" }, 404);
   }
 
-  const member = (await convex.query("organization-members:getByOrgUser", {
+  const member = (await convex.query("organization_members:getByOrgUser", {
     organizationId: org._id,
     userId: auth.userId,
   })) as OrganizationMemberDoc | null;
@@ -297,7 +297,7 @@ app.get("/:provider/:slug/projects/:handle", async (c) => {
     return c.json({ error: "Organization not found" }, 404);
   }
 
-  const member = (await convex.query("organization-members:getByOrgUser", {
+  const member = (await convex.query("organization_members:getByOrgUser", {
     organizationId: org._id,
     userId: auth.userId,
   })) as OrganizationMemberDoc | null;

@@ -92,13 +92,13 @@ describe("auth routes", () => {
     mockMutation.mockReset();
 
     mockQuery.mockImplementation((name: string) => {
-      if (name === "organization-members:listByUser") {
+      if (name === "organization_members:listByUser") {
         return Promise.resolve([]);
       }
       if (name === "organizations:listByInstallerGithubId") {
         return Promise.resolve([]);
       }
-      if (name === "organization-members:getByOrgUser") {
+      if (name === "organization_members:getByOrgUser") {
         return Promise.resolve(null);
       }
       if (name === "organizations:listByProviderAccountIds") {
@@ -148,7 +148,7 @@ describe("auth routes", () => {
         });
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "organization-members:listByUser") {
+        if (name === "organization_members:listByUser") {
           return Promise.resolve([
             {
               id: "member-1",
@@ -266,7 +266,7 @@ describe("auth routes", () => {
         });
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "organization-members:listByUser") {
+        if (name === "organization_members:listByUser") {
           return Promise.resolve([
             {
               id: "member-1",
@@ -325,7 +325,7 @@ describe("auth routes", () => {
         });
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "organization-members:listByUser") {
+        if (name === "organization_members:listByUser") {
           return Promise.resolve([
             {
               id: "member-1",
@@ -411,7 +411,7 @@ describe("auth routes", () => {
       });
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "organization-members:listByUser") {
+        if (name === "organization_members:listByUser") {
           return Promise.resolve([
             {
               id: "member-1",
@@ -455,7 +455,7 @@ describe("auth routes", () => {
         });
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "organization-members:listByUser") {
+        if (name === "organization_members:listByUser") {
           return Promise.resolve([
             {
               id: "member-1",
@@ -499,7 +499,7 @@ describe("auth routes", () => {
         });
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "organization-members:listByUser") {
+        if (name === "organization_members:listByUser") {
           return Promise.resolve([]);
         }
         return Promise.resolve([]);
@@ -551,7 +551,7 @@ describe("auth routes", () => {
         });
 
       mockQuery.mockImplementation((name: string) => {
-        if (name === "organization-members:listByUser") {
+        if (name === "organization_members:listByUser") {
           return Promise.resolve([]);
         }
         return Promise.resolve([]);

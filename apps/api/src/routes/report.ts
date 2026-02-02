@@ -983,7 +983,7 @@ app.post("/", async (c) => {
       return row;
     });
 
-    const storeResult = (await convex.mutation("run-ingest:storeJobReport", {
+    const storeResult = (await convex.mutation("run_ingest:storeJobReport", {
       run: {
         id: runRecordId,
         projectId: project._id,

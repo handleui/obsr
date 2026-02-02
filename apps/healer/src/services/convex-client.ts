@@ -2,13 +2,13 @@ import { ConvexHttpClient } from "convex/browser";
 import { env } from "../env.js";
 
 const securedFunctions = new Set([
-  "api-keys:create",
-  "api-keys:getById",
-  "api-keys:getByKeyHash",
-  "api-keys:listByOrg",
-  "api-keys:updateLastUsedAt",
-  "api-keys:update",
-  "api-keys:remove",
+  "api_keys:create",
+  "api_keys:getById",
+  "api_keys:getByKeyHash",
+  "api_keys:listByOrg",
+  "api_keys:updateLastUsedAt",
+  "api_keys:update",
+  "api_keys:remove",
   "organizations:create",
   "organizations:getById",
   "organizations:getBySlug",

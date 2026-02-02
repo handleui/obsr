@@ -83,7 +83,7 @@ const seedRoleFromGitHub = async (
   // 2. If multiple admins race, only one can win the owner slot due to
   //    the recheck after insert (see resolveGitHubOrgRole)
   if (githubRole === "admin") {
-    const owners = (await convex.query("organization-members:listByOrgRole", {
+    const owners = (await convex.query("organization_members:listByOrgRole", {
       organizationId: org._id,
       role: "owner",
     })) as OrganizationMemberDoc[];
@@ -111,7 +111,7 @@ const resolveGitHubOrgRole = async (
 ): Promise<{ role: OrgAccessRole } | { error: string; status: number }> => {
   // Check for existing Detent membership first (active members only)
   const existingMember = (await convex.query(
-    "organization-members:getByOrgUser",
+    "organization_members:getByOrgUser",
     {
       organizationId: org._id,
       userId,
@@ -129,7 +129,7 @@ const resolveGitHubOrgRole = async (
       activeMember.providerUserId !== githubIdentity.userId ||
       activeMember.providerUsername !== githubIdentity.username
     ) {
-      await convex.mutation("organization-members:update", {
+      await convex.mutation("organization_members:update", {
         id: activeMember._id,
         providerUserId: githubIdentity.userId,
         providerUsername: githubIdentity.username,
@@ -177,7 +177,7 @@ const resolveGitHubOrgRole = async (
   );
 
   const createdMember = (await convex.mutation(
-    "organization-members:createIfMissing",
+    "organization_members:createIfMissing",
     {
       organizationId: org._id,
       userId,
@@ -338,7 +338,7 @@ export const githubOrgAccessMiddleware = async (
 
     // Check for existing membership with stored GitHub identity (active members only)
     const existingMember = (await convex.query(
-      "organization-members:getByOrgUser",
+      "organization_members:getByOrgUser",
       { organizationId: org._id, userId: auth.userId }
     )) as OrganizationMemberDoc | null;
     const activeMember =

@@ -45,7 +45,7 @@ export const checkAndTriggerAggregation = async (
   commitSha: string
 ): Promise<AggregationResult> => {
   // Single query: stats + prNumber are both on commitJobStats table
-  const stats = (await db.query("commit-job-stats:getByRepoCommit", {
+  const stats = (await db.query("commit_job_stats:getByRepoCommit", {
     repository,
     commitSha,
   })) as {
@@ -153,7 +153,7 @@ export const checkAndTriggerAggregation = async (
 
   if (posted) {
     // Mark as posted to prevent duplicates
-    await db.mutation("commit-job-stats:setCommentPostedByRepoCommit", {
+    await db.mutation("commit_job_stats:setCommentPostedByRepoCommit", {
       repository,
       commitSha,
       commentPosted: true,

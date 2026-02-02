@@ -58,7 +58,7 @@ const tryDemoteToVisitor = async (
     // Only demote auto-joined members, not manually invited
     // Security: Exclude owners (should not be auto-demoted) and visitors (no change needed)
     const members = (await convex.query(
-      "organization-members:listByOrgProviderUser",
+      "organization_members:listByOrgProviderUser",
       {
         organizationId: org._id,
         providerUserId: githubUserId,
@@ -81,7 +81,7 @@ const tryDemoteToVisitor = async (
         continue;
       }
 
-      await convex.mutation("organization-members:update", {
+      await convex.mutation("organization_members:update", {
         id: member._id,
         role: "visitor",
         updatedAt: Date.now(),
@@ -146,7 +146,7 @@ const tryAutoAddMember = async (
     // Single query to check all membership states for this user in this org
     // Replaces 3 separate queries with one
     const existingMemberships = (await convex.query(
-      "organization-members:listByOrgProviderUser",
+      "organization_members:listByOrgProviderUser",
       {
         organizationId: org._id,
         providerUserId: githubUserId,
@@ -188,7 +188,7 @@ const tryAutoAddMember = async (
       // SECURITY: Reset role to "member" on reactivation to prevent privilege escalation.
       // Previously elevated users (admin/owner) who left GitHub org and rejoin
       // should not automatically regain their elevated role.
-      await convex.mutation("organization-members:update", {
+      await convex.mutation("organization_members:update", {
         id: mirrorRemovedMember._id,
         removedAt: null,
         removalReason: null,
@@ -211,7 +211,7 @@ const tryAutoAddMember = async (
 
     // Find user in Detent system by providerUserId (in any org)
     const existingUsers = (await convex.query(
-      "organization-members:listByProviderUserId",
+      "organization_members:listByProviderUserId",
       {
         providerUserId: githubUserId,
       }
@@ -231,7 +231,7 @@ const tryAutoAddMember = async (
     // - Concurrent webhook requests for same user
     // - User already has membership via different path (e.g., manual invite)
     const created = (await convex.mutation(
-      "organization-members:createIfMissing",
+      "organization_members:createIfMissing",
       {
         organizationId: org._id,
         userId: existingUser.userId,

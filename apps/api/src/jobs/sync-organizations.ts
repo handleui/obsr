@@ -121,7 +121,7 @@ const syncOrganization = async (
       membershipSource?: string | null;
       role?: string | null;
       removedAt?: number | null;
-    }>(convex, "organization-members:paginateByOrg", {
+    }>(convex, "organization_members:paginateByOrg", {
       organizationId: org._id,
       includeRemoved: true,
     });
@@ -143,7 +143,7 @@ const syncOrganization = async (
 
     if (staleMembers.length > 0) {
       for (const member of staleMembers) {
-        await convex.mutation("organization-members:update", {
+        await convex.mutation("organization_members:update", {
           id: member._id,
           role: "visitor",
           updatedAt: now,
@@ -168,7 +168,7 @@ const syncOrganization = async (
 
     if (verifiableMembers.length > 0) {
       for (const member of verifiableMembers) {
-        await convex.mutation("organization-members:update", {
+        await convex.mutation("organization_members:update", {
           id: member._id,
           membershipSource: "github_sync",
           updatedAt: now,

@@ -397,10 +397,10 @@ describe("webhooks - installation events", () => {
       setQueryResult("organizations:getByProviderAccount", null);
       setQueryResult("organizations:listByProviderInstallationId", []);
       setQueryResult("organizations:getBySlug", null);
-      setQueryResult("organization-members:listByProviderUserId", [
+      setQueryResult("organization_members:listByProviderUserId", [
         { userId: "existing-detent-user" },
       ]);
-      setQueryResult("organization-members:getByOrgUser", null);
+      setQueryResult("organization_members:getByOrgUser", null);
 
       // Mock: installer is a GitHub admin
       mockVerifyGitHubMembership.mockResolvedValueOnce({
@@ -440,10 +440,10 @@ describe("webhooks - installation events", () => {
       setQueryResult("organizations:getByProviderAccount", null);
       setQueryResult("organizations:listByProviderInstallationId", []);
       setQueryResult("organizations:getBySlug", null);
-      setQueryResult("organization-members:listByProviderUserId", [
+      setQueryResult("organization_members:listByProviderUserId", [
         { userId: "existing-detent-user" },
       ]);
-      setQueryResult("organization-members:getByOrgUser", null);
+      setQueryResult("organization_members:getByOrgUser", null);
 
       // Mock: installer is only a GitHub member (not admin)
       mockVerifyGitHubMembership.mockResolvedValueOnce({
@@ -479,10 +479,10 @@ describe("webhooks - installation events", () => {
       setQueryResult("organizations:getByProviderAccount", null);
       setQueryResult("organizations:listByProviderInstallationId", []);
       setQueryResult("organizations:getBySlug", null);
-      setQueryResult("organization-members:listByProviderUserId", [
+      setQueryResult("organization_members:listByProviderUserId", [
         { userId: "existing-detent-user" },
       ]);
-      setQueryResult("organization-members:getByOrgUser", null);
+      setQueryResult("organization_members:getByOrgUser", null);
 
       const payload = createInstallationPayload("created", {
         accountType: "User", // Personal account
@@ -545,7 +545,7 @@ describe("webhooks - installation events", () => {
     it("appends suffix when slug already exists", async () => {
       setQueryResult("organizations:getByProviderAccount", null);
       setQueryResult("organizations:listByProviderInstallationId", []);
-      setQueryResult("organization-members:listByProviderUserId", []);
+      setQueryResult("organization_members:listByProviderUserId", []);
       queueQueryResult(
         "organizations:getBySlug",
         { _id: "existing-org" },
@@ -566,7 +566,7 @@ describe("webhooks - installation events", () => {
     it("increments suffix for multiple collisions", async () => {
       setQueryResult("organizations:getByProviderAccount", null);
       setQueryResult("organizations:listByProviderInstallationId", []);
-      setQueryResult("organization-members:listByProviderUserId", []);
+      setQueryResult("organization_members:listByProviderUserId", []);
       queueQueryResult(
         "organizations:getBySlug",
         { _id: "slug-1" },
@@ -589,7 +589,7 @@ describe("webhooks - installation events", () => {
     it("falls back to UUID suffix after max attempts", async () => {
       setQueryResult("organizations:getByProviderAccount", null);
       setQueryResult("organizations:listByProviderInstallationId", []);
-      setQueryResult("organization-members:listByProviderUserId", []);
+      setQueryResult("organization_members:listByProviderUserId", []);
       queueQueryResult(
         "organizations:getBySlug",
         { _id: "slug-0" },

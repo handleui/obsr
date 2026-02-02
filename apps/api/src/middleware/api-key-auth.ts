@@ -71,7 +71,7 @@ const lookupApiKey = async (
   }
 
   // Cache miss: lookup in database by hash (select only needed columns)
-  const apiKey = (await convex.query("api-keys:getByKeyHash", {
+  const apiKey = (await convex.query("api_keys:getByKeyHash", {
     keyHash: tokenHash,
   })) as CachedApiKey | null;
 
@@ -134,7 +134,7 @@ export const apiKeyAuthMiddleware = async (
     // This doesn't block the response and uses a separate connection
     c.executionCtx.waitUntil(
       convex
-        .mutation("api-keys:updateLastUsedAt", {
+        .mutation("api_keys:updateLastUsedAt", {
           id: apiKey._id,
           lastUsedAt: Date.now(),
         })

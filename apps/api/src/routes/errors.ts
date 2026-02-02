@@ -198,7 +198,7 @@ app.get("/", async (c) => {
   const runIds = latestRuns.map((r) => r._id);
   const errorsByRun = await Promise.all(
     runIds.map((runId) =>
-      convex.query("run-errors:listByRunId", { runId, limit: 1000 })
+      convex.query("run_errors:listByRunId", { runId, limit: 1000 })
     )
   );
   const errors = errorsByRun.flat() as RunErrorDoc[];

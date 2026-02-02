@@ -121,7 +121,7 @@ app.post(
       const keyHash = await hashApiKey(apiKey);
       const keyPrefix = apiKey.substring(0, 8); // "dtk_XXXX"
 
-      keyId = (await convex.mutation("api-keys:create", {
+      keyId = (await convex.mutation("api_keys:create", {
         organizationId: organization._id,
         keyHash,
         keyPrefix,
@@ -161,7 +161,7 @@ app.post(
       // Clean up the API key if creation failed
       if (keyId) {
         try {
-          await convex.mutation("api-keys:remove", { id: keyId });
+          await convex.mutation("api_keys:remove", { id: keyId });
         } catch (deleteError) {
           // CRITICAL: Orphaned API key - key exists in DB but no corresponding GitHub secret
           console.error(

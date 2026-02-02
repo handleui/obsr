@@ -311,7 +311,7 @@ export const bulkStoreRunsAndErrors = async (
     createdAt: completedAt,
   }));
 
-  await convex.mutation("run-ingest:bulkStore", {
+  await convex.mutation("run_ingest:bulkStore", {
     runs: runRows,
     errors: errorRows,
     signatures: Array.from(signatureInputs.values()),
@@ -420,7 +420,7 @@ export const getCommentIdFromDb = async (
   prNumber: number
 ): Promise<string | null> => {
   try {
-    const result = (await db.query("pr-comments:getByRepoPr", {
+    const result = (await db.query("pr_comments:getByRepoPr", {
       repository: repository.toLowerCase(),
       prNumber,
     })) as { commentId: string } | null;
@@ -451,7 +451,7 @@ export const upsertCommentIdInDb = async (
   const normalizedRepo = repository.toLowerCase();
 
   try {
-    await db.mutation("pr-comments:upsertByRepoPr", {
+    await db.mutation("pr_comments:upsertByRepoPr", {
       repository: normalizedRepo,
       prNumber,
       commentId,
@@ -513,7 +513,7 @@ export const checkForJobReportedErrors = async (
 
   const errorsByRun = await Promise.all(
     runs.map((run) =>
-      convex.query("run-errors:listByRunIdSource", {
+      convex.query("run_errors:listByRunIdSource", {
         runId: run._id,
         source: "job-report",
         limit: 1000,

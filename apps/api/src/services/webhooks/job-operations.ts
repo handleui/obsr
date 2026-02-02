@@ -148,13 +148,13 @@ export const updateCommitJobStats = async (
     return sum + (job.errorCount ?? 0);
   }, 0);
 
-  const existing = (await db.query("commit-job-stats:getByRepoCommit", {
+  const existing = (await db.query("commit_job_stats:getByRepoCommit", {
     repository,
     commitSha,
   })) as { commentPosted?: boolean } | null;
 
   const now = Date.now();
-  await db.mutation("commit-job-stats:upsert", {
+  await db.mutation("commit_job_stats:upsert", {
     repository,
     commitSha,
     prNumber,

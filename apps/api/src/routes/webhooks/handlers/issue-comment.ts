@@ -254,7 +254,7 @@ const loadFixableErrors = async (
   prNumber: number,
   runId: string
 ): Promise<HealError[] | Response> => {
-  const errors = (await convex.query("run-errors:listFixableByRunId", {
+  const errors = (await convex.query("run_errors:listFixableByRunId", {
     runId,
   })) as HealError[];
 

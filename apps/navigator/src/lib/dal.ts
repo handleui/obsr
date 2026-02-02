@@ -3,6 +3,8 @@ import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
+import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import {
   getUser as getAuthUser,
   verifySession as verifySessionToken,
@@ -29,7 +31,9 @@ const resolveProvider = (provider: string): Provider | null => {
 const GITHUB_LOGIN_PATTERN = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
 const GITLAB_LOGIN_PATTERN =
   /^[a-z\d](?:[a-z\d]|[._-](?=[a-z\d])){0,253}[a-z\d]$|^[a-z\d]{1}$/i;
-const HANDLE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// Handle pattern: derived from GitHub/GitLab repo names (alphanumeric, hyphens, underscores, dots)
+// Must start with alphanumeric, max 100 chars (GitHub repo name limit)
+const HANDLE_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 
 const isValidProviderLogin = (login: string, provider: Provider): boolean => {
   if (!login || typeof login !== "string") {
@@ -61,7 +65,7 @@ const isNextRedirect = (error: unknown): boolean =>
   String((error as { digest?: string }).digest).includes("NEXT_REDIRECT");
 
 interface OrganizationDoc {
-  _id: string;
+  _id: Id<"organizations">;
   name: string;
   slug: string;
   provider: Provider;
@@ -82,7 +86,7 @@ interface OrganizationMemberDoc {
 }
 
 interface ProjectDoc {
-  _id: string;
+  _id: Id<"projects">;
   handle: string;
   providerRepoId: string;
   providerRepoName: string;
@@ -101,25 +105,30 @@ const getAuthedConvexClient = cache(async () => {
   return getConvexClient(accessToken);
 });
 
-const loadOrganization = async (
-  provider: Provider,
-  org: string
-): Promise<OrganizationDoc | null> => {
-  const convex = await getAuthedConvexClient();
-  const organization = (await convex.query(
-    "organizations:getByProviderAccountLogin",
-    {
-      provider,
-      providerAccountLogin: org,
+/**
+ * Load organization by provider and login - memoized per request
+ * This is the core org lookup used by multiple DAL functions.
+ * Using React's cache() prevents redundant Convex queries when
+ * layout.tsx makes parallel fetches (fetchOrg, fetchMembership, fetchProject).
+ */
+const loadOrganization = cache(
+  async (provider: Provider, org: string): Promise<OrganizationDoc | null> => {
+    const convex = await getAuthedConvexClient();
+    const organization = (await convex.query(
+      api.organizations.getByProviderAccountLogin,
+      {
+        provider,
+        providerAccountLogin: org,
+      }
+    )) as OrganizationDoc | null;
+
+    if (!organization || organization.deletedAt) {
+      return null;
     }
-  )) as OrganizationDoc | null;
 
-  if (!organization || organization.deletedAt) {
-    return null;
+    return organization;
   }
-
-  return organization;
-};
+);
 
 export interface Session {
   userId: string;
@@ -194,7 +203,7 @@ const loadOrgAndMembership = async (
     return null;
   }
 
-  const member = (await convex.query("organization-members:getByOrgUser", {
+  const member = (await convex.query(api["organization-members"].getByOrgUser, {
     organizationId: organization._id,
     userId,
   })) as OrganizationMemberDoc | null;
@@ -302,7 +311,7 @@ export const fetchProject = cache(
       }
 
       const convex = await getAuthedConvexClient();
-      const record = (await convex.query("projects:getByOrgHandle", {
+      const record = (await convex.query(api.projects.getByOrgHandle, {
         organizationId: result.organization._id,
         handle,
       })) as ProjectDoc | null;
@@ -357,9 +366,9 @@ export const fetchProjects = cache(
       }
 
       const convex = await getAuthedConvexClient();
-      const records = (await convex.query("projects:listByOrg", {
+      const records = (await convex.query(api.projects.listByOrg, {
         organizationId: result.organization._id,
-      })) as ProjectDoc[];
+      })) as unknown as ProjectDoc[];
 
       const projects = records
         .filter((record) => !record.removedAt)
@@ -409,10 +418,13 @@ export const fetchMembership = cache(
       }
 
       const convex = await getAuthedConvexClient();
-      const member = (await convex.query("organization-members:getByOrgUser", {
-        organizationId: organization._id,
-        userId: session.userId,
-      })) as OrganizationMemberDoc | null;
+      const member = (await convex.query(
+        api["organization-members"].getByOrgUser,
+        {
+          organizationId: organization._id,
+          userId: session.userId,
+        }
+      )) as OrganizationMemberDoc | null;
 
       if (!member || member.removedAt) {
         return null;

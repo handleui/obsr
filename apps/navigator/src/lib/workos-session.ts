@@ -20,6 +20,14 @@ export const getWorkOSAccessToken = async (): Promise<string | null> => {
       cookiePassword,
     });
 
+    // First check if the current access token is still valid (local JWT validation, no API call).
+    // Only refresh if the token has expired to reduce unnecessary WorkOS API calls.
+    const authResult = await session.authenticate();
+    if (authResult.authenticated && authResult.accessToken) {
+      return authResult.accessToken;
+    }
+
+    // Token expired or invalid - attempt to refresh via API
     const refreshResult = await session.refresh({ cookiePassword });
     if (!(refreshResult.authenticated && refreshResult.session)) {
       return null;

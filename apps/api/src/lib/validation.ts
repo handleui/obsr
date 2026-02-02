@@ -9,8 +9,9 @@
 // Allows forward slash for provider-prefixed slugs (e.g., gh/org-name)
 const SLUG_PATTERN = /^[a-z0-9]+(?:[-/][a-z0-9]+)*$/;
 
-// Handle pattern: same as slug but without forward slashes
-const HANDLE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+// Handle pattern: derived from GitHub/GitLab repo names (alphanumeric, hyphens, underscores, dots)
+// Must start with alphanumeric, max 100 chars (GitHub repo name limit)
+const HANDLE_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 
 // Provider values
 const VALID_PROVIDERS = ["github", "gitlab"] as const;
@@ -59,11 +60,10 @@ export const validateSlug = (
 };
 
 /**
- * Validate a handle (e.g., project handle like "my-project")
+ * Validate a handle (e.g., project handle like "my-project" or "my_project.v2")
  * - Must be 1-255 characters
- * - Lowercase alphanumeric with hyphens only (no slashes)
- * - No leading/trailing hyphens
- * - No consecutive hyphens
+ * - Lowercase alphanumeric with hyphens, underscores, and dots
+ * - Must start with a letter or number
  */
 export const validateHandle = (
   handle: string,
@@ -89,7 +89,7 @@ export const validateHandle = (
   if (!HANDLE_PATTERN.test(trimmed)) {
     return {
       valid: false,
-      error: `${fieldName} must contain only lowercase letters, numbers, and hyphens`,
+      error: `${fieldName} must start with a letter or number and contain only lowercase letters, numbers, hyphens, underscores, and dots`,
     };
   }
 
@@ -120,13 +120,14 @@ export const validateProvider = (
 /**
  * Sanitize a string for use as a handle
  * Converts to lowercase and replaces invalid characters with hyphens
+ * Preserves underscores and dots (valid in GitHub/GitLab repo names)
  */
 export const sanitizeHandle = (input: string): string => {
   return input
     .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "-") // Replace invalid chars with hyphens
+    .replace(/[^a-z0-9._-]/g, "-") // Replace invalid chars with hyphens
     .replace(/-+/g, "-") // Collapse multiple hyphens
-    .replace(/^-|-$/g, ""); // Remove leading/trailing hyphens
+    .replace(/^[-._]+|[-._]+$/g, ""); // Remove leading/trailing special chars
 };
 
 // Email validation pattern (RFC 5322 simplified)

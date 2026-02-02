@@ -52,6 +52,10 @@ jobs:
         if: ${{ steps.release.outputs['packages/diagnostics--release_created'] }}
         uses: oven-sh/setup-bun@v2
 
+      - name: Update npm for trusted publishing
+        if: ${{ steps.release.outputs['packages/diagnostics--release_created'] }}
+        run: npm install -g npm@latest
+
       - name: Install dependencies
         if: ${{ steps.release.outputs['packages/diagnostics--release_created'] }}
         run: bun install

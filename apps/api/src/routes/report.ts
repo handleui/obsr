@@ -27,6 +27,7 @@ interface ReportError {
   line?: number;
   column?: number;
   category?: string;
+  source?: string;
   severity?: "error" | "warning";
   ruleId?: string;
   stackTrace?: string;

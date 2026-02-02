@@ -801,6 +801,44 @@ const handleJobCompletion = async (
   }
 };
 
+const isErrorAutofixable = (error: {
+  fixable?: boolean | null;
+  source?: string | null;
+}): boolean => {
+  if (error.fixable !== true) {
+    return false;
+  }
+  const source = typeof error.source === "string" ? error.source : "";
+  return source.length > 0 && hasAutofix(source);
+};
+
+interface RunError {
+  _id: string;
+  fixable?: boolean | null;
+  category?: string | null;
+  source?: string | null;
+  signatureId?: string | null;
+  workflowJob?: string | null;
+}
+
+const groupErrorsByWorkflowJob = (
+  runErrors: RunError[]
+): Map<string, RunError[]> => {
+  const errorsByWorkflowJob = new Map<string, RunError[]>();
+  for (const error of runErrors) {
+    if (typeof error.workflowJob !== "string" || !error.workflowJob) {
+      continue;
+    }
+    if (isErrorAutofixable(error)) {
+      continue;
+    }
+    const existingGroup = errorsByWorkflowJob.get(error.workflowJob) ?? [];
+    existingGroup.push(error);
+    errorsByWorkflowJob.set(error.workflowJob, existingGroup);
+  }
+  return errorsByWorkflowJob;
+};
+
 const createHealsForErrors = async (
   env: Env,
   convex: DbClient,
@@ -828,40 +866,19 @@ const createHealsForErrors = async (
       .flatMap((heal) => heal.errorIds ?? [])
   );
 
+  const errorLimit = 1000;
   const runErrors = (await convex.query("run-errors:listByRunId", {
     runId: storeResult.runId,
-    limit: 1000,
-  })) as Array<{
-    _id: string;
-    fixable?: boolean | null;
-    category?: string | null;
-    source?: string | null;
-    signatureId?: string | null;
-    workflowJob?: string | null;
-  }>;
+    limit: errorLimit,
+  })) as RunError[];
 
-  const errorsByWorkflowJob = new Map<string, typeof runErrors>();
-  for (const error of runErrors) {
-    if (typeof error.workflowJob !== "string" || !error.workflowJob) {
-      continue;
-    }
-
-    const isAutofixable = (() => {
-      if (error.fixable !== true) {
-        return false;
-      }
-      const source = typeof error.source === "string" ? error.source : "";
-      return source.length > 0 && hasAutofix(source);
-    })();
-
-    if (isAutofixable) {
-      continue;
-    }
-
-    const existingGroup = errorsByWorkflowJob.get(error.workflowJob) ?? [];
-    existingGroup.push(error);
-    errorsByWorkflowJob.set(error.workflowJob, existingGroup);
+  if (runErrors.length === errorLimit) {
+    console.warn(
+      `[createHealsForErrors] Run ${storeResult.runId} has ${errorLimit}+ errors; some may not be considered for heal creation`
+    );
   }
+
+  const errorsByWorkflowJob = groupErrorsByWorkflowJob(runErrors);
 
   let healStatus: HealCreateStatus = "found";
   if (orgSettings.healAutoTrigger) {
@@ -877,7 +894,7 @@ const createHealsForErrors = async (
     if (errorIds.length === 0) {
       continue;
     }
-    if (errorIds.every((id) => existingErrorIds.has(id))) {
+    if (errorIds.some((id) => existingErrorIds.has(id))) {
       continue;
     }
 

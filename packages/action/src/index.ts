@@ -97,7 +97,7 @@ const parseAndEnrichErrors = (
       const parsed = parser(content);
       for (const error of parsed) {
         const enriched = enrichWithSnippet(error);
-        errors.push({ ...enriched, source: tool });
+        errors.push({ ...enriched, source: enriched.source ?? tool });
       }
       core.debug(`Parsed ${parsed.length} errors from ${tool} (${path})`);
     } catch (err) {

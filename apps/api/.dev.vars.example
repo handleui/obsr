@@ -1,11 +1,8 @@
-# Local development environment variables
+# Local development environment variables (required only)
 # Copy to .dev.vars and fill in your values
-# These mirror the secrets set in Cloudflare dashboard
 
 GITHUB_APP_ID=your_app_id
 GITHUB_CLIENT_ID=your_client_id
-# GitHub App Client Secret (for OAuth token refresh) - found in GitHub App settings
-GITHUB_CLIENT_SECRET=your_client_secret
 # IMPORTANT: Private key must be single-line with literal \n (dotenv doesn't support multiline)
 # Convert with: awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' your-key.pem
 GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n...\n-----END RSA PRIVATE KEY-----"
@@ -15,27 +12,22 @@ GITHUB_WEBHOOK_SECRET=your_webhook_secret
 WORKOS_CLIENT_ID=your_workos_client_id
 WORKOS_API_KEY=your_workos_api_key
 
+# Convex
 CONVEX_URL=https://your-deployment.convex.cloud
+CONVEX_SERVICE_TOKEN=your_convex_service_token
 
 # Upstash Redis for rate limiting
 UPSTASH_REDIS_REST_URL=your_upstash_url
 UPSTASH_REDIS_REST_TOKEN=your_upstash_token
-
-# Sandbox provider (vercel | e2b)
-SANDBOX_PROVIDER=vercel
-# E2B sandbox API key (required when SANDBOX_PROVIDER=e2b)
-E2B_API_KEY=
-# Vercel Sandbox auth (access token + team/project IDs)
-VERCEL_TOKEN=
-VERCEL_TEAM_ID=
-VERCEL_PROJECT_ID=
 
 # Email (Resend) configuration
 RESEND_API_KEY=your_resend_api_key
 RESEND_EMAIL_FROM="Detent <noreply@detent.dev>"
 
 # Navigator (web app) base URL for invitation links
-NAVIGATOR_BASE_URL=http://localhost:3000
+NAVIGATOR_BASE_URL=http://localhost:3001
 
-# Modal executor webhook secret (HMAC signature verification)
-MODAL_WEBHOOK_SECRET=your_modal_webhook_secret
+# Polar billing
+POLAR_ACCESS_TOKEN=your_polar_access_token
+POLAR_ORGANIZATION_ID=your_polar_org_id
+POLAR_WEBHOOK_SECRET=your_polar_webhook_secret

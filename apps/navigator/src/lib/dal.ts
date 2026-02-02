@@ -3,12 +3,132 @@ import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
+import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import {
   getUser as getAuthUser,
   verifySession as verifySessionToken,
   type WorkOSUser,
 } from "./auth";
-import { API_BASE_URL, COOKIE_NAMES } from "./constants";
+import { COOKIE_NAMES } from "./constants";
+import { getConvexClient, toIsoString } from "./convex-client";
+import { getWorkOSAccessToken } from "./workos-session";
+
+const PROVIDER_MAP = {
+  gh: "github",
+  gl: "gitlab",
+  github: "github",
+  gitlab: "gitlab",
+} as const;
+
+type Provider = (typeof PROVIDER_MAP)[keyof typeof PROVIDER_MAP];
+
+const resolveProvider = (provider: string): Provider | null => {
+  const resolved = PROVIDER_MAP[provider as keyof typeof PROVIDER_MAP];
+  return resolved ?? null;
+};
+
+const GITHUB_LOGIN_PATTERN = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
+const GITLAB_LOGIN_PATTERN =
+  /^[a-z\d](?:[a-z\d]|[._-](?=[a-z\d])){0,253}[a-z\d]$|^[a-z\d]{1}$/i;
+// Handle pattern: derived from GitHub/GitLab repo names (alphanumeric, hyphens, underscores, dots)
+// Must start with alphanumeric, max 100 chars (GitHub repo name limit)
+const HANDLE_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+
+const isValidProviderLogin = (login: string, provider: Provider): boolean => {
+  if (!login || typeof login !== "string") {
+    return false;
+  }
+  if (provider === "github") {
+    return GITHUB_LOGIN_PATTERN.test(login);
+  }
+  if (login.length < 2 || login.length > 255) {
+    return false;
+  }
+  return GITLAB_LOGIN_PATTERN.test(login);
+};
+
+const isValidHandle = (handle: string): boolean => {
+  if (!handle || typeof handle !== "string") {
+    return false;
+  }
+  const trimmed = handle.trim().toLowerCase();
+  if (trimmed.length === 0 || trimmed.length > 255) {
+    return false;
+  }
+  return HANDLE_PATTERN.test(trimmed);
+};
+
+const isNextRedirect = (error: unknown): boolean =>
+  error instanceof Error &&
+  "digest" in error &&
+  String((error as { digest?: string }).digest).includes("NEXT_REDIRECT");
+
+interface OrganizationDoc {
+  _id: Id<"organizations">;
+  name: string;
+  slug: string;
+  provider: Provider;
+  providerAccountId: string;
+  providerAccountLogin: string;
+  providerAccountType: "organization" | "user";
+  providerAvatarUrl?: string | null;
+  providerInstallationId?: string | null;
+  suspendedAt?: number | null;
+  deletedAt?: number | null;
+  createdAt: number;
+}
+
+interface OrganizationMemberDoc {
+  role: "owner" | "admin" | "member" | "visitor";
+  userId: string;
+  removedAt?: number | null;
+}
+
+interface ProjectDoc {
+  _id: Id<"projects">;
+  handle: string;
+  providerRepoId: string;
+  providerRepoName: string;
+  providerRepoFullName: string;
+  providerDefaultBranch?: string | null;
+  isPrivate: boolean;
+  createdAt: number;
+  removedAt?: number | null;
+}
+
+const getAuthedConvexClient = cache(async () => {
+  const accessToken = await getWorkOSAccessToken();
+  if (!accessToken) {
+    redirect("/login");
+  }
+  return getConvexClient(accessToken);
+});
+
+/**
+ * Load organization by provider and login - memoized per request
+ * This is the core org lookup used by multiple DAL functions.
+ * Using React's cache() prevents redundant Convex queries when
+ * layout.tsx makes parallel fetches (fetchOrg, fetchMembership, fetchProject).
+ */
+const loadOrganization = cache(
+  async (provider: Provider, org: string): Promise<OrganizationDoc | null> => {
+    const convex = await getAuthedConvexClient();
+    const organization = (await convex.query(
+      api.organizations.getByProviderAccountLogin,
+      {
+        provider,
+        providerAccountLogin: org,
+      }
+    )) as OrganizationDoc | null;
+
+    if (!organization || organization.deletedAt) {
+      return null;
+    }
+
+    return organization;
+  }
+);
 
 export interface Session {
   userId: string;
@@ -69,23 +189,30 @@ export const getUser = cache(async (): Promise<Session | null> => {
   };
 });
 
-export const fetchWithAuth = async (
-  path: string,
-  options?: RequestInit
-): Promise<Response> => {
-  const session = await verifySession();
+const loadOrgAndMembership = async (
+  provider: Provider,
+  org: string,
+  userId: string
+): Promise<{
+  organization: OrganizationDoc;
+  member: OrganizationMemberDoc;
+} | null> => {
+  const convex = await getAuthedConvexClient();
+  const organization = await loadOrganization(provider, org);
+  if (!organization) {
+    return null;
+  }
 
-  const url = path.startsWith("/")
-    ? `${API_BASE_URL}${path}`
-    : `${API_BASE_URL}/${path}`;
+  const member = (await convex.query(api["organization-members"].getByOrgUser, {
+    organizationId: organization._id,
+    userId,
+  })) as OrganizationMemberDoc | null;
 
-  return fetch(url, {
-    ...options,
-    headers: {
-      ...options?.headers,
-      Authorization: `Bearer ${session.token}`,
-    },
-  });
+  if (!member || member.removedAt) {
+    return null;
+  }
+
+  return { organization, member };
 };
 
 export interface OrgData {
@@ -108,12 +235,32 @@ export interface OrgData {
 export const fetchOrg = cache(
   async (provider: string, org: string): Promise<OrgData | null> => {
     try {
-      const response = await fetchWithAuth(`/v1/orgs/${provider}/${org}`);
-      if (!response.ok) {
+      const resolvedProvider = resolveProvider(provider);
+      if (!(resolvedProvider && isValidProviderLogin(org, resolvedProvider))) {
         return null;
       }
-      return response.json() as Promise<OrgData>;
-    } catch {
+
+      const slug = org.toLowerCase();
+      const organization = await loadOrganization(resolvedProvider, slug);
+      if (!organization) {
+        return null;
+      }
+      return {
+        id: organization._id,
+        name: organization.name,
+        slug: organization.slug,
+        provider: organization.provider,
+        provider_account_login: organization.providerAccountLogin,
+        provider_account_type: organization.providerAccountType,
+        provider_avatar_url: organization.providerAvatarUrl ?? null,
+        app_installed: Boolean(organization.providerInstallationId),
+        suspended_at: toIsoString(organization.suspendedAt),
+        created_at: new Date(organization.createdAt).toISOString(),
+      };
+    } catch (error) {
+      if (isNextRedirect(error)) {
+        throw error;
+      }
       return null;
     }
   }
@@ -140,14 +287,53 @@ export const fetchProject = cache(
     project: string
   ): Promise<ProjectData | null> => {
     try {
-      const response = await fetchWithAuth(
-        `/v1/orgs/${provider}/${org}/projects/${project}`
-      );
-      if (!response.ok) {
+      const resolvedProvider = resolveProvider(provider);
+      if (
+        !(
+          resolvedProvider &&
+          isValidProviderLogin(org, resolvedProvider) &&
+          isValidHandle(project)
+        )
+      ) {
         return null;
       }
-      return response.json() as Promise<ProjectData>;
-    } catch {
+
+      const session = await verifySession();
+      const slug = org.toLowerCase();
+      const handle = project.toLowerCase();
+      const result = await loadOrgAndMembership(
+        resolvedProvider,
+        slug,
+        session.userId
+      );
+      if (!result) {
+        return null;
+      }
+
+      const convex = await getAuthedConvexClient();
+      const record = (await convex.query(api.projects.getByOrgHandle, {
+        organizationId: result.organization._id,
+        handle,
+      })) as ProjectDoc | null;
+
+      if (!record || record.removedAt) {
+        return null;
+      }
+
+      return {
+        id: record._id,
+        handle: record.handle,
+        provider_repo_id: record.providerRepoId,
+        provider_repo_name: record.providerRepoName,
+        provider_repo_full_name: record.providerRepoFullName,
+        provider_default_branch: record.providerDefaultBranch ?? null,
+        is_private: record.isPrivate,
+        created_at: new Date(record.createdAt).toISOString(),
+      };
+    } catch (error) {
+      if (isNextRedirect(error)) {
+        throw error;
+      }
       return null;
     }
   }
@@ -163,21 +349,52 @@ export interface ProjectsResponse {
 export const fetchProjects = cache(
   async (provider: string, org: string): Promise<ProjectsResponse | null> => {
     try {
-      const response = await fetchWithAuth(
-        `/v1/orgs/${provider}/${org}/projects`
-      );
-      if (!response.ok) {
+      const resolvedProvider = resolveProvider(provider);
+      if (!(resolvedProvider && isValidProviderLogin(org, resolvedProvider))) {
         return null;
       }
-      return response.json() as Promise<ProjectsResponse>;
-    } catch {
+
+      const session = await verifySession();
+      const slug = org.toLowerCase();
+      const result = await loadOrgAndMembership(
+        resolvedProvider,
+        slug,
+        session.userId
+      );
+      if (!result) {
+        return null;
+      }
+
+      const convex = await getAuthedConvexClient();
+      const records = (await convex.query(api.projects.listByOrg, {
+        organizationId: result.organization._id,
+      })) as unknown as ProjectDoc[];
+
+      const projects = records
+        .filter((record) => !record.removedAt)
+        .map((record) => ({
+          id: record._id,
+          handle: record.handle,
+          provider_repo_id: record.providerRepoId,
+          provider_repo_name: record.providerRepoName,
+          provider_repo_full_name: record.providerRepoFullName,
+          provider_default_branch: record.providerDefaultBranch ?? null,
+          is_private: record.isPrivate,
+          created_at: new Date(record.createdAt).toISOString(),
+        }));
+
+      return { projects };
+    } catch (error) {
+      if (isNextRedirect(error)) {
+        throw error;
+      }
       return null;
     }
   }
 );
 
 export interface OrgMembership {
-  role: "owner" | "admin" | "member";
+  role: "owner" | "admin" | "member" | "visitor";
   user_id: string;
   organization_id: string;
 }
@@ -189,16 +406,39 @@ export interface OrgMembership {
 export const fetchMembership = cache(
   async (provider: string, org: string): Promise<OrgMembership | null> => {
     try {
-      const response = await fetchWithAuth(
-        `/v1/orgs/${provider}/${org}/membership`
-      );
-
-      if (!response.ok) {
+      const resolvedProvider = resolveProvider(provider);
+      if (!(resolvedProvider && isValidProviderLogin(org, resolvedProvider))) {
+        return null;
+      }
+      const session = await verifySession();
+      const slug = org.toLowerCase();
+      const organization = await loadOrganization(resolvedProvider, slug);
+      if (!organization) {
         return null;
       }
 
-      return response.json() as Promise<OrgMembership>;
-    } catch {
+      const convex = await getAuthedConvexClient();
+      const member = (await convex.query(
+        api["organization-members"].getByOrgUser,
+        {
+          organizationId: organization._id,
+          userId: session.userId,
+        }
+      )) as OrganizationMemberDoc | null;
+
+      if (!member || member.removedAt) {
+        return null;
+      }
+
+      return {
+        role: member.role,
+        user_id: member.userId,
+        organization_id: organization._id,
+      };
+    } catch (error) {
+      if (isNextRedirect(error)) {
+        throw error;
+      }
       return null;
     }
   }

@@ -103,8 +103,13 @@ export const getById = query({
 });
 
 export const getByOrgUser = query({
-  args: { organizationId: v.id("organizations"), userId: v.string() },
+  args: {
+    organizationId: v.id("organizations"),
+    userId: v.string(),
+    serviceToken,
+  },
   handler: async (ctx, args) => {
+    await requireServiceAuth(ctx, args);
     return await ctx.db
       .query("organizationMembers")
       .withIndex("by_org_user", (q) =>

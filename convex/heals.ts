@@ -154,7 +154,7 @@ export const create = mutation({
     failedReason: v.optional(nullableString),
   },
   handler: async (ctx, args) => {
-    if (args.prNumber !== undefined && args.prNumber <= 0) {
+    if (args.prNumber != null && args.prNumber <= 0) {
       throw new Error("Invalid prNumber");
     }
 

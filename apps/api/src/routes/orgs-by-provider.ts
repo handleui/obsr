@@ -59,12 +59,19 @@ const validateProviderLogin = (
   return { valid: true };
 };
 
-// Project handles are internal, use GitHub-style pattern (alphanumeric + hyphens, 1-39 chars)
+// Project handles are derived from GitHub/GitLab repo names
+// Allows alphanumeric, hyphens, underscores, and dots (must start with alphanumeric)
+const HANDLE_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
+
 const validateHandle = (handle: string): { valid: boolean; error?: string } => {
   if (!handle || typeof handle !== "string") {
     return { valid: false, error: "Project handle is required" };
   }
-  if (!GITHUB_LOGIN_PATTERN.test(handle)) {
+  const trimmed = handle.trim().toLowerCase();
+  if (trimmed.length === 0 || trimmed.length > 100) {
+    return { valid: false, error: "Project handle must be 1-100 characters" };
+  }
+  if (!HANDLE_PATTERN.test(trimmed)) {
     return { valid: false, error: "Invalid project handle format" };
   }
   return { valid: true };

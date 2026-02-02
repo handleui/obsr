@@ -335,6 +335,7 @@ Active heals tracked in-memory. New heals only fetched when slots available.
 | `VERCEL_PROJECT_ID` | No | Vercel project ID (required for Vercel Sandboxes) |
 | `AI_GATEWAY_API_KEY` | Yes | AI Gateway access |
 | `CONVEX_URL` | Yes | Convex deployment URL |
+| `CONVEX_SERVICE_TOKEN` | Yes | Convex service token for authenticated access |
 | `GITHUB_APP_ID` | Yes | GitHub App ID |
 | `GITHUB_APP_PRIVATE_KEY` | Yes | GitHub App private key (PEM) |
 

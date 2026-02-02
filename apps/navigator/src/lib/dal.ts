@@ -29,6 +29,7 @@ const resolveProvider = (provider: string): Provider | null => {
 const GITHUB_LOGIN_PATTERN = /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i;
 const GITLAB_LOGIN_PATTERN =
   /^[a-z\d](?:[a-z\d]|[._-](?=[a-z\d])){0,253}[a-z\d]$|^[a-z\d]{1}$/i;
+const HANDLE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 const isValidProviderLogin = (login: string, provider: Provider): boolean => {
   if (!login || typeof login !== "string") {
@@ -47,7 +48,11 @@ const isValidHandle = (handle: string): boolean => {
   if (!handle || typeof handle !== "string") {
     return false;
   }
-  return GITHUB_LOGIN_PATTERN.test(handle);
+  const trimmed = handle.trim().toLowerCase();
+  if (trimmed.length === 0 || trimmed.length > 255) {
+    return false;
+  }
+  return HANDLE_PATTERN.test(trimmed);
 };
 
 const isNextRedirect = (error: unknown): boolean =>

@@ -1,7 +1,7 @@
-import { notFound } from "next/navigation";
+import { forbidden, notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { ProjectProvider } from "@/contexts/project-context";
-import { fetchProject } from "@/lib/dal";
+import { fetchMembership, fetchOrg, fetchProject } from "@/lib/dal";
 
 interface ProjectLayoutProps {
   children: ReactNode;
@@ -11,7 +11,19 @@ interface ProjectLayoutProps {
 const ProjectLayout = async ({ children, params }: ProjectLayoutProps) => {
   const { provider, org, project } = await params;
 
-  const projectData = await fetchProject(provider, org, project);
+  const [orgData, membership, projectData] = await Promise.all([
+    fetchOrg(provider, org),
+    fetchMembership(provider, org),
+    fetchProject(provider, org, project),
+  ]);
+
+  if (!orgData) {
+    notFound();
+  }
+
+  if (!membership) {
+    forbidden();
+  }
 
   if (!projectData) {
     notFound();

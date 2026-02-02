@@ -35,6 +35,7 @@
         "WORKOS_API_KEY",
         "WORKOS_CLIENT_ID",
         "JWT_SECRET_KEY",
+        "CONVEX_URL",
         "NEXT_PUBLIC_APP_URL",
         "WORKOS_COOKIE_PASSWORD"
       ]

@@ -1,21 +1,17 @@
-name: API Migrations
+name: Convex Deploy
 
 on:
   push:
     branches: [main]
     paths:
-      - "apps/api/src/db/schema.ts"
-      - "apps/api/drizzle/**"
+      - "convex/**"
 
 permissions:
   contents: read
 
 jobs:
-  migrate:
+  deploy:
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    defaults:
-      run:
-        working-directory: apps/api
 
     steps:
       - uses: actions/checkout@v4
@@ -26,9 +22,8 @@ jobs:
 
       - name: Install dependencies
         run: bun install
-        working-directory: .
 
-      - name: Run migrations
-        run: bunx drizzle-kit migrate
+      - name: Deploy Convex
+        run: npx convex deploy
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}

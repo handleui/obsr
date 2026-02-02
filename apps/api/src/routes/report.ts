@@ -816,9 +816,11 @@ const createHealsForErrors = async (
   })) as { settings?: OrganizationSettings | null } | null;
   const orgSettings = getOrgSettings(organization?.settings);
 
-  const existingHeals = payload.prNumber
+  const healsByRun = await getHealsByRunId(env, storeResult.runId);
+  const healsByPr = payload.prNumber
     ? await getHealsByPr(env, project._id, payload.prNumber)
-    : await getHealsByRunId(env, storeResult.runId);
+    : [];
+  const existingHeals = [...healsByRun, ...healsByPr];
   const existingErrorIds = new Set(
     existingHeals
       .filter((heal) => heal.type === "heal")
@@ -832,6 +834,7 @@ const createHealsForErrors = async (
     _id: string;
     fixable?: boolean | null;
     category?: string | null;
+    source?: string | null;
     signatureId?: string | null;
     workflowJob?: string | null;
   }>;
@@ -846,8 +849,8 @@ const createHealsForErrors = async (
       if (error.fixable !== true) {
         return false;
       }
-      const category = typeof error.category === "string" ? error.category : "";
-      return category.length > 0 && hasAutofix(category);
+      const source = typeof error.source === "string" ? error.source : "";
+      return source.length > 0 && hasAutofix(source);
     })();
 
     if (isAutofixable) {

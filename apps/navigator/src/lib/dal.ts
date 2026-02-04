@@ -203,7 +203,7 @@ const loadOrgAndMembership = async (
     return null;
   }
 
-  const member = (await convex.query(api["organization-members"].getByOrgUser, {
+  const member = (await convex.query(api.organization_members.getByOrgUser, {
     organizationId: organization._id,
     userId,
   })) as OrganizationMemberDoc | null;
@@ -419,7 +419,7 @@ export const fetchMembership = cache(
 
       const convex = await getAuthedConvexClient();
       const member = (await convex.query(
-        api["organization-members"].getByOrgUser,
+        api.organization_members.getByOrgUser,
         {
           organizationId: organization._id,
           userId: session.userId,

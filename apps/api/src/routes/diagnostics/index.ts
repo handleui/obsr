@@ -11,6 +11,7 @@ import {
 } from "./schemas";
 
 const MAX_DIAGNOSTICS = 10_000;
+const MAX_VALIDATE_DIAGNOSTICS = 100;
 
 const diagnosticsRoute = createRoute({
   method: "post",
@@ -84,7 +85,7 @@ app.openAPIRegistry.registerComponent("securitySchemes", "apiKey", {
 // Apply IP-based rate limiting to all routes in this router
 app.use("*", publicRateLimitMiddleware);
 
-app.openapi(diagnosticsRoute, (c) => {
+app.openapi(diagnosticsRoute, async (c) => {
   const body = c.req.valid("json");
 
   // Zod validates tool against DetectedToolSchema; type assertion aligns with extract() signature
@@ -112,6 +113,64 @@ app.openapi(diagnosticsRoute, (c) => {
     );
   }
 
+  // Run AI validation if requested (limit to first 100 diagnostics to control costs)
+  let validation:
+    | {
+        status: Array<{
+          index: number;
+          validation: "confirmed" | "false_positive" | "uncertain";
+          confidence: "high" | "medium" | "low";
+          reason?: string;
+        }>;
+        missed: Array<{
+          message: string;
+          file_path?: string;
+          line?: number;
+          severity?: "error" | "warning";
+          missed_reason: string;
+        }>;
+        summary: {
+          total: number;
+          confirmed: number;
+          false_positives: number;
+          uncertain: number;
+          missed: number;
+        };
+      }
+    | undefined;
+
+  if (body.validate && result.diagnostics.length > 0) {
+    const { validate } = await import("@detent/ai");
+    const toValidate = {
+      ...result,
+      diagnostics: result.diagnostics.slice(0, MAX_VALIDATE_DIAGNOSTICS),
+    };
+    const validationResult = await validate(body.content, toValidate);
+
+    validation = {
+      status: validationResult.validated.map((v, i) => ({
+        index: i,
+        validation: v.validation,
+        confidence: v.confidence,
+        reason: v.reason,
+      })),
+      missed: validationResult.missed.map((m) => ({
+        message: m.message,
+        file_path: m.filePath,
+        line: m.line,
+        severity: m.severity,
+        missed_reason: m.missedReason,
+      })),
+      summary: {
+        total: validationResult.summary.total,
+        confirmed: validationResult.summary.confirmed,
+        false_positives: validationResult.summary.falsePositives,
+        uncertain: validationResult.summary.uncertain,
+        missed: validationResult.summary.missed,
+      },
+    };
+  }
+
   return c.json(
     {
       mode: "full" as const,
@@ -129,6 +188,7 @@ app.openapi(diagnosticsRoute, (c) => {
       })),
       summary: result.summary,
       truncated,
+      validation,
     },
     200
   );

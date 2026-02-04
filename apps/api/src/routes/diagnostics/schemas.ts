@@ -26,6 +26,10 @@ export const DiagnosticsRequestSchema = z
       description:
         "Response detail level. 'full' includes severity, ruleId, suggestions. 'lite' is minimal.",
     }),
+    validate: z.boolean().optional().openapi({
+      description:
+        "Run AI validation to verify parsed diagnostics and detect missed errors.",
+    }),
   })
   .openapi("DiagnosticsRequest");
 
@@ -104,6 +108,56 @@ export const SummarySchema = z
   })
   .openapi("DiagnosticSummary");
 
+export const ValidationStatusSchema = z
+  .enum(["confirmed", "false_positive", "uncertain"])
+  .openapi("ValidationStatus");
+
+export const ConfidenceSchema = z
+  .enum(["high", "medium", "low"])
+  .openapi("Confidence");
+
+export const MissedDiagnosticSchema = z
+  .object({
+    message: z
+      .string()
+      .openapi({ description: "Error message from CI output" }),
+    file_path: z.string().optional().openapi({ description: "File path" }),
+    line: z.number().optional().openapi({ description: "Line number" }),
+    severity: SeveritySchema.optional(),
+    missed_reason: z
+      .string()
+      .openapi({ description: "Why the parser missed this" }),
+  })
+  .openapi("MissedDiagnostic");
+
+export const ValidationSummarySchema = z
+  .object({
+    total: z.number().int(),
+    confirmed: z.number().int(),
+    false_positives: z.number().int(),
+    uncertain: z.number().int(),
+    missed: z.number().int(),
+  })
+  .openapi("ValidationSummary");
+
+export const ValidationResultSchema = z
+  .object({
+    status: z.array(
+      z.object({
+        index: z
+          .number()
+          .int()
+          .openapi({ description: "0-based diagnostic index" }),
+        validation: ValidationStatusSchema,
+        confidence: ConfidenceSchema,
+        reason: z.string().optional(),
+      })
+    ),
+    missed: z.array(MissedDiagnosticSchema),
+    summary: ValidationSummarySchema,
+  })
+  .openapi("ValidationResult");
+
 export const DiagnosticsResponseFullSchema = z
   .object({
     mode: z.literal("full").openapi({
@@ -121,6 +175,9 @@ export const DiagnosticsResponseFullSchema = z
     }),
     truncated: z.boolean().openapi({
       description: "True if diagnostics were truncated (max 10,000)",
+    }),
+    validation: ValidationResultSchema.optional().openapi({
+      description: "AI validation results (only when validate=true)",
     }),
   })
   .openapi("DiagnosticsResponseFull");

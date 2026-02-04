@@ -1,13 +1,16 @@
+import { validate } from "@detent/ai";
 import { extract } from "@detent/diagnostics";
 import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
 import { scrubSecrets } from "../../lib/scrub-secrets";
-import { publicRateLimitMiddleware } from "../../middleware/public-rate-limit";
+import { apiKeyAuthMiddleware } from "../../middleware/api-key-auth";
+import { apiKeyRateLimitMiddleware } from "../../middleware/api-key-rate-limit";
 import type { Env } from "../../types/env";
 import {
   DiagnosticsRequestSchema,
   DiagnosticsResponseSchema,
   ErrorResponseSchema,
   RateLimitErrorSchema,
+  type ValidationResult,
 } from "./schemas";
 
 const MAX_DIAGNOSTICS = 10_000;
@@ -24,7 +27,10 @@ Supports auto-detection of common tools (ESLint, TypeScript, Vitest, Cargo, gola
 
 Returns parsed diagnostics with file locations, severity, and tool-specific metadata.
 
-**Note:** Sensitive data (API keys, tokens, credentials) detected in the output is automatically redacted for security.`,
+**Note:** Sensitive data (API keys, tokens, credentials) detected in the output is automatically redacted for security.
+
+AI validation is automatically enabled when the organization has \`validationEnabled\` set in their settings.`,
+  security: [{ apiKey: [] }],
   request: {
     body: {
       content: {
@@ -52,28 +58,28 @@ Returns parsed diagnostics with file locations, severity, and tool-specific meta
       },
       description: "Invalid request body",
     },
+    401: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Authentication required",
+    },
     429: {
       content: {
         "application/json": {
           schema: RateLimitErrorSchema,
         },
       },
-      description: "Rate limit exceeded (30 requests per minute per IP)",
+      description: "Rate limit exceeded",
     },
   },
 });
 
 const app = new OpenAPIHono<{ Bindings: Env }>();
 
-// Register security schemes for OpenAPI spec
-app.openAPIRegistry.registerComponent("securitySchemes", "bearerAuth", {
-  type: "http",
-  scheme: "bearer",
-  bearerFormat: "JWT",
-  description:
-    "WorkOS access token obtained after login via navigator.detent.sh",
-});
-
+// Register security scheme for OpenAPI spec
 app.openAPIRegistry.registerComponent("securitySchemes", "apiKey", {
   type: "apiKey",
   in: "header",
@@ -82,10 +88,12 @@ app.openAPIRegistry.registerComponent("securitySchemes", "apiKey", {
     "Detent API key (dtk_*) for CI/CD and machine-to-machine access. [Get your API key →](https://navigator.detent.sh/settings/api-keys)",
 });
 
-// Apply IP-based rate limiting to all routes in this router
-app.use("*", publicRateLimitMiddleware);
+// Apply API key authentication and rate limiting
+app.use("*", apiKeyAuthMiddleware);
+app.use("*", apiKeyRateLimitMiddleware);
 
 app.openapi(diagnosticsRoute, async (c) => {
+  const { orgSettings } = c.get("apiKeyAuth");
   const body = c.req.valid("json");
 
   // Zod validates tool against DetectedToolSchema; type assertion aligns with extract() signature
@@ -113,35 +121,10 @@ app.openapi(diagnosticsRoute, async (c) => {
     );
   }
 
-  // Run AI validation if requested (limit to first 100 diagnostics to control costs)
-  let validation:
-    | {
-        status: Array<{
-          index: number;
-          validation: "confirmed" | "false_positive" | "uncertain";
-          confidence: "high" | "medium" | "low";
-          reason?: string;
-        }>;
-        missed: Array<{
-          message: string;
-          file_path?: string;
-          line?: number;
-          severity?: "error" | "warning";
-          missed_reason: string;
-        }>;
-        summary: {
-          total: number;
-          confirmed: number;
-          false_positives: number;
-          uncertain: number;
-          missed: number;
-        };
-        cost_usd?: number;
-      }
-    | undefined;
+  // Run AI validation if org has it enabled (limit to first 100 diagnostics to control costs)
+  let validation: ValidationResult | undefined;
 
-  if (body.validate && result.diagnostics.length > 0) {
-    const { validate } = await import("@detent/ai");
+  if (orgSettings.validationEnabled && result.diagnostics.length > 0) {
     const toValidate = {
       ...result,
       diagnostics: result.diagnostics.slice(0, MAX_VALIDATE_DIAGNOSTICS),
@@ -150,7 +133,7 @@ app.openapi(diagnosticsRoute, async (c) => {
 
     validation = {
       status: validationResult.validated.map((v, i) => ({
-        index: i,
+        index: i + 1, // 1-based to match AI validation schema
         validation: v.validation,
         confidence: v.confidence,
         reason: v.reason ? scrubSecrets(v.reason) : undefined,

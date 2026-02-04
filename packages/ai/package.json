@@ -17,6 +17,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@ai-sdk/provider": "^3.0.7",
     "@detent/diagnostics": "workspace:*",
     "ai": "^5.0.0",
     "zod": "^3.25.34"

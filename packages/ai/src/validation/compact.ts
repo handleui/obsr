@@ -3,11 +3,18 @@
  * These are sanitized to prevent malicious CI output from manipulating the LLM.
  */
 const PROMPT_INJECTION_PATTERNS = [
-  // XML/HTML-like tags that could close our <ci_output> block
+  // XML/HTML-like tags that could close our <ci_output> block or inject roles
   /<\/?ci_output>/gi,
   /<\/?system>/gi,
   /<\/?user>/gi,
   /<\/?assistant>/gi,
+  /<\/?human>/gi,
+  /<\/?instructions>/gi,
+  // Anthropic-style message separators
+  /\[INST\]/gi,
+  /\[\/INST\]/gi,
+  /<<SYS>>/gi,
+  /<\/SYS>>/gi,
   // Common prompt injection phrases
   /ignore\s+(all\s+)?previous\s+instructions/gi,
   /ignore\s+(all\s+)?prior\s+instructions/gi,
@@ -15,6 +22,10 @@ const PROMPT_INJECTION_PATTERNS = [
   /forget\s+(all\s+)?previous/gi,
   /new\s+instructions?\s*:/gi,
   /system\s*prompt\s*:/gi,
+  /you\s+are\s+now\s+/gi,
+  /act\s+as\s+if\s+/gi,
+  /pretend\s+(?:you\s+are|to\s+be)\s+/gi,
+  /override\s+(?:your\s+)?(?:instructions|rules)/gi,
 ];
 
 /**

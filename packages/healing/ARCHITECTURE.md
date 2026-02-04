@@ -372,22 +372,19 @@ export type { HealConfig, HealResult, TokenUsage } from "./types.js";
 ## Typical Usage
 
 ```typescript
-// 1. Create client with API key
-const client = new Client(apiKey);
-
-// 2. Create tool registry with context
+// 1. Create tool registry with context
 const ctx = createToolContext(worktreePath, repoRoot, runId);
 const registry = createToolRegistry(ctx);
 registry.registerAll(getAllTools());
 
-// 3. Configure and run
+// 2. Configure and run
 const config = createConfig(model, timeoutMins, budgetPerRunUSD, remainingMonthly);
-const loop = new HealLoop(client, registry, config);
+const loop = new HealLoop(registry, config);
 
-// 4. Execute healing
+// 3. Execute healing
 const result = await loop.run(SYSTEM_PROMPT, formattedErrors);
 
-// 5. Check result
+// 4. Check result
 if (result.success) {
   // Apply patches from worktree
 } else if (result.budgetExceeded) {

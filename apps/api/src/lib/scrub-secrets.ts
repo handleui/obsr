@@ -14,6 +14,7 @@
  * - AWS keys (AKIA, ASIA for temp credentials)
  * - OpenAI keys (sk-, sk-proj-, sk-admin-, sk-svcacct-)
  * - Anthropic keys (sk-ant-api03-, sk-ant-admin-)
+ * - Detent API keys (dtk_)
  * - Generic env var patterns (KEY=value, SECRET=value, etc.)
  * - Base64-encoded secrets (in assignment context only)
  * - Private keys (-----BEGIN ... PRIVATE KEY-----)
@@ -61,6 +62,9 @@ const TOKEN_PATTERNS = [
 
   // Discord tokens
   /[MN][A-Za-z0-9]{23,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}/g,
+
+  // Detent API keys (dtk_ + 32 base64url chars)
+  /dtk_[A-Za-z0-9_-]{32}/g,
 
   // Private keys in PEM format
   /-----BEGIN\s+(?:RSA\s+)?(?:PRIVATE|EC)\s+KEY-----[\s\S]*?-----END\s+(?:RSA\s+)?(?:PRIVATE|EC)\s+KEY-----/g,

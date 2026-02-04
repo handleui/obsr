@@ -125,7 +125,7 @@ api.route("/billing", billingRoutes);
 
 app.route("/v1", api);
 
-// Public diagnostics endpoint (no auth - used by SDK fallback)
+// Diagnostics endpoint (API key auth - X-Detent-Token header)
 // Mounted at root because the OpenAPIHono route defines full path for accurate spec generation
 app.route("/", diagnosticsRoutes);
 

@@ -63,6 +63,8 @@ export interface ValidationResult {
   usage?: ValidationUsage;
   /** Cost in USD for the validation call */
   costUsd?: number;
+  /** Whether validation failed to complete */
+  failed?: boolean;
 }
 
 /**

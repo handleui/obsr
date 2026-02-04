@@ -26,10 +26,6 @@ export const DiagnosticsRequestSchema = z
       description:
         "Response detail level. 'full' includes severity, ruleId, suggestions. 'lite' is minimal.",
     }),
-    validate: z.boolean().optional().openapi({
-      description:
-        "Run AI validation to verify parsed diagnostics and detect missed errors.",
-    }),
   })
   .openapi("DiagnosticsRequest");
 
@@ -147,7 +143,8 @@ export const ValidationResultSchema = z
         index: z
           .number()
           .int()
-          .openapi({ description: "0-based diagnostic index" }),
+          .min(1)
+          .openapi({ description: "1-based diagnostic index" }),
         validation: ValidationStatusSchema,
         confidence: ConfidenceSchema,
         reason: z.string().optional(),
@@ -181,7 +178,8 @@ export const DiagnosticsResponseFullSchema = z
       description: "True if diagnostics were truncated (max 10,000)",
     }),
     validation: ValidationResultSchema.optional().openapi({
-      description: "AI validation results (only when validate=true)",
+      description:
+        "AI validation results (only when organization has validationEnabled)",
     }),
   })
   .openapi("DiagnosticsResponseFull");
@@ -232,3 +230,6 @@ export const DiagnosticsResponseSchema = z
     DiagnosticsResponseLiteSchema,
   ])
   .openapi("DiagnosticsResponse");
+
+/** Inferred TypeScript type for ValidationResultSchema */
+export type ValidationResult = z.infer<typeof ValidationResultSchema>;

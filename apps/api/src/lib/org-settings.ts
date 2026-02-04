@@ -8,7 +8,7 @@ export interface OrganizationSettings {
   healAutoCommit?: boolean;
   healAutoTrigger?: boolean;
   healBudgetPerRunUsd?: number;
-  aiValidationEnabled?: boolean;
+  validationEnabled?: boolean;
 }
 
 export const DEFAULT_ORG_SETTINGS: Required<OrganizationSettings> = {
@@ -19,7 +19,7 @@ export const DEFAULT_ORG_SETTINGS: Required<OrganizationSettings> = {
   healAutoCommit: false,
   healAutoTrigger: false,
   healBudgetPerRunUsd: 100,
-  aiValidationEnabled: false,
+  validationEnabled: false,
 };
 
 export const getOrgSettings = (
@@ -40,8 +40,8 @@ export const getOrgSettings = (
     settings?.healAutoTrigger ?? DEFAULT_ORG_SETTINGS.healAutoTrigger,
   healBudgetPerRunUsd:
     settings?.healBudgetPerRunUsd ?? DEFAULT_ORG_SETTINGS.healBudgetPerRunUsd,
-  aiValidationEnabled:
-    settings?.aiValidationEnabled ?? DEFAULT_ORG_SETTINGS.aiValidationEnabled,
+  validationEnabled:
+    settings?.validationEnabled ?? DEFAULT_ORG_SETTINGS.validationEnabled,
 });
 
 export const providerShortCodes: Record<"github" | "gitlab", string> = {

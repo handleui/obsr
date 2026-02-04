@@ -8,22 +8,23 @@
  * @module
  */
 
-import type * as apiKeys from "../api-keys.js";
-import type * as commitJobStats from "../commit-job-stats.js";
+import type * as api_keys from "../api_keys.js";
+import type * as commit_job_stats from "../commit_job_stats.js";
 import type * as enterprises from "../enterprises.js";
-import type * as errorOccurrences from "../error-occurrences.js";
-import type * as errorSignatures from "../error-signatures.js";
+import type * as error_occurrences from "../error_occurrences.js";
+import type * as error_signatures from "../error_signatures.js";
 import type * as heals from "../heals.js";
 import type * as invitations from "../invitations.js";
 import type * as jobs from "../jobs.js";
-import type * as organizationMembers from "../organization-members.js";
+import type * as organization_members from "../organization_members.js";
 import type * as organizations from "../organizations.js";
-import type * as prComments from "../pr-comments.js";
+import type * as pr_comments from "../pr_comments.js";
 import type * as projects from "../projects.js";
-import type * as runErrors from "../run-errors.js";
-import type * as runIngest from "../run-ingest.js";
+import type * as run_errors from "../run_errors.js";
+import type * as run_ingest from "../run_ingest.js";
 import type * as runs from "../runs.js";
-import type * as usageEvents from "../usage-events.js";
+import type * as service_auth from "../service_auth.js";
+import type * as usage_events from "../usage_events.js";
 import type * as validators from "../validators.js";
 
 import type {
@@ -33,22 +34,23 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
-  "api-keys": typeof apiKeys;
-  "commit-job-stats": typeof commitJobStats;
+  api_keys: typeof api_keys;
+  commit_job_stats: typeof commit_job_stats;
   enterprises: typeof enterprises;
-  "error-occurrences": typeof errorOccurrences;
-  "error-signatures": typeof errorSignatures;
+  error_occurrences: typeof error_occurrences;
+  error_signatures: typeof error_signatures;
   heals: typeof heals;
   invitations: typeof invitations;
   jobs: typeof jobs;
-  "organization-members": typeof organizationMembers;
+  organization_members: typeof organization_members;
   organizations: typeof organizations;
-  "pr-comments": typeof prComments;
+  pr_comments: typeof pr_comments;
   projects: typeof projects;
-  "run-errors": typeof runErrors;
-  "run-ingest": typeof runIngest;
+  run_errors: typeof run_errors;
+  run_ingest: typeof run_ingest;
   runs: typeof runs;
-  "usage-events": typeof usageEvents;
+  service_auth: typeof service_auth;
+  usage_events: typeof usage_events;
   validators: typeof validators;
 }>;
 

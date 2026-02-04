@@ -1,5 +1,5 @@
 import type { Diagnostic, DiagnosticResult } from "@detent/diagnostics";
-import { generateObject } from "ai";
+import { generateObject, NoObjectGeneratedError } from "ai";
 import { z } from "zod";
 import { normalizeModelId } from "../client.js";
 import { estimateCost } from "../pricing.js";
@@ -15,6 +15,20 @@ import type {
   ValidationResult,
   ValidationUsage,
 } from "./types.js";
+
+/**
+ * Sanitizes tool name for prompt inclusion.
+ * Prevents injection via detectedTool field.
+ */
+const sanitizeToolName = (tool: string | null): string => {
+  if (!tool) {
+    return "unknown";
+  }
+  // Allow only alphanumeric, hyphens, underscores, and dots
+  const sanitized = tool.replace(/[^a-zA-Z0-9\-_.]/g, "");
+  // Limit length to prevent abuse
+  return sanitized.slice(0, 50) || "unknown";
+};
 
 /**
  * Formats diagnostics for the prompt.
@@ -83,7 +97,7 @@ const buildUserPrompt = (
   rawOutput: string,
   detectedTool: string | null,
   diagnostics: string
-): string => `## CI Output (${detectedTool ?? "unknown"} tool)
+): string => `## CI Output (${sanitizeToolName(detectedTool)} tool)
 <ci_output>
 ${rawOutput}
 </ci_output>
@@ -141,12 +155,15 @@ const mapToResult = (
 /**
  * Creates a fallback result when validation fails.
  */
-const createFallbackResult = (diagnostics: Diagnostic[]): ValidationResult => {
+const createFallbackResult = (
+  diagnostics: Diagnostic[],
+  reason = "Validation failed"
+): ValidationResult => {
   const validated: ValidatedDiagnostic[] = diagnostics.map((d) => ({
     ...d,
     validation: "uncertain" as const,
     confidence: "low" as const,
-    reason: "Validation failed",
+    reason,
   }));
 
   return {
@@ -159,6 +176,9 @@ const createFallbackResult = (diagnostics: Diagnostic[]): ValidationResult => {
       uncertain: validated.length,
       missed: 0,
     },
+    usage: undefined,
+    costUsd: undefined,
+    failed: true,
   };
 };
 
@@ -194,14 +214,17 @@ export const validate = async (
   const modelName = options?.model ?? DEFAULT_FAST_MODEL;
   const model = normalizeModelId(modelName);
   const maxOutputTokens = options?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
-  const timeout = options?.timeout ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = options?.timeout ?? DEFAULT_TIMEOUT_MS;
 
   // Compact, sanitize, and truncate the CI output (includes prompt injection protection)
   const preparedOutput = prepareForPrompt(rawOutput);
   const diagnosticsPrompt = formatDiagnosticsForPrompt(parseResult.diagnostics);
 
-  const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), timeout);
+  // Combine user-provided abort signal with timeout
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const abortSignal = options?.abortSignal
+    ? AbortSignal.any([options.abortSignal, timeoutSignal])
+    : timeoutSignal;
 
   try {
     const { object, usage } = await generateObject({
@@ -214,7 +237,7 @@ export const validate = async (
         diagnosticsPrompt
       ),
       maxOutputTokens,
-      abortSignal: options?.abortSignal ?? abortController.signal,
+      abortSignal,
     });
 
     const result = mapToResult(parseResult.diagnostics, object);
@@ -234,10 +257,11 @@ export const validate = async (
       usage: validationUsage,
       costUsd,
     };
-  } catch {
-    return createFallbackResult(parseResult.diagnostics);
-  } finally {
-    clearTimeout(timeoutId);
+  } catch (error) {
+    const reason = NoObjectGeneratedError.isInstance(error)
+      ? `Validation failed: ${error.message}`
+      : "Validation failed";
+    return createFallbackResult(parseResult.diagnostics, reason);
   }
 };
 

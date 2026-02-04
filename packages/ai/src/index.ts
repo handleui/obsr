@@ -1,12 +1,20 @@
 // biome-ignore-all lint/performance/noBarrelFile: This is the package entry point
 
-// Utilities
+export {
+  type AddCacheControlOptions,
+  type AnthropicCacheOptions,
+  addCacheControl,
+  type CacheTTL,
+  createCacheableSystemMessage,
+  createCachePrepareStep,
+  isAnthropicModel,
+  type PrepareStepParams,
+} from "./cache.js";
+
 export { normalizeModelId } from "./client.js";
 
-// Pricing
 export { calculateCost, estimateCost } from "./pricing.js";
 
-// Types
 export {
   DEFAULT_FAST_MODEL,
   DEFAULT_MAX_OUTPUT_TOKENS,
@@ -16,7 +24,6 @@ export {
   type TokenUsage,
 } from "./types.js";
 
-// Validation (re-export for convenience)
 export {
   type Confidence,
   compactCiOutput,

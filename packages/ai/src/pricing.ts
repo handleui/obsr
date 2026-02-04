@@ -12,11 +12,24 @@ interface ModelPricing {
 /**
  * Model prefixes mapped to their pricing.
  * Order matters: more specific prefixes should come before less specific ones.
+ *
+ * Official pricing pages:
+ * - Anthropic: https://www.anthropic.com/pricing
+ * - OpenAI: https://openai.com/api/pricing
  */
 const MODEL_PREFIXES: Array<{ prefix: string; pricing: ModelPricing }> = [
   {
     prefix: "gpt-5.2-codex",
     pricing: { inputPerMillion: 1.75, outputPerMillion: 14.0 },
+  },
+  // GPT-4o models
+  {
+    prefix: "gpt-4o-mini",
+    pricing: { inputPerMillion: 0.15, outputPerMillion: 0.6 },
+  },
+  {
+    prefix: "gpt-4o",
+    pricing: { inputPerMillion: 2.5, outputPerMillion: 10.0 },
   },
   // Claude 4.5 models
   {

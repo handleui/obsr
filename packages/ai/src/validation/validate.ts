@@ -1,147 +1,18 @@
+import type { Diagnostic, DiagnosticResult } from "@detent/diagnostics";
 import { generateObject } from "ai";
 import { z } from "zod";
-import type { Diagnostic, DiagnosticResult } from "./types.js";
-
-/**
- * Confidence level for validation results.
- */
-export type Confidence = "high" | "medium" | "low";
-
-/**
- * Validation status for each diagnostic.
- */
-export type ValidationStatus = "confirmed" | "false_positive" | "uncertain";
-
-/**
- * A diagnostic with validation metadata from the LLM review.
- */
-export interface ValidatedDiagnostic extends Diagnostic {
-  /** Validation status after LLM review */
-  validation: ValidationStatus;
-  /** Confidence in the validation */
-  confidence: Confidence;
-  /** Reason for the validation decision */
-  reason?: string;
-}
-
-/**
- * A diagnostic that was missed by the parser but found by validation.
- */
-export interface MissedDiagnostic {
-  message: string;
-  filePath?: string;
-  line?: number;
-  severity?: "error" | "warning";
-  /** Why the parser might have missed this */
-  missedReason: string;
-}
-
-/**
- * Result of the validation pass.
- */
-export interface ValidationResult {
-  /** Original diagnostics with validation metadata */
-  validated: ValidatedDiagnostic[];
-  /** Diagnostics found by validation but missed by parser */
-  missed: MissedDiagnostic[];
-  /** Summary of validation results */
-  summary: {
-    total: number;
-    confirmed: number;
-    falsePositives: number;
-    uncertain: number;
-    missed: number;
-  };
-}
-
-/**
- * Options for validation.
- */
-export interface ValidateOptions {
-  /** Model to use for validation (default: claude-haiku-4-5) */
-  model?: string;
-  /** Maximum output tokens for the response */
-  maxOutputTokens?: number;
-  /** Timeout in milliseconds */
-  timeout?: number;
-  /** Abort signal */
-  abortSignal?: AbortSignal;
-}
-
-const DEFAULT_MODEL = "anthropic/claude-haiku-4-5";
-const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
-const DEFAULT_TIMEOUT_MS = 30_000;
-
-// CI noise patterns to filter out
-const NOISE_PATTERNS = [
-  /^\s*$/,
-  /^[-=]{3,}$/,
-  /^\s*\d+\s+passing/i,
-  /^\s*\d+\s+pending/i,
-  /^npm\s+(warn|notice)/i,
-  /^yarn\s+(warn|notice)/i,
-  /^\s*at\s+(?:Object\.|Module\.|Function\.)/,
-  /^\s*at\s+node:/,
-  /^\s*at\s+internal\//,
-  /^Downloading/i,
-  /^Installing/i,
-  /^Resolving/i,
-  /^\s*\^+\s*$/,
-  /^\s*~+\s*$/,
-];
-
-// Patterns that indicate important lines (keep these)
-const IMPORTANT_PATTERNS = [
-  /error/i,
-  /warning/i,
-  /failed/i,
-  /failure/i,
-  /exception/i,
-  /:\d+:\d+/,
-  /line\s+\d+/i,
-  /^\s*>\s+\d+\s*\|/,
-  /FAIL|PASS|ERROR|WARN/,
-];
-
-/**
- * Compacts CI output by removing noise while preserving errors.
- */
-export const compactCiOutput = (content: string): string => {
-  const lines = content.split("\n");
-  const result: string[] = [];
-  let consecutiveNoiseCount = 0;
-
-  for (const line of lines) {
-    const isNoise = NOISE_PATTERNS.some((p) => p.test(line));
-    const isImportant = IMPORTANT_PATTERNS.some((p) => p.test(line));
-
-    if (isImportant || !isNoise) {
-      if (consecutiveNoiseCount > 3) {
-        result.push(`... [${consecutiveNoiseCount} lines omitted]`);
-      }
-      consecutiveNoiseCount = 0;
-      result.push(line);
-    } else {
-      consecutiveNoiseCount++;
-    }
-  }
-
-  if (consecutiveNoiseCount > 3) {
-    result.push(`... [${consecutiveNoiseCount} lines omitted]`);
-  }
-
-  return result.join("\n");
-};
-
-/**
- * Truncates content for the prompt to avoid excessive token usage.
- */
-const truncateContent = (content: string, maxLength = 15_000): string => {
-  if (content.length <= maxLength) {
-    return content;
-  }
-  return `${content.slice(0, maxLength)}\n... [truncated, ${content.length - maxLength} more characters]`;
-};
+import { normalizeModelId } from "../client.js";
+import {
+  DEFAULT_FAST_MODEL,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+  DEFAULT_TIMEOUT_MS,
+} from "../types.js";
+import { compactCiOutput, truncateContent } from "./compact.js";
+import type {
+  ValidatedDiagnostic,
+  ValidateOptions,
+  ValidationResult,
+} from "./types.js";
 
 /**
  * Formats diagnostics for the prompt.
@@ -286,13 +157,11 @@ const createFallbackResult = (diagnostics: Diagnostic[]): ValidationResult => {
  *
  * @example
  * ```ts
- * import { extract, validate } from "@detent/diagnostics"
+ * import { extract } from "@detent/diagnostics"
+ * import { validate } from "@detent/ai/validation"
  *
  * const result = extract(ciOutput)
  * const validated = await validate(ciOutput, result)
- *
- * console.log(validated.summary)
- * // { total: 5, confirmed: 4, falsePositives: 1, uncertain: 0, missed: 1 }
  *
  * // Filter out false positives
  * const realErrors = validated.validated.filter(d => d.validation !== "false_positive")
@@ -303,7 +172,7 @@ export const validate = async (
   parseResult: DiagnosticResult,
   options?: ValidateOptions
 ): Promise<ValidationResult> => {
-  const model = options?.model ?? DEFAULT_MODEL;
+  const model = normalizeModelId(options?.model ?? DEFAULT_FAST_MODEL);
   const maxOutputTokens = options?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
   const timeout = options?.timeout ?? DEFAULT_TIMEOUT_MS;
 
@@ -339,12 +208,6 @@ export const validate = async (
 
 /**
  * Creates a validator function with pre-configured options.
- *
- * @example
- * ```ts
- * const validator = createValidator({ model: "anthropic/claude-sonnet-4" })
- * const result = await validator(ciOutput, parseResult)
- * ```
  */
 export const createValidator = (defaultOptions?: ValidateOptions) => {
   return (

@@ -38,17 +38,6 @@ export {
   type Parser,
   type Severity,
 } from "./types.js";
-export {
-  type Confidence,
-  compactCiOutput,
-  createValidator,
-  type MissedDiagnostic,
-  type ValidatedDiagnostic,
-  type ValidateOptions,
-  type ValidationResult,
-  type ValidationStatus,
-  validate,
-} from "./validate.js";
 
 export const PARSERS: Record<DetectedTool, Parser> = {
   eslint: parseEslint,

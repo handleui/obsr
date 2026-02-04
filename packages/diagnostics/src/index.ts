@@ -40,6 +40,7 @@ export {
 } from "./types.js";
 export {
   type Confidence,
+  compactCiOutput,
   createValidator,
   type MissedDiagnostic,
   type ValidatedDiagnostic,

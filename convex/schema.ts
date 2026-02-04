@@ -73,6 +73,7 @@ const organizationSettings = v.object({
   healAutoCommit: v.optional(nullableBoolean),
   healAutoTrigger: v.optional(nullableBoolean),
   healBudgetPerRunUsd: v.optional(nullableNumber),
+  validationEnabled: v.optional(nullableBoolean),
 });
 
 export default defineSchema({

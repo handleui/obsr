@@ -1,6 +1,11 @@
+import {
+  calculateCost,
+  createCacheableSystemMessage,
+  createCachePrepareStep,
+  normalizeModelId,
+} from "@detent/ai";
+import { redactSensitiveData } from "@detent/types";
 import { generateText, stepCountIs } from "ai";
-import type { Client } from "./client.js";
-import { calculateCost } from "./pricing.js";
 import type { ToolRegistry } from "./tools/registry.js";
 import {
   DEFAULT_CONFIG,
@@ -11,28 +16,16 @@ import {
   type TokenUsage,
 } from "./types.js";
 
-/**
- * Mutable execution context for tracking state during the healing loop.
- */
 interface ExecutionContext {
   iteration: number;
   lastTool: string | null;
   lastToolInput: string | null;
 }
 
-/**
- * Maximum number of tool call rounds (not user-configurable).
- */
 const MAX_ITERATIONS = 50;
 
-/**
- * Maximum tokens per response.
- */
 const MAX_TOKENS_PER_RESPONSE = 8192;
 
-/**
- * Maps tool names to their key parameter for verbose output.
- */
 const KEY_PARAM_NAMES: Record<string, string> = {
   read_file: "path",
   edit_file: "path",
@@ -42,9 +35,6 @@ const KEY_PARAM_NAMES: Record<string, string> = {
   run_command: "command",
 };
 
-/**
- * Extracts the most relevant parameter for verbose output.
- */
 const extractKeyParam = (
   toolName: string,
   input: Record<string, unknown>
@@ -65,9 +55,6 @@ const extractKeyParam = (
   return value;
 };
 
-/**
- * Creates the initial result object.
- */
 const createInitialResult = (): HealResult => ({
   success: false,
   iterations: 0,
@@ -82,9 +69,6 @@ const createInitialResult = (): HealResult => ({
   budgetExceeded: false,
 });
 
-/**
- * Calculates token usage from result.
- */
 const getUsageFromResult = (result: HealResult): TokenUsage => ({
   inputTokens: result.inputTokens,
   outputTokens: result.outputTokens,
@@ -92,9 +76,6 @@ const getUsageFromResult = (result: HealResult): TokenUsage => ({
   cacheReadInputTokens: result.cacheReadInputTokens,
 });
 
-/**
- * Step usage from AI SDK response.
- */
 interface StepUsage {
   inputTokens?: number;
   outputTokens?: number;
@@ -104,9 +85,6 @@ interface StepUsage {
   };
 }
 
-/**
- * Calculates cumulative cost from step usage data.
- */
 const calculateStepsCost = (
   steps: Array<{ usage?: StepUsage }>,
   modelName: string
@@ -132,9 +110,6 @@ const calculateStepsCost = (
   return calculateCost(modelName, totalUsage);
 };
 
-/**
- * Creates a stop condition that checks budget limits between steps.
- */
 const createBudgetStopCondition = (
   config: HealConfig,
   modelName: string
@@ -157,9 +132,6 @@ const createBudgetStopCondition = (
   };
 };
 
-/**
- * Checks if budget limits have been exceeded (post-run validation).
- */
 const checkBudgetLimits = (
   config: HealConfig,
   result: HealResult,
@@ -189,9 +161,6 @@ const checkBudgetLimits = (
   return null;
 };
 
-/**
- * Extracts HTTP status code from error object if available.
- */
 const getErrorStatus = (error: unknown): number | undefined => {
   if (typeof error !== "object" || error === null) {
     return undefined;
@@ -200,10 +169,6 @@ const getErrorStatus = (error: unknown): number | undefined => {
   return typeof status === "number" ? status : undefined;
 };
 
-/**
- * Maps HTTP status codes to HealErrorType.
- * Based on Anthropic API error codes.
- */
 const classifyByStatusCode = (status: number): HealErrorType | null => {
   if (status === 429) {
     return "RATE_LIMIT";
@@ -223,10 +188,6 @@ const classifyByStatusCode = (status: number): HealErrorType | null => {
   return null;
 };
 
-/**
- * Patterns for classifying errors by message content.
- * Order matters: more specific patterns should come first.
- */
 const ERROR_MESSAGE_PATTERNS: Array<{
   type: HealErrorType;
   patterns: string[];
@@ -283,9 +244,6 @@ const ERROR_MESSAGE_PATTERNS: Array<{
   },
 ];
 
-/**
- * Classifies error by message content using pattern matching.
- */
 const classifyByMessage = (msg: string): HealErrorType | null => {
   for (const { type, patterns } of ERROR_MESSAGE_PATTERNS) {
     if (patterns.some((pattern) => msg.includes(pattern))) {
@@ -295,18 +253,6 @@ const classifyByMessage = (msg: string): HealErrorType | null => {
   return null;
 };
 
-/**
- * Classifies an error into a HealErrorType.
- *
- * Classification follows Anthropic API error types:
- * - 429: rate_limit_error -> RATE_LIMIT
- * - 529: overloaded_error -> OVERLOADED
- * - 401/403: authentication_error, permission_error -> AUTH_ERROR
- * - 500+: api_error, internal errors -> API_ERROR
- * - 400/413/422: invalid_request_error, request_too_large -> VALIDATION_ERROR
- * - Timeout/abort -> TIMEOUT
- * - Tool failures -> TOOL_ERROR
- */
 const classifyError = (
   error: unknown,
   isAborted: boolean,
@@ -316,7 +262,6 @@ const classifyError = (
     return "TIMEOUT";
   }
 
-  // Check HTTP status code first (most reliable)
   const status = getErrorStatus(error);
   if (status !== undefined) {
     const statusType = classifyByStatusCode(status);
@@ -331,13 +276,11 @@ const classifyError = (
 
   const msg = error.message.toLowerCase();
 
-  // Try message pattern matching
   const messageType = classifyByMessage(msg);
   if (messageType) {
     return messageType;
   }
 
-  // Tool execution errors (check after other patterns to avoid false positives)
   if (lastTool || msg.includes("tool")) {
     return "TOOL_ERROR";
   }
@@ -345,75 +288,13 @@ const classifyError = (
   return "UNKNOWN";
 };
 
-/**
- * Sanitizes error messages to remove potential API keys or sensitive data.
- *
- * NOTE: A comprehensive shared utility exists at @detent/types (redactSensitiveData).
- * This local version is kept for now to preserve specific replacement labels
- * (e.g., [REDACTED_GITHUB_TOKEN] vs [GITHUB_CLASSIC_TOKEN]).
- *
- * TODO: Consider consolidating with @detent/types/sanitize.ts which has 50+ patterns.
- * See also: packages/healing/src/eval/tracing.ts (redactSensitive)
- */
-const sanitizeErrorMessage = (message: string): string => {
-  // Anthropic API key patterns
-  let sanitized = message.replace(
-    /sk-ant-[a-zA-Z0-9_-]{20,}/gi,
-    "[REDACTED_API_KEY]"
-  );
-
-  // OpenAI API key patterns
-  sanitized = sanitized.replace(/sk-[a-zA-Z0-9]{20,}/gi, "[REDACTED_API_KEY]");
-
-  // Generic Bearer tokens
-  sanitized = sanitized.replace(
-    /Bearer\s+[a-zA-Z0-9_-]{20,}/gi,
-    "Bearer [REDACTED_TOKEN]"
-  );
-
-  // GitHub classic tokens (ghp_, gho_, ghu_, ghs_, ghr_)
-  sanitized = sanitized.replace(
-    /gh[pousr]_[a-zA-Z0-9_]{20,}/gi,
-    "[REDACTED_GITHUB_TOKEN]"
-  );
-
-  // GitHub fine-grained PATs
-  sanitized = sanitized.replace(
-    /github_pat_[a-zA-Z0-9_]{20,}/gi,
-    "[REDACTED_GITHUB_PAT]"
-  );
-
-  // Detent tokens
-  sanitized = sanitized.replace(
-    /dtk_[a-zA-Z0-9_-]{20,}/gi,
-    "[REDACTED_DETENT_TOKEN]"
-  );
-
-  // x-api-key header values
-  sanitized = sanitized.replace(
-    /x-api-key[:\s]+[a-zA-Z0-9_-]{20,}/gi,
-    "x-api-key: [REDACTED]"
-  );
-
-  // Generic long secrets in key/token/secret/password contexts
-  sanitized = sanitized.replace(
-    /(api[_-]?key|token|secret|password|credential)[:\s=]+['"]?[a-zA-Z0-9_-]{20,}['"]?/gi,
-    "$1: [REDACTED]"
-  );
-
-  return sanitized;
-};
-
-/**
- * Formats an error message with execution context.
- */
 const formatErrorMessage = (
   errorType: HealErrorType,
   rawError: string,
   execCtx: ExecutionContext
 ): string => {
   const iterationInfo = `iteration ${execCtx.iteration}/${MAX_ITERATIONS}`;
-  const safeError = sanitizeErrorMessage(rawError);
+  const safeError = redactSensitiveData(rawError);
 
   switch (errorType) {
     case "TIMEOUT":
@@ -457,10 +338,6 @@ const formatErrorMessage = (
   }
 };
 
-/**
- * Builds error context from execution state.
- * Note: rawError is sanitized to prevent API key leakage in logs/storage.
- */
 const buildErrorContext = (
   errorType: HealErrorType,
   rawError: string,
@@ -478,25 +355,16 @@ const buildErrorContext = (
     cacheCreationInputTokens: result.cacheCreationInputTokens,
     cacheReadInputTokens: result.cacheReadInputTokens,
   },
-  rawError: sanitizeErrorMessage(rawError),
+  rawError: redactSensitiveData(rawError),
 });
 
-/**
- * HealLoop orchestrates the agentic healing process.
- */
 export class HealLoop {
-  private readonly client: Client;
   private readonly registry: ToolRegistry;
   private readonly config: HealConfig;
   private readonly verboseWriter: ((msg: string) => void) | null;
   private readonly execCtx: ExecutionContext;
 
-  constructor(
-    client: Client,
-    registry: ToolRegistry,
-    config: Partial<HealConfig> = {}
-  ) {
-    this.client = client;
+  constructor(registry: ToolRegistry, config: Partial<HealConfig> = {}) {
     this.registry = registry;
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.verboseWriter = this.config.verbose
@@ -505,29 +373,24 @@ export class HealLoop {
     this.execCtx = { iteration: 0, lastTool: null, lastToolInput: null };
   }
 
-  /**
-   * Executes the healing loop with the given system prompt and initial user message.
-   */
   run = async (
     systemPrompt: string,
     userPrompt: string
   ): Promise<HealResult> => {
     const startTime = Date.now();
     const result = createInitialResult();
-    const modelName = this.client.normalizeModel(this.config.model);
+    const modelName = normalizeModelId(this.config.model);
     const abortController = new AbortController();
     const timeoutId = setTimeout(
       () => abortController.abort(),
       this.config.timeout
     );
 
-    // Reset execution context for this run
     this.execCtx.iteration = 1;
     this.execCtx.lastTool = null;
     this.execCtx.lastToolInput = null;
 
     try {
-      // Set up tool call listener that tracks context and optionally logs
       this.registry.setToolCallListener(
         (toolName: string, input: Record<string, unknown>) => {
           this.execCtx.lastTool = toolName;
@@ -546,7 +409,7 @@ export class HealLoop {
       const response = await generateText({
         model: modelName,
         messages: [
-          { role: "system", content: systemPrompt },
+          createCacheableSystemMessage(systemPrompt),
           { role: "user", content: userPrompt },
         ],
         maxOutputTokens: MAX_TOKENS_PER_RESPONSE,
@@ -554,12 +417,11 @@ export class HealLoop {
         tools: this.registry.toAiTools(),
         stopWhen: [stepCountIs(MAX_ITERATIONS), budgetStopCondition],
         abortSignal: abortController.signal,
-        providerOptions: this.client.providerOptions(modelName) ?? undefined,
+        prepareStep: createCachePrepareStep(),
       });
 
       this.updateTokenUsage(result, response.usage ?? {}, modelName);
       result.iterations = response.steps?.length ?? 1;
-      // Update execution context with final iteration count
       this.execCtx.iteration = result.iterations;
       result.toolCalls =
         response.steps?.flatMap((step) => step.toolCalls ?? []).length ?? 0;
@@ -574,7 +436,6 @@ export class HealLoop {
         };
       }
 
-      // Detect if we hit the step limit without natural completion
       const hitStepLimit = result.iterations >= MAX_ITERATIONS;
       if (hitStepLimit) {
         result.finalMessage =
@@ -588,18 +449,15 @@ export class HealLoop {
       result.duration = Date.now() - startTime;
       result.costUSD = calculateCost(modelName, getUsageFromResult(result));
 
-      // Extract raw error message
       const rawError =
         error instanceof Error ? error.message : "Unknown error occurred";
 
-      // Classify the error
       const errorType = classifyError(
         error,
         abortController.signal.aborted,
         this.execCtx.lastTool
       );
 
-      // Build error context for debugging
       result.errorContext = buildErrorContext(
         errorType,
         rawError,
@@ -607,7 +465,6 @@ export class HealLoop {
         result
       );
 
-      // Format user-friendly error message with context
       result.finalMessage = formatErrorMessage(
         errorType,
         rawError,
@@ -621,9 +478,6 @@ export class HealLoop {
     }
   };
 
-  /**
-   * Updates the result with token usage from response.
-   */
   private readonly updateTokenUsage = (
     result: HealResult,
     usage: {
@@ -648,9 +502,6 @@ export class HealLoop {
     result.costUSD = calculateCost(modelName, getUsageFromResult(result));
   };
 
-  /**
-   * Logs a tool call in verbose mode with the key parameter.
-   */
   private readonly logToolCall = (
     toolName: string,
     input: Record<string, unknown>
@@ -668,10 +519,6 @@ export class HealLoop {
   };
 }
 
-/**
- * Creates a config from settings.
- * This is the canonical way to configure the healing loop from application settings.
- */
 export const createConfig = (
   model: string,
   timeoutMins: number,

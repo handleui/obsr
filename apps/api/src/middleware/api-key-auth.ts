@@ -21,10 +21,12 @@ import type { ConvexHttpClient } from "convex/browser";
 import type { Context, Next } from "hono";
 import { getConvexClient } from "../db/convex";
 import { hashApiKey } from "../lib/crypto";
+import { getOrgSettings, type OrganizationSettings } from "../lib/org-settings";
 import type { Env } from "../types/env";
 
 interface ApiKeyAuthContext {
   organizationId: string;
+  orgSettings: Required<OrganizationSettings>;
 }
 
 declare module "hono" {
@@ -45,10 +47,27 @@ const API_KEY_CACHE_PREFIX = "api-key-v2:";
 // Cache TTL: 5 minutes (API keys rarely change, but we want invalidation to be quick)
 const API_KEY_CACHE_TTL_SECONDS = 300;
 
+/**
+ * Cached API key data including org settings.
+ *
+ * TRADE-OFF: Org settings are cached with the API key for performance.
+ * If an admin updates org settings (e.g., enables validationEnabled),
+ * the change won't take effect for API key authenticated requests until
+ * cache expires (5 minutes). This is acceptable because:
+ * - Settings changes are infrequent admin actions
+ * - 5-minute eventual consistency is reasonable for config changes
+ * - Alternative (invalidate all API keys per org) requires tracking all
+ *   key hashes per org, adding complexity and memory overhead
+ * - Fetching settings on every request adds latency to the hot path
+ *
+ * Web UI and webhook handlers use a separate cache with explicit invalidation
+ * (see organizations.ts PATCH /settings), so they see changes immediately.
+ */
 interface CachedApiKey {
   _id: string;
   organizationId: string;
   keyHash: string;
+  orgSettings: OrganizationSettings | null;
 }
 
 /**
@@ -73,16 +92,23 @@ const lookupApiKey = async (
   // Cache miss: lookup in database by hash (select only needed columns)
   const apiKey = (await convex.query("api_keys:getByKeyHash", {
     keyHash: tokenHash,
-  })) as CachedApiKey | null;
+  })) as { _id: string; organizationId: string; keyHash: string } | null;
 
   if (!apiKey) {
     return null;
   }
 
+  // Fetch org settings in parallel with the API key lookup would be ideal,
+  // but since we need the organizationId first, we fetch it after
+  const organization = (await convex.query("organizations:getById", {
+    id: apiKey.organizationId,
+  })) as { settings?: OrganizationSettings | null } | null;
+
   const result: CachedApiKey = {
     _id: apiKey._id,
     organizationId: apiKey.organizationId,
     keyHash: apiKey.keyHash,
+    orgSettings: organization?.settings ?? null,
   };
 
   // Cache the result (don't await - fire and forget for performance)
@@ -145,6 +171,7 @@ export const apiKeyAuthMiddleware = async (
 
     c.set("apiKeyAuth", {
       organizationId: apiKey.organizationId,
+      orgSettings: getOrgSettings(apiKey.orgSettings),
     });
 
     await next();

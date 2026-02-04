@@ -12,59 +12,9 @@
  * (like API keys, tokens, passwords) from being sent to Braintrust.
  */
 
+import { redactSensitiveData } from "@detent/types";
 import { initLogger, traced } from "braintrust";
 import type { HealResult } from "../types.js";
-
-/**
- * Factory functions that create fresh regex instances for sensitive patterns.
- * These are redacted before sending to Braintrust.
- *
- * TODO: Consider using @detent/types/sanitize.ts (redactSensitiveData) instead.
- * That shared utility has 50+ patterns and is the canonical source.
- *
- * IMPORTANT: We use factory functions instead of regex literals because the
- * global flag (`g`) makes regexes stateful via `lastIndex`. While `String.replace`
- * doesn't persist this state, using factories prevents subtle bugs if patterns
- * are ever used with `test()` or `exec()`, and makes the code more maintainable.
- */
-const SENSITIVE_PATTERN_FACTORIES: Array<() => RegExp> = [
-  // API keys and tokens (common formats with explicit key/token indicators)
-  // Matches: API_KEY=value, token: value, secret=value (including unquoted shell assignments)
-  // The [:=\s] character class matches =, :, or whitespace, so API_KEY=unquoted works
-  () =>
-    /(?:api[_-]?key|token|secret|password|auth|credential)s?\s*[:=]\s*['"]?[\w\-./+=]{8,}['"]?/gi,
-  // Shell-style export assignments (handles: export VAR=value, declare VAR=value)
-  () =>
-    /(?:export|declare)\s+\w*(?:key|token|secret|password|auth)\w*\s*=\s*['"]?[\w\-./+=]+['"]?/gi,
-  // Bearer tokens
-  () => /Bearer\s+[\w\-./+=]+/gi,
-  // AWS-style keys (specific prefix pattern)
-  () => /(?:AKIA|ABIA|ACCA|ASIA)[A-Z0-9]{16}/g,
-  // GitHub tokens (specific prefix pattern)
-  () => /gh[pousr]_[A-Za-z0-9_]{36,}/g,
-  // Anthropic API keys
-  () => /sk-ant-[A-Za-z0-9\-_]{40,}/g,
-  // OpenAI API keys
-  () => /sk-[A-Za-z0-9]{48,}/g,
-  // Slack tokens
-  () => /xox[baprs]-[A-Za-z0-9-]+/g,
-  // Private keys (PEM format markers)
-  () => /-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----/g,
-  // Base64 strings that are explicitly marked as secrets
-  () =>
-    /(?:secret|private|credential)[_-]?(?:key)?[:\s=]+[A-Za-z0-9+/]{40,}={0,2}/gi,
-];
-
-/**
- * Redacts potentially sensitive information from a string.
- */
-const redactSensitive = (text: string): string => {
-  let result = text;
-  for (const createPattern of SENSITIVE_PATTERN_FACTORIES) {
-    result = result.replace(createPattern(), "[REDACTED]");
-  }
-  return result;
-};
 
 /**
  * Maximum length for logged prompts to prevent excessive data transfer.
@@ -138,10 +88,10 @@ export const tracedRun = <T extends HealResult>(
       const result = await runFn();
 
       // Truncate and redact sensitive information before logging
-      const sanitizedUserPrompt = redactSensitive(
+      const sanitizedUserPrompt = redactSensitiveData(
         input.userPrompt.slice(0, MAX_PROMPT_LENGTH)
       );
-      const sanitizedFinalMessage = redactSensitive(
+      const sanitizedFinalMessage = redactSensitiveData(
         result.finalMessage.slice(0, MAX_PROMPT_LENGTH)
       );
 

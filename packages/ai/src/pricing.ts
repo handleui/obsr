@@ -2,7 +2,6 @@ import type { TokenUsage } from "./types.js";
 
 /**
  * Model pricing in USD per million tokens.
- * Sources: https://openai.com/api/pricing (GPT-5.2) and provider pricing pages for legacy models.
  * Cache pricing: read = 0.1x base input, write (5-min TTL) = 1.25x base input
  */
 interface ModelPricing {
@@ -12,13 +11,25 @@ interface ModelPricing {
 
 /**
  * Model prefixes mapped to their pricing.
- * Handles versioned model names like "claude-sonnet-4-5-20250929".
  * Order matters: more specific prefixes should come before less specific ones.
+ *
+ * Official pricing pages:
+ * - Anthropic: https://www.anthropic.com/pricing
+ * - OpenAI: https://openai.com/api/pricing
  */
 const MODEL_PREFIXES: Array<{ prefix: string; pricing: ModelPricing }> = [
   {
     prefix: "gpt-5.2-codex",
     pricing: { inputPerMillion: 1.75, outputPerMillion: 14.0 },
+  },
+  // GPT-4o models
+  {
+    prefix: "gpt-4o-mini",
+    pricing: { inputPerMillion: 0.15, outputPerMillion: 0.6 },
+  },
+  {
+    prefix: "gpt-4o",
+    pricing: { inputPerMillion: 2.5, outputPerMillion: 10.0 },
   },
   // Claude 4.5 models
   {
@@ -90,8 +101,7 @@ const normalizeModelName = (model: string): string => {
 };
 
 /**
- * Gets the pricing for a model using prefix matching
- * to handle versioned model names like "claude-sonnet-4-5-20250929".
+ * Gets the pricing for a model using prefix matching.
  */
 const getPricing = (model: string): ModelPricing => {
   const normalized = normalizeModelName(model);
@@ -129,4 +139,20 @@ export const calculateCost = (model: string, usage: TokenUsage): number => {
     (usage.outputTokens / 1_000_000) * pricing.outputPerMillion;
 
   return inputCost + cacheReadCost + cacheWriteCost + outputCost;
+};
+
+/**
+ * Estimates the cost for a given number of input and output tokens.
+ */
+export const estimateCost = (
+  model: string,
+  inputTokens: number,
+  outputTokens: number
+): number => {
+  return calculateCost(model, {
+    inputTokens,
+    outputTokens,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+  });
 };

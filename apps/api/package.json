@@ -15,6 +15,7 @@
     "email:dev": "email dev --dir src/emails --port 3003"
   },
   "dependencies": {
+    "@detent/ai": "*",
     "@detent/diagnostics": "*",
     "@detent/healing": "*",
     "@detent/lore": "*",

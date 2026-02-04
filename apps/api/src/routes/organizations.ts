@@ -326,29 +326,30 @@ app.get("/:organizationId/status", githubOrgAccessMiddleware, async (c) => {
 
   const convex = getConvexClient(c.env);
 
-  // Fetch full organization details (middleware only provides subset)
-  const fullOrg = (await convex.query("organizations:getById", {
-    id: organization._id,
-  })) as {
-    _id: string;
-    name: string;
-    slug: string;
-    provider: string;
-    providerAccountLogin: string;
-    providerAccountType: string;
-    suspendedAt?: number | null;
-    createdAt: number;
-    lastSyncedAt?: number | null;
-    settings?: OrganizationSettings | null;
-  } | null;
+  // Fetch full organization details and project count in parallel
+  const [fullOrg, projectCount] = await Promise.all([
+    convex.query("organizations:getById", {
+      id: organization._id,
+    }) as Promise<{
+      _id: string;
+      name: string;
+      slug: string;
+      provider: string;
+      providerAccountLogin: string;
+      providerAccountType: string;
+      suspendedAt?: number | null;
+      createdAt: number;
+      lastSyncedAt?: number | null;
+      settings?: OrganizationSettings | null;
+    } | null>,
+    convex.query("projects:countByOrg", {
+      organizationId: organization._id,
+    }) as Promise<number>,
+  ]);
 
   if (!fullOrg) {
     return c.json({ error: "Organization not found" }, 404);
   }
-
-  const projectCount = (await convex.query("projects:countByOrg", {
-    organizationId: organization._id,
-  })) as number;
 
   const appInstalled = Boolean(organization.providerInstallationId);
   const settings = getOrgSettings(fullOrg.settings);
@@ -373,6 +374,7 @@ app.get("/:organizationId/status", githubOrgAccessMiddleware, async (c) => {
       enable_inline_annotations: settings.enableInlineAnnotations,
       enable_pr_comments: settings.enablePrComments,
       heal_auto_trigger: settings.healAutoTrigger,
+      validation_enabled: settings.validationEnabled,
     },
   });
 });
@@ -555,6 +557,7 @@ app.patch(
       "enable_inline_annotations",
       "enable_pr_comments",
       "heal_auto_trigger",
+      "validation_enabled",
     ] as const;
     type ValidKey = (typeof validKeys)[number];
     const validKeySet = new Set<string>(validKeys);
@@ -626,6 +629,9 @@ app.patch(
     if ("heal_auto_trigger" in providedSettings) {
       newSettings.healAutoTrigger = providedSettings.heal_auto_trigger;
     }
+    if ("validation_enabled" in providedSettings) {
+      newSettings.validationEnabled = providedSettings.validation_enabled;
+    }
 
     await convex.mutation("organizations:update", {
       id: organization._id,
@@ -648,6 +654,7 @@ app.patch(
         enable_inline_annotations: finalSettings.enableInlineAnnotations,
         enable_pr_comments: finalSettings.enablePrComments,
         heal_auto_trigger: finalSettings.healAutoTrigger,
+        validation_enabled: finalSettings.validationEnabled,
       },
     });
   }

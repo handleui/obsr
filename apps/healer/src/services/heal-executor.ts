@@ -1,5 +1,4 @@
 import {
-  Client,
   createConfig,
   createToolRegistry,
   HealLoop,
@@ -244,7 +243,8 @@ export const executeHeal = async (
     const registry = createToolRegistry(toolContext);
     registry.registerAll(createSandboxTools(sandbox));
 
-    const client = new Client(appEnv.AI_GATEWAY_API_KEY);
+    // AI_GATEWAY_API_KEY is validated at startup in env.ts and already set in process.env
+    // No need to set it again per-request
 
     const config = createConfig(
       DEFAULT_MODEL,
@@ -252,9 +252,9 @@ export const executeHeal = async (
       request.budgetPerRunUSD ?? 1.0,
       request.remainingMonthlyUSD ?? -1
     );
-    resolvedModel = client.normalizeModel(config.model);
+    resolvedModel = config.model;
 
-    const loop = new HealLoop(client, registry, config);
+    const loop = new HealLoop(registry, config);
 
     console.log("[heal-executor] Starting heal loop");
     const healResult: HealResult = await loop.run(

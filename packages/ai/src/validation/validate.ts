@@ -2,16 +2,18 @@ import type { Diagnostic, DiagnosticResult } from "@detent/diagnostics";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { normalizeModelId } from "../client.js";
+import { estimateCost } from "../pricing.js";
 import {
   DEFAULT_FAST_MODEL,
   DEFAULT_MAX_OUTPUT_TOKENS,
   DEFAULT_TIMEOUT_MS,
 } from "../types.js";
-import { compactCiOutput, truncateContent } from "./compact.js";
+import { prepareForPrompt } from "./compact.js";
 import type {
   ValidatedDiagnostic,
   ValidateOptions,
   ValidationResult,
+  ValidationUsage,
 } from "./types.js";
 
 /**
@@ -92,14 +94,18 @@ ${diagnostics}
 Validate each diagnostic against the CI output. Identify any missed errors.`;
 
 /**
- * Maps generateObject output to ValidationResult.
+ * Maps generateObject output to base ValidationResult (without usage/cost).
+ * Uses a Map for O(1) lookups instead of O(n) .find() calls.
  */
 const mapToResult = (
   diagnostics: Diagnostic[],
   object: z.infer<typeof validationSchema>
-): ValidationResult => {
+): Omit<ValidationResult, "usage" | "costUsd"> => {
+  // Build index map for O(1) lookups (avoids O(n^2) with .find())
+  const validationMap = new Map(object.validated.map((v) => [v.index, v]));
+
   const validated: ValidatedDiagnostic[] = diagnostics.map((diag, i) => {
-    const validation = object.validated.find((v) => v.index === i + 1);
+    const validation = validationMap.get(i + 1);
     return {
       ...diag,
       validation: validation?.status ?? "uncertain",
@@ -108,12 +114,24 @@ const mapToResult = (
     };
   });
 
+  // Single-pass summary calculation (avoids 3 separate .filter() iterations)
+  let confirmed = 0;
+  let falsePositives = 0;
+  let uncertain = 0;
+  for (const v of validated) {
+    if (v.validation === "confirmed") {
+      confirmed++;
+    } else if (v.validation === "false_positive") {
+      falsePositives++;
+    } else {
+      uncertain++;
+    }
+  }
   const summary = {
     total: validated.length,
-    confirmed: validated.filter((v) => v.validation === "confirmed").length,
-    falsePositives: validated.filter((v) => v.validation === "false_positive")
-      .length,
-    uncertain: validated.filter((v) => v.validation === "uncertain").length,
+    confirmed,
+    falsePositives,
+    uncertain,
     missed: object.missed.length,
   };
 
@@ -153,7 +171,7 @@ const createFallbackResult = (diagnostics: Diagnostic[]): ValidationResult => {
  * @param rawOutput - The original CI output
  * @param parseResult - The result from the parser
  * @param options - Validation options
- * @returns Validated diagnostics with confidence scores and missed errors
+ * @returns Validated diagnostics with confidence scores, missed errors, usage, and cost
  *
  * @example
  * ```ts
@@ -165,6 +183,7 @@ const createFallbackResult = (diagnostics: Diagnostic[]): ValidationResult => {
  *
  * // Filter out false positives
  * const realErrors = validated.validated.filter(d => d.validation !== "false_positive")
+ * console.log(`Validation cost: $${validated.costUsd}`)
  * ```
  */
 export const validate = async (
@@ -172,25 +191,25 @@ export const validate = async (
   parseResult: DiagnosticResult,
   options?: ValidateOptions
 ): Promise<ValidationResult> => {
-  const model = normalizeModelId(options?.model ?? DEFAULT_FAST_MODEL);
+  const modelName = options?.model ?? DEFAULT_FAST_MODEL;
+  const model = normalizeModelId(modelName);
   const maxOutputTokens = options?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
   const timeout = options?.timeout ?? DEFAULT_TIMEOUT_MS;
 
-  // Compact and truncate the CI output
-  const compacted = compactCiOutput(rawOutput);
-  const truncated = truncateContent(compacted);
+  // Compact, sanitize, and truncate the CI output (includes prompt injection protection)
+  const preparedOutput = prepareForPrompt(rawOutput);
   const diagnosticsPrompt = formatDiagnosticsForPrompt(parseResult.diagnostics);
 
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), timeout);
 
   try {
-    const { object } = await generateObject({
+    const { object, usage } = await generateObject({
       model,
       schema: validationSchema,
       system: SYSTEM_PROMPT,
       prompt: buildUserPrompt(
-        truncated,
+        preparedOutput,
         parseResult.detectedTool,
         diagnosticsPrompt
       ),
@@ -198,7 +217,23 @@ export const validate = async (
       abortSignal: options?.abortSignal ?? abortController.signal,
     });
 
-    return mapToResult(parseResult.diagnostics, object);
+    const result = mapToResult(parseResult.diagnostics, object);
+
+    // Add usage and cost information (AI SDK may return undefined for some models)
+    const inputTokens = usage.inputTokens ?? 0;
+    const outputTokens = usage.outputTokens ?? 0;
+    const validationUsage: ValidationUsage = {
+      inputTokens,
+      outputTokens,
+      totalTokens: usage.totalTokens ?? inputTokens + outputTokens,
+    };
+    const costUsd = estimateCost(modelName, inputTokens, outputTokens);
+
+    return {
+      ...result,
+      usage: validationUsage,
+      costUsd,
+    };
   } catch {
     return createFallbackResult(parseResult.diagnostics);
   } finally {

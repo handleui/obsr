@@ -30,8 +30,9 @@ export const normalizeModelId = (model: string): string => {
 
 /**
  * Options for text generation.
+ * @internal Used by AIClient which is not currently exported.
  */
-export interface GenerateTextOptions {
+interface GenerateTextOptions {
   /** Model to use */
   model?: string;
   /** System prompt */
@@ -48,8 +49,9 @@ export interface GenerateTextOptions {
 
 /**
  * Options for structured object generation.
+ * @internal Used by AIClient which is not currently exported.
  */
-export interface GenerateObjectOptions<T> {
+interface GenerateObjectOptions<T> {
   /** Model to use */
   model?: string;
   /** Zod schema for the output */
@@ -68,8 +70,9 @@ export interface GenerateObjectOptions<T> {
 
 /**
  * Result of text generation.
+ * @internal Used by AIClient which is not currently exported.
  */
-export interface TextResult {
+interface TextResult {
   text: string;
   usage?: {
     inputTokens: number;
@@ -79,8 +82,9 @@ export interface TextResult {
 
 /**
  * Result of object generation.
+ * @internal Used by AIClient which is not currently exported.
  */
-export interface ObjectResult<T> {
+interface ObjectResult<T> {
   object: T;
   usage?: {
     inputTokens: number;
@@ -90,8 +94,9 @@ export interface ObjectResult<T> {
 
 /**
  * AI Engine client for text and structured output generation.
+ * @internal Not currently used - kept for potential future use.
  */
-export class AIClient {
+class AIClient {
   constructor(apiKey?: string) {
     const resolvedKey = apiKey ?? process.env.AI_GATEWAY_API_KEY ?? "";
     if (!resolvedKey) {
@@ -106,7 +111,7 @@ export class AIClient {
   /**
    * Generates text from a prompt.
    */
-  async text(options: GenerateTextOptions): Promise<TextResult> {
+  text = async (options: GenerateTextOptions): Promise<TextResult> => {
     const model = normalizeModelId(options.model ?? DEFAULT_FAST_MODEL);
     const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
     const maxOutputTokens =
@@ -136,12 +141,14 @@ export class AIClient {
     } finally {
       clearTimeout(timeoutId);
     }
-  }
+  };
 
   /**
    * Generates a structured object from a prompt using a Zod schema.
    */
-  async object<T>(options: GenerateObjectOptions<T>): Promise<ObjectResult<T>> {
+  object = async <T>(
+    options: GenerateObjectOptions<T>
+  ): Promise<ObjectResult<T>> => {
     const model = normalizeModelId(options.model ?? DEFAULT_FAST_MODEL);
     const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
     const maxOutputTokens =
@@ -172,12 +179,12 @@ export class AIClient {
     } finally {
       clearTimeout(timeoutId);
     }
-  }
+  };
 
   /**
    * Tests the API connection.
    */
-  async test(): Promise<string> {
+  test = async (): Promise<string> => {
     const result = await this.text({
       model: DEFAULT_FAST_MODEL,
       prompt: "Say 'OK' in exactly one word.",
@@ -185,10 +192,11 @@ export class AIClient {
       timeout: DEFAULT_REQUEST_TIMEOUT_MS,
     });
     return result.text;
-  }
+  };
 }
 
 /**
  * Creates an AI client instance.
+ * @internal Not currently used - kept for potential future use.
  */
-export const createClient = (apiKey?: string): AIClient => new AIClient(apiKey);
+const _createClient = (apiKey?: string): AIClient => new AIClient(apiKey);

@@ -155,6 +155,10 @@ export const ValidationResultSchema = z
     ),
     missed: z.array(MissedDiagnosticSchema),
     summary: ValidationSummarySchema,
+    cost_usd: z.number().optional().openapi({
+      description: "Cost of the AI validation call in USD",
+      example: 0.000_25,
+    }),
   })
   .openapi("ValidationResult");
 

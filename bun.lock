@@ -104,6 +104,7 @@
       "name": "@detent/healer",
       "version": "0.0.0",
       "dependencies": {
+        "@detent/ai": "*",
         "@detent/healing": "*",
         "@detent/sandbox": "*",
         "@detent/types": "*",
@@ -226,6 +227,7 @@
       "name": "@detent/healing",
       "version": "0.0.0",
       "dependencies": {
+        "@detent/ai": "workspace:*",
         "@detent/lore": "workspace:*",
         "@detent/types": "workspace:*",
         "ai": "^5.0.0",

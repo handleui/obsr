@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@detent/ai": "*",
     "@detent/healing": "*",
     "@detent/sandbox": "*",
     "@detent/types": "*",

@@ -136,6 +136,7 @@ app.openapi(diagnosticsRoute, async (c) => {
           uncertain: number;
           missed: number;
         };
+        cost_usd?: number;
       }
     | undefined;
 
@@ -152,14 +153,15 @@ app.openapi(diagnosticsRoute, async (c) => {
         index: i,
         validation: v.validation,
         confidence: v.confidence,
-        reason: v.reason,
+        reason: v.reason ? scrubSecrets(v.reason) : undefined,
       })),
+      // Scrub AI-generated content to prevent secret leakage from CI output
       missed: validationResult.missed.map((m) => ({
-        message: m.message,
+        message: scrubSecrets(m.message),
         file_path: m.filePath,
         line: m.line,
         severity: m.severity,
-        missed_reason: m.missedReason,
+        missed_reason: scrubSecrets(m.missedReason),
       })),
       summary: {
         total: validationResult.summary.total,
@@ -168,6 +170,7 @@ app.openapi(diagnosticsRoute, async (c) => {
         uncertain: validationResult.summary.uncertain,
         missed: validationResult.summary.missed,
       },
+      cost_usd: validationResult.costUsd,
     };
   }
 

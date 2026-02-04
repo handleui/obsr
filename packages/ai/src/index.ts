@@ -1,13 +1,7 @@
-// Client
-export {
-  AIClient,
-  createClient,
-  type GenerateObjectOptions,
-  type GenerateTextOptions,
-  normalizeModelId,
-  type ObjectResult,
-  type TextResult,
-} from "./client.js";
+// biome-ignore-all lint/performance/noBarrelFile: This is the package entry point
+
+// Utilities
+export { normalizeModelId } from "./client.js";
 
 // Pricing
 export { calculateCost, estimateCost } from "./pricing.js";
@@ -33,5 +27,6 @@ export {
   type ValidateOptions,
   type ValidationResult,
   type ValidationStatus,
+  type ValidationUsage,
   validate,
 } from "./validation/index.js";

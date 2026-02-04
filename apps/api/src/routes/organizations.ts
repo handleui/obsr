@@ -373,6 +373,7 @@ app.get("/:organizationId/status", githubOrgAccessMiddleware, async (c) => {
       enable_inline_annotations: settings.enableInlineAnnotations,
       enable_pr_comments: settings.enablePrComments,
       heal_auto_trigger: settings.healAutoTrigger,
+      ai_validation_enabled: settings.aiValidationEnabled,
     },
   });
 });
@@ -555,6 +556,7 @@ app.patch(
       "enable_inline_annotations",
       "enable_pr_comments",
       "heal_auto_trigger",
+      "ai_validation_enabled",
     ] as const;
     type ValidKey = (typeof validKeys)[number];
     const validKeySet = new Set<string>(validKeys);
@@ -626,6 +628,9 @@ app.patch(
     if ("heal_auto_trigger" in providedSettings) {
       newSettings.healAutoTrigger = providedSettings.heal_auto_trigger;
     }
+    if ("ai_validation_enabled" in providedSettings) {
+      newSettings.aiValidationEnabled = providedSettings.ai_validation_enabled;
+    }
 
     await convex.mutation("organizations:update", {
       id: organization._id,
@@ -648,6 +653,7 @@ app.patch(
         enable_inline_annotations: finalSettings.enableInlineAnnotations,
         enable_pr_comments: finalSettings.enablePrComments,
         heal_auto_trigger: finalSettings.healAutoTrigger,
+        ai_validation_enabled: finalSettings.aiValidationEnabled,
       },
     });
   }

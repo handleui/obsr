@@ -35,6 +35,15 @@ export interface MissedDiagnostic {
 }
 
 /**
+ * Token usage from the AI validation call.
+ */
+export interface ValidationUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+/**
  * Result of the validation pass.
  */
 export interface ValidationResult {
@@ -50,6 +59,10 @@ export interface ValidationResult {
     uncertain: number;
     missed: number;
   };
+  /** Token usage from the AI call */
+  usage?: ValidationUsage;
+  /** Cost in USD for the validation call */
+  costUsd?: number;
 }
 
 /**

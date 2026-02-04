@@ -22,7 +22,6 @@ if (!process.env.BRAINTRUST_API_KEY) {
 
 import { randomUUID } from "node:crypto";
 import { Eval } from "braintrust";
-import { Client } from "../client.js";
 import { HealLoop } from "../loop.js";
 import { SYSTEM_PROMPT } from "../prompt/system.js";
 import {
@@ -109,8 +108,7 @@ const liveTask = async (input: HealingTestCase): Promise<HealingEvalResult> => {
       registry.register(tool);
     }
 
-    const client = new Client();
-    const loop = new HealLoop(client, registry, {
+    const loop = new HealLoop(registry, {
       verbose: true,
       budgetPerRunUSD: input.expected.maxCostUSD ?? 1.0,
     });

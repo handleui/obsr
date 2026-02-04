@@ -1,3 +1,5 @@
+import type { TokenUsage } from "@detent/ai";
+
 /**
  * Error types for classifying healing loop failures.
  *
@@ -89,15 +91,8 @@ export interface HealResult {
   errorContext?: HealErrorContext;
 }
 
-/**
- * Token usage for cost calculation.
- */
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  cacheCreationInputTokens: number;
-  cacheReadInputTokens: number;
-}
+// Re-export TokenUsage for backward compatibility
+export type { TokenUsage } from "@detent/ai";
 
 /**
  * Default configuration values.

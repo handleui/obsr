@@ -1,6 +1,6 @@
+import { calculateCost, normalizeModelId } from "@detent/ai";
+import { redactSensitiveData } from "@detent/types";
 import { generateText, stepCountIs } from "ai";
-import type { Client } from "./client.js";
-import { calculateCost } from "./pricing.js";
 import type { ToolRegistry } from "./tools/registry.js";
 import {
   DEFAULT_CONFIG,
@@ -346,65 +346,6 @@ const classifyError = (
 };
 
 /**
- * Sanitizes error messages to remove potential API keys or sensitive data.
- *
- * NOTE: A comprehensive shared utility exists at @detent/types (redactSensitiveData).
- * This local version is kept for now to preserve specific replacement labels
- * (e.g., [REDACTED_GITHUB_TOKEN] vs [GITHUB_CLASSIC_TOKEN]).
- *
- * TODO: Consider consolidating with @detent/types/sanitize.ts which has 50+ patterns.
- * See also: packages/healing/src/eval/tracing.ts (redactSensitive)
- */
-const sanitizeErrorMessage = (message: string): string => {
-  // Anthropic API key patterns
-  let sanitized = message.replace(
-    /sk-ant-[a-zA-Z0-9_-]{20,}/gi,
-    "[REDACTED_API_KEY]"
-  );
-
-  // OpenAI API key patterns
-  sanitized = sanitized.replace(/sk-[a-zA-Z0-9]{20,}/gi, "[REDACTED_API_KEY]");
-
-  // Generic Bearer tokens
-  sanitized = sanitized.replace(
-    /Bearer\s+[a-zA-Z0-9_-]{20,}/gi,
-    "Bearer [REDACTED_TOKEN]"
-  );
-
-  // GitHub classic tokens (ghp_, gho_, ghu_, ghs_, ghr_)
-  sanitized = sanitized.replace(
-    /gh[pousr]_[a-zA-Z0-9_]{20,}/gi,
-    "[REDACTED_GITHUB_TOKEN]"
-  );
-
-  // GitHub fine-grained PATs
-  sanitized = sanitized.replace(
-    /github_pat_[a-zA-Z0-9_]{20,}/gi,
-    "[REDACTED_GITHUB_PAT]"
-  );
-
-  // Detent tokens
-  sanitized = sanitized.replace(
-    /dtk_[a-zA-Z0-9_-]{20,}/gi,
-    "[REDACTED_DETENT_TOKEN]"
-  );
-
-  // x-api-key header values
-  sanitized = sanitized.replace(
-    /x-api-key[:\s]+[a-zA-Z0-9_-]{20,}/gi,
-    "x-api-key: [REDACTED]"
-  );
-
-  // Generic long secrets in key/token/secret/password contexts
-  sanitized = sanitized.replace(
-    /(api[_-]?key|token|secret|password|credential)[:\s=]+['"]?[a-zA-Z0-9_-]{20,}['"]?/gi,
-    "$1: [REDACTED]"
-  );
-
-  return sanitized;
-};
-
-/**
  * Formats an error message with execution context.
  */
 const formatErrorMessage = (
@@ -413,7 +354,7 @@ const formatErrorMessage = (
   execCtx: ExecutionContext
 ): string => {
   const iterationInfo = `iteration ${execCtx.iteration}/${MAX_ITERATIONS}`;
-  const safeError = sanitizeErrorMessage(rawError);
+  const safeError = redactSensitiveData(rawError);
 
   switch (errorType) {
     case "TIMEOUT":
@@ -478,25 +419,19 @@ const buildErrorContext = (
     cacheCreationInputTokens: result.cacheCreationInputTokens,
     cacheReadInputTokens: result.cacheReadInputTokens,
   },
-  rawError: sanitizeErrorMessage(rawError),
+  rawError: redactSensitiveData(rawError),
 });
 
 /**
  * HealLoop orchestrates the agentic healing process.
  */
 export class HealLoop {
-  private readonly client: Client;
   private readonly registry: ToolRegistry;
   private readonly config: HealConfig;
   private readonly verboseWriter: ((msg: string) => void) | null;
   private readonly execCtx: ExecutionContext;
 
-  constructor(
-    client: Client,
-    registry: ToolRegistry,
-    config: Partial<HealConfig> = {}
-  ) {
-    this.client = client;
+  constructor(registry: ToolRegistry, config: Partial<HealConfig> = {}) {
     this.registry = registry;
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.verboseWriter = this.config.verbose
@@ -514,7 +449,7 @@ export class HealLoop {
   ): Promise<HealResult> => {
     const startTime = Date.now();
     const result = createInitialResult();
-    const modelName = this.client.normalizeModel(this.config.model);
+    const modelName = normalizeModelId(this.config.model);
     const abortController = new AbortController();
     const timeoutId = setTimeout(
       () => abortController.abort(),
@@ -554,7 +489,6 @@ export class HealLoop {
         tools: this.registry.toAiTools(),
         stopWhen: [stepCountIs(MAX_ITERATIONS), budgetStopCondition],
         abortSignal: abortController.signal,
-        providerOptions: this.client.providerOptions(modelName) ?? undefined,
       });
 
       this.updateTokenUsage(result, response.usage ?? {}, modelName);

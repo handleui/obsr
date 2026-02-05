@@ -147,6 +147,7 @@ useful line here`;
   });
 
   it("handles all noise (nothing kept)", () => {
+    // 5 newlines → split("\n") → 6 elements (lines 1-6)
     const input = "\n\n\n\n\n";
     const result = compactCiOutput(input);
     expect(result).toContain("[lines 1-6 omitted]");

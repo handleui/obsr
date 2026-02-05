@@ -38,6 +38,7 @@ interface WebhookPayload {
     head_sha: string;
     head_branch: string | null;
     workflow_name: string | null;
+    conclusion: string | null;
   };
 }
 
@@ -302,7 +303,8 @@ const storeErrors = async (
   ctx: ExtractionContext,
   project: { _id: string },
   errors: CIError[],
-  prNumber: number | undefined
+  prNumber: number | undefined,
+  conclusion: string
 ): Promise<string | null> => {
   const runRecordId = crypto.randomUUID();
   const convex = getConvexClient(env);
@@ -325,7 +327,7 @@ const storeErrors = async (
         workflowName: ctx.workflowName,
         runAttempt: 1,
         errorCount: errors.length,
-        conclusion: "failure",
+        conclusion,
         receivedAt: Date.now(),
       },
       errors: errorRows,
@@ -409,8 +411,12 @@ const createHealsForErrors = async (
 
   const orgSettings = getOrgSettings(organization?.settings);
 
-  const existingErrorIds = new Set(
-    healsByPr.filter((h) => h.type === "heal").flatMap((h) => h.errorIds ?? [])
+  // Build set of existing signature IDs from heals on this PR for deduplication
+  // Uses stable signatureIds instead of random error IDs
+  const existingSignatureIds = new Set(
+    healsByPr
+      .filter((h) => h.type === "heal")
+      .flatMap((h) => h.signatureIds ?? [])
   );
 
   const errorsByJob = groupErrorsByWorkflowJob(runErrors);
@@ -424,7 +430,7 @@ const createHealsForErrors = async (
   }
 
   const promises: Promise<string>[] = [];
-  for (const errors of errorsByJob.values()) {
+  for (const [jobName, errors] of errorsByJob.entries()) {
     // Resource exhaustion protection: limit heals per extraction
     if (promises.length >= MAX_HEALS_PER_EXTRACTION) {
       console.warn(
@@ -437,13 +443,21 @@ const createHealsForErrors = async (
     if (errorIds.length === 0) {
       continue;
     }
-    if (errorIds.some((id) => existingErrorIds.has(id))) {
-      continue;
-    }
 
     const signatureIds = errors
       .map((e) => e.signatureId)
       .filter((id): id is string => typeof id === "string");
+
+    // Dedupe: skip if all signatures for this job already exist in a heal on this PR
+    if (
+      signatureIds.length > 0 &&
+      signatureIds.every((id) => existingSignatureIds.has(id))
+    ) {
+      console.log(
+        `${LOG_PREFIX} Skipping duplicate heal for job "${jobName}" - signatures already covered`
+      );
+      continue;
+    }
 
     promises.push(
       createHeal(env, {
@@ -543,12 +557,14 @@ export const extractAndStoreErrors = async (
     runs.find((r) => typeof r.prNumber === "number")?.prNumber ?? undefined;
 
   // Store errors
+  const conclusion = payload.workflow_job.conclusion ?? "failure";
   const runRecordId = await storeErrors(
     env,
     ctx,
     project,
     extraction.errors,
-    prNumber
+    prNumber,
+    conclusion
   );
   if (!runRecordId) {
     return;

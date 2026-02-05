@@ -26,8 +26,6 @@ export { sanitizeCredentials, CREDENTIAL_PATTERNS } from "./utils/sanitize.js";
 
 // Re-export resource classes for advanced use cases
 export { AuthResource } from "./resources/auth.js";
-/** @deprecated The diagnostics endpoint has been removed */
-export { DiagnosticsResource, type ParseOptions } from "./resources/diagnostics.js";
 export { ErrorsResource } from "./resources/errors.js";
 export { HealsResource } from "./resources/heals.js";
 export { InvitationsResource } from "./resources/invitations.js";

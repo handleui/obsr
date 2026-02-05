@@ -222,51 +222,6 @@ export interface RevokeInvitationResponse {
 }
 
 // ============================================================================
-// Diagnostics
-// ============================================================================
-
-export type DetectedTool =
-  | "eslint"
-  | "vitest"
-  | "typescript"
-  | "cargo"
-  | "golangci";
-
-export type DiagnosticMode = "full" | "lite";
-
-export interface DiagnosticsRequest {
-  content: string;
-  tool?: DetectedTool;
-  mode?: DiagnosticMode;
-}
-
-export interface Diagnostic {
-  message: string;
-  filePath?: string;
-  line?: number;
-  column?: number;
-  severity?: "error" | "warning";
-  ruleId?: string;
-  stackTrace?: string;
-  hints?: string[];
-  fixable?: boolean;
-}
-
-export interface DiagnosticSummary {
-  errorCount: number;
-  warningCount: number;
-  fixableCount: number;
-  fileCount: number;
-}
-
-export interface DiagnosticsResponse {
-  mode: DiagnosticMode;
-  detected_tool: DetectedTool | null;
-  diagnostics: Diagnostic[];
-  summary: DiagnosticSummary;
-}
-
-// ============================================================================
 // Heals
 // ============================================================================
 

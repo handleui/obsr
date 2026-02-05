@@ -14,7 +14,6 @@
 import { createClient, type DetentClient } from "@detent/sdk";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { registerDiagnosticsTools } from "./tools/diagnostics-tools.js";
 import { registerErrorsTools } from "./tools/errors-tools.js";
 import { registerHealsTools } from "./tools/heals-tools.js";
 import { registerProjectsTools } from "./tools/projects-tools.js";
@@ -48,7 +47,6 @@ const main = async () => {
   }
 
   // Register all tools
-  registerDiagnosticsTools(server, client);
   registerProjectsTools(server, client);
   registerErrorsTools(server, client);
   registerHealsTools(server, client);

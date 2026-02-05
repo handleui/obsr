@@ -16,8 +16,17 @@
     "dev": "tsc --watch",
     "check-types": "tsc --noEmit"
   },
+  "peerDependencies": {
+    "zod": "^3.25.0"
+  },
+  "peerDependenciesMeta": {
+    "zod": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@detent/typescript-config": "*",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "zod": "^3.25.34"
   }
 }

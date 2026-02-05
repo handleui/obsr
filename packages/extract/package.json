@@ -1,5 +1,5 @@
 {
-  "name": "@detent/ai",
+  "name": "@detent/extract",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -16,7 +16,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@ai-sdk/gateway": "^2.0.0",
     "@ai-sdk/provider": "^3.0.7",
+    "@detent/ai": "workspace:*",
+    "@detent/types": "workspace:*",
     "ai": "^5.0.0",
     "zod": "^3.25.34"
   },

@@ -1,38 +1,7 @@
+import type { CIError } from "@detent/types";
 import type { ConvexHttpClient } from "convex/browser";
 
 export type DbClient = ConvexHttpClient;
-
-export interface ParsedError {
-  filePath?: string;
-  line?: number;
-  column?: number;
-  message: string;
-  category?: string;
-  severity?: string;
-  ruleId?: string;
-  source?: string;
-  stackTrace?: string;
-  workflowJob?: string;
-  workflowStep?: string;
-  workflowAction?: string;
-  /** True if matched by generic fallback parser */
-  unknownPattern?: boolean;
-  /** True if error may be test output noise (vitest/jest progress, etc.) */
-  possiblyTestOutput?: boolean;
-  /** Hints for fixing the error (merged from legacy suggestions + hint fields) */
-  hints?: string[];
-  /** Code snippet with surrounding context */
-  codeSnippet?: {
-    lines: string[];
-    startLine: number;
-    errorLine: number;
-    language: string;
-  };
-  /** Confidence flag for line number */
-  lineKnown?: boolean;
-  /** True if error can be auto-fixed by the tool */
-  fixable?: boolean;
-}
 
 export interface PreparedRunData {
   runRecordId: string;
@@ -40,7 +9,7 @@ export interface PreparedRunData {
   runName: string;
   prNumber: number;
   headSha: string;
-  errors: ParsedError[];
+  errors: CIError[];
   repository: string;
   checkRunId: number | null;
   conclusion: string | null;

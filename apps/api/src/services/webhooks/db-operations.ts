@@ -25,14 +25,10 @@ const asSource = (s: string | undefined): ErrorSource | undefined =>
 const asCategory = (c: string | undefined): ErrorCategory | undefined =>
   c as ErrorCategory | undefined;
 
+import type { CIError } from "@detent/types";
 import { CACHE_TTL, cacheKey, getFromCache, setInCache } from "../../lib/cache";
 import type { Env } from "../../types/env";
-import type {
-  DbClient,
-  ParsedError,
-  PreparedRunData,
-  RunIdentifier,
-} from "./types";
+import type { DbClient, PreparedRunData, RunIdentifier } from "./types";
 
 // ============================================================================
 // Validation Constants
@@ -92,7 +88,7 @@ export const prepareRunData = (data: {
   runName: string;
   prNumber: number;
   headSha: string;
-  errors: ParsedError[];
+  errors: CIError[];
   repository: string;
   checkRunId?: number;
   conclusion: string | null;
@@ -165,7 +161,7 @@ export const bulkStoreRunsAndErrors = async (
   const completedAt = Date.now();
 
   const errorsWithFingerprints: Array<{
-    error: ParsedError;
+    error: CIError;
     fingerprints: ReturnType<typeof generateFingerprints>;
     runRecordId: string;
     runName: string;
@@ -294,19 +290,18 @@ export const bulkStoreRunsAndErrors = async (
     hints: entry.error.hints ?? undefined,
     codeSnippet: entry.error.codeSnippet ?? undefined,
     workflowJob:
-      truncateString(entry.error.workflowJob, MAX_WORKFLOW_NAME_LENGTH) ??
-      entry.runName,
+      truncateString(
+        entry.error.workflowJob ?? entry.error.workflowContext?.job,
+        MAX_WORKFLOW_NAME_LENGTH
+      ) ?? entry.runName,
     workflowStep: truncateString(
-      entry.error.workflowStep,
+      entry.error.workflowContext?.step,
       MAX_WORKFLOW_NAME_LENGTH
     ),
     workflowAction: truncateString(
-      entry.error.workflowAction,
+      entry.error.workflowContext?.action,
       MAX_WORKFLOW_NAME_LENGTH
     ),
-    unknownPattern: entry.error.unknownPattern ?? undefined,
-    lineKnown: entry.error.lineKnown ?? undefined,
-    possiblyTestOutput: entry.error.possiblyTestOutput ?? undefined,
     fixable: entry.error.fixable ?? undefined,
     createdAt: completedAt,
   }));

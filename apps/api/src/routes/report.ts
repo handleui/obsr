@@ -39,11 +39,8 @@ interface ReportError {
     language: string;
   };
   // Additional fields from ExtractedError
-  possiblyTestOutput?: boolean;
   fixable?: boolean;
   hints?: string[];
-  unknownPattern?: boolean;
-  lineKnown?: boolean;
   // Backwards compatibility: accept legacy fields and merge into hints
   /** @deprecated Use hints instead */
   suggestions?: string[];
@@ -269,11 +266,8 @@ const createErrorRow = (
   ),
   source: "job-report" as const,
   codeSnippet: error.codeSnippet ?? null,
-  possiblyTestOutput: error.possiblyTestOutput ?? null,
   fixable: error.fixable ?? null,
   hints: mergeHints(error),
-  unknownPattern: error.unknownPattern ?? null,
-  lineKnown: error.lineKnown ?? null,
   createdAt: Date.now(),
 });
 
@@ -558,12 +552,7 @@ const validateStringArray = (
   return null;
 };
 
-const BOOLEAN_ERROR_FIELDS = [
-  "possiblyTestOutput",
-  "fixable",
-  "unknownPattern",
-  "lineKnown",
-];
+const BOOLEAN_ERROR_FIELDS = ["fixable"];
 
 /**
  * Validate a single error object's string fields

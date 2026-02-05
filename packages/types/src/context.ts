@@ -1,28 +1,14 @@
-/**
- * CodeSnippet contains source code context around an error location.
- */
-export interface CodeSnippet {
-  /** Lines of source code context */
-  readonly lines: readonly string[];
-  /** First line number in snippet (1-indexed in original file) */
-  readonly startLine: number;
-  /** Position of error line within lines array (1-indexed, e.g., 1 = lines[0]) */
-  readonly errorLine: number;
-  /** Language identifier: "go", "typescript", "python", etc. */
-  readonly language: string;
-}
+import type { CICodeSnippet, CIWorkflowContext } from "./diagnostic.js";
 
 /**
- * WorkflowContext captures GitHub Actions workflow execution context.
+ * @deprecated Use CICodeSnippet from diagnostic.ts instead.
  */
-export interface WorkflowContext {
-  /** From [workflow/job] prefix in act output */
-  readonly job?: string;
-  /** Parse from step names */
-  readonly step?: string;
-  /** Parse from action names */
-  readonly action?: string;
-}
+export type CodeSnippet = CICodeSnippet;
+
+/**
+ * @deprecated Use CIWorkflowContext from diagnostic.ts instead.
+ */
+export type WorkflowContext = CIWorkflowContext;
 
 /**
  * Clone a WorkflowContext for safe mutation.

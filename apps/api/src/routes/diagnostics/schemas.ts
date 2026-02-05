@@ -1,5 +1,13 @@
+// biome-ignore-all lint/performance/noBarrelFile: Shared schemas need re-export
 import { z } from "@hono/zod-openapi";
 
+export {
+  CIErrorSchema,
+  ErrorSeveritySchema,
+  ErrorSourceSchema,
+} from "@detent/types";
+
+// API-specific schemas with snake_case keys and OpenAPI decorators
 export const SeveritySchema = z.enum(["error", "warning"]).openapi("Severity");
 
 export const DetectedToolSchema = z
@@ -177,9 +185,9 @@ export const DiagnosticsResponseFullSchema = z
     truncated: z.boolean().openapi({
       description: "True if diagnostics were truncated (max 10,000)",
     }),
-    validation: ValidationResultSchema.optional().openapi({
-      description:
-        "AI validation results (only when organization has validationEnabled)",
+    extraction_cost_usd: z.number().optional().openapi({
+      description: "Cost of AI extraction in USD",
+      example: 0.001,
     }),
   })
   .openapi("DiagnosticsResponseFull");

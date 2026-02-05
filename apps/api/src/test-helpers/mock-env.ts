@@ -56,6 +56,7 @@ export const createMockEnv = (overrides: Partial<Env> = {}): Env => ({
   NAVIGATOR_BASE_URL: "https://navigator.detent.sh",
   CONVEX_URL: "https://test.convex.cloud",
   CONVEX_SERVICE_TOKEN: "convex-service-token",
+  AI_GATEWAY_API_KEY: "ai-gateway-api-key",
   ...overrides,
 });
 

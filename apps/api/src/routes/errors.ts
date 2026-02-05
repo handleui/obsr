@@ -72,8 +72,6 @@ interface RunErrorDoc {
     language: string;
   };
   workflowJob?: string;
-  lineKnown?: boolean;
-  unknownPattern?: boolean;
 }
 
 /**
@@ -234,8 +232,6 @@ app.get("/", async (c) => {
       stackTrace: e.stackTrace ? scrubSecrets(e.stackTrace) : null,
       codeSnippet: e.codeSnippet,
       workflowJob: e.workflowJob,
-      lineKnown: e.lineKnown,
-      unknownPattern: e.unknownPattern,
     })),
   });
 });

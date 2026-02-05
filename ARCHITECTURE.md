@@ -129,9 +129,9 @@ A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to autom
                                              │
                                              ▼
                                     ┌──────────────────┐
-                                    │  @detent/action  │
-                                    │  (GitHub Action) │
-                                    │  parse errors    │
+                                    │  @detent/extract │
+                                    │  (AI extraction) │
+                                    │  Claude Haiku    │
                                     └────────┬─────────┘
                                              │
                                              ▼
@@ -242,8 +242,16 @@ detent/
 ├── convex/                           # Convex schema + functions
 │
 ├── packages/
-│   ├── action/                       # GitHub Action for parsing
+│   ├── action/                       # GitHub Action entry point
 │   │   └── src/                      # Runs client-side in CI
+│   │
+│   ├── extract/                      # AI-powered error extraction
+│   │   └── src/
+│   │       ├── extract.ts            # Main extraction via Claude Haiku
+│   │       ├── preprocess.ts         # Log compaction and sanitization
+│   │       ├── prompt.ts             # Extraction system prompts
+│   │       ├── schema.ts             # Zod schemas for extracted errors
+│   │       └── related-files.ts      # File path extraction from errors
 │   │
 │   ├── lore/                         # Error hints and signatures
 │   │   └── src/
@@ -409,16 +417,17 @@ dt org                    # Organization management
 
 ## Tech Stack Summary
 
-| Layer       | Technology                             |
-|-------------|---------------------------------------|
-| CLI         | TypeScript, Citty, Ink (React)        |
-| API         | Hono, Cloudflare Workers              |
-| Healer      | Hono, Bun, Railway                    |
-| Database    | Convex                               |
-| Web Apps    | Next.js 16, React 19, Tailwind        |
-| Auth        | WorkOS, JWT (Jose), OAuth 2.0         |
-| AI          | Codex 5.2 via Vercel AI Gateway       |
-| Sandboxes   | E2B (fresh per heal)                  |
-| Monorepo    | Turborepo, Bun                        |
-| Lint/Format | Ultracite (Biome)                     |
-| Monitoring  | Sentry, Logtail                       |
+| Layer        | Technology                            |
+|--------------|---------------------------------------|
+| CLI          | TypeScript, Citty, Ink (React)        |
+| API          | Hono, Cloudflare Workers              |
+| Healer       | Hono, Bun, Railway                    |
+| Database     | Convex                                |
+| Web Apps     | Next.js 16, React 19, Tailwind        |
+| Auth         | WorkOS, JWT (Jose), OAuth 2.0         |
+| AI Extraction| Claude Haiku via Vercel AI SDK        |
+| AI Healing   | Codex 5.2 via Vercel AI Gateway       |
+| Sandboxes    | E2B (fresh per heal)                  |
+| Monorepo     | Turborepo, Bun                        |
+| Lint/Format  | Ultracite (Biome)                     |
+| Monitoring   | Sentry, Logtail                       |

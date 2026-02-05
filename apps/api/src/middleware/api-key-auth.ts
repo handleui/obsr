@@ -177,10 +177,10 @@ export const apiKeyAuthMiddleware = async (
     await next();
     return undefined;
   } catch (error) {
-    console.error(
-      "[api-key-auth] Authentication error:",
-      error instanceof Error ? error.message : String(error)
-    );
+    console.error("[api-key-auth] Authentication error:", {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     return c.json({ error: "Authentication failed" }, 401);
   }
 };

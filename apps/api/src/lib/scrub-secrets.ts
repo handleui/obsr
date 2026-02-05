@@ -19,6 +19,7 @@
  * - Base64-encoded secrets (in assignment context only)
  * - Private keys (-----BEGIN ... PRIVATE KEY-----)
  * - Connection strings with credentials
+ * - User home directory paths (PII in file paths)
  */
 
 // Core token patterns - high-confidence matches
@@ -85,6 +86,16 @@ const CONNECTION_STRING_PATTERN =
 // Pattern for finding separator in env var matches
 const ENV_VAR_SEPARATOR_PATTERN = /[=:]/;
 
+// User home directory patterns - redact usernames to protect PII
+// Unix: /home/username/... -> /home/[USER]/...
+const UNIX_HOME_PATH_PATTERN = /\/home\/([^/\s]+)/g;
+// macOS: /Users/username/... -> /Users/[USER]/...
+const MACOS_HOME_PATH_PATTERN = /\/Users\/([^/\s]+)/g;
+// Windows: C:\Users\username\... -> C:\Users\[USER]\...
+const WINDOWS_HOME_PATH_PATTERN = /C:\\Users\\([^\\\s]+)/gi;
+// Root user path (Docker containers, CI runners)
+const ROOT_PATH_PATTERN = /\/root(?=\/)/g;
+
 /**
  * Scrub sensitive data from a string value.
  *
@@ -145,3 +156,33 @@ export const scrubDiagnostic = <T extends DiagnosticLike>(
     : undefined,
   hints: diagnostic.hints?.map(scrubSecrets),
 });
+
+/**
+ * Scrub user home directory paths from file paths.
+ *
+ * Replaces usernames in common home directory patterns to prevent PII leakage.
+ * @example "/Users/johndoe/project/src/app.ts" -> "/Users/[USER]/project/src/app.ts"
+ */
+export const scrubFilePath = (
+  filePath: string | undefined
+): string | undefined => {
+  if (!filePath) {
+    return filePath;
+  }
+
+  let result = filePath;
+
+  // Scrub Unix home paths: /home/username -> /home/[USER]
+  result = result.replace(UNIX_HOME_PATH_PATTERN, "/home/[USER]");
+
+  // Scrub macOS home paths: /Users/username -> /Users/[USER]
+  result = result.replace(MACOS_HOME_PATH_PATTERN, "/Users/[USER]");
+
+  // Scrub Windows home paths: C:\Users\username -> C:\Users\[USER]
+  result = result.replace(WINDOWS_HOME_PATH_PATTERN, "C:\\Users\\[USER]");
+
+  // Scrub root paths: /root/... -> /[ROOT]/...
+  result = result.replace(ROOT_PATH_PATTERN, "/[ROOT]");
+
+  return result;
+};

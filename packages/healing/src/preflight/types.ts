@@ -1,4 +1,6 @@
-import type { ExtractedError } from "@detent/types";
+import type { CIError } from "@detent/types";
+
+export type { CIError } from "@detent/types";
 
 export type ValidationReason =
   | "file_missing"
@@ -6,11 +8,11 @@ export type ValidationReason =
   | "code_changed";
 
 export interface StaleError {
-  error: ExtractedError;
+  error: CIError;
   reason: ValidationReason;
 }
 
 export interface PreflightResult {
-  valid: ExtractedError[];
+  valid: CIError[];
   stale: StaleError[];
 }

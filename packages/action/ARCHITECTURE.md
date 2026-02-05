@@ -34,7 +34,7 @@ GitHub Workflow
       |
       v
 +------------------+
-| 3. PARSE         |  parsers/* - Extract structured errors
+| 3. EXTRACT       |  AI extraction via @detent/extract or API
 +------------------+
       |
       v
@@ -108,48 +108,27 @@ isPrivateHost() {
 - Transmitted via `X-Detent-Token` header
 - Never logged or exposed in outputs
 
-## Parser Architecture
+## AI Extraction
 
-### Format Detection
+### Universal Extraction
+
+Error extraction uses AI (Claude Haiku) instead of regex parsers. This approach:
+
+- Works with any CI output format (ESLint, TypeScript, Vitest, Cargo, golangci, etc.)
+- Handles new tools without code changes
+- Adapts to format variations automatically
+
+### Extraction Methods
 
 ```
-detect.ts
+CI Output
     |
-    +-- JSON files: Search known paths
-    |   OUTPUT_PATTERNS = {
-    |     eslint: ["eslint-report.json", "eslint.json"],
-    |     vitest: ["vitest.json", "test-results.json"],
-    |     golangci: ["golangci-lint.json", ...],
-    |     typescript: ["tsc-output.txt", ...]
-    |   }
+    +-- @detent/extract (local)     # For direct package usage
     |
-    +-- NDJSON: Cargo via CARGO_STDOUT env
-    |
-    +-- Text: TypeScript via TYPESCRIPT_OUTPUT env
+    +-- POST /v1/diagnostics (API)  # For GitHub Action
 ```
 
-### Parsers
-
-| Tool       | Format | File                     | Notes                        |
-| ---------- | ------ | ------------------------ | ---------------------------- |
-| ESLint     | JSON   | parsers/json/eslint.ts   | Array or `{results}` wrapper |
-| Vitest     | JSON   | parsers/json/vitest.ts   | Jest-compatible format       |
-| golangci   | JSON   | parsers/json/golangci.ts | `{Issues}` array             |
-| Cargo      | NDJSON | parsers/json/cargo.ts    | Line-by-line JSON            |
-| TypeScript | Text   | parsers/text/typescript.ts | Regex, two formats         |
-
-### TypeScript Text Parsing
-
-No JSON output available from tsc. Two format patterns:
-
-```
-Parenthesized: file.ts(42,5): error TS2304: message
-Colon format:  file.ts:42:5 - error TS2304: message
-```
-
-Anti-ReDoS: Lines >2000 chars skipped. ANSI codes stripped.
-
-### Parsed Error Structure
+### Extracted Error Structure
 
 ```typescript
 interface ParsedError {
@@ -272,13 +251,10 @@ packages/action/
 |   +-- report.ts         # API client with retry
 |   +-- snippet.ts        # Code context extraction
 |   +-- errors.ts         # Error classification
+|   +-- parsers.ts        # AI extraction client
 |   +-- autofix/
-|   |   +-- registry.ts   # Command allowlist + config
-|   |   +-- executor.ts   # Command execution + patching
-|   +-- parsers/
-|       +-- types.ts      # ParsedError interface
-|       +-- json/         # JSON format parsers
-|       +-- text/         # Text format parsers
+|       +-- registry.ts   # Command allowlist + config
+|       +-- executor.ts   # Command execution + patching
 +-- action.yml            # GitHub Action manifest
 +-- dist/                 # Bundled output (ncc)
 ```

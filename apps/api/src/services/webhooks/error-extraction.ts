@@ -439,8 +439,7 @@ const createHealsForErrors = async (
       break;
     }
 
-    const errorIds = errors.map((e) => e._id);
-    if (errorIds.length === 0) {
+    if (errors.length === 0) {
       continue;
     }
 
@@ -459,6 +458,8 @@ const createHealsForErrors = async (
       continue;
     }
 
+    // Note: We don't pass errorIds here because the RunError objects have synthetic UUIDs
+    // that don't match stored database records. signatureIds provide stable correlation.
     promises.push(
       createHeal(env, {
         type: "heal",
@@ -467,7 +468,6 @@ const createHealsForErrors = async (
         runId: runRecordId,
         commitSha,
         prNumber,
-        errorIds,
         signatureIds,
       })
     );

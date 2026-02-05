@@ -13,13 +13,35 @@ export interface AutofixResult {
   error?: string;
 }
 
-const WHITESPACE_REGEX = /\s+/;
+const WHITESPACE_CHAR = /\s/;
 
-// Security: Parse command into executable and arguments
-// This prevents shell interpretation of metacharacters
+// Security: Parse command into executable and arguments with quote support
+// Handles double/single-quoted args (e.g. `prettier --write "src/**/*.ts"`)
 const parseCommand = (command: string): { cmd: string; args: string[] } => {
-  const parts = command.split(WHITESPACE_REGEX).filter((p) => p.length > 0);
-  const [cmd, ...args] = parts;
+  const tokens: string[] = [];
+  let current = "";
+  let inSingle = false;
+  let inDouble = false;
+
+  for (const char of command) {
+    if (char === "'" && !inDouble) {
+      inSingle = !inSingle;
+    } else if (char === '"' && !inSingle) {
+      inDouble = !inDouble;
+    } else if (WHITESPACE_CHAR.test(char) && !inSingle && !inDouble) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+    } else {
+      current += char;
+    }
+  }
+  if (current) {
+    tokens.push(current);
+  }
+
+  const [cmd, ...args] = tokens;
   if (!cmd) {
     throw new Error("Empty command");
   }

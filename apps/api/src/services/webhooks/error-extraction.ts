@@ -72,6 +72,8 @@ const EXTRACTION_TIMEOUT_MS = 60_000;
 const LOCK_TTL_SECONDS = 300;
 // Maximum heals to create per extraction to prevent resource exhaustion
 const MAX_HEALS_PER_EXTRACTION = 10;
+// SECURITY: Cap R2 log storage at 50 MB to prevent storage abuse
+const MAX_R2_LOG_BYTES = 50 * 1024 * 1024;
 
 // ============================================================================
 // Context & Validation
@@ -111,25 +113,31 @@ const isValidRepositoryFormat = (repo: string): boolean => {
 const safeLogValue = (value: string, maxLen = 100): string =>
   value.length > maxLen ? `${value.slice(0, maxLen)}...` : value;
 
-// SECURITY: Sanitize job name for safe logging/storage (truncate + remove control chars)
-// Removes: C0 control chars (U+0000-U+001F), DEL (U+007F), zero-width chars (U+200B-U+200F),
-// and line/paragraph separators (U+2028-U+2029) that could cause log injection or parsing issues
 // biome-ignore lint/suspicious/noControlCharactersInRegex: Intentionally matching control chars for security
 const CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u2029]/g;
 
-const sanitizeJobName = (name: string): string => {
-  const cleaned = name.replace(CONTROL_CHAR_PATTERN, "");
-  return cleaned.length > 255 ? cleaned.slice(0, 255) : cleaned;
+// SECURITY: Sanitize webhook string fields (strip control chars + truncate to limit)
+const sanitizeField = (value: string, maxLen: number): string => {
+  const cleaned = value.replace(CONTROL_CHAR_PATTERN, "");
+  return cleaned.length > maxLen ? cleaned.slice(0, maxLen) : cleaned;
 };
 
 const buildContext = (payload: WebhookPayload): ExtractionContext | null => {
   const repository = payload.repository.full_name;
   const jobId = payload.workflow_job.id;
+  const runId = payload.workflow_job.run_id;
 
   // SECURITY: Validate inputs before processing
   if (!isValidJobId(jobId)) {
     console.error(
       `${LOG_PREFIX} Invalid job ID: ${safeLogValue(String(jobId))}`
+    );
+    return null;
+  }
+
+  if (!isValidJobId(runId)) {
+    console.error(
+      `${LOG_PREFIX} Invalid run ID: ${safeLogValue(String(runId))}`
     );
     return null;
   }
@@ -152,11 +160,18 @@ const buildContext = (payload: WebhookPayload): ExtractionContext | null => {
   return {
     repository,
     jobId,
-    runId: payload.workflow_job.run_id,
-    jobName: sanitizeJobName(payload.workflow_job.name),
+    runId,
+    jobName: sanitizeField(payload.workflow_job.name, 255),
     commitSha: commitSha.toLowerCase(),
-    headBranch: payload.workflow_job.head_branch ?? "unknown",
-    workflowName: payload.workflow_job.workflow_name ?? "Unknown",
+    // SECURITY: Sanitize webhook fields to prevent control char injection and DB bloat
+    headBranch: sanitizeField(
+      payload.workflow_job.head_branch ?? "unknown",
+      255
+    ),
+    workflowName: sanitizeField(
+      payload.workflow_job.workflow_name ?? "Unknown",
+      255
+    ),
     installationId: payload.installation.id,
     logCtx: `${safeLogValue(repository)}#${jobId}`,
   };
@@ -304,7 +319,8 @@ const storeErrors = async (
   project: { _id: string },
   errors: CIError[],
   prNumber: number | undefined,
-  conclusion: string
+  conclusion: string,
+  logR2Key?: string | null
 ): Promise<string | null> => {
   const runRecordId = crypto.randomUUID();
   const convex = getConvexClient(env);
@@ -328,6 +344,7 @@ const storeErrors = async (
         runAttempt: 1,
         errorCount: errors.length,
         conclusion,
+        logR2Key,
         receivedAt: Date.now(),
       },
       errors: errorRows,
@@ -371,21 +388,18 @@ const isErrorAutofixable = (error: {
 
 const groupErrorsByWorkflowJob = (
   runErrors: RunError[]
-): Map<string, RunError[]> => {
-  const groups = new Map<string, RunError[]>();
-  for (const error of runErrors) {
+): Map<string, RunError[]> =>
+  runErrors.reduce((groups, error) => {
     if (typeof error.workflowJob !== "string" || !error.workflowJob) {
-      continue;
+      return groups;
     }
     if (isErrorAutofixable(error)) {
-      continue;
+      return groups;
     }
     const existing = groups.get(error.workflowJob) ?? [];
     existing.push(error);
-    groups.set(error.workflowJob, existing);
-  }
-  return groups;
-};
+    return groups.set(error.workflowJob, existing);
+  }, new Map<string, RunError[]>());
 
 const createHealsForErrors = async (
   env: Env,
@@ -429,9 +443,18 @@ const createHealsForErrors = async (
     }
   }
 
+  const shouldCreateHeal = (
+    signatures: string[],
+    existingIds: Set<string>
+  ): boolean => {
+    if (signatures.length === 0) {
+      return true;
+    }
+    return !signatures.every((id) => existingIds.has(id));
+  };
+
   const promises: Promise<string>[] = [];
   for (const [jobName, errors] of errorsByJob.entries()) {
-    // Resource exhaustion protection: limit heals per extraction
     if (promises.length >= MAX_HEALS_PER_EXTRACTION) {
       console.warn(
         `${LOG_PREFIX} Hit max heals limit (${MAX_HEALS_PER_EXTRACTION}), skipping remaining jobs`
@@ -447,19 +470,13 @@ const createHealsForErrors = async (
       .map((e) => e.signatureId)
       .filter((id): id is string => typeof id === "string");
 
-    // Dedupe: skip if all signatures for this job already exist in a heal on this PR
-    if (
-      signatureIds.length > 0 &&
-      signatureIds.every((id) => existingSignatureIds.has(id))
-    ) {
+    if (!shouldCreateHeal(signatureIds, existingSignatureIds)) {
       console.log(
         `${LOG_PREFIX} Skipping duplicate heal for job "${jobName}" - signatures already covered`
       );
       continue;
     }
 
-    // Note: We don't pass errorIds here because the RunError objects have synthetic UUIDs
-    // that don't match stored database records. signatureIds provide stable correlation.
     promises.push(
       createHeal(env, {
         type: "heal",
@@ -532,8 +549,35 @@ export const extractAndStoreErrors = async (
     return;
   }
 
-  // Extract errors
-  const extraction = await runExtraction(env, logs);
+  const storeLogsInR2 = async (): Promise<string | null> => {
+    // SECURITY: Enforce size limit to prevent R2 storage abuse
+    const logBytes = new Blob([logs]).size;
+    if (logBytes > MAX_R2_LOG_BYTES) {
+      console.warn(
+        `${LOG_PREFIX} ${ctx.logCtx}: Log too large for R2 (${(logBytes / 1024 / 1024).toFixed(1)} MB), skipping storage`
+      );
+      return null;
+    }
+    try {
+      // Key is per-run (not per-job) since fetchWorkflowLogs returns all logs for the run
+      const key = `logs/${project.organizationId}/${ctx.repository}/${ctx.runId}.txt`;
+      await env.LOGS_BUCKET.put(key, logs, {
+        httpMetadata: { contentType: "text/plain" },
+      });
+      return key;
+    } catch (e) {
+      console.error(
+        `${LOG_PREFIX} ${ctx.logCtx}: R2 put failed:`,
+        e instanceof Error ? e.message : String(e)
+      );
+      return null;
+    }
+  };
+
+  const [extraction, logR2Key] = await Promise.all([
+    runExtraction(env, logs),
+    storeLogsInR2(),
+  ]);
   if (!extraction || extraction.errors.length === 0) {
     console.log(`${LOG_PREFIX} ${ctx.logCtx}: No errors extracted`);
     return;
@@ -557,14 +601,19 @@ export const extractAndStoreErrors = async (
     runs.find((r) => typeof r.prNumber === "number")?.prNumber ?? undefined;
 
   // Store errors
-  const conclusion = payload.workflow_job.conclusion ?? "failure";
+  // SECURITY: Sanitize conclusion to prevent control char injection and DB bloat
+  const conclusion = sanitizeField(
+    payload.workflow_job.conclusion ?? "failure",
+    50
+  );
   const runRecordId = await storeErrors(
     env,
     ctx,
     project,
     extraction.errors,
     prNumber,
-    conclusion
+    conclusion,
+    logR2Key
   );
   if (!runRecordId) {
     return;
@@ -574,15 +623,17 @@ export const extractAndStoreErrors = async (
     `${LOG_PREFIX} ${ctx.logCtx}: Stored ${extraction.errors.length} errors`
   );
 
-  // Map extracted errors to RunError format for heal creation
-  // This avoids re-querying the database which could have eventual consistency issues
-  const runErrors: RunError[] = extraction.errors.map((e) => ({
+  const toRunError = (e: CIError, jobName: string): RunError => ({
     _id: crypto.randomUUID(),
     fixable: e.fixable ?? null,
     source: "webhook-extraction",
     signatureId: e.ruleId ?? null,
-    workflowJob: ctx.jobName,
-  }));
+    workflowJob: jobName,
+  });
+
+  const runErrors: RunError[] = extraction.errors.map((e) =>
+    toRunError(e, ctx.jobName)
+  );
 
   // Create heals
   try {

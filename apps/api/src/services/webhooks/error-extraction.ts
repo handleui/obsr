@@ -135,22 +135,23 @@ const buildContext = (payload: WebhookPayload): ExtractionContext | null => {
   };
 };
 
+// KV has no atomic CAS, so we use a simple dedup key.
+// Duplicate extractions are idempotent (storeJobReport upserts), so the rare
+// race where two workers both proceed is harmless.
 const acquireLock = async (
   kv: KVNamespace,
   repository: string,
   jobId: number
 ): Promise<boolean> => {
   const lockKey = `lock:extract:${repository}:${jobId}`;
-  const requestId = crypto.randomUUID();
 
   const existing = await kv.get(lockKey);
   if (existing) {
     return false;
   }
 
-  await kv.put(lockKey, requestId, { expirationTtl: LOCK_TTL_SECONDS });
-  const written = await kv.get(lockKey);
-  return written === requestId;
+  await kv.put(lockKey, "1", { expirationTtl: LOCK_TTL_SECONDS });
+  return true;
 };
 
 interface FetchLogsResult {

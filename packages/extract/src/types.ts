@@ -1,5 +1,5 @@
 import type { CIError, ErrorSource } from "@detent/types";
-import { CIErrorSchema, ErrorSourceSchema } from "@detent/types";
+import { CIErrorSchemaWithValidation, ErrorSourceSchema } from "@detent/types";
 import { z } from "zod";
 
 export interface ExtractionUsage {
@@ -17,7 +17,9 @@ export interface ExtractionResult {
 }
 
 export const ExtractionResultSchema = z.object({
-  errors: z.array(CIErrorSchema).describe("All extracted errors and warnings"),
+  errors: z
+    .array(CIErrorSchemaWithValidation)
+    .describe("All extracted errors and warnings"),
   detectedSource: ErrorSourceSchema.nullable().describe(
     "The primary tool that produced the output, if identifiable"
   ),

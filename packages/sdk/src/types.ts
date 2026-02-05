@@ -8,9 +8,6 @@ export interface DetentConfig {
   timeout?: number;
 }
 
-// ============================================================================
-// Organizations
-// ============================================================================
 
 export interface Organization {
   organization_id: string;
@@ -26,10 +23,6 @@ export interface Organization {
 export interface OrganizationsResponse {
   organizations: Organization[];
 }
-
-// ============================================================================
-// Auth / Identity
-// ============================================================================
 
 export interface SyncIdentityResponse {
   user_id: string;
@@ -72,10 +65,6 @@ export interface GitHubTokenRefreshResponse {
   refresh_token_expires_at: number;
 }
 
-// ============================================================================
-// Projects
-// ============================================================================
-
 export interface Project {
   project_id: string;
   organization_id: string;
@@ -98,10 +87,6 @@ export interface ProjectDetailsResponse extends Project {
   organization_name: string;
   organization_slug: string;
 }
-
-// ============================================================================
-// Organization Members
-// ============================================================================
 
 export type MemberRole = "owner" | "admin" | "member" | "visitor";
 
@@ -138,10 +123,6 @@ export interface DeleteOrganizationResponse {
   provider_account_type: "organization" | "user";
 }
 
-// ============================================================================
-// Errors (CI Errors)
-// ============================================================================
-
 export interface RunInfo {
   id: string;
   runId: string | null;
@@ -174,10 +155,6 @@ export interface ErrorsResponse {
   errors: ErrorInfo[];
 }
 
-// ============================================================================
-// Invitations
-// ============================================================================
-
 export type InvitationRole = "admin" | "member" | "visitor";
 export type InvitationStatus = "pending" | "accepted" | "expired" | "revoked";
 
@@ -207,10 +184,6 @@ export interface CreateInvitationResponse {
 export interface RevokeInvitationResponse {
   success: boolean;
 }
-
-// ============================================================================
-// Heals
-// ============================================================================
 
 export type HealStatus =
   | "pending"

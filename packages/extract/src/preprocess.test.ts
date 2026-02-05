@@ -107,7 +107,7 @@ useful line here`;
   it("preserves error keywords and file locations", () => {
     const input = "src/index.ts:42:5 - error TS2304";
     const result = compactCiOutput(input);
-    expect(result).toBe(input);
+    expect(result).toBe("[1] src/index.ts:42:5 - error TS2304");
   });
 
   it("preserves test result indicators", () => {
@@ -117,22 +117,40 @@ useful line here`;
     expect(result).toContain("PASS");
   });
 
-  it("adds omission markers for consecutive noise", () => {
-    // Use pure noise lines (empty, separators) that don't match IMPORTANT_PATTERN
-    // 5 newlines create 5 empty lines, > 3 triggers omission marker
+  it("adds omission markers with original line ranges", () => {
+    // 5 empty lines between errors, > 3 triggers omission marker
     const input = "error: start\n\n\n\n\n\nerror: end";
     const result = compactCiOutput(input);
-    expect(result).toContain("[5 lines omitted]");
-    expect(result).toContain("error: start");
-    expect(result).toContain("error: end");
+    expect(result).toContain("[lines 2-6 omitted]");
+    expect(result).toContain("[1] error: start");
+    expect(result).toContain("[7] error: end");
   });
 
   it("applies early cutoff for very long content", () => {
     const targetLength = 100;
     const longContent = "x".repeat(targetLength * 4);
     const result = compactCiOutput(longContent, targetLength);
-    expect(result).toContain("early cutoff applied");
-    expect(result).toContain("more characters not processed");
+    expect(result).toContain("early cutoff at line");
+    expect(result).toContain("chars not processed");
+  });
+
+  it("prefixes kept lines with original line numbers", () => {
+    const input = "error: first\n\nerror: second";
+    const result = compactCiOutput(input);
+    expect(result).toContain("[1] error: first");
+    expect(result).toContain("[3] error: second");
+  });
+
+  it("handles empty input", () => {
+    // Empty string splits to [""], one empty line = noise but below marker threshold
+    expect(compactCiOutput("")).toBe("");
+  });
+
+  it("handles all noise (nothing kept)", () => {
+    // 5 newlines → split("\n") → 6 elements (lines 1-6)
+    const input = "\n\n\n\n\n";
+    const result = compactCiOutput(input);
+    expect(result).toContain("[lines 1-6 omitted]");
   });
 });
 

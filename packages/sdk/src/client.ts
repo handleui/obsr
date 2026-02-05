@@ -108,52 +108,56 @@ export class DetentClient {
       });
     } catch (error) {
       clearTimeout(timeoutId);
-
-      if (error instanceof DOMException && error.name === "AbortError") {
-        throw new DetentNetworkError(
-          `Request timed out after ${this.#timeout}ms`
-        );
-      }
-
-      if (error instanceof TypeError && error.message.includes("fetch")) {
-        throw new DetentNetworkError(
-          "Network error: Unable to connect to the Detent API. Please check your internet connection."
-        );
-      }
-
-      if (error instanceof Error) {
-        const sanitizedError = new Error(sanitizeCredentials(error.message));
-        sanitizedError.name = error.name;
-        throw sanitizedError;
-      }
-
-      throw error;
+      throw this.#wrapFetchError(error);
     }
 
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      if (response.status === 401) {
-        throw new DetentAuthError(
-          "Authentication failed. Your session may have expired."
-        );
-      }
-
-      const errorData = (await response
-        .json()
-        .catch(() => ({}))) as ApiErrorResponse;
-
-      const errorMessage = sanitizeCredentials(
-        errorData.error ?? `API request failed: ${response.status}`
-      );
-
-      throw new DetentApiError(
-        errorMessage,
-        response.status
-      );
+      await this.#throwApiError(response);
     }
 
     return response.json() as Promise<T>;
+  }
+
+  #wrapFetchError(error: unknown): Error {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return new DetentNetworkError(
+        `Request timed out after ${this.#timeout}ms`
+      );
+    }
+
+    if (error instanceof TypeError && error.message.includes("fetch")) {
+      return new DetentNetworkError(
+        "Network error: Unable to connect to the Detent API. Please check your internet connection."
+      );
+    }
+
+    if (error instanceof Error) {
+      const sanitized = new Error(sanitizeCredentials(error.message));
+      sanitized.name = error.name;
+      return sanitized;
+    }
+
+    return error instanceof Error ? error : new Error(String(error));
+  }
+
+  async #throwApiError(response: Response): Promise<never> {
+    if (response.status === 401) {
+      throw new DetentAuthError(
+        "Authentication failed. Your session may have expired."
+      );
+    }
+
+    const errorData = (await response
+      .json()
+      .catch(() => ({}))) as ApiErrorResponse;
+
+    const errorMessage = sanitizeCredentials(
+      errorData.error ?? `API request failed: ${response.status}`
+    );
+
+    throw new DetentApiError(errorMessage, response.status);
   }
 }
 

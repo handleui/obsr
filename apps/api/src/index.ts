@@ -134,12 +134,11 @@ export default Sentry.withSentry(
   (env: Env) => ({
     dsn: env.SENTRY_DSN,
     release: env.CF_VERSION_METADATA?.id,
-    tracesSampleRate: 0.05, // MVP: 5% traces
-    sampleRate: 1.0, // 100% errors
-    sendDefaultPii: false, // Explicit: never send IP addresses, cookies, etc.
+    tracesSampleRate: 0.05,
+    sampleRate: 1.0,
+    sendDefaultPii: false,
     beforeSend: (event: Sentry.ErrorEvent) => {
       scrubEvent(event);
-      // Keep user.id only (internal IDs are safe)
       if (event.user) {
         event.user = event.user.id ? { id: event.user.id } : {};
       }
@@ -147,7 +146,6 @@ export default Sentry.withSentry(
     },
     beforeSendTransaction: (event: TransactionEvent) => {
       scrubEvent(event);
-      // Keep user.id only (internal IDs are safe, email/username/ip_address are PII)
       if (event.user) {
         event.user = event.user.id ? { id: event.user.id } : {};
       }

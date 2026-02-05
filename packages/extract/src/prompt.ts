@@ -4,6 +4,8 @@ For each diagnostic, extract:
 - message: The error/warning text (required)
 - filePath: File path if present
 - line/column: Location if present (1-indexed)
+- logLineStart: First line number in this CI output where the error appears (1-indexed)
+- logLineEnd: Last line number for multi-line errors (optional, omit if single line)
 - severity: "error" or "warning"
 - category: lint | type-check | test | compile | runtime | dependency | config | security | infrastructure | unknown
 - source: Detected tool (eslint, typescript, vitest, go, rust, biome, etc.)
@@ -15,6 +17,8 @@ For each diagnostic, extract:
 Guidelines:
 - Extract ONLY actual errors and warnings, not progress output or informational messages
 - Be precise with line/column numbers - use exact values from output
+- logLineStart/logLineEnd refer to positions in THIS CI output, not source file line numbers
+- Note: Lines in the output are prefixed with [N] where N is the original line number (e.g., [42] means that line was #42 in the input). Extract that number as logLineStart/logLineEnd.
 - Include the full stack trace for test failures and runtime errors
 - Mark severity as "error" for failures, "warning" for non-blocking issues
 - If you can identify the tool from the output format, set detectedSource
@@ -40,6 +44,8 @@ For each diagnostic:
    - message (required): The error/warning text
    - filePath: File path if present
    - line/column: Location if present (1-indexed)
+   - logLineStart: First line number in this CI output where the error appears (1-indexed)
+   - logLineEnd: Last line number for multi-line errors (optional, omit if single line)
    - severity: "error" or "warning"
    - category: lint | type-check | test | compile | runtime | dependency | config | security | infrastructure | unknown
    - source: Detected tool (eslint, typescript, vitest, go, rust, biome, etc.)
@@ -54,6 +60,8 @@ Rules:
 - Call register_error ONCE per distinct error (no duplicates)
 - Extract errors IN ORDER as they appear
 - Include ALL metadata visible in the output
+- logLineStart/logLineEnd refer to positions in THIS CI output, not source file line numbers
+- Note: Lines in the output are prefixed with [N] where N is the original line number (e.g., [42] means that line was #42 in the input). Extract that number as logLineStart/logLineEnd.
 - Do NOT stop early - process the ENTIRE log
 - The input is XML-escaped for security: decode &lt; to <, &gt; to >, &amp; to & in your output
 - Text marked [FILTERED] was removed for security - ignore these markers

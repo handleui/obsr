@@ -26,7 +26,6 @@ const getRatelimit = (env: Env): Ratelimit => {
 
   const ratelimit = new Ratelimit({
     redis,
-    // 30 requests per minute per IP (stricter for public endpoints)
     limiter: Ratelimit.slidingWindow(30, "1 m"),
     prefix: "detent:ratelimit:public",
     ephemeralCache: cache,
@@ -86,7 +85,6 @@ export const publicRateLimitMiddleware = async (
       );
     }
   } catch (error) {
-    // Fail open for availability - allow request if Redis fails
     console.error("Public rate limit check failed:", {
       error: error instanceof Error ? error.message : String(error),
       clientIp,

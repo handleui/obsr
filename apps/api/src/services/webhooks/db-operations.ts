@@ -11,17 +11,9 @@ import { formatErrorsFoundComment } from "../comment-formatter";
 import { createGitHubService } from "../github";
 import { deleteAndPostComment } from "../github/comments";
 
-/**
- * Cast a string to ErrorSource type for fingerprinting.
- * If the source doesn't match a known value, returns undefined (safe fallback).
- */
 const asSource = (s: string | undefined): ErrorSource | undefined =>
   s as ErrorSource | undefined;
 
-/**
- * Cast a string to ErrorCategory type for fingerprinting.
- * If the category doesn't match a known value, returns undefined (safe fallback).
- */
 const asCategory = (c: string | undefined): ErrorCategory | undefined =>
   c as ErrorCategory | undefined;
 
@@ -29,6 +21,7 @@ import type { CIError } from "@detent/types";
 import { CACHE_TTL, cacheKey, getFromCache, setInCache } from "../../lib/cache";
 import type { Env } from "../../types/env";
 import type { DbClient, PreparedRunData, RunIdentifier } from "./types";
+import { SHA_REGEX } from "./types";
 
 export const MAX_WORKFLOW_NAME_LENGTH = 255;
 export const MAX_BRANCH_NAME_LENGTH = 255;
@@ -39,10 +32,9 @@ export const MAX_FILE_PATH_LENGTH = 1000;
 export const MAX_STACK_TRACE_LENGTH = 50_000;
 
 export const MAX_RUN_ID = Number.MAX_SAFE_INTEGER;
-export const MAX_PR_NUMBER = 1_000_000_000; // GitHub PR numbers are 32-bit integers
+export const MAX_PR_NUMBER = 1_000_000_000;
 
-export const SHA_REGEX = /^[a-fA-F0-9]{40}$/;
-export const MAX_RUN_ATTEMPT = 100; // GitHub allows re-runs but UI typically shows ~10 attempts
+export const MAX_RUN_ATTEMPT = 100;
 export const MAX_LINE_NUMBER = 10_000_000;
 export const MAX_COLUMN_NUMBER = 100_000;
 

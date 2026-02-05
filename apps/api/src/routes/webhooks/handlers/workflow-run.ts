@@ -2,10 +2,8 @@ import {
   acquireCommitLock,
   releaseCommitLock,
 } from "../../../services/idempotency";
+import { safeLogValue } from "../../../services/webhooks/types";
 import type { WebhookContext, WorkflowRunPayload } from "../types";
-
-const safeLogValue = (value: string, maxLen = 100): string =>
-  value.length > maxLen ? `${value.slice(0, maxLen)}...` : value;
 
 // biome-ignore lint/suspicious/useAwait: async required for webhook handler type signature
 export const handleWorkflowRunInProgress = async (

@@ -1,9 +1,3 @@
-/**
- * Detent SDK Client
- *
- * Main client class for interacting with the Detent API.
- */
-
 import { DetentApiError, DetentAuthError, DetentNetworkError } from "./errors.js";
 import { AuthResource } from "./resources/auth.js";
 import { ErrorsResource } from "./resources/errors.js";
@@ -18,7 +12,6 @@ import { sanitizeCredentials } from "./utils/sanitize.js";
 const DEFAULT_BASE_URL = "https://backend.detent.sh";
 const DEFAULT_TIMEOUT = 30_000;
 
-/** Validate URL is HTTPS (except localhost for development) */
 const validateBaseUrl = (url: string): void => {
   try {
     const parsed = new URL(url);
@@ -37,7 +30,6 @@ const validateBaseUrl = (url: string): void => {
   }
 };
 
-/** Validate auth configuration */
 const validateAuth = (auth: AuthConfig): void => {
   if (!auth.token || typeof auth.token !== "string" || auth.token.trim() === "") {
     throw new Error("Auth token is required and must be a non-empty string");
@@ -63,19 +55,12 @@ export class DetentClient {
   readonly #timeout: number;
   readonly #baseHeaders: Record<string, string>;
 
-  /** Authentication operations */
   readonly auth: AuthResource;
-  /** Project operations */
   readonly projects: ProjectsResource;
-  /** CI error retrieval */
   readonly errors: ErrorsResource;
-  /** Heal operations */
   readonly heals: HealsResource;
-  /** Organization operations */
   readonly organizations: OrganizationsResource;
-  /** Organization member operations */
   readonly members: MembersResource;
-  /** Invitation operations */
   readonly invitations: InvitationsResource;
 
   constructor(config: DetentConfig) {
@@ -86,7 +71,6 @@ export class DetentClient {
     this.#auth = config.auth;
     this.#timeout = config.timeout ?? DEFAULT_TIMEOUT;
 
-    // Pre-build base headers to avoid object creation on each request
     this.#baseHeaders = { "Content-Type": "application/json" };
     if (this.#auth.type === "jwt") {
       this.#baseHeaders["Authorization"] = `Bearer ${this.#auth.token}`;
@@ -94,7 +78,6 @@ export class DetentClient {
       this.#baseHeaders["X-Detent-Token"] = this.#auth.token;
     }
 
-    // Initialize resources
     this.auth = new AuthResource(this);
     this.projects = new ProjectsResource(this);
     this.errors = new ErrorsResource(this);
@@ -104,11 +87,9 @@ export class DetentClient {
     this.invitations = new InvitationsResource(this);
   }
 
-  /** Internal method for making API requests */
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const { method = "GET", body, headers: extraHeaders } = options;
 
-    // Merge base headers with extra headers to avoid recreating on each request
     const headers =
       extraHeaders && Object.keys(extraHeaders).length > 0
         ? { ...this.#baseHeaders, ...extraHeaders }
@@ -140,7 +121,6 @@ export class DetentClient {
         );
       }
 
-      // Sanitize error messages that might contain sensitive data
       if (error instanceof Error) {
         const sanitizedError = new Error(sanitizeCredentials(error.message));
         sanitizedError.name = error.name;
@@ -163,7 +143,6 @@ export class DetentClient {
         .json()
         .catch(() => ({}))) as ApiErrorResponse;
 
-      // Sanitize error messages to prevent leaking sensitive data
       const errorMessage = sanitizeCredentials(
         errorData.error ?? `API request failed: ${response.status}`
       );
@@ -178,7 +157,5 @@ export class DetentClient {
   }
 }
 
-/** Create a new Detent client instance */
-export const createClient = (config: DetentConfig): DetentClient => {
-  return new DetentClient(config);
-};
+export const createClient = (config: DetentConfig): DetentClient =>
+  new DetentClient(config);

@@ -140,23 +140,26 @@ const handleExtractionError = (error: unknown): Error => {
   );
 };
 
-/**
- * Extract errors from CI output using AI (primary method).
- *
- * Uses generateObject() for single-shot structured extraction. This is the
- * production method used by webhook handlers. Prefer this over extractErrorsWithTools.
- */
+const emptyResultForContent = (
+  content: string,
+  maxContentLength: number
+): ExtractionResult => {
+  const { truncated } = prepareForPrompt(content, maxContentLength);
+  return createEmptyResult(truncated);
+};
+
+const DEFAULT_MAX_CONTENT_LENGTH = 15_000;
+
 export const extractErrors = async (
   content: string,
   options?: ExtractionOptions
 ): Promise<ExtractionResult> => {
   const prep = prepareExtraction(content, options ?? {});
   if (!prep) {
-    const { truncated } = prepareForPrompt(
+    return emptyResultForContent(
       content,
-      options?.maxContentLength ?? 15_000
+      options?.maxContentLength ?? DEFAULT_MAX_CONTENT_LENGTH
     );
-    return createEmptyResult(truncated);
   }
 
   const { model, modelId, prepared, truncated, abortSignal } = prep;
@@ -188,29 +191,8 @@ export const extractErrors = async (
   }
 };
 
-/**
- * EXPERIMENTAL - NOT USED IN PRODUCTION
- *
- * Tool-based extraction using register_error tool calls instead of generateObject.
- * This approach is currently unused and its value is uncertain.
- *
- * Why this exists (and why you probably shouldn't use it):
- * - Theory: Tool calling might be more exhaustive than single-shot JSON generation
- * - Reality: generateObject() works fine, this adds complexity with unclear benefit
- * - The onError callback enables streaming writes but we don't need that yet
- *
- * FUTURE PRODUCT IDEA (parser/bidirectional terminal):
- * This tooling pattern could enable a "bidirectional terminal" product where:
- * - Users see human-readable logs in their terminal (normal CI output)
- * - AI receives structured JSON errors via tool calls in real-time
- * - Commands execute normally but emit structured data for AI consumption
- *
- * Think: `npm test` outputs human logs, but an AI wrapper intercepts tool calls
- * to build a structured error database as tests run. The terminal is bidirectional -
- * readable by humans, parseable by AI, without post-processing log files.
- *
- * Until that product exists, prefer extractErrors() for all extraction needs.
- */
+// HACK: Experimental tool-based extraction kept for future "bidirectional terminal" product.
+// Uses register_error tool calls instead of generateObject for streaming error extraction.
 // biome-ignore lint/correctness/noUnusedVariables: Experimental - kept for future "bidirectional terminal" product
 const extractErrorsWithTools = async (
   content: string,
@@ -218,11 +200,10 @@ const extractErrorsWithTools = async (
 ): Promise<ExtractionResult> => {
   const prep = prepareExtraction(content, options ?? {});
   if (!prep) {
-    const { truncated } = prepareForPrompt(
+    return emptyResultForContent(
       content,
-      options?.maxContentLength ?? 15_000
+      options?.maxContentLength ?? DEFAULT_MAX_CONTENT_LENGTH
     );
-    return createEmptyResult(truncated);
   }
 
   const { model, modelId, prepared, truncated, abortSignal } = prep;

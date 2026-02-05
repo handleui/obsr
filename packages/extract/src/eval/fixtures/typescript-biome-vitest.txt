@@ -1,0 +1,633 @@
+﻿2026-01-18T18:40:47.7091218Z Current runner version: '2.331.0'
+2026-01-18T18:40:47.7125806Z ##[group]Runner Image Provisioner
+2026-01-18T18:40:47.7127072Z Hosted Compute Agent
+2026-01-18T18:40:47.7127896Z Version: 20251211.462
+2026-01-18T18:40:47.7129167Z Commit: 6cbad8c2bb55d58165063d031ccabf57e2d2db61
+2026-01-18T18:40:47.7130298Z Build Date: 2025-12-11T16:28:49Z
+2026-01-18T18:40:47.7131305Z Worker ID: {157133e8-0329-4de9-b2f8-50c485041185}
+2026-01-18T18:40:47.7132539Z ##[endgroup]
+2026-01-18T18:40:47.7133521Z ##[group]Operating System
+2026-01-18T18:40:47.7134509Z Ubuntu
+2026-01-18T18:40:47.7135372Z 24.04.3
+2026-01-18T18:40:47.7136228Z LTS
+2026-01-18T18:40:47.7136957Z ##[endgroup]
+2026-01-18T18:40:47.7137917Z ##[group]Runner Image
+2026-01-18T18:40:47.7139065Z Image: ubuntu-24.04
+2026-01-18T18:40:47.7139940Z Version: 20260111.209.1
+2026-01-18T18:40:47.7141787Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260111.209/images/ubuntu/Ubuntu2404-Readme.md
+2026-01-18T18:40:47.7144647Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260111.209
+2026-01-18T18:40:47.7146489Z ##[endgroup]
+2026-01-18T18:40:47.7148238Z ##[group]GITHUB_TOKEN Permissions
+2026-01-18T18:40:47.7151513Z Contents: read
+2026-01-18T18:40:47.7152440Z Metadata: read
+2026-01-18T18:40:47.7153241Z Packages: read
+2026-01-18T18:40:47.7154217Z ##[endgroup]
+2026-01-18T18:40:47.7157219Z Secret source: Actions
+2026-01-18T18:40:47.7158325Z Prepare workflow directory
+2026-01-18T18:40:47.7632538Z Prepare all required actions
+2026-01-18T18:40:47.7690959Z Getting action download info
+2026-01-18T18:40:48.0139799Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-01-18T18:40:48.1311262Z Download action repository 'oven-sh/setup-bun@v2' (SHA:3d267786b128fe76c2f16a390aa2448b815359f3)
+2026-01-18T18:40:48.6494352Z Complete job name: check
+2026-01-18T18:40:48.7198453Z ##[group]Run actions/checkout@v4
+2026-01-18T18:40:48.7199584Z with:
+2026-01-18T18:40:48.7199991Z   repository: handleui/errors
+2026-01-18T18:40:48.7200681Z   token: ***
+2026-01-18T18:40:48.7201062Z   ssh-strict: true
+2026-01-18T18:40:48.7201455Z   ssh-user: git
+2026-01-18T18:40:48.7201844Z   persist-credentials: true
+2026-01-18T18:40:48.7202297Z   clean: true
+2026-01-18T18:40:48.7202699Z   sparse-checkout-cone-mode: true
+2026-01-18T18:40:48.7203185Z   fetch-depth: 1
+2026-01-18T18:40:48.7203562Z   fetch-tags: false
+2026-01-18T18:40:48.7203955Z   show-progress: true
+2026-01-18T18:40:48.7204358Z   lfs: false
+2026-01-18T18:40:48.7204714Z   submodules: false
+2026-01-18T18:40:48.7205114Z   set-safe-directory: true
+2026-01-18T18:40:48.7205746Z ##[endgroup]
+2026-01-18T18:40:48.8341595Z Syncing repository: handleui/errors
+2026-01-18T18:40:48.8343361Z ##[group]Getting Git version info
+2026-01-18T18:40:48.8344023Z Working directory is '/home/runner/work/errors/errors'
+2026-01-18T18:40:48.8345208Z [command]/usr/bin/git version
+2026-01-18T18:40:48.8428616Z git version 2.52.0
+2026-01-18T18:40:48.8456194Z ##[endgroup]
+2026-01-18T18:40:48.8472828Z Temporarily overriding HOME='/home/runner/work/_temp/ea8603e1-a505-4cd4-a4de-902c6a18e0b2' before making global git config changes
+2026-01-18T18:40:48.8475168Z Adding repository directory to the temporary git global config as a safe directory
+2026-01-18T18:40:48.8486606Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/errors/errors
+2026-01-18T18:40:48.8527460Z Deleting the contents of '/home/runner/work/errors/errors'
+2026-01-18T18:40:48.8531658Z ##[group]Initializing the repository
+2026-01-18T18:40:48.8536292Z [command]/usr/bin/git init /home/runner/work/errors/errors
+2026-01-18T18:40:48.8664293Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-01-18T18:40:48.8665769Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-01-18T18:40:48.8666700Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-01-18T18:40:48.8667826Z hint: call:
+2026-01-18T18:40:48.8668419Z hint:
+2026-01-18T18:40:48.8670067Z hint: 	git config --global init.defaultBranch <name>
+2026-01-18T18:40:48.8670654Z hint:
+2026-01-18T18:40:48.8671196Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-01-18T18:40:48.8672077Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-01-18T18:40:48.8672767Z hint:
+2026-01-18T18:40:48.8673138Z hint: 	git branch -m <name>
+2026-01-18T18:40:48.8673558Z hint:
+2026-01-18T18:40:48.8674365Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-01-18T18:40:48.8675482Z Initialized empty Git repository in /home/runner/work/errors/errors/.git/
+2026-01-18T18:40:48.8680981Z [command]/usr/bin/git remote add origin https://github.com/handleui/errors
+2026-01-18T18:40:48.8717595Z ##[endgroup]
+2026-01-18T18:40:48.8718346Z ##[group]Disabling automatic garbage collection
+2026-01-18T18:40:48.8721935Z [command]/usr/bin/git config --local gc.auto 0
+2026-01-18T18:40:48.8749910Z ##[endgroup]
+2026-01-18T18:40:48.8750588Z ##[group]Setting up auth
+2026-01-18T18:40:48.8756777Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-01-18T18:40:48.8785711Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-01-18T18:40:48.9152849Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-01-18T18:40:48.9180983Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-01-18T18:40:48.9396122Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-01-18T18:40:48.9426770Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-01-18T18:40:48.9654591Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-01-18T18:40:48.9687498Z ##[endgroup]
+2026-01-18T18:40:48.9689323Z ##[group]Fetching the repository
+2026-01-18T18:40:48.9697484Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +b954c0edd3753ca63708e718826ade30849878dd:refs/remotes/origin/main
+2026-01-18T18:40:49.1817033Z From https://github.com/handleui/errors
+2026-01-18T18:40:49.1818646Z  * [new ref]         b954c0edd3753ca63708e718826ade30849878dd -> origin/main
+2026-01-18T18:40:49.1856393Z ##[endgroup]
+2026-01-18T18:40:49.1857790Z ##[group]Determining the checkout info
+2026-01-18T18:40:49.1859825Z ##[endgroup]
+2026-01-18T18:40:49.1864547Z [command]/usr/bin/git sparse-checkout disable
+2026-01-18T18:40:49.1910578Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-01-18T18:40:49.1939465Z ##[group]Checking out the ref
+2026-01-18T18:40:49.1943865Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-01-18T18:40:49.2000563Z Switched to a new branch 'main'
+2026-01-18T18:40:49.2002650Z branch 'main' set up to track 'origin/main'.
+2026-01-18T18:40:49.2010431Z ##[endgroup]
+2026-01-18T18:40:49.2048033Z [command]/usr/bin/git log -1 --format=%H
+2026-01-18T18:40:49.2071111Z b954c0edd3753ca63708e718826ade30849878dd
+2026-01-18T18:40:49.2355850Z ##[group]Run oven-sh/setup-bun@v2
+2026-01-18T18:40:49.2356651Z with:
+2026-01-18T18:40:49.2357094Z   no-cache: false
+2026-01-18T18:40:49.2357900Z   token: ***
+2026-01-18T18:40:49.2358376Z ##[endgroup]
+2026-01-18T18:40:49.6702874Z Downloading a new version of Bun: https://github.com/oven-sh/bun/releases/download/bun-v1.3.6/bun-linux-x64.zip
+2026-01-18T18:40:49.9932878Z [command]/usr/bin/unzip -o -q /home/runner/work/_temp/1ae2cfc7-c901-44f4-8e70-8ae7bbf8ee07.zip
+2026-01-18T18:40:50.7338680Z [command]/home/runner/.bun/bin/bun --revision
+2026-01-18T18:40:50.7381737Z 1.3.6+d530ed993
+2026-01-18T18:40:50.7527662Z ##[group]Run bun install
+2026-01-18T18:40:50.7528273Z [36;1mbun install[0m
+2026-01-18T18:40:50.7565622Z shell: /usr/bin/bash -e {0}
+2026-01-18T18:40:50.7565919Z ##[endgroup]
+2026-01-18T18:40:50.7659243Z bun install v1.3.6 (d530ed99)
+2026-01-18T18:40:51.0505416Z 
+2026-01-18T18:40:51.0505849Z + @biomejs/biome@1.9.4
+2026-01-18T18:40:51.0506230Z + @types/node@25.0.9
+2026-01-18T18:40:51.0506544Z + typescript@5.9.3
+2026-01-18T18:40:51.0506824Z + vitest@3.2.4
+2026-01-18T18:40:51.0506973Z 
+2026-01-18T18:40:51.0507119Z 57 packages installed [285.00ms]
+2026-01-18T18:40:51.0642142Z ##[group]Run bun tsc --noEmit
+2026-01-18T18:40:51.0642486Z [36;1mbun tsc --noEmit[0m
+2026-01-18T18:40:51.0675042Z shell: /usr/bin/bash -e {0}
+2026-01-18T18:40:51.0675426Z ##[endgroup]
+2026-01-18T18:40:52.3993757Z src/lint-errors.ts(2,10): error TS2305: Module '"node:fs"' has no exported member 'unused'.
+2026-01-18T18:40:52.3995571Z src/lint-errors.ts(9,5): error TS2367: This comparison appears to be unintentional because the types 'number' and 'string' have no overlap.
+2026-01-18T18:40:52.3997294Z src/module-errors.ts(2,21): error TS2307: Cannot find module './nonexistent' or its corresponding type declarations.
+2026-01-18T18:40:52.3998541Z src/module-errors.ts(5,13): error TS2304: Cannot find name 'undeclaredVariable'.
+2026-01-18T18:40:52.3999797Z src/type-errors.ts(2,7): error TS2322: Type 'number' is not assignable to type 'string'.
+2026-01-18T18:40:52.4000775Z src/type-errors.ts(6,17): error TS2339: Property 'age' does not exist on type '{ name: string; }'.
+2026-01-18T18:40:52.4001967Z src/type-errors.ts(10,7): error TS2345: Argument of type 'number' is not assignable to parameter of type 'string'.
+2026-01-18T18:40:52.4002932Z src/type-errors.ts(14,13): error TS18048: 'maybe' is possibly 'undefined'.
+2026-01-18T18:40:52.4004011Z src/type-errors.ts(18,7): error TS2741: Property 'age' is missing in type '{ name: string; }' but required in type 'User'.
+2026-01-18T18:40:52.4005157Z src/type-errors.ts(21,13): error TS7006: Parameter 'x' implicitly has an 'any' type.
+2026-01-18T18:40:52.4161904Z error: "tsc" exited with code 2
+2026-01-18T18:40:52.4181162Z ##[error]Process completed with exit code 2.
+2026-01-18T18:40:52.4226987Z ##[group]Run bun biome lint .
+2026-01-18T18:40:52.4227271Z [36;1mbun biome lint .[0m
+2026-01-18T18:40:52.4260205Z shell: /usr/bin/bash -e {0}
+2026-01-18T18:40:52.4260443Z ##[endgroup]
+2026-01-18T18:40:52.4744342Z ./src/module-errors.ts:2:10 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-01-18T18:40:52.4745108Z 
+2026-01-18T18:40:52.4745311Z   × This import is unused.
+2026-01-18T18:40:52.4745661Z   
+2026-01-18T18:40:52.4746029Z     1 │ // TS2307 - Cannot find module
+2026-01-18T18:40:52.4746545Z   > 2 │ import { foo } from "./nonexistent";
+2026-01-18T18:40:52.4747006Z       │          ^^^
+2026-01-18T18:40:52.4747331Z     3 │ 
+2026-01-18T18:40:52.4747711Z     4 │ // TS2304 - Cannot find name
+2026-01-18T18:40:52.4748085Z   
+2026-01-18T18:40:52.4748532Z   i Unused imports might be the result of an incomplete refactoring.
+2026-01-18T18:40:52.4749313Z   
+2026-01-18T18:40:52.4749609Z   i Safe fix: Remove the unused import.
+2026-01-18T18:40:52.4750009Z   
+2026-01-18T18:40:52.4750843Z     1   │ - //·TS2307·-·Cannot·find·module
+2026-01-18T18:40:52.4751558Z     2   │ - import·{·foo·}·from·"./nonexistent";
+2026-01-18T18:40:52.4752040Z       1 │ + 
+2026-01-18T18:40:52.4752347Z     3 2 │   
+2026-01-18T18:40:52.4752714Z     4 3 │   // TS2304 - Cannot find name
+2026-01-18T18:40:52.4753098Z   
+2026-01-18T18:40:52.4753250Z 
+2026-01-18T18:40:52.4753878Z ./src/lint-errors.ts:9:7 lint/suspicious/noDoubleEquals  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-01-18T18:40:52.4754512Z 
+2026-01-18T18:40:52.4754700Z   × Use === instead of ==
+2026-01-18T18:40:52.4755022Z   
+2026-01-18T18:40:52.4755343Z      7 │ // noDoubleEquals
+2026-01-18T18:40:52.4755720Z      8 │ const x = 1;
+2026-01-18T18:40:52.4756137Z    > 9 │ if (x == "1") console.log("loose");
+2026-01-18T18:40:52.4756589Z        │       ^^
+2026-01-18T18:40:52.4757205Z     10 │ 
+2026-01-18T18:40:52.4757526Z     11 │ // noExplicitAny
+2026-01-18T18:40:52.4757846Z   
+2026-01-18T18:40:52.4758177Z   i == is only allowed when comparing against null
+2026-01-18T18:40:52.4758640Z   
+2026-01-18T18:40:52.4759204Z      7 │ // noDoubleEquals
+2026-01-18T18:40:52.4759606Z      8 │ const x = 1;
+2026-01-18T18:40:52.4760038Z    > 9 │ if (x == "1") console.log("loose");
+2026-01-18T18:40:52.4760474Z        │       ^^
+2026-01-18T18:40:52.4760784Z     10 │ 
+2026-01-18T18:40:52.4761099Z     11 │ // noExplicitAny
+2026-01-18T18:40:52.4761417Z   
+2026-01-18T18:40:52.4761788Z   i Using == may be unsafe if you are relying on type coercion
+2026-01-18T18:40:52.4762291Z   
+2026-01-18T18:40:52.4762556Z   i Unsafe fix: Use ===
+2026-01-18T18:40:52.4762860Z   
+2026-01-18T18:40:52.4763239Z     9 │ if·(x·===·"1")·console.log("loose");
+2026-01-18T18:40:52.4763730Z       │         +                           
+2026-01-18T18:40:52.4764007Z 
+2026-01-18T18:40:52.4764663Z ./src/lint-errors.ts:12:17 lint/suspicious/noExplicitAny ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-01-18T18:40:52.4765328Z 
+2026-01-18T18:40:52.4765592Z   × Unexpected any. Specify a different type.
+2026-01-18T18:40:52.4766020Z   
+2026-01-18T18:40:52.4766323Z     11 │ // noExplicitAny
+2026-01-18T18:40:52.4766745Z   > 12 │ const anything: any = "test";
+2026-01-18T18:40:52.4767208Z        │                 ^^^
+2026-01-18T18:40:52.4767572Z     13 │ 
+2026-01-18T18:40:52.4767930Z     14 │ // useNodejsImportProtocol
+2026-01-18T18:40:52.4768309Z   
+2026-01-18T18:40:52.4768998Z   i any disables many type checking rules. Its use should be avoided.
+2026-01-18T18:40:52.4769557Z   
+2026-01-18T18:40:52.4769707Z 
+2026-01-18T18:40:52.4770361Z ./src/lint-errors.ts:15:18 lint/style/useNodejsImportProtocol  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-01-18T18:40:52.4771011Z 
+2026-01-18T18:40:52.4771416Z   × A Node.js builtin module should be imported with the node: protocol.
+2026-01-18T18:40:52.4771983Z   
+2026-01-18T18:40:52.4772334Z     14 │ // useNodejsImportProtocol
+2026-01-18T18:40:52.4772871Z   > 15 │ import path from "path";
+2026-01-18T18:40:52.4773314Z        │                  ^^^^^^
+2026-01-18T18:40:52.4773951Z     16 │ 
+2026-01-18T18:40:52.4774216Z   
+2026-01-18T18:40:52.4774815Z   i Using the node: protocol is more explicit and signals that the imported module belongs to Node.js.
+2026-01-18T18:40:52.4775566Z   
+2026-01-18T18:40:52.4775872Z   i Unsafe fix: Add the node: protocol.
+2026-01-18T18:40:52.4776348Z   
+2026-01-18T18:40:52.4776653Z     13 13 │   
+2026-01-18T18:40:52.4777031Z     14 14 │   // useNodejsImportProtocol
+2026-01-18T18:40:52.4777569Z     15    │ - import·path·from·"path";
+2026-01-18T18:40:52.4778092Z        15 │ + import·path·from·"node:path";
+2026-01-18T18:40:52.4778534Z     16 16 │   
+2026-01-18T18:40:52.4778977Z   
+2026-01-18T18:40:52.4779120Z 
+2026-01-18T18:40:52.4779761Z ./src/lint-errors.ts:2:10 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-01-18T18:40:52.4780416Z 
+2026-01-18T18:40:52.4780603Z   × This import is unused.
+2026-01-18T18:40:52.4780955Z   
+2026-01-18T18:40:52.4781271Z     1 │ // noUnusedImports
+2026-01-18T18:40:52.4781713Z   > 2 │ import { unused } from "node:fs";
+2026-01-18T18:40:52.4782163Z       │          ^^^^^^
+2026-01-18T18:40:52.4782503Z     3 │ 
+2026-01-18T18:40:52.4782843Z     4 │ // noUnusedVariables
+2026-01-18T18:40:52.4783188Z   
+2026-01-18T18:40:52.4783608Z   i Unused imports might be the result of an incomplete refactoring.
+2026-01-18T18:40:52.4784154Z   
+2026-01-18T18:40:52.4784427Z   i Safe fix: Remove the unused import.
+2026-01-18T18:40:52.4784818Z   
+2026-01-18T18:40:52.4785158Z      1    │ - //·noUnusedImports
+2026-01-18T18:40:52.4785665Z      2    │ - import·{·unused·}·from·"node:fs";
+2026-01-18T18:40:52.4786126Z         1 │ + 
+2026-01-18T18:40:52.4786438Z      3  2 │   
+2026-01-18T18:40:52.4786786Z      4  3 │   // noUnusedVariables
+2026-01-18T18:40:52.4787148Z   
+2026-01-18T18:40:52.4787288Z 
+2026-01-18T18:40:52.4787925Z ./src/lint-errors.ts:5:7 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-01-18T18:40:52.4788938Z 
+2026-01-18T18:40:52.4789143Z   × This variable is unused.
+2026-01-18T18:40:52.4789509Z   
+2026-01-18T18:40:52.4789819Z     4 │ // noUnusedVariables
+2026-01-18T18:40:52.4790233Z   > 5 │ const unusedVar = 42;
+2026-01-18T18:40:52.4790624Z       │       ^^^^^^^^^
+2026-01-18T18:40:52.4790957Z     6 │ 
+2026-01-18T18:40:52.4791274Z     7 │ // noDoubleEquals
+2026-01-18T18:40:52.4791602Z   
+2026-01-18T18:40:52.4792203Z   i Unused variables usually are result of incomplete refactoring, typos and other source of bugs.
+2026-01-18T18:40:52.4792943Z   
+2026-01-18T18:40:52.4793461Z   i Unsafe fix: If this is intentional, prepend unusedVar with an underscore.
+2026-01-18T18:40:52.4794050Z   
+2026-01-18T18:40:52.4794339Z      3  3 │   
+2026-01-18T18:40:52.4794768Z      4  4 │   // noUnusedVariables
+2026-01-18T18:40:52.4795258Z      5    │ - const·unusedVar·=·42;
+2026-01-18T18:40:52.4795749Z         5 │ + const·_unusedVar·=·42;
+2026-01-18T18:40:52.4796194Z      6  6 │   
+2026-01-18T18:40:52.4796540Z      7  7 │   // noDoubleEquals
+2026-01-18T18:40:52.4796876Z   
+2026-01-18T18:40:52.4797023Z 
+2026-01-18T18:40:52.4797661Z ./src/lint-errors.ts:12:7 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-01-18T18:40:52.4798309Z 
+2026-01-18T18:40:52.4798502Z   × This variable is unused.
+2026-01-18T18:40:52.4799042Z   
+2026-01-18T18:40:52.4799370Z     11 │ // noExplicitAny
+2026-01-18T18:40:52.4799789Z   > 12 │ const anything: any = "test";
+2026-01-18T18:40:52.4800232Z        │       ^^^^^^^^
+2026-01-18T18:40:52.4800565Z     13 │ 
+2026-01-18T18:40:52.4800914Z     14 │ // useNodejsImportProtocol
+2026-01-18T18:40:52.4801284Z   
+2026-01-18T18:40:52.4801883Z   i Unused variables usually are result of incomplete refactoring, typos and other source of bugs.
+2026-01-18T18:40:52.4802608Z   
+2026-01-18T18:40:52.4803049Z   i Unsafe fix: If this is intentional, prepend anything with an underscore.
+2026-01-18T18:40:52.4803623Z   
+2026-01-18T18:40:52.4803922Z     10 10 │   
+2026-01-18T18:40:52.4804274Z     11 11 │   // noExplicitAny
+2026-01-18T18:40:52.4804970Z     12    │ - const·anything:·any·=·"test";
+2026-01-18T18:40:52.4805541Z        12 │ + const·_anything:·any·=·"test";
+2026-01-18T18:40:52.4805981Z     13 13 │   
+2026-01-18T18:40:52.4806374Z     14 14 │   // useNodejsImportProtocol
+2026-01-18T18:40:52.4806765Z   
+2026-01-18T18:40:52.4806910Z 
+2026-01-18T18:40:52.4807533Z ./src/lint-errors.ts:15:8 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-01-18T18:40:52.4808181Z 
+2026-01-18T18:40:52.4808391Z   × This import is unused.
+2026-01-18T18:40:52.4809008Z   
+2026-01-18T18:40:52.4809408Z     14 │ // useNodejsImportProtocol
+2026-01-18T18:40:52.4809887Z   > 15 │ import path from "path";
+2026-01-18T18:40:52.4810311Z        │        ^^^^
+2026-01-18T18:40:52.4810633Z     16 │ 
+2026-01-18T18:40:52.4810883Z   
+2026-01-18T18:40:52.4811301Z   i Unused imports might be the result of an incomplete refactoring.
+2026-01-18T18:40:52.4811880Z   
+2026-01-18T18:40:52.4812154Z   i Safe fix: Remove the unused import.
+2026-01-18T18:40:52.4812547Z   
+2026-01-18T18:40:52.4812875Z     11 11 │   // noExplicitAny
+2026-01-18T18:40:52.4813330Z     12 12 │   const anything: any = "test";
+2026-01-18T18:40:52.4813779Z     13    │ - 
+2026-01-18T18:40:52.4814165Z     14    │ - //·useNodejsImportProtocol
+2026-01-18T18:40:52.4814681Z     15    │ - import·path·from·"path";
+2026-01-18T18:40:52.4815099Z     16 13 │   
+2026-01-18T18:40:52.4815356Z   
+2026-01-18T18:40:52.4815494Z 
+2026-01-18T18:40:52.4816114Z ./src/type-errors.ts:2:7 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-01-18T18:40:52.4816758Z 
+2026-01-18T18:40:52.4816941Z   × This variable is unused.
+2026-01-18T18:40:52.4817272Z   
+2026-01-18T18:40:52.4817600Z     1 │ // TS2322 - Type assignment
+2026-01-18T18:40:52.4818055Z   > 2 │ const str: string = 123;
+2026-01-18T18:40:52.4818462Z       │       ^^^
+2026-01-18T18:40:52.4818957Z     3 │ 
+2026-01-18T18:40:52.4819594Z     4 │ // TS2339 - Property doesn't exist
+2026-01-18T18:40:52.4819997Z   
+2026-01-18T18:40:52.4820601Z   i Unused variables usually are result of incomplete refactoring, typos and other source of bugs.
+2026-01-18T18:40:52.4821316Z   
+2026-01-18T18:40:52.4821625Z   i Unsafe fix: If this is intentional, prepend str with an underscore.
+2026-01-18T18:40:52.4821955Z   
+2026-01-18T18:40:52.4822177Z      1  1 │   // TS2322 - Type assignment
+2026-01-18T18:40:52.4822480Z      2    │ - const·str:·string·=·123;
+2026-01-18T18:40:52.4822770Z         2 │ + const·_str:·string·=·123;
+2026-01-18T18:40:52.4823015Z      3  3 │   
+2026-01-18T18:40:52.4823255Z      4  4 │   // TS2339 - Property doesn't exist
+2026-01-18T18:40:52.4823495Z   
+2026-01-18T18:40:52.4823585Z 
+2026-01-18T18:40:52.4823999Z ./src/type-errors.ts:18:7 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-01-18T18:40:52.4824382Z 
+2026-01-18T18:40:52.4824498Z   × This variable is unused.
+2026-01-18T18:40:52.4824699Z   
+2026-01-18T18:40:52.4824919Z     16 │ // TS2741 - Missing property
+2026-01-18T18:40:52.4825251Z     17 │ interface User { name: string; age: number; }
+2026-01-18T18:40:52.4825605Z   > 18 │ const user: User = { name: "John" };
+2026-01-18T18:40:52.4825868Z        │       ^^^^
+2026-01-18T18:40:52.4826057Z     19 │ 
+2026-01-18T18:40:52.4826254Z     20 │ // TS7006 - Implicit any
+2026-01-18T18:40:52.4826466Z   
+2026-01-18T18:40:52.4826810Z   i Unused variables usually are result of incomplete refactoring, typos and other source of bugs.
+2026-01-18T18:40:52.4827232Z   
+2026-01-18T18:40:52.4827487Z   i Unsafe fix: If this is intentional, prepend user with an underscore.
+2026-01-18T18:40:52.4827805Z   
+2026-01-18T18:40:52.4828017Z     16 16 │   // TS2741 - Missing property
+2026-01-18T18:40:52.4828351Z     17 17 │   interface User { name: string; age: number; }
+2026-01-18T18:40:52.4828970Z     18    │ - const·user:·User·=·{·name:·"John"·};
+2026-01-18T18:40:52.4829432Z        18 │ + const·_user:·User·=·{·name:·"John"·};
+2026-01-18T18:40:52.4829745Z     19 19 │   
+2026-01-18T18:40:52.4829965Z     20 20 │   // TS7006 - Implicit any
+2026-01-18T18:40:52.4830180Z   
+2026-01-18T18:40:52.4830461Z 
+2026-01-18T18:40:52.4830842Z ./src/type-errors.ts:21:7 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-01-18T18:40:52.4831209Z 
+2026-01-18T18:40:52.4831319Z   × This variable is unused.
+2026-01-18T18:40:52.4831538Z   
+2026-01-18T18:40:52.4831732Z     20 │ // TS7006 - Implicit any
+2026-01-18T18:40:52.4832197Z   > 21 │ const fn = (x) => x * 2;
+2026-01-18T18:40:52.4832652Z        │       ^^
+2026-01-18T18:40:52.4833011Z     22 │ 
+2026-01-18T18:40:52.4833169Z   
+2026-01-18T18:40:52.4833781Z   i Unused variables usually are result of incomplete refactoring, typos and other source of bugs.
+2026-01-18T18:40:52.4834531Z   
+2026-01-18T18:40:52.4834953Z   i Unsafe fix: If this is intentional, prepend fn with an underscore.
+2026-01-18T18:40:52.4835292Z   
+2026-01-18T18:40:52.4835512Z     19 19 │   
+2026-01-18T18:40:52.4835734Z     20 20 │   // TS7006 - Implicit any
+2026-01-18T18:40:52.4836050Z     21    │ - const·fn·=·(x)·=>·x·*·2;
+2026-01-18T18:40:52.4836337Z        21 │ + const·_fn·=·(x)·=>·x·*·2;
+2026-01-18T18:40:52.4836586Z     22 22 │   
+2026-01-18T18:40:52.4836743Z   
+2026-01-18T18:40:52.4836825Z 
+2026-01-18T18:40:52.4837124Z lint ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-01-18T18:40:52.4837416Z 
+2026-01-18T18:40:52.4837570Z   × Some errors were emitted while running checks.
+2026-01-18T18:40:52.4837819Z   
+2026-01-18T18:40:52.4837907Z 
+2026-01-18T18:40:52.4838004Z Checked 10 files in 2ms. No fixes applied.
+2026-01-18T18:40:52.4838243Z Found 11 errors.
+2026-01-18T18:40:52.4857031Z error: "biome" exited with code 1
+2026-01-18T18:40:52.4867555Z ##[error]Process completed with exit code 1.
+2026-01-18T18:40:52.4892879Z ##[group]Run bun vitest run
+2026-01-18T18:40:52.4893152Z [36;1mbun vitest run[0m
+2026-01-18T18:40:52.4925672Z shell: /usr/bin/bash -e {0}
+2026-01-18T18:40:52.4926085Z ##[endgroup]
+2026-01-18T18:40:52.8417097Z 
+2026-01-18T18:40:52.8419023Z [1m[46m RUN [49m[22m [36mv3.2.4 [39m[90m/home/runner/work/errors/errors[39m
+2026-01-18T18:40:52.8419592Z 
+2026-01-18T18:40:53.1010816Z  [31m❯[39m tests/assertions.test.ts [2m([22m[2m3 tests[22m[2m | [22m[31m3 failed[39m[2m)[22m[32m 21[2mms[22m[39m
+2026-01-18T18:40:53.1012809Z [31m   [31m×[31m toBe fails on different objects[39m[32m 13[2mms[22m[39m
+2026-01-18T18:40:53.1014096Z [31m     → expected { a: 1 } to be { a: 1 } // Object.is equality
+2026-01-18T18:40:53.1014572Z 
+2026-01-18T18:40:53.1014938Z If it should pass with deep equality, replace "toBe" with "toStrictEqual"
+2026-01-18T18:40:53.1015474Z 
+2026-01-18T18:40:53.1015613Z Expected: { a: 1 }
+2026-01-18T18:40:53.1016094Z Received: serializes to the same string
+2026-01-18T18:40:53.1016593Z [39m
+2026-01-18T18:40:53.1017235Z [31m   [31m×[31m toEqual fails on value mismatch[39m[32m 5[2mms[22m[39m
+2026-01-18T18:40:53.1018170Z [31m     → expected { count: 13 } to deeply equal { count: 14 }[39m
+2026-01-18T18:40:53.1019318Z [31m   [31m×[31m array length mismatch[39m[32m 2[2mms[22m[39m
+2026-01-18T18:40:53.1020120Z [31m     → expected [ 1, 2, 3 ] to deeply equal [ 1, 2 ][39m
+2026-01-18T18:40:53.1078650Z  [31m❯[39m tests/throws.test.ts [2m([22m[2m2 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 14[2mms[22m[39m
+2026-01-18T18:40:53.1079961Z [31m   [31m×[31m expected throw but returns[39m[32m 11[2mms[22m[39m
+2026-01-18T18:40:53.1080703Z [31m     → expected [Function fn] to throw an error[39m
+2026-01-18T18:40:53.1081380Z [31m   [31m×[31m wrong error message[39m[32m 2[2mms[22m[39m
+2026-01-18T18:40:53.1082232Z [31m     → expected [Function fn] to throw error matching /banana/ but got 'apple'[39m
+2026-01-18T18:40:53.2163853Z  [31m❯[39m tests/async.test.ts [2m([22m[2m2 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 109[2mms[22m[39m
+2026-01-18T18:40:53.2165378Z [31m   [31m×[31m times out[39m[32m 106[2mms[22m[39m
+2026-01-18T18:40:53.2166185Z [31m     → Test timed out in 100ms.
+2026-01-18T18:40:53.2167288Z If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".[39m
+2026-01-18T18:40:53.2168369Z [31m   [31m×[31m unwaited assertion[39m[32m 1[2mms[22m[39m
+2026-01-18T18:40:53.2169269Z [31m     → expected any number of assertion, but got none[39m
+2026-01-18T18:40:53.2263526Z 
+2026-01-18T18:40:53.2264295Z [31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 7 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+2026-01-18T18:40:53.2264720Z 
+2026-01-18T18:40:53.2268380Z [41m[1m FAIL [22m[49m tests/assertions.test.ts[2m > [22mtoBe fails on different objects
+2026-01-18T18:40:53.2288095Z [31m[1mAssertionError[22m: expected { a: 1 } to be { a: 1 } // Object.is equality
+2026-01-18T18:40:53.2289113Z 
+2026-01-18T18:40:53.2289682Z If it should pass with deep equality, replace "toBe" with "toStrictEqual"
+2026-01-18T18:40:53.2290204Z 
+2026-01-18T18:40:53.2290662Z Expected: { a: 1 }
+2026-01-18T18:40:53.2291046Z Received: serializes to the same string
+2026-01-18T18:40:53.2291550Z [39m
+2026-01-18T18:40:53.2291740Z 
+2026-01-18T18:40:53.2292040Z [2mCompared values have no visual difference.[22m
+2026-01-18T18:40:53.2292425Z 
+2026-01-18T18:40:53.2292799Z [36m [2m❯[22m tests/assertions.test.ts:[2m4:20[22m[39m
+2026-01-18T18:40:53.2317552Z     [90m  2| [39m
+2026-01-18T18:40:53.2318957Z     [90m  3| [39m[34mtest[39m([32m"toBe fails on different objects"[39m[33m,[39m () [33m=>[39m {
+2026-01-18T18:40:53.2320292Z     [90m  4| [39m  [34mexpect[39m({ a[33m:[39m [34m1[39m })[33m.[39m[34mtoBe[39m({ a[33m:[39m [34m1[39m })[33m;[39m
+2026-01-18T18:40:53.2321216Z     [90m   | [39m                   [31m^[39m
+2026-01-18T18:40:53.2321997Z     [90m  5| [39m})[33m;[39m
+2026-01-18T18:40:53.2322434Z     [90m  6| [39m
+2026-01-18T18:40:53.2322640Z 
+2026-01-18T18:40:53.2322937Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯[22m[39m
+2026-01-18T18:40:53.2323292Z 
+2026-01-18T18:40:53.2323811Z [41m[1m FAIL [22m[49m tests/assertions.test.ts[2m > [22mtoEqual fails on value mismatch
+2026-01-18T18:40:53.2325187Z [31m[1mAssertionError[22m: expected { count: 13 } to deeply equal { count: 14 }[39m
+2026-01-18T18:40:53.2325754Z 
+2026-01-18T18:40:53.2325929Z [32m- Expected[39m
+2026-01-18T18:40:53.2326289Z [31m+ Received[39m
+2026-01-18T18:40:53.2326478Z 
+2026-01-18T18:40:53.2326623Z [2m  {[22m
+2026-01-18T18:40:53.2326964Z [32m-   "count": 14,[39m
+2026-01-18T18:40:53.2327347Z [31m+   "count": 13,[39m
+2026-01-18T18:40:53.2327697Z [2m  }[22m
+2026-01-18T18:40:53.2327854Z 
+2026-01-18T18:40:53.2328179Z [36m [2m❯[22m tests/assertions.test.ts:[2m8:25[22m[39m
+2026-01-18T18:40:53.2328896Z     [90m  6| [39m
+2026-01-18T18:40:53.2329772Z     [90m  7| [39m[34mtest[39m([32m"toEqual fails on value mismatch"[39m[33m,[39m () [33m=>[39m {
+2026-01-18T18:40:53.2331117Z     [90m  8| [39m  [34mexpect[39m({ count[33m:[39m [34m13[39m })[33m.[39m[34mtoEqual[39m({ count[33m:[39m [34m14[39m })[33m;[39m
+2026-01-18T18:40:53.2332117Z     [90m   | [39m                        [31m^[39m
+2026-01-18T18:40:53.2332609Z     [90m  9| [39m})[33m;[39m
+2026-01-18T18:40:53.2332997Z     [90m 10| [39m
+2026-01-18T18:40:53.2333175Z 
+2026-01-18T18:40:53.2333439Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯[22m[39m
+2026-01-18T18:40:53.2333746Z 
+2026-01-18T18:40:53.2334202Z [41m[1m FAIL [22m[49m tests/assertions.test.ts[2m > [22marray length mismatch
+2026-01-18T18:40:53.2335205Z [31m[1mAssertionError[22m: expected [ 1, 2, 3 ] to deeply equal [ 1, 2 ][39m
+2026-01-18T18:40:53.2335713Z 
+2026-01-18T18:40:53.2335897Z [32m- Expected[39m
+2026-01-18T18:40:53.2336245Z [31m+ Received[39m
+2026-01-18T18:40:53.2336437Z 
+2026-01-18T18:40:53.2336587Z [2m  [[22m
+2026-01-18T18:40:53.2336901Z [2m    1,[22m
+2026-01-18T18:40:53.2337215Z [2m    2,[22m
+2026-01-18T18:40:53.2337519Z [31m+   3,[39m
+2026-01-18T18:40:53.2337827Z [2m  ][22m
+2026-01-18T18:40:53.2338001Z 
+2026-01-18T18:40:53.2338324Z [36m [2m❯[22m tests/assertions.test.ts:[2m12:21[22m[39m
+2026-01-18T18:40:53.2339110Z     [90m 10| [39m
+2026-01-18T18:40:53.2339764Z     [90m 11| [39m[34mtest[39m([32m"array length mismatch"[39m[33m,[39m () [33m=>[39m {
+2026-01-18T18:40:53.2341192Z     [90m 12| [39m  [34mexpect[39m([[34m1[39m[33m,[39m [34m2[39m[33m,[39m [34m3[39m])[33m.[39m[34mtoEqual[39m([[34m1[39m[33m,[39m [34m2[39m])[33m;[39m
+2026-01-18T18:40:53.2342271Z     [90m   | [39m                    [31m^[39m
+2026-01-18T18:40:53.2342750Z     [90m 13| [39m})[33m;[39m
+2026-01-18T18:40:53.2343143Z     [90m 14| [39m
+2026-01-18T18:40:53.2343322Z 
+2026-01-18T18:40:53.2343595Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯[22m[39m
+2026-01-18T18:40:53.2343926Z 
+2026-01-18T18:40:53.2344282Z [41m[1m FAIL [22m[49m tests/async.test.ts[2m > [22mtimes out
+2026-01-18T18:40:53.2344944Z [31m[1mError[22m: Test timed out in 100ms.
+2026-01-18T18:40:53.2346001Z If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".[39m
+2026-01-18T18:40:53.2347310Z [36m [2m❯[22m tests/async.test.ts:[2m3:1[22m[39m
+2026-01-18T18:40:53.2348195Z     [90m  1| [39m[35mimport[39m { expect[33m,[39m test } [35mfrom[39m [32m"vitest"[39m[33m;[39m
+2026-01-18T18:40:53.2349163Z     [90m  2| [39m
+2026-01-18T18:40:53.2349844Z     [90m  3| [39m[34mtest[39m([32m"times out"[39m[33m,[39m [35masync[39m () [33m=>[39m {
+2026-01-18T18:40:53.2350537Z     [90m   | [39m[31m^[39m
+2026-01-18T18:40:53.2351250Z     [90m  4| [39m  [35mawait[39m [35mnew[39m [33mPromise[39m(() [33m=>[39m {})[33m;[39m
+2026-01-18T18:40:53.2352046Z     [90m  5| [39m}[33m,[39m [34m100[39m)[33m;[39m
+2026-01-18T18:40:53.2352378Z 
+2026-01-18T18:40:53.2352838Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯[22m[39m
+2026-01-18T18:40:53.2353164Z 
+2026-01-18T18:40:53.2353561Z [41m[1m FAIL [22m[49m tests/async.test.ts[2m > [22munwaited assertion
+2026-01-18T18:40:53.2354422Z [31m[1mError[22m: expected any number of assertion, but got none[39m
+2026-01-18T18:40:53.2355144Z [36m [2m❯[22m tests/async.test.ts:[2m8:10[22m[39m
+2026-01-18T18:40:53.2355653Z     [90m  6| [39m
+2026-01-18T18:40:53.2356392Z     [90m  7| [39m[34mtest[39m([32m"unwaited assertion"[39m[33m,[39m [35masync[39m () [33m=>[39m {
+2026-01-18T18:40:53.2357340Z     [90m  8| [39m  expect[33m.[39m[34mhasAssertions[39m()[33m;[39m
+2026-01-18T18:40:53.2357946Z     [90m   | [39m         [31m^[39m
+2026-01-18T18:40:53.2358476Z     [90m  9| [39m  [34msetTimeout[39m(() [33m=>[39m {
+2026-01-18T18:40:53.2359531Z     [90m 10| [39m    [34mexpect[39m([35mtrue[39m)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+2026-01-18T18:40:53.2360105Z 
+2026-01-18T18:40:53.2360400Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯[22m[39m
+2026-01-18T18:40:53.2360730Z 
+2026-01-18T18:40:53.2361174Z [41m[1m FAIL [22m[49m tests/throws.test.ts[2m > [22mexpected throw but returns
+2026-01-18T18:40:53.2362099Z [31m[1mAssertionError[22m: expected [Function fn] to throw an error[39m
+2026-01-18T18:40:53.2362853Z [36m [2m❯[22m tests/throws.test.ts:[2m5:14[22m[39m
+2026-01-18T18:40:53.2363720Z     [90m  3| [39m[34mtest[39m([32m"expected throw but returns"[39m[33m,[39m () [33m=>[39m {
+2026-01-18T18:40:53.2364697Z     [90m  4| [39m  [35mconst[39m fn [33m=[39m () [33m=>[39m [32m"ok"[39m[33m;[39m
+2026-01-18T18:40:53.2365548Z     [90m  5| [39m  [34mexpect[39m(fn)[33m.[39m[34mtoThrow[39m()[33m;[39m
+2026-01-18T18:40:53.2366202Z     [90m   | [39m             [31m^[39m
+2026-01-18T18:40:53.2366660Z     [90m  6| [39m})[33m;[39m
+2026-01-18T18:40:53.2367032Z     [90m  7| [39m
+2026-01-18T18:40:53.2367212Z 
+2026-01-18T18:40:53.2367490Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯[22m[39m
+2026-01-18T18:40:53.2367797Z 
+2026-01-18T18:40:53.2368176Z [41m[1m FAIL [22m[49m tests/throws.test.ts[2m > [22mwrong error message
+2026-01-18T18:40:53.2369423Z [31m[1mAssertionError[22m: expected [Function fn] to throw error matching /banana/ but got 'apple'[39m
+2026-01-18T18:40:53.2370085Z 
+2026-01-18T18:40:53.2370257Z [32m- Expected:[39m 
+2026-01-18T18:40:53.2370567Z /banana/
+2026-01-18T18:40:53.2370716Z 
+2026-01-18T18:40:53.2370885Z [31m+ Received:[39m 
+2026-01-18T18:40:53.2371180Z "apple"
+2026-01-18T18:40:53.2371325Z 
+2026-01-18T18:40:53.2371643Z [36m [2m❯[22m tests/throws.test.ts:[2m10:14[22m[39m
+2026-01-18T18:40:53.2372442Z     [90m  8| [39m[34mtest[39m([32m"wrong error message"[39m[33m,[39m () [33m=>[39m {
+2026-01-18T18:40:53.2373756Z     [90m  9| [39m  [35mconst[39m fn [33m=[39m () [33m=>[39m { [35mthrow[39m [35mnew[39m [33mError[39m([32m"apple"[39m)[33m;[39m }[33m;[39m
+2026-01-18T18:40:53.2375052Z     [90m 10| [39m  [34mexpect[39m(fn)[33m.[39m[34mtoThrow[39m([36m/banana/[39m)[33m;[39m
+2026-01-18T18:40:53.2375777Z     [90m   | [39m             [31m^[39m
+2026-01-18T18:40:53.2376226Z     [90m 11| [39m})[33m;[39m
+2026-01-18T18:40:53.2376824Z     [90m 12| [39m
+2026-01-18T18:40:53.2377034Z 
+2026-01-18T18:40:53.2377306Z [31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯[22m[39m
+2026-01-18T18:40:53.2377611Z 
+2026-01-18T18:40:53.2377621Z 
+2026-01-18T18:40:53.2377929Z [2m Test Files [22m [1m[31m3 failed[39m[22m[90m (3)[39m
+2026-01-18T18:40:53.2378587Z [2m      Tests [22m [1m[31m7 failed[39m[22m[90m (7)[39m
+2026-01-18T18:40:53.2379300Z [2m   Start at [22m 18:40:52
+2026-01-18T18:40:53.2380262Z [2m   Duration [22m 384ms[2m (transform 53ms, setup 0ms, collect 61ms, tests 144ms, environment 1ms, prepare 288ms)[22m
+2026-01-18T18:40:53.2380991Z 
+2026-01-18T18:40:53.2385482Z 
+2026-01-18T18:40:53.2407885Z ##[error]AssertionError: expected { a: 1 } to be { a: 1 } // Object.is equality
+
+If it should pass with deep equality, replace "toBe" with "toStrictEqual"
+
+Expected: { a: 1 }
+Received: serializes to the same string
+
+
+Compared values have no visual difference.
+
+ ❯ tests/assertions.test.ts:4:20
+
+
+2026-01-18T18:40:53.2411058Z 
+2026-01-18T18:40:53.2413798Z ##[error]AssertionError: expected { count: 13 } to deeply equal { count: 14 }
+
+- Expected
++ Received
+
+  {
+-   "count": 14,
++   "count": 13,
+  }
+
+ ❯ tests/assertions.test.ts:8:25
+
+
+2026-01-18T18:40:53.2415502Z 
+2026-01-18T18:40:53.2417767Z ##[error]AssertionError: expected [ 1, 2, 3 ] to deeply equal [ 1, 2 ]
+
+- Expected
++ Received
+
+  [
+    1,
+    2,
++   3,
+  ]
+
+ ❯ tests/assertions.test.ts:12:21
+
+
+2026-01-18T18:40:53.2419701Z 
+2026-01-18T18:40:53.2422476Z ##[error]Error: Test timed out in 100ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ tests/async.test.ts:3:1
+
+
+2026-01-18T18:40:53.2424459Z 
+2026-01-18T18:40:53.2426145Z ##[error]Error: expected any number of assertion, but got none
+ ❯ tests/async.test.ts:8:10
+
+
+2026-01-18T18:40:53.2427512Z 
+2026-01-18T18:40:53.2429493Z ##[error]AssertionError: expected [Function fn] to throw an error
+ ❯ tests/throws.test.ts:5:14
+
+
+2026-01-18T18:40:53.2430969Z 
+2026-01-18T18:40:53.2433648Z ##[error]AssertionError: expected [Function fn] to throw error matching /banana/ but got 'apple'
+
+- Expected: 
+/banana/
+
++ Received: 
+"apple"
+
+ ❯ tests/throws.test.ts:10:14
+
+
+2026-01-18T18:40:53.3213046Z error: "vitest" exited with code 1
+2026-01-18T18:40:53.3222019Z ##[error]Process completed with exit code 1.
+2026-01-18T18:40:53.3288126Z Post job cleanup.
+2026-01-18T18:40:53.4658123Z Post job cleanup.
+2026-01-18T18:40:53.5611239Z [command]/usr/bin/git version
+2026-01-18T18:40:53.5647778Z git version 2.52.0
+2026-01-18T18:40:53.5691524Z Temporarily overriding HOME='/home/runner/work/_temp/59efd9da-ec71-44ad-9553-5b5a7c80683b' before making global git config changes
+2026-01-18T18:40:53.5692521Z Adding repository directory to the temporary git global config as a safe directory
+2026-01-18T18:40:53.5696830Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/errors/errors
+2026-01-18T18:40:53.5733431Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-01-18T18:40:53.5767151Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-01-18T18:40:53.6017204Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-01-18T18:40:53.6042088Z http.https://github.com/.extraheader
+2026-01-18T18:40:53.6055217Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-01-18T18:40:53.6091246Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-01-18T18:40:53.6337742Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-01-18T18:40:53.6377115Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-01-18T18:40:53.6762019Z Cleaning up orphan processes

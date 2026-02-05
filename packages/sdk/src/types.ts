@@ -1,23 +1,10 @@
-/**
- * Detent SDK Types
- *
- * API response and request types for the Detent platform.
- */
-
-// ============================================================================
-// Configuration
-// ============================================================================
-
 export type AuthConfig =
   | { type: "apiKey"; token: string }
   | { type: "jwt"; token: string };
 
 export interface DetentConfig {
-  /** Base URL for the API (defaults to https://backend.detent.sh) */
   baseUrl?: string;
-  /** Authentication configuration */
   auth: AuthConfig;
-  /** Request timeout in milliseconds */
   timeout?: number;
 }
 

@@ -6,17 +6,8 @@ interface PaginationResult<T> {
   continueCursor: string;
 }
 
-// Safety limit to prevent unbounded memory growth in Cloudflare Workers (128MB limit)
-// Most commits have <100 jobs, but pathological cases could have thousands
 const DEFAULT_MAX_ITEMS = 10_000;
 
-/**
- * Fetches all pages from a paginated Convex query.
- *
- * Performance note: This function accumulates all items in memory. For Cloudflare
- * Workers with 128MB limit, use maxItems to cap memory usage. Default limit is
- * 10,000 items which should cover most cases while preventing memory exhaustion.
- */
 export const fetchAllPages = async <T>(
   convex: ConvexHttpClient,
   name: string,

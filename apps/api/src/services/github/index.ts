@@ -44,20 +44,8 @@ import type {
 } from "./workflow-runs";
 import { evaluateWorkflowRuns } from "./workflow-runs";
 
-/**
- * Module-level cache for installation tokens.
- * Survives across function calls within the same Worker isolate.
- * Cache lifecycle: persists until isolate is recycled (cold start clears it).
- * This is intentional - tokens are short-lived (1hr) and isolate recycling
- * provides natural cache invalidation without explicit TTL management.
- */
 const tokenCache = new Map<number, { token: string; expiresAt: number }>();
 
-/**
- * Module-level singleton for GitHub service instance.
- * Re-uses the same service across all requests within an isolate to share
- * the token cache. Cleared on cold start when new isolate is created.
- */
 let cachedService: ReturnType<typeof createGitHubServiceInternal> | null = null;
 let cachedAppId: string | null = null;
 
@@ -71,7 +59,6 @@ const createGitHubServiceInternal = (env: Env) => {
   const getInstallationToken = async (
     installationId: number
   ): Promise<string> => {
-    // Check cache first
     const cached = tokenCache.get(installationId);
     if (cached && cached.expiresAt > Date.now() + 60_000) {
       console.log(
@@ -80,10 +67,8 @@ const createGitHubServiceInternal = (env: Env) => {
       return cached.token;
     }
 
-    // Generate app JWT
     const jwt = await generateAppJwt(config);
 
-    // Exchange JWT for installation token
     const response = await fetch(
       `${GITHUB_API}/app/installations/${installationId}/access_tokens`,
       {
@@ -106,7 +91,6 @@ const createGitHubServiceInternal = (env: Env) => {
 
     const data = (await response.json()) as InstallationTokenResponse;
 
-    // Cache the token
     tokenCache.set(installationId, {
       token: data.token,
       expiresAt: new Date(data.expires_at).getTime(),
@@ -127,10 +111,8 @@ const createGitHubServiceInternal = (env: Env) => {
   ): Promise<LogExtractionResult> => {
     const context = `fetchWorkflowLogs(${owner}/${repo}, runId=${runId})`;
 
-    // Validate inputs to prevent URL manipulation
     validateOwnerRepo(owner, repo, context);
 
-    // GitHub returns a redirect to a zip file containing logs
     const response = await fetch(
       `${GITHUB_API}/repos/${owner}/${repo}/actions/runs/${runId}/logs`,
       {
@@ -153,7 +135,6 @@ const createGitHubServiceInternal = (env: Env) => {
       });
     }
 
-    // Extract logs from zip archive
     const blob = await response.blob();
     const arrayBuffer = await blobToArrayBuffer(blob);
     const result = extractLogsFromZip(arrayBuffer);
@@ -172,7 +153,6 @@ const createGitHubServiceInternal = (env: Env) => {
     issueNumber: number,
     body: string
   ): Promise<void> => {
-    // Validate inputs to prevent URL manipulation
     if (!(isValidGitHubName(owner) && isValidGitHubName(repo))) {
       throw new Error("Invalid owner or repo name");
     }
@@ -337,7 +317,6 @@ const createGitHubServiceInternal = (env: Env) => {
     repo: string,
     runId: number
   ): Promise<number | null> => {
-    // Validate inputs to prevent URL manipulation
     if (!(isValidGitHubName(owner) && isValidGitHubName(repo))) {
       throw new Error("Invalid owner or repo name");
     }
@@ -364,18 +343,12 @@ const createGitHubServiceInternal = (env: Env) => {
     return firstPR?.number ?? null;
   };
 
-  /**
-   * Find PR number for a commit SHA using the commits API.
-   * This works for fork PRs where workflow_run.pull_requests is empty.
-   * Returns the first open PR associated with the commit, or null if none found.
-   */
   const getPullRequestForCommit = async (
     token: string,
     owner: string,
     repo: string,
     sha: string
   ): Promise<number | null> => {
-    // Validate inputs to prevent URL manipulation
     if (!(isValidGitHubName(owner) && isValidGitHubName(repo))) {
       throw new Error("Invalid owner or repo name");
     }
@@ -397,7 +370,6 @@ const createGitHubServiceInternal = (env: Env) => {
     );
 
     if (!response.ok) {
-      // 409 means empty repo or commit not found - not an error, just no PR
       if (response.status === 409) {
         return null;
       }
@@ -409,15 +381,10 @@ const createGitHubServiceInternal = (env: Env) => {
       state: string;
     }>;
 
-    // Prefer open PRs, but fall back to any PR
     const openPr = prs.find((pr) => pr.state === "open");
     return openPr?.number ?? prs[0]?.number ?? null;
   };
 
-  /**
-   * Get detailed information about a pull request.
-   * Returns the head branch name and current head SHA.
-   */
   const getPullRequestInfo = async (
     token: string,
     owner: string,
@@ -426,7 +393,6 @@ const createGitHubServiceInternal = (env: Env) => {
   ): Promise<{ headBranch: string; headSha: string } | null> => {
     const context = `getPullRequestInfo(${owner}/${repo}#${prNumber})`;
 
-    // Validate inputs to prevent URL manipulation
     if (!(isValidGitHubName(owner) && isValidGitHubName(repo))) {
       throw new Error(`${context}: Invalid owner or repo name`);
     }
@@ -471,7 +437,6 @@ const createGitHubServiceInternal = (env: Env) => {
   const getInstallationInfo = async (
     installationId: number
   ): Promise<InstallationInfo | null> => {
-    // Generate app JWT to call app-level endpoints
     const jwt = await generateAppJwt(config);
 
     const response = await fetch(
@@ -487,7 +452,6 @@ const createGitHubServiceInternal = (env: Env) => {
     );
 
     if (response.status === 404) {
-      // Installation not found (uninstalled)
       return null;
     }
 
@@ -509,7 +473,6 @@ const createGitHubServiceInternal = (env: Env) => {
     let page = 1;
     const perPage = 100;
 
-    // Paginate through all repos
     while (true) {
       const response = await fetch(
         `${GITHUB_API}/installation/repositories?per_page=${perPage}&page=${page}`,
@@ -533,7 +496,6 @@ const createGitHubServiceInternal = (env: Env) => {
       const data = (await response.json()) as InstallationReposResponse;
       allRepos.push(...data.repositories);
 
-      // Check if we've fetched all repos
       if (allRepos.length >= data.total_count) {
         break;
       }
@@ -543,7 +505,6 @@ const createGitHubServiceInternal = (env: Env) => {
     return allRepos;
   };
 
-  // Helper: fetch paginated org members from GitHub API
   const fetchOrgMembersFromGitHub = async (
     token: string,
     orgLogin: string,
@@ -569,7 +530,6 @@ const createGitHubServiceInternal = (env: Env) => {
       const rateLimitInfo = parseRateLimitHeaders(response);
       logRateLimitWarning(rateLimitInfo, context);
 
-      // 403 can mean rate limit exceeded OR missing members:read permission
       if (response.status === 403 && rateLimitInfo?.isExceeded) {
         throw createRateLimitError(response, rateLimitInfo, context);
       }
@@ -589,7 +549,6 @@ const createGitHubServiceInternal = (env: Env) => {
       const members = (await response.json()) as GitHubOrgMember[];
       allMembers.push(...members);
 
-      // Check if more pages (GitHub returns empty array when done)
       if (members.length < perPage) {
         break;
       }
@@ -602,34 +561,19 @@ const createGitHubServiceInternal = (env: Env) => {
     return allMembers;
   };
 
-  // GET /orgs/{org}/members - fetch all members of a GitHub org
-  // Requires members:read permission on the installation
-  // Cached: in-memory 5min (fast, per-isolate) + KV 1hr (persists across isolates)
-  // See: https://docs.github.com/en/rest/orgs/members#list-organization-members
-  // Note: GitHub also supports `role` (admin/member) and `filter` (2fa_disabled) params
-  //
-  // Cache architecture (two-tier):
-  // - In-memory: 5min TTL, fastest access, per-isolate (cleared on cold start)
-  // - KV: 1hr TTL, eventually consistent across regions, survives isolate recycling
-  // - Keys use same format for both tiers to ensure consistency during invalidation
-  // - KV writes are fire-and-forget to avoid blocking the response
   const getOrgMembers = async (
     installationId: number,
     orgLogin: string
   ): Promise<GitHubOrgMember[]> => {
     const context = `getOrgMembers(${orgLogin})`;
-    // Use consistent key format for both in-memory and KV caches
     const membersCacheKey = cacheKey.githubOrgMembers(orgLogin);
 
-    // Check in-memory cache first - avoid multiple paginated API calls for large orgs
     const cached = getFromCache<GitHubOrgMember[]>(membersCacheKey);
     if (cached) {
       console.log(`[github] ${context}: Cache hit (${cached.length} members)`);
       return cached;
     }
 
-    // Check KV cache (persists across isolates)
-    // Use same key format as in-memory for consistency during invalidation
     try {
       const kvCached = await env["detent-idempotency"].get(
         membersCacheKey,
@@ -637,7 +581,6 @@ const createGitHubServiceInternal = (env: Env) => {
       );
       if (kvCached) {
         const members = kvCached as GitHubOrgMember[];
-        // Populate in-memory cache from KV
         setInCache(membersCacheKey, members, CACHE_TTL.GITHUB_ORG_MEMBERS);
         console.log(
           `[github] ${context}: KV cache hit (${members.length} members)`
@@ -645,15 +588,12 @@ const createGitHubServiceInternal = (env: Env) => {
         return members;
       }
     } catch (kvError) {
-      // KV read failed - log and continue to fetch from GitHub
-      // This ensures we don't fail the request due to cache issues
       console.warn(
         `[github] ${context}: KV read failed, fetching fresh:`,
         kvError
       );
     }
 
-    // Fetch fresh data from GitHub
     const token = await getInstallationToken(installationId);
     const allMembers = await fetchOrgMembersFromGitHub(
       token,
@@ -661,19 +601,13 @@ const createGitHubServiceInternal = (env: Env) => {
       context
     );
 
-    // Cache the full member list for 5 minutes (in-memory)
     setInCache(membersCacheKey, allMembers, CACHE_TTL.GITHUB_ORG_MEMBERS);
 
-    // Write to KV with 1hr TTL (longer than in-memory 5min)
-    // Fire-and-forget: don't block response on KV write
-    // KV is eventually consistent so there's no guarantee of read-after-write anyway
-    // Errors are logged with structured context for CF Workers monitoring/alerting
     env["detent-idempotency"]
       .put(membersCacheKey, JSON.stringify(allMembers), {
-        expirationTtl: 3600, // 1 hour
+        expirationTtl: 3600,
       })
       .catch((kvError) => {
-        // Logged for monitoring visibility - search "[github]" + "KV write failed" in CF dashboard
         console.error(`[github] ${context}: KV write failed:`, kvError);
       });
 
@@ -692,7 +626,6 @@ const createGitHubServiceInternal = (env: Env) => {
   }> => {
     const context = `listWorkflowRunsForCommit(${owner}/${repo}@${headSha.slice(0, 7)})`;
 
-    // Validate inputs
     validateOwnerRepo(owner, repo, context);
     validateGitSha(headSha, context);
 
@@ -717,7 +650,6 @@ const createGitHubServiceInternal = (env: Env) => {
 
     const data = (await response.json()) as WorkflowRunsResponse;
 
-    // Handle empty or missing workflow_runs array
     const workflowRuns = data.workflow_runs ?? [];
     const runs: WorkflowRunSummary[] = workflowRuns.map((run) => ({
       id: run.id,
@@ -741,7 +673,6 @@ const createGitHubServiceInternal = (env: Env) => {
       stuckRuns,
     } = evaluateWorkflowRuns(runs, now);
 
-    // Log with status/conclusion for debugging stuck workflows
     console.log(
       `[github] ${context}: Found ${runs.length} workflow runs (${blacklistedRuns.length} blacklisted, ${ciRelevantRuns.length} CI-relevant, ${skippedRuns.length} skipped), allCompleted=${allCompleted}${
         blacklistedRuns.length > 0
@@ -758,7 +689,6 @@ const createGitHubServiceInternal = (env: Env) => {
       }`
     );
 
-    // Warn about potentially stuck workflows
     if (stuckRuns.length > 0) {
       console.warn(
         `[github] ${context}: WARNING - ${stuckRuns.length} workflow(s) may be stuck (running > 30min): ${stuckRuns
@@ -796,7 +726,6 @@ const createGitHubServiceInternal = (env: Env) => {
   }> => {
     const context = `listJobsForWorkflowRun(${owner}/${repo}, runId=${runId})`;
 
-    // Validate inputs
     validateOwnerRepo(owner, repo, context);
     if (!Number.isInteger(runId) || runId <= 0) {
       throw new Error(`${context}: Invalid run ID`);
@@ -837,7 +766,6 @@ const createGitHubServiceInternal = (env: Env) => {
       workflowName: job.workflow_name ?? null,
       headBranch: job.head_branch ?? null,
       runnerName: job.runner_name ?? null,
-      // Map steps if present (useful for step-level error tracking)
       steps: job.steps?.map((step) => ({
         name: step.name,
         status: step.status,
@@ -851,7 +779,6 @@ const createGitHubServiceInternal = (env: Env) => {
     const now = Date.now();
     const evaluation = evaluateJobs(jobs, now);
 
-    // Log with stuck detection similar to workflow-runs.ts
     console.log(
       `[github] ${context}: Found ${jobs.length} jobs (${evaluation.pendingJobs.length} pending, ${evaluation.failedJobs.length} failed, ${evaluation.successJobs.length} passed)${
         evaluation.stuckJobs.length > 0
@@ -877,13 +804,11 @@ const createGitHubServiceInternal = (env: Env) => {
     const { owner, repo, headSha, name, status, output } = options;
     const context = `createCheckRun(${owner}/${repo}@${headSha.slice(0, 7)}, "${name}")`;
 
-    // Validate inputs
     validateOwnerRepo(owner, repo, context);
     validateGitSha(headSha, context);
     if (!name || name.trim().length === 0) {
       throw new Error(`${context}: Check run name cannot be empty`);
     }
-    // GitHub recommends unique check names to appear correctly in UI
     if (name.length > 200) {
       throw new Error(`${context}: Check run name too long (max 200 chars)`);
     }
@@ -922,7 +847,6 @@ const createGitHubServiceInternal = (env: Env) => {
 
     const data = (await response.json()) as CheckRunResponse;
 
-    // Validate response has expected fields
     if (typeof data.id !== "number" || !data.html_url) {
       throw new Error(
         `${context}: Unexpected response format - missing id or html_url`
@@ -964,7 +888,6 @@ const createGitHubServiceInternal = (env: Env) => {
     const { owner, repo, checkRunId, status, output } = options;
     const context = `updateCheckRun(${owner}/${repo}, checkRunId=${checkRunId})`;
 
-    // Validate inputs
     validateOwnerRepo(owner, repo, context);
     if (!Number.isInteger(checkRunId) || checkRunId <= 0) {
       throw new Error(`${context}: Invalid check run ID`);
@@ -975,7 +898,6 @@ const createGitHubServiceInternal = (env: Env) => {
       ...(output && { output }),
     };
 
-    // Only add conclusion and completed_at for completed status
     if (status === "completed") {
       body.conclusion = (
         options as {
@@ -1032,13 +954,11 @@ const createGitHubServiceInternal = (env: Env) => {
   ): Promise<{ id: number; htmlUrl: string }> => {
     const context = `postCommentWithId(${owner}/${repo}#${issueNumber})`;
 
-    // Validate inputs
     validateOwnerRepo(owner, repo, context);
     validateIssueNumber(issueNumber, context);
     if (!body || body.trim().length === 0) {
       throw new Error(`${context}: Comment body cannot be empty`);
     }
-    // GitHub API has a limit of ~65536 characters for comment body
     if (body.length > 65_536) {
       throw new Error(
         `${context}: Comment body too long (${body.length} chars, max 65536)`
@@ -1072,7 +992,6 @@ const createGitHubServiceInternal = (env: Env) => {
 
     const data = (await response.json()) as CommentResponse;
 
-    // Validate response has expected fields
     if (typeof data.id !== "number" || !data.html_url) {
       throw new Error(
         `${context}: Unexpected response format - missing id or html_url`
@@ -1092,7 +1011,6 @@ const createGitHubServiceInternal = (env: Env) => {
   ): Promise<void> => {
     const context = `updateComment(${owner}/${repo}, commentId=${commentId})`;
 
-    // Validate inputs
     validateOwnerRepo(owner, repo, context);
     validateCommentId(commentId, context);
     if (!body || body.trim().length === 0) {
@@ -1150,7 +1068,6 @@ const createGitHubServiceInternal = (env: Env) => {
     const context = `addReactionToComment(${owner}/${repo}, commentId=${commentId})`;
 
     try {
-      // Validate inputs
       validateOwnerRepo(owner, repo, context);
       validateCommentId(commentId, context);
 
@@ -1169,7 +1086,6 @@ const createGitHubServiceInternal = (env: Env) => {
         }
       );
 
-      // 201 = created, 200 = already exists (both are success)
       if (response.status === 201) {
         console.log(`[github] ${context}: Added "${reaction}" reaction`);
         return;
@@ -1182,14 +1098,12 @@ const createGitHubServiceInternal = (env: Env) => {
         return;
       }
 
-      // 422 = validation failed or endpoint spammed (secondary rate limit)
       if (response.status === 422) {
         const error = await response.text();
         console.warn(`[github] ${context}: Reaction rejected (422): ${error}`);
         return;
       }
 
-      // Other errors
       const error = await response.text();
       console.error(
         `[github] ${context}: Failed to add reaction: ${response.status} ${error}`
@@ -1220,14 +1134,11 @@ const createGitHubServiceInternal = (env: Env) => {
   };
 };
 
-// Public factory that returns cached singleton (token cache survives across calls)
 export const createGitHubService = (env: Env): GitHubService => {
-  // Return cached service if app ID matches (same env)
   if (cachedService && cachedAppId === env.GITHUB_APP_ID) {
     return cachedService;
   }
 
-  // Create new service and cache it
   cachedService = createGitHubServiceInternal(env);
   cachedAppId = env.GITHUB_APP_ID;
   console.log("[github] Created new GitHubService instance (singleton)");

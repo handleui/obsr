@@ -1,28 +1,6 @@
-/**
- * Zero-width and invisible Unicode characters that could bypass pattern matching.
- * Removing these prevents attackers from hiding content or breaking up keywords.
- *
- * Includes:
- * - Zero-width characters (U+200B-U+200F, U+2060-U+206F)
- * - Bidirectional control characters (U+202A-U+202E)
- * - Line/paragraph separators (U+2028-U+2029)
- * - Variation selectors (U+FE00-U+FE0F)
- * - Other invisible formatting characters
- *
- * Uses alternation instead of character class to avoid biome lint warning about
- * combining characters in character classes.
- */
 const INVISIBLE_CHARS_PATTERN =
   /\u200B|\u200C|\u200D|\u200E|\u200F|\u2028|\u2029|\u202A|\u202B|\u202C|\u202D|\u202E|\u202F|\u2060|\u2061|\u2062|\u2063|\u2064|\u2065|\u2066|\u2067|\u2068|\u2069|\u206A|\u206B|\u206C|\u206D|\u206E|\u206F|\uFEFF|\u00AD|\u034F|\u061C|\u115F|\u1160|\u17B4|\u17B5|\u180B|\u180C|\u180D|\u180E|\u3164|\uFFA0|\uFE00|\uFE01|\uFE02|\uFE03|\uFE04|\uFE05|\uFE06|\uFE07|\uFE08|\uFE09|\uFE0A|\uFE0B|\uFE0C|\uFE0D|\uFE0E|\uFE0F/g;
 
-/**
- * Normalizes confusable Unicode characters to their ASCII equivalents.
- * This prevents homoglyph attacks where attackers use lookalike characters
- * (e.g., Cyrillic 'a' instead of Latin 'a') to bypass keyword detection.
- *
- * Coverage focuses on characters that could spell injection keywords:
- * "ignore", "system", "instructions", "disregard", "previous", "forget", etc.
- */
 const HOMOGLYPH_MAP: Record<string, string> = {
   // Cyrillic lookalikes
   "\u0430": "a", // Cyrillic a
@@ -418,8 +396,6 @@ const HOMOGLYPH_MAP: Record<string, string> = {
   "\u2089": "9", // subscript nine
 };
 
-// Use 'u' flag for proper Unicode handling of astral plane characters (U+1D400+)
-// Without 'u', surrogate pairs are matched as separate characters
 const HOMOGLYPH_PATTERN = new RegExp(
   `[${Object.keys(HOMOGLYPH_MAP).join("")}]`,
   "gu"
@@ -428,33 +404,18 @@ const HOMOGLYPH_PATTERN = new RegExp(
 const normalizeHomoglyphs = (str: string): string =>
   str.replace(HOMOGLYPH_PATTERN, (char) => HOMOGLYPH_MAP[char] ?? char);
 
-/**
- * Prompt injection detection patterns, broken into named sub-patterns for maintainability.
- * Combined using alternation for O(n) single-pass matching instead of O(n * patterns).
- */
-
-// XML/HTML-like tags that could close our <ci_output> wrapper or inject roles
-// Tolerates whitespace variations: `< /system>`, `<system >`, etc.
 const XML_TAG_INJECTION =
   /<\s*\/?\s*(?:ci_output|system|user|assistant|human|instructions|function|tool|message|prompt|context|task)[^>]*>/;
 
-// Claude/Anthropic-style message separators
 const CLAUDE_MARKERS = /\n\n(?:Human|Assistant|System)\s*:/;
-
-// Llama-style markers
 const LLAMA_MARKERS = /\[\/INST\]|\[INST\]|<<SYS>>|<\/?SYS>>/;
-
-// OpenAI chat format markers (<|im_start|>, <|im_end|>, etc.)
 const OPENAI_MARKERS =
   /<\|(?:im_start|im_end|endoftext|end|system|user|assistant)\|>/;
 
-// Common prompt injection phrases
-// Uses bounded quantifiers (\s{1,20}) to prevent catastrophic backtracking on crafted input.
-// JS lacks possessive quantifiers and atomic groups, so bounded ranges are the alternative.
+// HACK: bounded quantifiers (\s{1,20}) instead of \s+ to prevent catastrophic backtracking
 const INJECTION_PHRASES =
   /ignore\s{1,20}(?:all\s{1,20})?(?:previous|prior|above)\s{1,20}instructions?|disregard\s{1,20}(?:all\s{1,20})?(?:previous|above)|forget\s{1,20}(?:all\s{1,20})?(?:previous|everything\s{1,20}above)|new\s{1,20}instructions?\s{0,10}:|system\s{0,10}prompt\s{0,10}:|you\s{1,20}are\s{1,20}now\s{1,20}|act\s{1,20}as\s{1,20}if\s{1,20}|pretend\s{1,20}(?:you\s{1,20}are|to\s{1,20}be)\s{1,20}|override\s{1,20}(?:your\s{1,20})?(?:instructions|rules|programming)|actually\s{1,20}your\s{1,20}(?:real\s{1,20})?instructions|from\s{1,20}now\s{1,20}on\s{1,20}|stop\s{1,20}being\s{1,20}a\s{1,20}|jailbreak|DAN\s{0,10}mode|developer\s{0,10}mode\s{0,10}enabled|base64\s{0,10}(?:decode|encoded)\s{0,10}instructions?|begin\s{1,20}(?:new\s{1,20})?(?:conversation|session)|end\s{1,20}(?:system\s{1,20})?(?:message|prompt)/;
 
-// Combined pattern from all sub-patterns
 const PROMPT_INJECTION_PATTERN = new RegExp(
   [
     XML_TAG_INJECTION,
@@ -468,9 +429,6 @@ const PROMPT_INJECTION_PATTERN = new RegExp(
   "gi"
 );
 
-/**
- * XML escape map for single-pass replacement.
- */
 const XML_ESCAPE_MAP: Record<string, string> = {
   "&": "&amp;",
   "<": "&lt;",
@@ -479,134 +437,99 @@ const XML_ESCAPE_MAP: Record<string, string> = {
   "'": "&apos;",
 };
 
-/**
- * Escapes XML special characters to prevent tag injection.
- * This is the primary structural defense - even if pattern matching fails,
- * escaped content cannot break out of XML structure.
- *
- * Uses single-pass replacement to avoid creating intermediate strings.
- */
 const escapeXml = (str: string): string =>
   str.replace(/[&<>"']/g, (char) => XML_ESCAPE_MAP[char] ?? char);
 
-/**
- * Sanitizes content to prevent prompt injection attacks.
- *
- * Defense in depth approach:
- * 1. Remove invisible Unicode characters that could bypass pattern matching
- * 2. Normalize homoglyphs to prevent lookalike character attacks
- * 3. Filter known injection patterns (behavioral defense)
- * 4. XML-escape all < and > characters (structural defense)
- *
- * The XML escaping is the primary defense - it ensures content cannot break
- * out of the <ci_output> wrapper regardless of attack vector.
- */
 export const sanitizeForPrompt = (content: string): string => {
-  // Step 1: Remove invisible characters that could hide malicious content
   let result = content.replace(INVISIBLE_CHARS_PATTERN, "");
-
-  // Step 2: Normalize homoglyphs before pattern matching
   result = normalizeHomoglyphs(result);
-
-  // Step 3: Filter known injection patterns (defense in depth)
   result = result.replace(PROMPT_INJECTION_PATTERN, "[FILTERED]");
-
-  // Step 4: XML escape as primary structural defense
   return escapeXml(result);
 };
 
-// Combined noise pattern - single regex for O(1) matching per line
-// Matches: empty lines, separators, passing/pending counts, npm/yarn notices,
-// internal stack frames, download/install/resolve progress, caret/tilde lines
 const NOISE_PATTERN =
   /^(?:\s*$|[-=]{3,}$|\s*\d+\s+(?:passing|pending)\b|(?:npm|yarn)\s+(?:warn|notice)\b|\s*at\s+(?:Object\.|Module\.|Function\.|node:|internal\/)|(?:Downloading|Installing|Resolving)\b|\s*[\^~]+\s*$)/i;
 
-// Combined important pattern - single regex for O(1) matching per line
-// Matches: error/warning keywords, file locations, line references, code context, test results
 const IMPORTANT_PATTERN =
   /error|warning|failed|failure|exception|:\d+:\d+|line\s+\d+|^\s*>\s+\d+\s*\||FAIL|PASS|ERROR|WARN/i;
 
-// Early cutoff multiplier: process at most 3x the final target to avoid
-// wasting CPU on content that will be truncated. With ~50% noise removal,
-// 3x gives good margin for compaction to work effectively.
 const EARLY_CUTOFF_MULTIPLIER = 3;
-
-// Minimum consecutive noise lines before showing an omission marker.
-// Avoids cluttering output with markers for small gaps.
 const MIN_CONSECUTIVE_NOISE_FOR_MARKER = 3;
 
-/**
- * Compacts CI output by removing noise while preserving errors.
- *
- * Filters:
- * - Empty lines and separators
- * - npm/yarn notices
- * - Internal stack frames (node:, internal/, etc.)
- * - Download/install progress
- *
- * Preserves:
- * - Lines with error/warning/failed
- * - File locations (file.ts:42:5)
- * - Code context lines
- * - Test results (FAIL, PASS)
- *
- * @param content - Raw CI output
- * @param targetLength - Target length after compaction (for early cutoff optimization)
- */
+const isSignalLine = (line: string): boolean =>
+  !NOISE_PATTERN.test(line) || IMPORTANT_PATTERN.test(line);
+
+const appendOmissionMarker = (
+  result: string[],
+  noiseCount: number,
+  noiseStartLine: number,
+  noiseEndLine: number
+): void => {
+  if (noiseCount > MIN_CONSECUTIVE_NOISE_FOR_MARKER) {
+    result.push(`[lines ${noiseStartLine}-${noiseEndLine} omitted]`);
+  }
+};
+
+const filterNoiseLines = (lines: string[]): string[] => {
+  const result: string[] = [];
+  let consecutiveNoiseCount = 0;
+  let noiseStartLine = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const lineNum = i + 1;
+    const line = lines[i] as string;
+
+    if (isSignalLine(line)) {
+      appendOmissionMarker(
+        result,
+        consecutiveNoiseCount,
+        noiseStartLine,
+        lineNum - 1
+      );
+      consecutiveNoiseCount = 0;
+      result.push(`[${lineNum}] ${line}`);
+    } else {
+      if (consecutiveNoiseCount === 0) {
+        noiseStartLine = lineNum;
+      }
+      consecutiveNoiseCount++;
+    }
+  }
+
+  appendOmissionMarker(
+    result,
+    consecutiveNoiseCount,
+    noiseStartLine,
+    lines.length
+  );
+  return result;
+};
+
 export const compactCiOutput = (
   content: string,
   targetLength = 15_000
 ): string => {
-  // Early cutoff: don't process content far beyond what we'll keep
   const earlyCutoff = targetLength * EARLY_CUTOFF_MULTIPLIER;
   const truncatedEarly = content.length > earlyCutoff;
   const toProcess = truncatedEarly ? content.slice(0, earlyCutoff) : content;
 
   const lines = toProcess.split("\n");
-  const result: string[] = [];
-  let consecutiveNoiseCount = 0;
-
-  for (const line of lines) {
-    const isNoise = NOISE_PATTERN.test(line);
-    // Only check importance if line looks like noise - avoids redundant regex test
-    const keep = !isNoise || IMPORTANT_PATTERN.test(line);
-
-    if (keep) {
-      if (consecutiveNoiseCount > MIN_CONSECUTIVE_NOISE_FOR_MARKER) {
-        result.push(`... [${consecutiveNoiseCount} lines omitted]`);
-      }
-      consecutiveNoiseCount = 0;
-      result.push(line);
-    } else {
-      consecutiveNoiseCount++;
-    }
-  }
-
-  if (consecutiveNoiseCount > MIN_CONSECUTIVE_NOISE_FOR_MARKER) {
-    result.push(`... [${consecutiveNoiseCount} lines omitted]`);
-  }
+  const result = filterNoiseLines(lines);
 
   if (truncatedEarly) {
     result.push(
-      `... [early cutoff applied, ${content.length - earlyCutoff} more characters not processed]`
+      `[early cutoff at line ${lines.length}, ${content.length - earlyCutoff} chars not processed]`
     );
   }
 
   return result.join("\n");
 };
 
-/**
- * Result of truncation operation.
- */
 export interface TruncateResult {
   content: string;
   truncated: boolean;
 }
 
-/**
- * Truncates content for the prompt to avoid excessive token usage.
- * Returns both the content and whether truncation occurred.
- */
 export const truncateContent = (
   content: string,
   maxLength = 15_000
@@ -620,27 +543,11 @@ export const truncateContent = (
   };
 };
 
-/**
- * Result of preparing content for the prompt.
- */
 export interface PrepareResult {
   content: string;
   truncated: boolean;
 }
 
-/**
- * Prepares CI output for LLM processing with compaction, truncation, and sanitization.
- * Applies all security measures to prevent prompt injection and reduce costs.
- *
- * Order of operations optimized for performance:
- * 1. Compact - removes noise (processes up to 3x target, ~45KB)
- * 2. Truncate - cuts to final size (15KB default)
- * 3. Sanitize - security pass only on final content (smallest input)
- *
- * Returns both the prepared content and whether truncation occurred after compaction.
- * This ensures the truncation flag accurately reflects whether content was lost,
- * not just whether the original input exceeded the limit.
- */
 export const prepareForPrompt = (
   content: string,
   maxLength = 15_000

@@ -410,12 +410,18 @@ const createHealsForErrors = async (
   }
 };
 
+/**
+ * Extract errors from workflow logs and store them.
+ * Called from webhook handler when a job completes with failure.
+ * Non-critical background task - failures are logged but not thrown.
+ */
 export const extractAndStoreErrors = async (
   env: Env,
   payload: WebhookPayload,
   db: DbClient
 ): Promise<void> => {
   const ctx = buildContext(payload);
+
   if (!ctx) {
     return;
   }
@@ -459,7 +465,6 @@ export const extractAndStoreErrors = async (
       return null;
     }
     try {
-      // Key is per-run (not per-job) since fetchWorkflowLogs returns all logs for the run
       const key = `logs/${project.organizationId}/${ctx.repository}/${ctx.runId}.txt`;
       await env.LOGS_BUCKET.put(key, logs, {
         httpMetadata: { contentType: "text/plain" },

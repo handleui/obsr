@@ -44,6 +44,8 @@ import type {
 } from "./workflow-runs";
 import { evaluateWorkflowRuns } from "./workflow-runs";
 
+// Module-level token cache. Survives across calls within a Worker isolate.
+// Tokens are short-lived (1hr); isolate recycling provides natural cache invalidation.
 const tokenCache = new Map<number, { token: string; expiresAt: number }>();
 
 let cachedService: ReturnType<typeof createGitHubServiceInternal> | null = null;
@@ -68,7 +70,6 @@ const createGitHubServiceInternal = (env: Env) => {
     }
 
     const jwt = await generateAppJwt(config);
-
     const response = await fetch(
       `${GITHUB_API}/app/installations/${installationId}/access_tokens`,
       {
@@ -90,7 +91,6 @@ const createGitHubServiceInternal = (env: Env) => {
     }
 
     const data = (await response.json()) as InstallationTokenResponse;
-
     tokenCache.set(installationId, {
       token: data.token,
       expiresAt: new Date(data.expires_at).getTime(),
@@ -370,6 +370,7 @@ const createGitHubServiceInternal = (env: Env) => {
     );
 
     if (!response.ok) {
+      // 409 means empty repo or commit not found - not an error, just no PR
       if (response.status === 409) {
         return null;
       }
@@ -567,7 +568,6 @@ const createGitHubServiceInternal = (env: Env) => {
   ): Promise<GitHubOrgMember[]> => {
     const context = `getOrgMembers(${orgLogin})`;
     const membersCacheKey = cacheKey.githubOrgMembers(orgLogin);
-
     const cached = getFromCache<GitHubOrgMember[]>(membersCacheKey);
     if (cached) {
       console.log(`[github] ${context}: Cache hit (${cached.length} members)`);
@@ -605,7 +605,7 @@ const createGitHubServiceInternal = (env: Env) => {
 
     env["detent-idempotency"]
       .put(membersCacheKey, JSON.stringify(allMembers), {
-        expirationTtl: 3600,
+        expirationTtl: 3600, // 1 hour
       })
       .catch((kvError) => {
         console.error(`[github] ${context}: KV write failed:`, kvError);

@@ -1,6 +1,7 @@
 import { getConvexClient } from "../../../db/convex";
 import { extractAndStoreErrors } from "../../../services/webhooks/error-extraction";
 import { checkAndTriggerAggregation } from "../../../services/webhooks/job-aggregation";
+import type { UpsertJobData } from "../../../services/webhooks/job-operations";
 import {
   lookupPrNumberFromRuns,
   updateCommitJobStats,
@@ -46,83 +47,112 @@ const validatePayload = (
   return null;
 };
 
-const prepareHandlerContext = async (
+interface JobHandlerContext {
+  c: WebhookContext;
+  payload: WorkflowJobPayload;
+  normalizedSha: string;
+  prNumber: number | undefined;
+  db: ReturnType<typeof getConvexClient>;
+  deliveryId: string;
+}
+
+const prepareJobHandler = async (
   c: WebhookContext,
-  payload: WorkflowJobPayload
-) => {
-  const { workflow_job, repository } = payload;
-  const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
-
-  console.log(
-    `[workflow_job] Processing: ${safeLogValue(repository.full_name)} / ${safeLogValue(workflow_job.name)} (job ${workflow_job.id}) [delivery: ${safeLogValue(deliveryId)}]`
-  );
-
-  const convex = getConvexClient(c.env);
-  const normalizedSha = workflow_job.head_sha.toLowerCase();
-  const prNumber = await lookupPrNumberFromRuns(
-    convex,
-    repository.full_name,
-    normalizedSha
-  );
-
-  return {
-    workflow_job,
-    repository,
-    deliveryId,
-    convex,
-    normalizedSha,
-    prNumber,
-  };
-};
-
-const buildBaseJobData = (
-  ctx: Awaited<ReturnType<typeof prepareHandlerContext>>
-) => ({
-  providerJobId: String(ctx.workflow_job.id),
-  repository: ctx.repository.full_name,
-  commitSha: ctx.normalizedSha,
-  prNumber: ctx.prNumber,
-  name: ctx.workflow_job.name,
-  workflowName: ctx.workflow_job.workflow_name,
-  htmlUrl: ctx.workflow_job.html_url,
-  headBranch: ctx.workflow_job.head_branch,
-});
-
-export const handleWorkflowJobQueued = async (
-  c: WebhookContext,
-  payload: WorkflowJobPayload
-) => {
+  payload: WorkflowJobPayload,
+  label: string
+): Promise<JobHandlerContext | Response> => {
   const validationError = validatePayload(payload);
   if (validationError) {
     return c.json({ error: validationError.error }, 400);
   }
 
-  const ctx = await prepareHandlerContext(c, payload);
+  const { workflow_job, repository } = payload;
+  const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
 
-  console.log(`[workflow_job] Queued job ${ctx.workflow_job.id}`);
+  console.log(
+    `[workflow_job] ${label}: ${safeLogValue(repository.full_name)} / ${safeLogValue(workflow_job.name)} (job ${workflow_job.id}) [delivery: ${safeLogValue(deliveryId)}]`
+  );
 
+  const db = getConvexClient(c.env);
+  const normalizedSha = workflow_job.head_sha.toLowerCase();
+  const prNumber = await lookupPrNumberFromRuns(
+    db,
+    repository.full_name,
+    normalizedSha
+  );
+
+  return { c, payload, normalizedSha, prNumber, db, deliveryId };
+};
+
+const isResponse = (value: JobHandlerContext | Response): value is Response =>
+  value instanceof Response;
+
+const buildBaseJobData = (
+  ctx: JobHandlerContext,
+  overrides: Pick<
+    UpsertJobData,
+    | "status"
+    | "conclusion"
+    | "runnerName"
+    | "queuedAt"
+    | "startedAt"
+    | "completedAt"
+  >
+): UpsertJobData => {
+  const { payload, normalizedSha, prNumber } = ctx;
+  const { workflow_job, repository } = payload;
+  return {
+    providerJobId: String(workflow_job.id),
+    repository: repository.full_name,
+    commitSha: normalizedSha,
+    prNumber,
+    name: workflow_job.name,
+    workflowName: workflow_job.workflow_name,
+    htmlUrl: workflow_job.html_url,
+    headBranch: workflow_job.head_branch,
+    ...overrides,
+  };
+};
+
+const upsertAndUpdateStats = async (
+  ctx: JobHandlerContext,
+  jobData: UpsertJobData
+): Promise<void> => {
   await Promise.all([
-    upsertJob(ctx.convex, {
-      ...buildBaseJobData(ctx),
-      status: "queued",
-      conclusion: null,
-      runnerName: null,
-      queuedAt: new Date(),
-      startedAt: null,
-      completedAt: null,
-    }),
+    upsertJob(ctx.db, jobData),
     updateCommitJobStats(
-      ctx.convex,
-      ctx.repository.full_name,
+      ctx.db,
+      jobData.repository,
       ctx.normalizedSha,
       ctx.prNumber
     ),
   ]);
+};
+
+export const handleWorkflowJobQueued = async (
+  c: WebhookContext,
+  payload: WorkflowJobPayload
+) => {
+  const result = await prepareJobHandler(c, payload, "Queued");
+  if (isResponse(result)) {
+    return result;
+  }
+
+  const jobData = buildBaseJobData(result, {
+    status: "queued",
+    conclusion: null,
+    runnerName: null,
+    queuedAt: new Date(),
+    startedAt: null,
+    completedAt: null,
+  });
+
+  await upsertAndUpdateStats(result, jobData);
 
   return c.json({
     message: "job queued",
-    jobId: ctx.workflow_job.id,
-    repository: ctx.repository.full_name,
+    jobId: payload.workflow_job.id,
+    repository: payload.repository.full_name,
   });
 };
 
@@ -130,39 +160,29 @@ export const handleWorkflowJobInProgress = async (
   c: WebhookContext,
   payload: WorkflowJobPayload
 ) => {
-  const validationError = validatePayload(payload);
-  if (validationError) {
-    return c.json({ error: validationError.error }, 400);
+  const result = await prepareJobHandler(c, payload, "In progress");
+  if (isResponse(result)) {
+    return result;
   }
 
-  const ctx = await prepareHandlerContext(c, payload);
+  const { workflow_job } = payload;
+  const jobData = buildBaseJobData(result, {
+    status: "in_progress",
+    conclusion: null,
+    runnerName: workflow_job.runner_name,
+    queuedAt: null,
+    startedAt: workflow_job.started_at
+      ? new Date(workflow_job.started_at)
+      : new Date(),
+    completedAt: null,
+  });
 
-  console.log(`[workflow_job] In progress job ${ctx.workflow_job.id}`);
-
-  await Promise.all([
-    upsertJob(ctx.convex, {
-      ...buildBaseJobData(ctx),
-      status: "in_progress",
-      conclusion: null,
-      runnerName: ctx.workflow_job.runner_name,
-      queuedAt: null,
-      startedAt: ctx.workflow_job.started_at
-        ? new Date(ctx.workflow_job.started_at)
-        : new Date(),
-      completedAt: null,
-    }),
-    updateCommitJobStats(
-      ctx.convex,
-      ctx.repository.full_name,
-      ctx.normalizedSha,
-      ctx.prNumber
-    ),
-  ]);
+  await upsertAndUpdateStats(result, jobData);
 
   return c.json({
     message: "job in_progress",
-    jobId: ctx.workflow_job.id,
-    repository: ctx.repository.full_name,
+    jobId: workflow_job.id,
+    repository: payload.repository.full_name,
   });
 };
 
@@ -170,63 +190,58 @@ export const handleWorkflowJobCompleted = async (
   c: WebhookContext,
   payload: WorkflowJobPayload
 ) => {
-  const validationError = validatePayload(payload);
-  if (validationError) {
-    return c.json({ error: validationError.error }, 400);
+  const result = await prepareJobHandler(c, payload, "Completed");
+  if (isResponse(result)) {
+    return result;
   }
 
-  const ctx = await prepareHandlerContext(c, payload);
-  const conclusion = mapConclusion(ctx.workflow_job.conclusion);
-
-  console.log(
-    `[workflow_job] Completed job ${ctx.workflow_job.id} (${ctx.workflow_job.conclusion})`
-  );
-
-  await upsertJob(ctx.convex, {
-    ...buildBaseJobData(ctx),
+  const { workflow_job, repository } = payload;
+  const jobData = buildBaseJobData(result, {
     status: "completed",
-    conclusion,
-    runnerName: ctx.workflow_job.runner_name,
+    conclusion: mapConclusion(workflow_job.conclusion),
+    runnerName: workflow_job.runner_name,
     queuedAt: null,
-    startedAt: ctx.workflow_job.started_at
-      ? new Date(ctx.workflow_job.started_at)
+    startedAt: workflow_job.started_at
+      ? new Date(workflow_job.started_at)
       : null,
-    completedAt: ctx.workflow_job.completed_at
-      ? new Date(ctx.workflow_job.completed_at)
+    completedAt: workflow_job.completed_at
+      ? new Date(workflow_job.completed_at)
       : new Date(),
   });
 
-  if (ctx.workflow_job.conclusion === "failure") {
+  await upsertJob(result.db, jobData);
+
+  if (workflow_job.conclusion === "failure") {
     const waitUntilTracked = createTrackedWaitUntil(c.executionCtx, {
-      deliveryId: ctx.deliveryId,
-      repository: ctx.repository.full_name,
+      deliveryId: result.deliveryId,
+      repository: repository.full_name,
       installationId: payload.installation?.id,
     });
-    waitUntilTracked(extractAndStoreErrors(c.env, payload, ctx.convex), {
+    waitUntilTracked(extractAndStoreErrors(c.env, payload, result.db), {
       operation: "error_extraction",
-      runId: ctx.workflow_job.run_id,
+      runId: workflow_job.run_id,
     });
   }
 
   await updateCommitJobStats(
-    ctx.convex,
-    ctx.repository.full_name,
-    ctx.normalizedSha,
-    ctx.prNumber
+    result.db,
+    repository.full_name,
+    result.normalizedSha,
+    result.prNumber
   );
 
   const aggregation = await checkAndTriggerAggregation(
     c.env,
-    ctx.convex,
-    ctx.repository.full_name,
-    ctx.normalizedSha
+    result.db,
+    repository.full_name,
+    result.normalizedSha
   );
 
   return c.json({
     message: "job completed",
-    jobId: ctx.workflow_job.id,
-    conclusion: ctx.workflow_job.conclusion,
-    repository: ctx.repository.full_name,
+    jobId: workflow_job.id,
+    conclusion: workflow_job.conclusion,
+    repository: repository.full_name,
     aggregation,
   });
 };
@@ -235,37 +250,26 @@ export const handleWorkflowJobWaiting = async (
   c: WebhookContext,
   payload: WorkflowJobPayload
 ) => {
-  const validationError = validatePayload(payload);
-  if (validationError) {
-    return c.json({ error: validationError.error }, 400);
+  const result = await prepareJobHandler(c, payload, "Waiting");
+  if (isResponse(result)) {
+    return result;
   }
 
-  const ctx = await prepareHandlerContext(c, payload);
+  const jobData = buildBaseJobData(result, {
+    status: "waiting",
+    conclusion: null,
+    runnerName: null,
+    queuedAt: null,
+    startedAt: null,
+    completedAt: null,
+  });
 
-  console.log(`[workflow_job] Waiting job ${ctx.workflow_job.id}`);
-
-  await Promise.all([
-    upsertJob(ctx.convex, {
-      ...buildBaseJobData(ctx),
-      status: "waiting",
-      conclusion: null,
-      runnerName: null,
-      queuedAt: null,
-      startedAt: null,
-      completedAt: null,
-    }),
-    updateCommitJobStats(
-      ctx.convex,
-      ctx.repository.full_name,
-      ctx.normalizedSha,
-      ctx.prNumber
-    ),
-  ]);
+  await upsertAndUpdateStats(result, jobData);
 
   return c.json({
     message: "job waiting",
-    jobId: ctx.workflow_job.id,
-    repository: ctx.repository.full_name,
+    jobId: payload.workflow_job.id,
+    repository: payload.repository.full_name,
   });
 };
 

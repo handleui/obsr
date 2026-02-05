@@ -1,24 +1,13 @@
-/**
- * Errors MCP Tools
- */
-
 import type { DetentClient } from "@detent/sdk";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { formatErrorResponse } from "../utils/errors.js";
+import { type SimplifiedMcpServer, wrapHandler } from "../utils/errors.js";
 
 export const registerErrorsTools = (
   server: McpServer,
   client: DetentClient
 ) => {
-  // Cast to any to avoid complex type inference that causes OOM
-  const srv = server as unknown as {
-    registerTool: (
-      name: string,
-      opts: { description: string; inputSchema: Record<string, unknown> },
-      handler: (args: Record<string, unknown>) => Promise<unknown>
-    ) => void;
-  };
+  const srv = server as unknown as SimplifiedMcpServer;
 
   srv.registerTool(
     "detent_get_errors",
@@ -37,19 +26,8 @@ Returns errors from failed CI runs including:
           .describe('Repository full name (e.g., "owner/repo")'),
       },
     },
-    async (args) => {
-      try {
-        const { commit, repository } = args as {
-          commit: string;
-          repository: string;
-        };
-        const result = await client.errors.get(commit, repository);
-        return {
-          content: [{ type: "text", text: JSON.stringify(result) }],
-        };
-      } catch (error) {
-        return formatErrorResponse(error);
-      }
-    }
+    wrapHandler<{ commit: string; repository: string }>(
+      async ({ commit, repository }) => client.errors.get(commit, repository)
+    )
   );
 };

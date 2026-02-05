@@ -11,10 +11,6 @@
  */
 import { z } from "zod";
 
-// =============================================================================
-// Enum Schemas
-// =============================================================================
-
 export const ErrorSeveritySchema = z.enum(["error", "warning"]);
 
 export const ErrorCategorySchema = z.enum([
@@ -49,36 +45,18 @@ export const ErrorSourceSchema = z.enum([
   "generic",
 ]);
 
-// =============================================================================
-// Validation Constants
-// =============================================================================
-
-/** Maximum file path length to prevent memory abuse */
 const MAX_FILE_PATH_LENGTH = 1000;
-/** Maximum error message length */
 const MAX_MESSAGE_LENGTH = 10_000;
-/** Maximum raw output length */
 const MAX_RAW_LENGTH = 50_000;
-/** Maximum stack trace length */
 const MAX_STACK_TRACE_LENGTH = 20_000;
-/** Maximum hint length */
 const MAX_HINT_LENGTH = 2000;
-/** Maximum hints per error */
 const MAX_HINTS_COUNT = 20;
-/** Maximum rule ID length */
 const MAX_RULE_ID_LENGTH = 200;
-/** Maximum code snippet line length */
 const MAX_SNIPPET_LINE_LENGTH = 500;
-/** Maximum lines in code snippet */
 const MAX_SNIPPET_LINES = 20;
-/** Maximum language identifier length */
 const MAX_LANGUAGE_LENGTH = 50;
-/** Maximum workflow field length */
 const MAX_WORKFLOW_FIELD_LENGTH = 200;
-
-// =============================================================================
-// Composite Schemas
-// =============================================================================
+const MAX_LOG_LINE_NUMBER = 1_000_000;
 
 export const CodeSnippetSchema = z.object({
   lines: z
@@ -119,10 +97,6 @@ export const WorkflowContextSchema = z.object({
     .describe("GitHub Actions action name"),
 });
 
-// =============================================================================
-// Unified CI Error Schema
-// =============================================================================
-
 export const CIErrorSchema = z.object({
   // Core (always populated)
   message: z
@@ -144,6 +118,22 @@ export const CIErrorSchema = z.object({
     .optional()
     .describe("Line number (1-indexed, 0 = unknown/not applicable)"),
   column: z.number().int().min(0).optional().describe("Column number"),
+
+  // CI log location (AI extracts)
+  logLineStart: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_LOG_LINE_NUMBER)
+    .optional()
+    .describe("First line in CI output where this error appears (1-indexed)"),
+  logLineEnd: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_LOG_LINE_NUMBER)
+    .optional()
+    .describe("Last line in CI output for this error (1-indexed)"),
 
   // Classification (AI/parsers populate)
   severity: ErrorSeveritySchema.optional().describe("error or warning"),
@@ -210,9 +200,29 @@ export const CIErrorSchema = z.object({
     .describe("Legacy: GitHub Actions step name. Use workflowContext.step."),
 });
 
-// =============================================================================
-// Inferred Types
-// =============================================================================
+/**
+ * CIErrorSchema with runtime validation for log line ranges.
+ * Use this for parsing/validating external data.
+ * Use plain CIErrorSchema for tool parameters and extending.
+ */
+export const CIErrorSchemaWithValidation = CIErrorSchema.refine(
+  (error) => {
+    // logLineEnd requires logLineStart to be present
+    if (error.logLineEnd !== undefined && error.logLineStart === undefined) {
+      return false;
+    }
+    // When both present, logLineEnd must be >= logLineStart
+    if (error.logLineStart !== undefined && error.logLineEnd !== undefined) {
+      return error.logLineEnd >= error.logLineStart;
+    }
+    return true;
+  },
+  {
+    message:
+      "logLineEnd requires logLineStart and must be >= logLineStart when both present",
+    path: ["logLineEnd"],
+  }
+);
 
 export type CIError = z.infer<typeof CIErrorSchema>;
 export type CICodeSnippet = z.infer<typeof CodeSnippetSchema>;

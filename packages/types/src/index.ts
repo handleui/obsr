@@ -25,6 +25,7 @@ export type { MutableExtractedError } from "./diagnostic.js";
 
 export {
   CIErrorSchema,
+  CIErrorSchemaWithValidation,
   CodeSnippetSchema,
   ErrorCategorySchema,
   ErrorSeveritySchema,

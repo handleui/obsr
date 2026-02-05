@@ -34,6 +34,31 @@ const resolveModel = (modelId: string, apiKey?: string) => {
 };
 
 /**
+ * Validates and normalizes a model name into a proper model ID.
+ * Provides helpful error context when normalization fails.
+ */
+const validateAndNormalizeModel = (modelName: string): string => {
+  let modelId: string;
+  try {
+    modelId = normalizeModelId(modelName);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown normalization error";
+    throw new Error(
+      `Invalid model ID after normalization. Original: ${modelName}. ${message}`
+    );
+  }
+
+  if (!modelId || typeof modelId !== "string" || modelId.trim() === "") {
+    throw new Error(
+      `Model normalization produced invalid result. Input: ${modelName}, Output: ${modelId}`
+    );
+  }
+
+  return modelId;
+};
+
+/**
  * Options for error extraction.
  */
 export interface ExtractionOptions {
@@ -88,26 +113,7 @@ export const extractErrors = async (
   options?: ExtractionOptions
 ): Promise<ExtractionResult> => {
   const modelName = options?.model ?? DEFAULT_FAST_MODEL;
-
-  // Validate and normalize model ID with helpful error context
-  let modelId: string;
-  try {
-    modelId = normalizeModelId(modelName);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unknown normalization error";
-    throw new Error(
-      `Invalid model ID: ${modelName}. Expected format: provider/model-name or claude-*/gpt-* shorthand. ${message}`
-    );
-  }
-
-  // Additional validation: ensure model ID has expected structure after normalization
-  if (!modelId || typeof modelId !== "string" || modelId.trim() === "") {
-    throw new Error(
-      `Invalid model ID: ${modelName}. Expected format: provider/model-name or claude-*/gpt-* shorthand`
-    );
-  }
-
+  const modelId = validateAndNormalizeModel(modelName);
   const model = resolveModel(modelId, options?.apiKey);
   const maxOutputTokens = options?.maxOutputTokens ?? 4096;
   const timeoutMs = options?.timeout ?? DEFAULT_TIMEOUT_MS;
@@ -170,8 +176,12 @@ export const extractErrors = async (
     if (NoObjectGeneratedError.isInstance(error)) {
       return createEmptyResult(truncated);
     }
+    // Sanitize error to avoid leaking AI SDK internals to callers
+    const isTimeout =
+      error instanceof Error &&
+      (error.name === "AbortError" || error.name === "TimeoutError");
     throw new Error(
-      `AI extraction failed: ${error instanceof Error ? error.message : "Unknown error"}`
+      isTimeout ? "AI extraction timed out" : "AI extraction failed"
     );
   }
 };

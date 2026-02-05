@@ -44,7 +44,17 @@ const FALLBACK_MAX_TOKENS = 30;
 const FALLBACK_REFILL_RATE = 0.5; // tokens per second (30/min)
 const FALLBACK_WINDOW_MS = 60_000; // 1 minute window for cleanup
 
-// Metrics for monitoring/alerting
+/**
+ * Metrics for monitoring/alerting on Redis failures.
+ *
+ * This object is module-scoped and mutated directly (lines 170-172) without locks.
+ * Thread-safety is guaranteed because:
+ * 1. Cloudflare Workers execute each request in a dedicated V8 isolate
+ * 2. V8 isolates are single-threaded and cannot be shared across threads
+ * 3. Each isolate maintains its own copy of this module's state
+ *
+ * Mutation of these counters is safe as long as each isolate only modifies its own instance.
+ */
 export const failOpenMetrics = {
   count: 0,
   lastOccurrence: 0,

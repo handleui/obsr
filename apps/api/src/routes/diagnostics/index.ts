@@ -120,6 +120,7 @@ app.use("*", apiKeyRateLimitMiddleware);
 
 app.openapi(diagnosticsRoute, async (c) => {
   const body = c.req.valid("json");
+  const correlationId = crypto.randomUUID();
 
   // AI extraction - no separate validation needed
   let result: Awaited<ReturnType<typeof extractErrors>>;
@@ -130,13 +131,17 @@ app.openapi(diagnosticsRoute, async (c) => {
   } catch (err) {
     const apiKeyAuth = c.get("apiKeyAuth");
     console.error("AI extraction failed:", {
+      correlationId,
       organizationId: apiKeyAuth.organizationId,
       requestId: c.req.header("CF-Ray"),
       message: err instanceof Error ? err.message : String(err),
       name: err instanceof Error ? err.name : undefined,
     });
     return c.json(
-      { error: "AI extraction service temporarily unavailable" },
+      {
+        error: "AI extraction service temporarily unavailable",
+        correlation_id: correlationId,
+      },
       503
     );
   }

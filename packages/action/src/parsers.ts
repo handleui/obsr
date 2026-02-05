@@ -3,9 +3,8 @@
  * These parse structured JSON output from tools like ESLint, Vitest, Cargo, golangci-lint.
  * TypeScript uses regex parsing since tsc has no JSON reporter.
  *
- * @deprecated TODO: Remove these parsers. The action should send raw logs to
- * the API's /v1/diagnostics endpoint for AI extraction instead of parsing locally.
- * These were copied from the deleted packages/diagnostics and are now orphaned code.
+ * These are local fallback parsers that extract errors when the API is not available.
+ * When the API's /v1/diagnostics endpoint is accessible, it provides AI-powered extraction.
  */
 
 import type { CIError } from "@detent/types";

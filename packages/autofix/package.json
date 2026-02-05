@@ -1,0 +1,24 @@
+{
+  "name": "@detent/autofix",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "bun run build:main && bun run build:cleanup",
+    "build:main": "ncc build src/index.ts -o dist --license licenses.txt",
+    "build:cleanup": "ncc build src/cleanup.ts -o dist/cleanup-tmp && mv dist/cleanup-tmp/index.js dist/cleanup.js && rm -rf dist/cleanup-tmp",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/exec": "^1.1.1"
+  },
+  "devDependencies": {
+    "@detent/typescript-config": "*",
+    "@types/node": "^25.0.3",
+    "@vercel/ncc": "^0.38.3",
+    "typescript": "^5.9.3"
+  }
+}

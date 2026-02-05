@@ -1,6 +1,6 @@
 # Healing Package Architecture
 
-The AI core of Detent. Orchestrates agentic error fixing using Claude models.
+The AI core of Detent. Orchestrates agentic error fixing using Claude models. Receives pre-extracted errors from upstream (`@detent/extract`) and focuses purely on AI-powered fixing.
 
 ## Overview
 
@@ -9,12 +9,12 @@ The AI core of Detent. Orchestrates agentic error fixing using Claude models.
 |     Client       |---->|    HealLoop      |---->|   ToolRegistry   |
 | (AI Gateway)     |     | (Orchestrator)   |     | (Tool Dispatch)  |
 +------------------+     +------------------+     +------------------+
-                               |    |
-              +----------------+    +----------------+
-              v                                      v
+                              |    |
+             +----------------+    +----------------+
+             v                                      v
 +------------------+                    +------------------+
 |     Prompt       |                    |    Preflight     |
-| (System + Format)|                    | (Error Validation)|
+| (System + Format)|                    | (Staleness Check)|
 +------------------+                    +------------------+
 ```
 
@@ -26,7 +26,7 @@ The AI core of Detent. Orchestrates agentic error fixing using Claude models.
 | `loop.ts` | Agentic loop orchestration, budget enforcement, error handling |
 | `tools/` | Tool registry and implementations (read, edit, grep, glob, run) |
 | `prompt/` | System prompt and error formatting |
-| `preflight/` | Error validation against current code state |
+| `preflight/` | Staleness check against current code state |
 | `pricing.ts` | Token-to-USD cost calculation with cache-aware pricing |
 | `eval/` | Evaluation framework (Braintrust tracing, scorers, datasets) |
 
@@ -217,9 +217,9 @@ Cache-aware cost calculation:
 | Claude Sonnet 4 | $3.00 | $15.00 |
 | Claude 3.5 Haiku | $0.80 | $4.00 |
 
-## Preflight Validation
+## Preflight Staleness Check
 
-Validates errors against current code before healing:
+Checks extracted errors against current code before healing. Errors may become stale if code changed between extraction and healing.
 
 ```
 +------------------+     +------------------+     +------------------+
@@ -232,7 +232,7 @@ Validates errors against current code before healing:
                          +------------------+
 ```
 
-**Validation Reasons:**
+**Staleness Reasons:**
 
 | Reason | Description |
 |--------|-------------|

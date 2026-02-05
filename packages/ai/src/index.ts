@@ -13,7 +13,12 @@ export {
 
 export { normalizeModelId } from "./client.js";
 
-export { calculateCost, estimateCost } from "./pricing.js";
+export {
+  calculateCost,
+  estimateCost,
+  extractModelId,
+  type ModelParam,
+} from "./pricing.js";
 
 export {
   DEFAULT_FAST_MODEL,
@@ -23,17 +28,3 @@ export {
   type ModelConfig,
   type TokenUsage,
 } from "./types.js";
-
-export {
-  type Confidence,
-  compactCiOutput,
-  createValidator,
-  type MissedDiagnostic,
-  truncateContent,
-  type ValidatedDiagnostic,
-  type ValidateOptions,
-  type ValidationResult,
-  type ValidationStatus,
-  type ValidationUsage,
-  validate,
-} from "./validation/index.js";

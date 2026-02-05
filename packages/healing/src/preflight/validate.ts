@@ -1,17 +1,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { ExtractedError } from "@detent/types";
+import type { CIError } from "@detent/types";
 
 import type { PreflightResult, StaleError, ValidationReason } from "./types.js";
 
 const normalizeLine = (line: string): string =>
   line.trim().replace(/\s+/g, " ");
 
-const groupByFile = (
-  errors: ExtractedError[]
-): Map<string, ExtractedError[]> => {
-  const groups = new Map<string, ExtractedError[]>();
+const groupByFile = (errors: CIError[]): Map<string, CIError[]> => {
+  const groups = new Map<string, CIError[]>();
   for (const error of errors) {
     if (error.filePath) {
       const existing = groups.get(error.filePath);
@@ -27,14 +25,14 @@ const groupByFile = (
 
 const processFileErrors = (
   _filePath: string,
-  fileErrors: ExtractedError[],
+  fileErrors: CIError[],
   _repoRoot: string,
   fileLines: string[]
 ): {
-  valid: ExtractedError[];
+  valid: CIError[];
   stale: StaleError[];
 } => {
-  const valid: ExtractedError[] = [];
+  const valid: CIError[] = [];
   const stale: StaleError[] = [];
 
   for (const error of fileErrors) {
@@ -52,7 +50,7 @@ const processFileErrors = (
 const readFileLines = (
   fullPath: string,
   _filePath: string,
-  fileErrors: ExtractedError[]
+  fileErrors: CIError[]
 ): {
   lines: string[] | null;
   stale: StaleError[];
@@ -78,11 +76,11 @@ const readFileLines = (
 };
 
 const validateSingle = (
-  error: ExtractedError,
+  error: CIError,
   fileLines: string[]
 ): { valid: true } | { valid: false; reason: ValidationReason } => {
-  // No line number or explicitly unknown - can't validate, assume valid
-  if (!error.line || error.lineKnown === false) {
+  // No line number - can't validate, assume valid
+  if (!error.line) {
     return { valid: true };
   }
 
@@ -121,14 +119,14 @@ const validateSingle = (
 };
 
 export const validateErrors = (
-  errors: ExtractedError[],
+  errors: CIError[],
   repoRoot: string
 ): PreflightResult => {
-  const valid: ExtractedError[] = [];
+  const valid: CIError[] = [];
   const stale: StaleError[] = [];
 
   // Errors without file path pass through as valid
-  const withFile: ExtractedError[] = [];
+  const withFile: CIError[] = [];
   for (const error of errors) {
     if (error.filePath) {
       withFile.push(error);

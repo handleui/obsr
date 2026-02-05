@@ -5,7 +5,6 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["src/**/*.test.{ts,tsx}"],
-    pool: "threads",
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],

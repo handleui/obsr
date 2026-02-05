@@ -1,13 +1,5 @@
 // biome-ignore lint/performance/noNamespaceImport: GitHub Actions SDK official pattern
 import * as core from "@actions/core";
-import type { Diagnostic } from "@detent/diagnostics";
-import {
-  parseCargo,
-  parseEslint,
-  parseGolangci,
-  parseTypeScript,
-  parseVitest,
-} from "@detent/diagnostics";
 import type { AutofixResult } from "./autofix/executor";
 import { runAutofix } from "./autofix/executor";
 import { getAutofixesForSources } from "./autofix/registry";
@@ -16,6 +8,13 @@ import { collect } from "./collect";
 import { detectOutputs } from "./detect";
 import type { ClassifiedReportError } from "./errors";
 import { classifyReportError } from "./errors";
+import {
+  parseCargo,
+  parseEslint,
+  parseGolangci,
+  parseTypeScript,
+  parseVitest,
+} from "./parsers";
 
 import { ReportApiError, report, reportAutofixResults } from "./report";
 
@@ -62,14 +61,14 @@ const OCTAL_IP_PATTERN =
   /^0\d+\.\d+\.\d+\.\d+$|^\d+\.0\d+\.\d+\.\d+$|^\d+\.\d+\.0\d+\.\d+$|^\d+\.\d+\.\d+\.0\d+$/;
 
 /**
- * Enrich a diagnostic with a code snippet from the source file.
+ * Enrich an error with a code snippet from the source file.
  */
 const enrichWithSnippet = (
-  diagnostic: Diagnostic
+  error: ReportPayload["errors"][number]
 ): ReportPayload["errors"][number] => {
-  const enriched: ReportPayload["errors"][number] = { ...diagnostic };
-  if (diagnostic.filePath && diagnostic.line) {
-    const snippet = readSnippet(diagnostic.filePath, diagnostic.line);
+  const enriched: ReportPayload["errors"][number] = { ...error };
+  if (error.filePath && error.line) {
+    const snippet = readSnippet(error.filePath, error.line);
     if (snippet) {
       enriched.codeSnippet = snippet;
     }

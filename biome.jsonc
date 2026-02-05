@@ -20,11 +20,43 @@
       }
     },
     {
+      "includes": ["packages/action/src/parsers.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noControlCharactersInRegex": "off"
+          }
+        }
+      }
+    },
+    {
+      // Disable organizeImports to preserve separate exports for JSDoc deprecation
+      "includes": ["packages/types/src/index.ts"],
+      "assist": {
+        "actions": {
+          "source": {
+            "organizeImports": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["convex/**/*.ts"],
       "linter": {
         "rules": {
           "style": {
             "useFilenamingConvention": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/api/src/services/comment-formatter.ts"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            // formatCheckRunOutput builds GitHub check output with complex formatting
+            "noExcessiveCognitiveComplexity": "off"
           }
         }
       }

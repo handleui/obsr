@@ -162,23 +162,6 @@ describe("validateErrors", () => {
     expect(result.stale).toHaveLength(0);
   });
 
-  test("errors with lineKnown=false pass through as valid", async () => {
-    await writeFile(join(repoRoot, "code.ts"), "const x = 1;\n");
-
-    const errors = [
-      makeError({
-        filePath: "code.ts",
-        line: 999,
-        lineKnown: false,
-      }),
-    ];
-
-    const result = validateErrors(errors, repoRoot);
-
-    expect(result.valid).toHaveLength(1);
-    expect(result.stale).toHaveLength(0);
-  });
-
   test("handles nested file paths", async () => {
     await mkdir(join(repoRoot, "src", "utils"), { recursive: true });
     await writeFile(

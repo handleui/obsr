@@ -1,7 +1,6 @@
-import { validate } from "@detent/ai";
-import { extract } from "@detent/diagnostics";
+import { extractErrors } from "@detent/extract";
 import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
-import { scrubSecrets } from "../../lib/scrub-secrets";
+import { scrubFilePath, scrubSecrets } from "../../lib/scrub-secrets";
 import { apiKeyAuthMiddleware } from "../../middleware/api-key-auth";
 import { apiKeyRateLimitMiddleware } from "../../middleware/api-key-rate-limit";
 import type { Env } from "../../types/env";
@@ -10,26 +9,45 @@ import {
   DiagnosticsResponseSchema,
   ErrorResponseSchema,
   RateLimitErrorSchema,
-  type ValidationResult,
 } from "./schemas";
 
 const MAX_DIAGNOSTICS = 10_000;
-const MAX_VALIDATE_DIAGNOSTICS = 100;
+
+/** Scrub sensitive data from diagnostic before returning in API response */
+const scrubDiagnosticResponse = (d: {
+  message: string;
+  filePath?: string;
+  line?: number;
+  column?: number;
+  severity?: "error" | "warning";
+  ruleId?: string;
+  stackTrace?: string;
+  hints?: string[];
+  fixable?: boolean;
+}) => ({
+  message: scrubSecrets(d.message),
+  file_path: scrubFilePath(d.filePath),
+  line: d.line,
+  column: d.column,
+  severity: d.severity ?? "error",
+  rule_id: d.ruleId,
+  stack_trace: d.stackTrace ? scrubSecrets(d.stackTrace) : undefined,
+  hints: d.hints?.map(scrubSecrets),
+  fixable: d.fixable,
+});
 
 const diagnosticsRoute = createRoute({
   method: "post",
   path: "/v1/diagnostics",
   tags: ["Diagnostics"],
   summary: "Parse CI/build logs into structured diagnostics",
-  description: `Extracts structured error and warning information from raw CI/build log output.
+  description: `Extracts structured error and warning information from raw CI/build log output using AI.
 
-Supports auto-detection of common tools (ESLint, TypeScript, Vitest, Cargo, golangci-lint) or accepts a hint via the \`tool\` parameter.
+Auto-detects tool format (ESLint, TypeScript, Vitest, Cargo, golangci-lint, etc.) from the output.
 
 Returns parsed diagnostics with file locations, severity, and tool-specific metadata.
 
-**Note:** Sensitive data (API keys, tokens, credentials) detected in the output is automatically redacted for security.
-
-AI validation is automatically enabled when the organization has \`validationEnabled\` set in their settings.`,
+**Note:** Sensitive data (API keys, tokens, credentials) detected in the output is automatically redacted for security.`,
   security: [{ apiKey: [] }],
   request: {
     body: {
@@ -74,6 +92,14 @@ AI validation is automatically enabled when the organization has \`validationEna
       },
       description: "Rate limit exceeded",
     },
+    503: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "AI extraction service unavailable",
+    },
   },
 });
 
@@ -93,25 +119,41 @@ app.use("*", apiKeyAuthMiddleware);
 app.use("*", apiKeyRateLimitMiddleware);
 
 app.openapi(diagnosticsRoute, async (c) => {
-  const { orgSettings } = c.get("apiKeyAuth");
   const body = c.req.valid("json");
 
-  // Zod validates tool against DetectedToolSchema; type assertion aligns with extract() signature
-  const result = extract(body.content, body.tool);
+  // AI extraction - no separate validation needed
+  let result: Awaited<ReturnType<typeof extractErrors>>;
+  try {
+    result = await extractErrors(body.content, {
+      apiKey: c.env.AI_GATEWAY_API_KEY,
+    });
+  } catch (err) {
+    const apiKeyAuth = c.get("apiKeyAuth");
+    console.error("AI extraction failed:", {
+      organizationId: apiKeyAuth.organizationId,
+      requestId: c.req.header("CF-Ray"),
+      message: err instanceof Error ? err.message : String(err),
+      name: err instanceof Error ? err.name : undefined,
+    });
+    return c.json(
+      { error: "AI extraction service temporarily unavailable" },
+      503
+    );
+  }
 
-  const truncated = result.diagnostics.length > MAX_DIAGNOSTICS;
-  const limitedDiagnostics = truncated
-    ? result.diagnostics.slice(0, MAX_DIAGNOSTICS)
-    : result.diagnostics;
+  const truncated = result.errors.length > MAX_DIAGNOSTICS;
+  const limitedErrors = truncated
+    ? result.errors.slice(0, MAX_DIAGNOSTICS)
+    : result.errors;
 
   if (body.mode === "lite") {
     return c.json(
       {
         mode: "lite" as const,
-        detected_tool: result.detectedTool,
-        diagnostics: limitedDiagnostics.map((d) => ({
+        detected_tool: result.detectedSource,
+        diagnostics: limitedErrors.map((d) => ({
           message: scrubSecrets(d.message),
-          file_path: d.filePath,
+          file_path: scrubFilePath(d.filePath),
           line: d.line,
           column: d.column,
         })),
@@ -121,63 +163,23 @@ app.openapi(diagnosticsRoute, async (c) => {
     );
   }
 
-  // Run AI validation if org has it enabled (limit to first 100 diagnostics to control costs)
-  // Sync validation is intentional: the validation result is part of the response body,
-  // and orgs opt in knowing there's LLM latency. Background processing would require
-  // polling/webhooks, adding complexity without clear benefit for this use case.
-  let validation: ValidationResult | undefined;
+  // Compute summary only for full mode
+  const summary = {
+    total: limitedErrors.length,
+    errors: limitedErrors.filter((e) => e.severity === "error").length,
+    warnings: limitedErrors.filter((e) => e.severity === "warning").length,
+  };
 
-  if (orgSettings.validationEnabled && result.diagnostics.length > 0) {
-    const toValidate = {
-      ...result,
-      diagnostics: result.diagnostics.slice(0, MAX_VALIDATE_DIAGNOSTICS),
-    };
-    const validationResult = await validate(body.content, toValidate);
-
-    validation = {
-      status: validationResult.validated.map((v, i) => ({
-        index: i + 1, // 1-based to match AI validation schema
-        validation: v.validation,
-        confidence: v.confidence,
-        reason: v.reason ? scrubSecrets(v.reason) : undefined,
-      })),
-      // Scrub AI-generated content to prevent secret leakage from CI output
-      missed: validationResult.missed.map((m) => ({
-        message: scrubSecrets(m.message),
-        file_path: m.filePath,
-        line: m.line,
-        severity: m.severity,
-        missed_reason: scrubSecrets(m.missedReason),
-      })),
-      summary: {
-        total: validationResult.summary.total,
-        confirmed: validationResult.summary.confirmed,
-        false_positives: validationResult.summary.falsePositives,
-        uncertain: validationResult.summary.uncertain,
-        missed: validationResult.summary.missed,
-      },
-      cost_usd: validationResult.costUsd,
-    };
-  }
-
+  // Use scrubDiagnosticResponse to sanitize all fields before returning
   return c.json(
     {
       mode: "full" as const,
-      detected_tool: result.detectedTool,
-      diagnostics: limitedDiagnostics.map((d) => ({
-        message: scrubSecrets(d.message),
-        file_path: d.filePath,
-        line: d.line,
-        column: d.column,
-        severity: d.severity ?? "error",
-        rule_id: d.ruleId,
-        stack_trace: d.stackTrace ? scrubSecrets(d.stackTrace) : undefined,
-        hints: d.hints?.map(scrubSecrets),
-        fixable: d.fixable,
-      })),
-      summary: result.summary,
+      detected_tool: result.detectedSource,
+      diagnostics: limitedErrors.map(scrubDiagnosticResponse),
+      summary,
       truncated,
-      validation,
+      // Include extraction cost in response
+      extraction_cost_usd: result.costUsd,
     },
     200
   );

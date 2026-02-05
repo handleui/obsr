@@ -1,12 +1,12 @@
 // Comment formatter for GitHub PR comments
 // Formats error summaries in a clean, scannable format
 
+import type { CIError } from "@detent/types";
 import type { JobEvaluation, JobSummary } from "./github/workflow-jobs";
 import type {
   WorkflowRunEvaluation,
   WorkflowRunSummary,
 } from "./github/workflow-runs";
-import type { ParsedError } from "./webhooks/types";
 
 export interface WorkflowRunResult {
   name: string;
@@ -22,7 +22,7 @@ export interface FormatCommentOptions {
   /** First line of the commit message (for display in footer) */
   headCommitMessage?: string;
   runs: WorkflowRunResult[];
-  errors: ParsedError[];
+  errors: CIError[];
   totalErrors: number;
   /** Unsupported tools detected from step commands */
   detectedUnsupportedTools?: string[];
@@ -170,12 +170,14 @@ interface JobErrors {
 }
 
 // Group errors by job > step for the PR comment
-const groupErrorsByJobAndStep = (errors: ParsedError[]): JobErrors[] => {
+const groupErrorsByJobAndStep = (errors: CIError[]): JobErrors[] => {
   const jobMap = new Map<string, Map<string, number>>();
 
   for (const error of errors) {
-    const job = error.workflowJob ?? "Unknown";
-    const step = error.workflowStep ?? "Unknown step";
+    const job = error.workflowJob ?? error.workflowContext?.job ?? "Unknown";
+    // Check workflowContext.step first, fall back to legacy workflowStep field (from DB records)
+    const step =
+      error.workflowContext?.step ?? error.workflowStep ?? "Unknown step";
 
     if (!jobMap.has(job)) {
       jobMap.set(job, new Map());
@@ -259,11 +261,19 @@ export const formatResultsComment = (
   const { owner, repo, headSha, headCommitMessage, runs, errors, checkRunId } =
     options;
 
-  const failedRuns = runs.filter((r) => r.conclusion === "failure");
-  const passedCount = runs.filter((r) => r.conclusion === "success").length;
-  const otherCount = runs.filter(
-    (r) => r.conclusion !== "failure" && r.conclusion !== "success"
-  ).length;
+  // Single-pass counting instead of multiple filter passes
+  let passedCount = 0;
+  let otherCount = 0;
+  const failedRuns: WorkflowRunResult[] = [];
+  for (const r of runs) {
+    if (r.conclusion === "failure") {
+      failedRuns.push(r);
+    } else if (r.conclusion === "success") {
+      passedCount++;
+    } else {
+      otherCount++;
+    }
+  }
 
   if (failedRuns.length === 0) {
     return null;
@@ -342,10 +352,16 @@ export const formatPassingComment = (
   const { runs, headSha, headCommitMessage } = options;
   const shortSha = headSha.slice(0, 7);
 
-  const passedCount = runs.filter((r) => r.conclusion === "success").length;
-  const otherCount = runs.filter(
-    (r) => r.conclusion !== "failure" && r.conclusion !== "success"
-  ).length;
+  // Single-pass counting instead of multiple filter passes
+  let passedCount = 0;
+  let otherCount = 0;
+  for (const r of runs) {
+    if (r.conclusion === "success") {
+      passedCount++;
+    } else if (r.conclusion !== "failure") {
+      otherCount++;
+    }
+  }
 
   const lines: string[] = [];
 
@@ -421,7 +437,7 @@ export interface FormatCheckRunOptions {
   repo: string;
   headSha: string;
   runs: WorkflowRunResult[];
-  errors: ParsedError[];
+  errors: CIError[];
   totalErrors: number;
   /** Unsupported tools detected from step commands */
   detectedUnsupportedTools?: string[];
@@ -455,7 +471,7 @@ const truncatePath = (path: string, maxLen = 50): string => {
 
 // === ANNOTATION HELPERS ===
 
-// Map ParsedError severity to GitHub annotation level
+// Map CIError severity to GitHub annotation level
 // "error" -> failure (red X), "warning" -> warning (yellow), else -> notice (blue info)
 const mapSeverityToAnnotationLevel = (
   severity?: string
@@ -481,7 +497,7 @@ const mapSeverityToAnnotationLevel = (
 
 // Priority scoring for errors - higher = more actionable, should appear first
 // Returns numeric score (higher = more important)
-const calculateErrorPriority = (error: ParsedError): number => {
+const calculateErrorPriority = (error: CIError): number => {
   let score = 0;
 
   // Has file path - more actionable (+100)
@@ -524,16 +540,6 @@ const calculateErrorPriority = (error: ParsedError): number => {
     score += 10;
   }
 
-  // Penalize unknown patterns and test output noise
-  // Use moderate penalty (-20) for unknownPattern since they're real errors
-  // that just didn't match a known parser - still actionable
-  if (error.unknownPattern) {
-    score -= 20;
-  }
-  if (error.possiblyTestOutput) {
-    score -= 50;
-  }
-
   // Source-based priority (well-known tools get boost)
   const knownSources = [
     "typescript",
@@ -554,12 +560,12 @@ const calculateErrorPriority = (error: ParsedError): number => {
 // Uses sentinel values that won't collide with real paths/lines:
 // - "__no_path__" instead of "unknown" (real files could be named "unknown")
 // - "__no_line__" instead of 0 (real errors can occur at line 0)
-const createErrorKey = (error: ParsedError): string => {
+const createErrorKey = (error: CIError): string => {
   return `${error.filePath ?? "__no_path__"}:${error.line ?? "__no_line__"}`;
 };
 
 // Deduplicated error with combined messages from same location
-interface DeduplicatedError extends ParsedError {
+interface DeduplicatedError extends CIError {
   combinedMessages?: string[];
   originalCount?: number;
 }
@@ -567,7 +573,7 @@ interface DeduplicatedError extends ParsedError {
 // Merge a new error into an existing deduplicated error
 const mergeIntoExisting = (
   existing: DeduplicatedError,
-  error: ParsedError
+  error: CIError
 ): void => {
   // Initialize combined messages if needed
   if (!existing.combinedMessages) {
@@ -598,8 +604,10 @@ const mergeIntoExisting = (
 
 // Deduplicate errors at same file:line by combining messages
 // Returns deduplicated errors with combined messages
-const deduplicateErrors = (errors: ParsedError[]): DeduplicatedError[] => {
+// Performance: avoids spread copies by using Object.assign only for first occurrence
+const deduplicateErrors = (errors: CIError[]): DeduplicatedError[] => {
   const errorMap = new Map<string, DeduplicatedError>();
+  const result: DeduplicatedError[] = [];
 
   for (const error of errors) {
     const key = createErrorKey(error);
@@ -608,11 +616,14 @@ const deduplicateErrors = (errors: ParsedError[]): DeduplicatedError[] => {
     if (existing) {
       mergeIntoExisting(existing, error);
     } else {
-      errorMap.set(key, { ...error });
+      // Create shallow copy only for first occurrence at each location
+      const deduped: DeduplicatedError = { ...error };
+      errorMap.set(key, deduped);
+      result.push(deduped);
     }
   }
 
-  return Array.from(errorMap.values());
+  return result;
 };
 
 // Capitalize first letter of source name for display
@@ -673,13 +684,13 @@ const generateFileUrl = (
 
 interface ErrorsByFile {
   filePath: string;
-  errors: ParsedError[];
+  errors: CIError[];
 }
 
 // Group errors by file path
 // Sorts file paths alphabetically, errors within each file by line number
-const groupErrorsByFile = (errors: ParsedError[]): ErrorsByFile[] => {
-  const grouped = new Map<string, ParsedError[]>();
+const groupErrorsByFile = (errors: CIError[]): ErrorsByFile[] => {
+  const grouped = new Map<string, CIError[]>();
 
   for (const error of errors) {
     const filePath = error.filePath ?? "__no_path__";
@@ -702,7 +713,7 @@ interface FormatTextSectionOptions {
   owner: string;
   repo: string;
   headSha: string;
-  errors: ParsedError[];
+  errors: CIError[];
 }
 
 // Maximum files to show inline before collapsing
@@ -713,10 +724,13 @@ const formatTextSection = (options: FormatTextSectionOptions): string[] => {
   const { owner, repo, headSha, errors } = options;
   const lines: string[] = [];
 
-  // Annotation note at top
-  const annotatableCount = errors.filter(
-    (e) => e.filePath && e.line && !e.possiblyTestOutput
-  ).length;
+  // Count annotatable errors (single pass)
+  let annotatableCount = 0;
+  for (const e of errors) {
+    if (e.filePath && e.line) {
+      annotatableCount++;
+    }
+  }
   if (annotatableCount > 0) {
     lines.push(
       `*${annotatableCount} error${annotatableCount === 1 ? "" : "s"} annotated inline where possible*`
@@ -798,7 +812,7 @@ const generateAnnotationTitle = (error: DeduplicatedError): string => {
     : title;
 };
 
-// Create CheckRunAnnotation from ParsedError
+// Create CheckRunAnnotation from CIError
 const createAnnotation = (error: DeduplicatedError): CheckRunAnnotation => {
   // Build the main message
   let message = error.message;
@@ -825,12 +839,7 @@ const createAnnotation = (error: DeduplicatedError): CheckRunAnnotation => {
     message = `${message.slice(0, ANNOTATION_MESSAGE_PRACTICAL_LIMIT - 3)}...`;
   }
 
-  // Determine annotation level from severity, but downgrade unknownPattern to notice
-  // (lower confidence errors from generic fallback parser shouldn't block PRs)
-  let annotationLevel = mapSeverityToAnnotationLevel(error.severity);
-  if (error.unknownPattern) {
-    annotationLevel = "notice";
-  }
+  const annotationLevel = mapSeverityToAnnotationLevel(error.severity);
 
   const annotation: CheckRunAnnotation = {
     path: error.filePath as string,
@@ -856,8 +865,17 @@ export const formatCheckRunOutput = (
   options: FormatCheckRunOptions
 ): CheckRunOutput => {
   const { owner, repo, headSha, runs, errors, totalErrors } = options;
-  const failedRuns = runs.filter((r) => r.conclusion === "failure");
-  const passedCount = runs.filter((r) => r.conclusion === "success").length;
+
+  // Single-pass counting instead of multiple filter passes
+  const failedRuns: WorkflowRunResult[] = [];
+  let passedCount = 0;
+  for (const r of runs) {
+    if (r.conclusion === "failure") {
+      failedRuns.push(r);
+    } else if (r.conclusion === "success") {
+      passedCount++;
+    }
+  }
 
   // === SUMMARY: Workflow table (concise, shown in check panel) ===
   const summaryLines: string[] = [];
@@ -925,15 +943,13 @@ export const formatCheckRunOutput = (
   }
 
   // === ANNOTATIONS: Inline file annotations ===
-  // Sort errors by priority (most actionable first) for annotations
-  const sortedErrors = [...errors].sort(
-    (a, b) => calculateErrorPriority(b) - calculateErrorPriority(a)
-  );
-
+  // Filter first, then sort (smaller array to sort = better performance)
   // Filter to errors with file path and line number (required for annotations)
-  // Also filter out test output noise (vitest/jest progress, etc.)
-  const errorsWithPath = sortedErrors.filter(
-    (e) => e.filePath && e.line && !e.possiblyTestOutput
+  const annotatableErrors = errors.filter((e) => e.filePath && e.line);
+
+  // Sort by priority (most actionable first) for annotations
+  annotatableErrors.sort(
+    (a, b) => calculateErrorPriority(b) - calculateErrorPriority(a)
   );
 
   // Deduplicate errors at same file:line to reduce annotation noise
@@ -941,7 +957,7 @@ export const formatCheckRunOutput = (
   // 1. Input is already sorted by priority (highest first)
   // 2. Map preserves insertion order
   // 3. First error at each file:line has highest priority for that location
-  const deduplicatedErrors = deduplicateErrors(errorsWithPath);
+  const deduplicatedErrors = deduplicateErrors(annotatableErrors);
 
   // Create annotations using helper (max 50 per request)
   // Helper handles: severity-based levels, rich titles, raw_details, column info
@@ -1383,8 +1399,16 @@ export const formatCheckSummary = (
   runs: WorkflowRunResult[],
   totalErrors: number
 ): string => {
-  const failedRuns = runs.filter((r) => r.conclusion === "failure");
-  const passedCount = runs.filter((r) => r.conclusion === "success").length;
+  // Single-pass counting instead of multiple filter passes
+  const failedRuns: WorkflowRunResult[] = [];
+  let passedCount = 0;
+  for (const r of runs) {
+    if (r.conclusion === "failure") {
+      failedRuns.push(r);
+    } else if (r.conclusion === "success") {
+      passedCount++;
+    }
+  }
 
   const lines: string[] = [];
 

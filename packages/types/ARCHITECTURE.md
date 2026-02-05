@@ -9,16 +9,15 @@ Shared type definitions for the Detent platform. Primarily TypeScript interfaces
 ```
                           index.ts (barrel)
                                │
-   ┌──────────┬───────────┬────┼────┬──────────┬──────────┬─────────────┬──────────┐
-   ▼          ▼           ▼    ▼    ▼          ▼          ▼             ▼          ▼
-category  severity    source context events context-parser fingerprint sanitize error
-   .ts       .ts        .ts    .ts    .ts        .ts          .ts        .ts      .ts
-   │          │           │      │
-   └──────────┴───────────┴──────┘
-                    │
-                    ▼
-                error.ts
-             (core type)
+   ┌──────────┬───────────┬────┼────┬──────────┬──────────┬─────────────┬──────────┬────────────┐
+   ▼          ▼           ▼    ▼    ▼          ▼          ▼             ▼          ▼            ▼
+category  severity    source context events context-parser fingerprint sanitize error    diagnostic
+   .ts       .ts        .ts    .ts    .ts        .ts          .ts        .ts      .ts         .ts
+                                                                                               │
+                                                                                   ┌───────────┤
+                                                                                   ▼           ▼
+                                                                              CIError    CIErrorSchema
+                                                                           (core type)   (validation)
 ```
 
 ---
@@ -35,47 +34,52 @@ category  severity    source context events context-parser fingerprint sanitize 
 | `events.ts` | JobEvent, StepEvent, ManifestInfo, JobStatuses, StepStatuses | CI lifecycle events |
 | `fingerprint.ts` | ErrorFingerprints, ErrorSignature, ErrorOccurrence | Error deduplication and tracking |
 | `sanitize.ts` | RedactionPattern, redactPII, redactSensitiveData, sanitizeForTelemetry | PII/secret redaction utilities |
-| `error.ts` | ExtractedError, MutableExtractedError | Core error representation |
+| `error.ts` | ExtractedError, MutableExtractedError | Core error representation (deprecated, use diagnostic.ts) |
+| `diagnostic.ts` | CIError, CIErrorSchema, CodeSnippetSchema, WorkflowContextSchema | Unified CI error schema with Zod validation |
 | `index.ts` | — | Barrel exports |
 
 ---
 
-## Core Type: ExtractedError
+## Core Type: CIError
 
-The canonical error representation used across all packages:
+The unified CI error schema used across all packages. Defined in `diagnostic.ts` with Zod validation.
 
 ```
-ExtractedError
-├── Location
-│   ├── filePath, line, column
-│   └── lineKnown, columnKnown (validity flags)
+CIError
+├── Core
+│   └── message (required, max 10k chars)
 │
-├── Content
-│   ├── message, raw, stackTrace
-│   └── messageTruncated, stackTraceTruncated
+├── Location
+│   ├── filePath (max 1k chars)
+│   ├── line (1-indexed)
+│   └── column
 │
 ├── Classification
-│   ├── category (lint, type-check, test...)
 │   ├── severity (error, warning)
-│   ├── source (typescript, biome, go...)
-│   └── ruleId (TS2749, no-var...)
+│   ├── category (lint, type-check, test, compile, runtime...)
+│   ├── source (biome, eslint, typescript, go, vitest...)
+│   └── ruleId (TS2304, no-unused-vars...)
 │
 ├── Context
-│   ├── workflowContext (job, step, action)
-│   ├── workflowJob (flattened)
-│   └── codeSnippet (surrounding code)
+│   ├── raw (original tool output)
+│   ├── stackTrace (for test/runtime errors)
+│   ├── codeSnippet { lines, startLine, errorLine, language }
+│   └── hints (fix suggestions from tool)
 │
-├── AI Hints
-│   ├── suggestions (fix hints from tools)
-│   ├── hint (actionable guidance)
-│   └── fixable (auto-fixable by tool)
+├── Metadata
+│   ├── fixable (tool can auto-fix)
+│   └── relatedFiles (parsed from stackTrace)
 │
-└── Metadata
-    ├── unknownPattern (fallback parser match)
-    ├── isInfrastructure (CI config vs code)
-    ├── exitCode (process failure)
-    └── possiblyTestOutput (noise detection)
+└── Workflow (action enriches)
+    ├── workflowContext { job, step, action }
+    └── workflowJob (flattened)
 ```
+
+**Data flow**: parsers populate location/classification → AI extraction adds context/hints → action enriches with workflow info.
+
+### Deprecated: ExtractedError
+
+`ExtractedError` and `MutableExtractedError` in `error.ts` are deprecated aliases for `CIError`. They exist for backward compatibility but all new code should use `CIError` and `CIErrorSchema`.
 
 ---
 
@@ -134,7 +138,8 @@ readonly filePath?: string;
 
 | Package | Usage |
 |---------|-------|
-| `@detent/healing` | Reads ExtractedError for AI prompt generation, validation |
+| `@detent/extract` | Uses CIError, CIErrorSchema for error extraction and validation |
+| `@detent/healing` | Reads CIError for AI prompt generation, validation |
 | `@detent/lore` | Uses ErrorFingerprints, ErrorSource for error signature tracking |
 | `apps/api` | Stores/retrieves errors, uses ErrorCategory, ErrorSource, CodeSnippet |
 | `apps/cli` | Uses redactSensitiveData for config sanitization |
@@ -150,12 +155,12 @@ readonly filePath?: string;
 
 ### Growth Strategies
 
-**If ExtractedError grows too large:**
+**If CIError grows too large:**
 ```typescript
-// Split into composable interfaces
-interface ErrorLocation { filePath?: string; line?: number; ... }
-interface ErrorClassification { category?: ...; severity?: ...; }
-interface ExtractedError extends ErrorLocation, ErrorClassification { ... }
+// Split into composable schemas
+const ErrorLocationSchema = z.object({ filePath: ..., line: ..., column: ... });
+const ErrorClassificationSchema = z.object({ category: ..., severity: ..., source: ... });
+const CIErrorSchema = ErrorLocationSchema.merge(ErrorClassificationSchema).extend({ ... });
 ```
 
 **If package grows beyond ~15 types:**

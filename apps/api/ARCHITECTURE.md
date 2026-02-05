@@ -71,6 +71,7 @@ Request --> CORS --> Security Headers --> Sentry Context --> Route Handlers
 
 ### API Key Routes (X-Detent-Token)
 - `POST /report` - Error reports from GitHub Actions
+- `POST /v1/diagnostics` - AI-powered error extraction from CI logs
 - `POST /v1/heal/autofix-result` - Autofix results from actions
 
 ### Protected Routes (JWT + Rate Limiting)
@@ -186,7 +187,7 @@ workflows       (idempotency)
    |               |
    +-------+-------+
            |
-   Query job-reported errors
+   Query AI-extracted errors
    (from /report endpoint)
            |
    +-------+-------+
@@ -241,7 +242,6 @@ orchestrateHeals()
 ### services/webhooks/
 
 Shared webhook utilities:
-- Error parsing and classification
 - DB operations (run existence checks, org settings)
 - Comment formatting
 - Job fetching with rate limit awareness
@@ -251,7 +251,13 @@ Shared webhook utilities:
 ### GitHub Actions (detent-action)
 
 ```
-Action runs in CI --> Parses errors --> POST /report --> DB stores errors
+Action runs in CI --> Sends logs --> POST /v1/diagnostics --> AI extracts errors
+                                              |
+                                              v
+                                     POST /report (errors)
+                                              |
+                                              v
+                                     DB stores errors
                                               |
                                               v
                                      Webhook completes
@@ -272,6 +278,8 @@ Action runs in CI --> Parses errors --> POST /report --> DB stores errors
                                      Update heal status
                                      (optional: auto-commit)
 ```
+
+The `/v1/diagnostics` endpoint uses Claude Haiku to extract structured errors from raw CI logs. This AI-based extraction handles diverse log formats without requiring format-specific parsers.
 
 ### Healer Service (Railway)
 

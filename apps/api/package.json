@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@detent/ai": "*",
-    "@detent/diagnostics": "*",
+    "@detent/extract": "*",
     "@detent/healing": "*",
     "@detent/lore": "*",
     "@detent/sentry": "workspace:*",

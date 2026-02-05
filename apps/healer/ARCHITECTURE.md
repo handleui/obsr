@@ -5,20 +5,32 @@ The Healer is a standalone Railway-deployed service that executes AI-powered hea
 ## System Overview
 
 ```
-+------------------+     poll      +------------------+     clone     +------------------+
-|                  | <------------ |                  | ------------> |                  |
-|   Detent API     |               |     Healer       |               |   E2B Sandbox    |
-|  (Cloudflare)    | ------------> |    (Railway)     | <------------ |   (Ephemeral)    |
-|                  |    update     |                  |     patch     |                  |
-+------------------+               +------------------+               +------------------+
-                                          |
-                                          | API calls
-                                          v
-                                   +------------------+
-                                   |   AI Gateway     |
-                                   |  (Claude Sonnet) |
-                                   +------------------+
++-------------+    logs    +------------------+     poll      +------------------+
+|             | ---------> |                  | <------------ |                  |
+|   CI Run    |            |   Detent API     |               |     Healer       |
+|             |            |  (Cloudflare)    | ------------> |    (Railway)     |
++-------------+            |                  |    update     |                  |
+      |                    +------------------+               +------------------+
+      | extract errors            ^                                  |    |
+      v (Claude Haiku)            |                                  |    | clone
++-------------+                   |                                  |    v
+|  packages/  |                   |                           +------------------+
+|   extract   |-------------------+                           |   E2B Sandbox    |
++-------------+      errors                                   |   (Ephemeral)    |
+                                                              +------------------+
+                                                                     ^
+                                                                     | API calls
+                                                                     v
+                                                              +------------------+
+                                                              |   AI Gateway     |
+                                                              | (Claude/Codex)   |
+                                                              +------------------+
 ```
+
+### Two-Stage AI Pipeline
+
+1. **Extraction (Claude Haiku)**: Parses raw CI logs to identify structured errors with file paths, line numbers, and messages
+2. **Healing (Claude/Codex)**: Receives pre-extracted errors and generates fixes in an isolated sandbox
 
 ## Heal Execution Lifecycle
 
@@ -81,7 +93,8 @@ The Healer is a standalone Railway-deployed service that executes AI-powered hea
    - Fetch project, organization, and run data
    - Get GitHub installation token via App JWT
    - Build authenticated clone URL
-   - Format run errors into user prompt
+   - Receive pre-extracted errors (structured by Haiku during ingestion)
+   - Format errors into user prompt for healing
 
 3. **Sandbox Setup** (timeout: 600s)
    - Create fresh E2B sandbox (`base` template)
@@ -135,6 +148,8 @@ interface SandboxService {
 - Log truncation (10KB max)
 
 ## AI Healing Loop Integration
+
+The Healer receives structured errors that have already been extracted from raw CI logs by Claude Haiku (see `packages/extract`). This separation allows fast, cost-effective extraction at ingestion time while reserving more capable models for the actual healing process.
 
 ### Architecture
 

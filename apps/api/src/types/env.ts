@@ -82,4 +82,8 @@ export interface Env {
   CONVEX_URL: string;
   // Service token for Convex function access
   CONVEX_SERVICE_TOKEN: string;
+
+  // AI Gateway API key for AI extraction (generateObject/generateText)
+  // Required for @detent/extract to work with the Vercel AI Gateway
+  AI_GATEWAY_API_KEY: string;
 }

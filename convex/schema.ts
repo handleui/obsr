@@ -1,6 +1,13 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+import {
+  nullableBoolean,
+  nullableNumber,
+  nullableString,
+  nullableStringArray,
+} from "./validators";
+
 const healStatus = v.union(
   v.literal("found"),
   v.literal("pending"),
@@ -27,11 +34,6 @@ const invitationStatus = v.union(
   v.literal("expired"),
   v.literal("revoked")
 );
-
-const nullableString = v.union(v.string(), v.null());
-const nullableNumber = v.union(v.number(), v.null());
-const nullableBoolean = v.union(v.boolean(), v.null());
-const nullableStringArray = v.union(v.array(v.string()), v.null());
 
 const usageEventName = v.union(v.literal("ai"), v.literal("sandbox"));
 const usageMetadata = v.object({
@@ -219,8 +221,6 @@ export default defineSchema({
     workflowJob: v.optional(nullableString),
     workflowStep: v.optional(nullableString),
     workflowAction: v.optional(nullableString),
-    unknownPattern: v.optional(nullableBoolean),
-    lineKnown: v.optional(nullableBoolean),
     codeSnippet: v.optional(
       v.union(
         v.object({
@@ -232,7 +232,9 @@ export default defineSchema({
         v.null()
       )
     ),
-    possiblyTestOutput: v.optional(nullableBoolean),
+    // Migration note: unknownPattern and lineKnown fields removed in favor of
+    // AI-powered extraction. relatedFiles populated from stack trace parsing.
+    relatedFiles: v.optional(nullableStringArray),
     fixable: v.optional(nullableBoolean),
     signatureId: v.optional(v.union(v.id("errorSignatures"), v.null())),
     createdAt: v.number(),

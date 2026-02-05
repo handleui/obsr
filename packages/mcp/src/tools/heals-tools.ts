@@ -8,7 +8,10 @@ import { z } from "zod";
 import { formatErrorResponse } from "../utils/errors.js";
 
 export const registerHealsTools = (server: McpServer, client: DetentClient) => {
-  // Cast to any to avoid complex type inference that causes OOM
+  // HACK: Cast to simplified interface to avoid OOM during TypeScript compilation.
+  // The MCP SDK's McpServer type has complex generic inference that exhausts memory
+  // on large projects. This workaround provides type-safe method signatures without
+  // the full type complexity. Revisit when @modelcontextprotocol/sdk improves types.
   const srv = server as unknown as {
     registerTool: (
       name: string,
@@ -16,6 +19,9 @@ export const registerHealsTools = (server: McpServer, client: DetentClient) => {
       handler: (args: Record<string, unknown>) => Promise<unknown>
     ) => void;
   };
+
+  // Note: MCP SDK validates args against inputSchema before invoking handlers.
+  // Type casts below are safe because validation occurs at the framework level.
 
   srv.registerTool(
     "detent_list_heals",

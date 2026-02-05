@@ -41,36 +41,25 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CLI_TAG_NAME: ${{ steps.release.outputs['apps/cli--tag_name'] }}
 
-      # npm package publishing setup (shared)
+      # npm package publishing setup
       - name: Setup Node for npm publish
-        if: ${{ steps.release.outputs['packages/diagnostics--release_created'] || steps.release.outputs['packages/sdk--release_created'] }}
+        if: ${{ steps.release.outputs['packages/sdk--release_created'] }}
         uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
 
       - name: Setup Bun
-        if: ${{ steps.release.outputs['packages/diagnostics--release_created'] || steps.release.outputs['packages/sdk--release_created'] }}
+        if: ${{ steps.release.outputs['packages/sdk--release_created'] }}
         uses: oven-sh/setup-bun@v2
 
       - name: Update npm for trusted publishing
-        if: ${{ steps.release.outputs['packages/diagnostics--release_created'] || steps.release.outputs['packages/sdk--release_created'] }}
+        if: ${{ steps.release.outputs['packages/sdk--release_created'] }}
         run: npm install -g npm@latest
 
       - name: Install dependencies
-        if: ${{ steps.release.outputs['packages/diagnostics--release_created'] || steps.release.outputs['packages/sdk--release_created'] }}
+        if: ${{ steps.release.outputs['packages/sdk--release_created'] }}
         run: bun install
-
-      # diagnostics package
-      - name: Build diagnostics
-        if: ${{ steps.release.outputs['packages/diagnostics--release_created'] }}
-        run: bun run build
-        working-directory: packages/diagnostics
-
-      - name: Publish @detent/diagnostics
-        if: ${{ steps.release.outputs['packages/diagnostics--release_created'] }}
-        run: npm publish
-        working-directory: packages/diagnostics
 
       # sdk package
       - name: Build SDK

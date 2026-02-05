@@ -10,7 +10,27 @@ export type {
   LineContext,
   ParseLineResult,
 } from "./context-parser.js";
-export type { ExtractedError, MutableExtractedError } from "./error.js";
+export type {
+  CICodeSnippet,
+  CIError,
+  CIWorkflowContext,
+} from "./diagnostic.js";
+
+/** @deprecated Use CIError instead */
+export type { DiagnosticError } from "./diagnostic.js";
+/** @deprecated Use CIError instead */
+export type { ExtractedError } from "./diagnostic.js";
+/** @deprecated Use CIError instead */
+export type { MutableExtractedError } from "./diagnostic.js";
+
+export {
+  CIErrorSchema,
+  CodeSnippetSchema,
+  ErrorCategorySchema,
+  ErrorSeveritySchema,
+  ErrorSourceSchema,
+  WorkflowContextSchema,
+} from "./diagnostic.js";
 export type {
   JobEvent,
   JobStatus,

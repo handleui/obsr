@@ -158,9 +158,21 @@ describe("formatResultsComment", () => {
         createOptions({
           runs: [{ name: "CI", id: 123, conclusion: "failure", errorCount: 5 }],
           errors: [
-            { message: "Error 1", workflowJob: "CI", workflowStep: "test" },
-            { message: "Error 2", workflowJob: "CI", workflowStep: "test" },
-            { message: "Error 3", workflowJob: "CI", workflowStep: "lint" },
+            {
+              message: "Error 1",
+              workflowJob: "CI",
+              workflowContext: { step: "test" },
+            },
+            {
+              message: "Error 2",
+              workflowJob: "CI",
+              workflowContext: { step: "test" },
+            },
+            {
+              message: "Error 3",
+              workflowJob: "CI",
+              workflowContext: { step: "lint" },
+            },
           ],
         })
       );
@@ -170,6 +182,31 @@ describe("formatResultsComment", () => {
       // Should show steps as bullet points (bold, not backticks, to avoid formatting issues)
       expect(result).toContain("- **test** · 2 errors");
       expect(result).toContain("- **lint** · 1 error");
+    });
+
+    it("falls back to legacy workflowStep field when workflowContext.step is missing", () => {
+      // Simulate errors coming from DB with workflowStep instead of workflowContext.step
+      const result = formatResultsComment(
+        createOptions({
+          runs: [{ name: "CI", id: 123, conclusion: "failure", errorCount: 2 }],
+          errors: [
+            {
+              message: "Error 1",
+              workflowJob: "CI",
+              workflowStep: "build",
+            } as Parameters<typeof formatResultsComment>[0]["errors"][number],
+            {
+              message: "Error 2",
+              workflowJob: "CI",
+              workflowStep: "test",
+            } as Parameters<typeof formatResultsComment>[0]["errors"][number],
+          ],
+        })
+      );
+
+      // Should show steps from legacy workflowStep field
+      expect(result).toContain("- **build** · 1 error");
+      expect(result).toContain("- **test** · 1 error");
     });
   });
 
@@ -537,7 +574,7 @@ describe("formatCheckRunOutput", () => {
       // Create 12 files to trigger overflow
       const errors = Array.from({ length: 12 }, (_, i) => ({
         message: `Error ${i + 1}`,
-        source: "typescript",
+        source: "typescript" as const,
         filePath: `src/file${i + 1}.ts`,
         line: i + 1,
       }));
@@ -601,7 +638,7 @@ describe("formatCheckRunOutput", () => {
     it("should handle more than 10 errors in same file", () => {
       const errors = Array.from({ length: 25 }, (_, i) => ({
         message: `Error ${i + 1}`,
-        source: "typescript",
+        source: "typescript" as const,
         filePath: "test.ts",
         line: i + 1,
       }));
@@ -923,7 +960,7 @@ describe("severity upgrade logic", () => {
     ...overrides,
   });
 
-  it("upgrades notice to warning when merging errors at same location", () => {
+  it("keeps failure level when merging errors at same location (undefined severity defaults to failure)", () => {
     const result = formatCheckRunOutput(
       createCheckRunOptions({
         errors: [
@@ -931,24 +968,24 @@ describe("severity upgrade logic", () => {
             message: "Info message",
             filePath: "src/app.ts",
             line: 10,
-            severity: "info", // maps to notice
-            source: "typescript",
+            // No severity -> defaults to failure (conservative for CI)
+            source: "typescript" as const,
           },
           {
             message: "Warning message",
             filePath: "src/app.ts",
             line: 10,
-            severity: "warning", // maps to warning
-            source: "typescript",
+            severity: "warning" as const,
+            source: "typescript" as const,
           },
         ],
         totalErrors: 2,
       })
     );
 
-    // Should have one annotation (deduplicated) with warning level
+    // Should have one annotation (deduplicated) - undefined maps to failure which is highest
     expect(result.annotations).toHaveLength(1);
-    expect(result.annotations?.[0]?.annotation_level).toBe("warning");
+    expect(result.annotations?.[0]?.annotation_level).toBe("failure");
   });
 
   it("upgrades warning to failure when merging errors at same location", () => {
@@ -959,15 +996,15 @@ describe("severity upgrade logic", () => {
             message: "Warning message",
             filePath: "src/app.ts",
             line: 10,
-            severity: "warning",
-            source: "typescript",
+            severity: "warning" as const,
+            source: "typescript" as const,
           },
           {
             message: "Error message",
             filePath: "src/app.ts",
             line: 10,
-            severity: "error", // maps to failure
-            source: "typescript",
+            severity: "error" as const,
+            source: "typescript" as const,
           },
         ],
         totalErrors: 2,
@@ -978,7 +1015,7 @@ describe("severity upgrade logic", () => {
     expect(result.annotations?.[0]?.annotation_level).toBe("failure");
   });
 
-  it("upgrades notice to failure when merging errors at same location", () => {
+  it("keeps failure level when both errors map to failure", () => {
     const result = formatCheckRunOutput(
       createCheckRunOptions({
         errors: [
@@ -986,15 +1023,15 @@ describe("severity upgrade logic", () => {
             message: "Info message",
             filePath: "src/app.ts",
             line: 10,
-            severity: "info",
-            source: "typescript",
+            // No severity -> defaults to failure
+            source: "typescript" as const,
           },
           {
             message: "Error message",
             filePath: "src/app.ts",
             line: 10,
-            severity: "error",
-            source: "typescript",
+            severity: "error" as const,
+            source: "typescript" as const,
           },
         ],
         totalErrors: 2,
@@ -1013,15 +1050,15 @@ describe("severity upgrade logic", () => {
             message: "Error message",
             filePath: "src/app.ts",
             line: 10,
-            severity: "error",
-            source: "typescript",
+            severity: "error" as const,
+            source: "typescript" as const,
           },
           {
             message: "Info message",
             filePath: "src/app.ts",
             line: 10,
-            severity: "info",
-            source: "typescript",
+            // No severity = notice level
+            source: "typescript" as const,
           },
         ],
         totalErrors: 2,
@@ -1052,11 +1089,20 @@ describe("GitHub API limits", () => {
     // Each error + markdown structure adds ~300-400 chars
     // 200 errors * ~350 chars = ~70000 chars
     const longMessage = "A".repeat(400);
+    const sources = [
+      "typescript",
+      "eslint",
+      "biome",
+      "vitest",
+      "rust",
+      "go",
+      "python",
+    ] as const;
     const errors = Array.from({ length: 200 }, (_, i) => ({
       message: `${longMessage} error ${i + 1}`,
       filePath: `src/very/long/deeply/nested/directory/structure/path/file${i}.ts`,
       line: i + 1,
-      source: `source${i % 20}`, // 20 different sources = more section headers
+      source: sources[i % sources.length],
     }));
 
     const result = formatCheckRunOutput(
@@ -1076,7 +1122,7 @@ describe("GitHub API limits", () => {
       message: `Error ${i + 1}`,
       filePath: `src/file${i}.ts`,
       line: i + 1,
-      source: "typescript",
+      source: "typescript" as const,
     }));
 
     const result = formatCheckRunOutput(
@@ -1095,7 +1141,7 @@ describe("GitHub API limits", () => {
       message: `Error ${i}`,
       filePath: `src/file${i}.ts`,
       line: i + 1,
-      source: "typescript",
+      source: "typescript" as const,
     }));
 
     const result = formatCheckRunOutput(

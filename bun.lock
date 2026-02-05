@@ -24,7 +24,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@detent/ai": "*",
-        "@detent/diagnostics": "*",
+        "@detent/extract": "*",
         "@detent/healing": "*",
         "@detent/lore": "*",
         "@detent/sandbox": "*",
@@ -180,7 +180,7 @@
       "dependencies": {
         "@actions/core": "^1.10.0",
         "@actions/github": "^6.0.0",
-        "@detent/diagnostics": "*",
+        "@detent/types": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "^22.0.0",
@@ -193,7 +193,6 @@
       "version": "0.0.1",
       "dependencies": {
         "@ai-sdk/provider": "^3.0.7",
-        "@detent/diagnostics": "workspace:*",
         "ai": "^5.0.0",
         "zod": "^3.25.34",
       },
@@ -204,13 +203,21 @@
         "vitest": "^4.0.16",
       },
     },
-    "packages/diagnostics": {
-      "name": "@detent/diagnostics",
-      "version": "1.1.1",
+    "packages/extract": {
+      "name": "@detent/extract",
+      "version": "0.0.1",
+      "dependencies": {
+        "@ai-sdk/gateway": "^2.0.0",
+        "@ai-sdk/provider": "^3.0.7",
+        "@detent/ai": "workspace:*",
+        "@detent/types": "workspace:*",
+        "ai": "^5.0.0",
+        "zod": "^3.25.34",
+      },
       "devDependencies": {
         "@detent/typescript-config": "*",
-        "@types/node": "^22.0.0",
-        "typescript": "5.9.2",
+        "@types/node": "^22.15.3",
+        "typescript": "^5.9.3",
         "vitest": "^4.0.16",
       },
     },
@@ -263,7 +270,7 @@
         "detent-mcp": "./dist/index.js",
       },
       "dependencies": {
-        "@detent/sdk": "*",
+        "@detent/sdk": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.25.3",
         "zod": "^3.25.42",
       },
@@ -313,7 +320,14 @@
       "devDependencies": {
         "@detent/typescript-config": "*",
         "typescript": "^5.9.3",
+        "zod": "^3.25.34",
       },
+      "peerDependencies": {
+        "zod": "^3.25.0",
+      },
+      "optionalPeers": [
+        "zod",
+      ],
     },
     "packages/typescript-config": {
       "name": "@detent/typescript-config",
@@ -460,7 +474,7 @@
 
     "@detent/cli": ["@detent/cli@workspace:apps/cli"],
 
-    "@detent/diagnostics": ["@detent/diagnostics@workspace:packages/diagnostics"],
+    "@detent/extract": ["@detent/extract@workspace:packages/extract"],
 
     "@detent/git": ["@detent/git@workspace:packages/git"],
 
@@ -2625,8 +2639,6 @@
     "@detent/api/zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
 
     "@detent/cli/@types/node": ["@types/node@25.0.8", "", { "dependencies": { "undici-types": "~7.16.0" } }, "sha512-powIePYMmC3ibL0UJ2i2s0WIbq6cg6UyVFQxSCpaPxxzAaziRfimGivjdF943sSGV6RADVbk0Nvlm5P/FB44Zg=="],
-
-    "@detent/diagnostics/typescript": ["typescript@5.9.2", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-CWBzXQrc/qOkhidw1OzBTQuYRbfyxDXJMVJ1XNwUHGROVmuaeiEm3OslpZ1RV96d7SKKjZKrSJu3+t/xlw3R9A=="],
 
     "@detent/git/@types/node": ["@types/node@25.0.8", "", { "dependencies": { "undici-types": "~7.16.0" } }, "sha512-powIePYMmC3ibL0UJ2i2s0WIbq6cg6UyVFQxSCpaPxxzAaziRfimGivjdF943sSGV6RADVbk0Nvlm5P/FB44Zg=="],
 

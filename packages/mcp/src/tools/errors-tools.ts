@@ -4,7 +4,6 @@
 
 import type { DetentClient } from "@detent/sdk";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { formatErrorResponse } from "../utils/errors.js";
 
@@ -12,7 +11,16 @@ export const registerErrorsTools = (
   server: McpServer,
   client: DetentClient
 ) => {
-  server.registerTool(
+  // Cast to any to avoid complex type inference that causes OOM
+  const srv = server as unknown as {
+    registerTool: (
+      name: string,
+      opts: { description: string; inputSchema: Record<string, unknown> },
+      handler: (args: Record<string, unknown>) => Promise<unknown>
+    ) => void;
+  };
+
+  srv.registerTool(
     "detent_get_errors",
     {
       description: `Get CI errors for a specific commit in a repository.
@@ -29,12 +37,13 @@ Returns errors from failed CI runs including:
           .describe('Repository full name (e.g., "owner/repo")'),
       },
     },
-    async (args: {
-      commit: string;
-      repository: string;
-    }): Promise<CallToolResult> => {
+    async (args) => {
       try {
-        const result = await client.errors.get(args.commit, args.repository);
+        const { commit, repository } = args as {
+          commit: string;
+          repository: string;
+        };
+        const result = await client.errors.get(commit, repository);
         return {
           content: [{ type: "text", text: JSON.stringify(result) }],
         };

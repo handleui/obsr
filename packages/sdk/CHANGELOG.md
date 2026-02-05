@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/detentsh/detent/compare/sdk-v0.2.0...sdk-v0.3.0) (2026-02-05)
+
+
+### Features
+
+* migrate diagnostics to AI-based extraction ([#166](https://github.com/detentsh/detent/issues/166)) ([7ac78f5](https://github.com/detentsh/detent/commit/7ac78f5adbac5fa75a7029e91371887905ee0c3e))
+* migrate diagnostics to AI-based extraction and remove action package ([#162](https://github.com/detentsh/detent/issues/162)) ([3f8311e](https://github.com/detentsh/detent/commit/3f8311ea5811f86528d2f583ccee28b4bdeeb5b3))
+
+
+### Bug Fixes
+
+* add CI log line tracking and restore critical comments ([#167](https://github.com/detentsh/detent/issues/167)) ([3adc772](https://github.com/detentsh/detent/commit/3adc7723d7288671fda07ea89c049671bff5aa97))
+
 ## [0.2.0](https://github.com/detentsh/detent/compare/sdk-v0.1.2...sdk-v0.2.0) (2026-02-05)
 
 

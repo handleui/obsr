@@ -25,6 +25,7 @@
 export { createClient, DetentClient } from "./client.js";
 export * from "./errors.js";
 export * from "./types.js";
+export { sanitizeCredentials, CREDENTIAL_PATTERNS } from "./utils/sanitize.js";
 
 // Re-export resource classes for advanced use cases
 export { AuthResource } from "./resources/auth.js";

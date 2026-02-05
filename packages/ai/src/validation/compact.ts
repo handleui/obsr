@@ -41,6 +41,15 @@ const HOMOGLYPH_MAP: Record<string, string> = {
   Υ: "Y",
   Ζ: "Z",
   ο: "o",
+  α: "a",
+  ε: "e",
+  ι: "i",
+  κ: "k",
+  ν: "v",
+  ρ: "p",
+  τ: "t",
+  υ: "u",
+  χ: "x",
   // Fullwidth variants
   "＜": "<",
   "＞": ">",
@@ -51,13 +60,48 @@ const HOMOGLYPH_MAP: Record<string, string> = {
   ȷ: "j",
   ｉ: "i",
   ｏ: "o",
+  ɑ: "a",
+  ɡ: "g",
+  ɴ: "N",
+  ʀ: "R",
+  ʏ: "Y",
+  ꓱ: "E",
+  ꓲ: "I",
+  ꓳ: "O",
+  // Mathematical alphanumerics (sometimes used in obfuscation)
+  𝐚: "a",
+  𝐛: "b",
+  𝐜: "c",
+  𝐝: "d",
+  𝐞: "e",
+  𝐟: "f",
+  𝐠: "g",
+  𝐡: "h",
+  𝐢: "i",
+  𝐣: "j",
+  𝐤: "k",
+  𝐥: "l",
+  𝐦: "m",
+  𝐧: "n",
+  𝐨: "o",
+  𝐩: "p",
+  𝐪: "q",
+  𝐫: "r",
+  𝐬: "s",
+  𝐭: "t",
+  𝐮: "u",
+  𝐯: "v",
+  𝐰: "w",
+  𝐱: "x",
+  𝐲: "y",
+  𝐳: "z",
 };
 
 /**
  * Normalizes Unicode text to ASCII equivalents for pattern matching.
  * Uses NFKD normalization + homoglyph replacement to defeat bypass attempts.
  */
-const _normalizeToAscii = (text: string): string => {
+const normalizeToAscii = (text: string): string => {
   // First apply NFKD normalization and strip combining marks
   const normalized = text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
 
@@ -102,9 +146,11 @@ const PROMPT_INJECTION_PATTERNS = [
 /**
  * Sanitizes content to prevent prompt injection attacks.
  * Removes or neutralizes patterns that could manipulate the LLM.
+ * Normalizes Unicode to ASCII first to prevent homoglyph bypasses.
  */
 export const sanitizeForPrompt = (content: string): string => {
-  let result = content;
+  // Normalize Unicode to ASCII to catch homoglyph bypass attempts
+  let result = normalizeToAscii(content);
   for (const pattern of PROMPT_INJECTION_PATTERNS) {
     result = result.replace(pattern, "[FILTERED]");
   }

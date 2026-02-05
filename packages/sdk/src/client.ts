@@ -14,6 +14,7 @@ import { MembersResource } from "./resources/members.js";
 import { OrganizationsResource } from "./resources/organizations.js";
 import { ProjectsResource } from "./resources/projects.js";
 import type { AuthConfig, DetentConfig } from "./types.js";
+import { sanitizeCredentials } from "./utils/sanitize.js";
 
 const DEFAULT_BASE_URL = "https://backend.detent.sh";
 const DEFAULT_TIMEOUT = 30_000;
@@ -145,11 +146,7 @@ export class DetentClient {
 
       // Sanitize error messages that might contain sensitive data
       if (error instanceof Error) {
-        const sanitizedMessage = error.message
-          .replace(/Bearer\s+[^\s]+/gi, "Bearer [REDACTED]")
-          .replace(/dtk_[^\s"']+/gi, "[REDACTED_KEY]")
-          .replace(/token[=:]\s*[^\s"']+/gi, "token=[REDACTED]");
-        const sanitizedError = new Error(sanitizedMessage);
+        const sanitizedError = new Error(sanitizeCredentials(error.message));
         sanitizedError.name = error.name;
         throw sanitizedError;
       }
@@ -171,14 +168,9 @@ export class DetentClient {
         .catch(() => ({}))) as ApiErrorResponse;
 
       // Sanitize error messages to prevent leaking sensitive data
-      let errorMessage = errorData.error ?? `API request failed: ${response.status}`;
-      errorMessage = errorMessage
-        .replace(/Bearer\s+[^\s]+/gi, "Bearer [REDACTED]")
-        .replace(/dtk_[^\s"']+/gi, "[REDACTED_KEY]")
-        .replace(/token[=:]\s*[^\s"']+/gi, "token=[REDACTED]")
-        .replace(/"?access_token"?\s*[:=]\s*[^\s,}]+/gi, "access_token=[REDACTED]")
-        .replace(/"?refresh_token"?\s*[:=]\s*[^\s,}]+/gi, "refresh_token=[REDACTED]")
-        .replace(/"?jwt"?\s*[:=]\s*[^\s,}]+/gi, "jwt=[REDACTED]");
+      const errorMessage = sanitizeCredentials(
+        errorData.error ?? `API request failed: ${response.status}`
+      );
 
       throw new DetentApiError(
         errorMessage,

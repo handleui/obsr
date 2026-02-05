@@ -122,6 +122,9 @@ app.openapi(diagnosticsRoute, async (c) => {
   }
 
   // Run AI validation if org has it enabled (limit to first 100 diagnostics to control costs)
+  // Sync validation is intentional: the validation result is part of the response body,
+  // and orgs opt in knowing there's LLM latency. Background processing would require
+  // polling/webhooks, adding complexity without clear benefit for this use case.
   let validation: ValidationResult | undefined;
 
   if (orgSettings.validationEnabled && result.diagnostics.length > 0) {

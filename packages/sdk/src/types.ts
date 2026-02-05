@@ -116,7 +116,7 @@ export interface ProjectDetailsResponse extends Project {
 // Organization Members
 // ============================================================================
 
-export type MemberRole = "owner" | "admin" | "member";
+export type MemberRole = "owner" | "admin" | "member" | "visitor";
 
 export interface OrganizationMember {
   user_id: string;

@@ -4,21 +4,15 @@
 
 import type { DetentClient } from "@detent/sdk";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { formatErrorResponse } from "../utils/errors.js";
-
-// Type escape for MCP SDK's complex registerTool generics
-interface ServerWithRegisterTool {
-  registerTool: CallableFunction;
-}
 
 export const registerProjectsTools = (
   server: McpServer,
   client: DetentClient
 ) => {
-  const srv = server as unknown as ServerWithRegisterTool;
-
-  srv.registerTool(
+  server.registerTool(
     "detent_list_projects",
     {
       description: `List all projects in a Detent organization.
@@ -28,15 +22,15 @@ Returns projects with:
 - Repository name and full name
 - Organization details
 - Creation timestamp`,
-      inputSchema: z.object({
+      inputSchema: {
         organization_id: z.string().describe("Organization ID"),
-      }),
+      },
     },
-    async ({ organization_id }: { organization_id: string }) => {
+    async (args: { organization_id: string }): Promise<CallToolResult> => {
       try {
-        const result = await client.projects.list(organization_id);
+        const result = await client.projects.list(args.organization_id);
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+          content: [{ type: "text", text: JSON.stringify(result) }],
         };
       } catch (error) {
         return formatErrorResponse(error);
@@ -44,20 +38,20 @@ Returns projects with:
     }
   );
 
-  srv.registerTool(
+  server.registerTool(
     "detent_get_project",
     {
       description:
         "Get details for a specific project by ID. Returns full project details including organization info.",
-      inputSchema: z.object({
+      inputSchema: {
         project_id: z.string().describe("Project ID"),
-      }),
+      },
     },
-    async ({ project_id }: { project_id: string }) => {
+    async (args: { project_id: string }): Promise<CallToolResult> => {
       try {
-        const result = await client.projects.get(project_id);
+        const result = await client.projects.get(args.project_id);
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+          content: [{ type: "text", text: JSON.stringify(result) }],
         };
       } catch (error) {
         return formatErrorResponse(error);
@@ -65,21 +59,21 @@ Returns projects with:
     }
   );
 
-  srv.registerTool(
+  server.registerTool(
     "detent_lookup_project",
     {
       description: `Find a project by its GitHub repository name.
 
 Use this when you have a repo name like "owner/repo" but not the project ID.`,
-      inputSchema: z.object({
+      inputSchema: {
         repo: z.string().describe('Repository full name (e.g., "owner/repo")'),
-      }),
+      },
     },
-    async ({ repo }: { repo: string }) => {
+    async (args: { repo: string }): Promise<CallToolResult> => {
       try {
-        const result = await client.projects.lookup(repo);
+        const result = await client.projects.lookup(args.repo);
         return {
-          content: [{ type: "text" as const, text: JSON.stringify(result) }],
+          content: [{ type: "text", text: JSON.stringify(result) }],
         };
       } catch (error) {
         return formatErrorResponse(error);

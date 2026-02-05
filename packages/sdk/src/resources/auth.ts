@@ -65,6 +65,10 @@ export class AuthResource {
   async refreshGitHubToken(
     refreshToken: string
   ): Promise<GitHubTokenRefreshResponse> {
+    if (!refreshToken || typeof refreshToken !== 'string' || refreshToken.trim() === '') {
+      throw new Error('Refresh token must be a non-empty string');
+    }
+
     return this.#client.request<GitHubTokenRefreshResponse>(
       "/v1/auth/github-token/refresh",
       {

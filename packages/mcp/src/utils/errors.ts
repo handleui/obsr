@@ -9,6 +9,7 @@ import {
   DetentApiError,
   DetentAuthError,
   DetentNetworkError,
+  sanitizeCredentials,
 } from "@detent/sdk";
 
 /** Sanitize error messages to avoid leaking sensitive info */
@@ -20,37 +21,10 @@ export const sanitizeError = (error: unknown): string => {
     return "Network error. Please check your connection.";
   }
   if (error instanceof DetentApiError) {
-    // Sanitize API error messages to prevent token leakage
-    const sanitized = error.message
-      .replace(/Bearer\s+[^\s]+/gi, "Bearer [REDACTED]")
-      .replace(/dtk_[^\s"']+/gi, "[REDACTED_KEY]")
-      .replace(/token[=:]\s*[^\s"']+/gi, "token=[REDACTED]")
-      .replace(
-        /"?access_token"?\s*[:=]\s*[^\s,}]+/gi,
-        "access_token=[REDACTED]"
-      )
-      .replace(
-        /"?refresh_token"?\s*[:=]\s*[^\s,}]+/gi,
-        "refresh_token=[REDACTED]"
-      )
-      .replace(/"?jwt"?\s*[:=]\s*[^\s,}]+/gi, "jwt=[REDACTED]");
-    return `API error (${error.status}): ${sanitized}`;
+    return `API error (${error.status}): ${sanitizeCredentials(error.message)}`;
   }
   if (error instanceof Error) {
-    // Redact potentially sensitive terms from unexpected errors
-    return error.message
-      .replace(/Bearer\s+[^\s]+/gi, "Bearer [REDACTED]")
-      .replace(/dtk_[^\s"']+/gi, "[REDACTED_KEY]")
-      .replace(/token[=:]\s*[^\s"']+/gi, "token=[REDACTED]")
-      .replace(
-        /"?access_token"?\s*[:=]\s*[^\s,}]+/gi,
-        "access_token=[REDACTED]"
-      )
-      .replace(
-        /"?refresh_token"?\s*[:=]\s*[^\s,}]+/gi,
-        "refresh_token=[REDACTED]"
-      )
-      .replace(/"?jwt"?\s*[:=]\s*[^\s,}]+/gi, "jwt=[REDACTED]");
+    return sanitizeCredentials(error.message);
   }
   return "An unexpected error occurred";
 };

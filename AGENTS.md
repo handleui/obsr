@@ -66,6 +66,8 @@ Source of truth: `apps/api/src/db/schema.ts`
 
 ## Boundaries
 
+# Never use background agents (run_in_background: true). Always use foreground subagents that block/yield until completion.
+
 ### Always Do
 - When answering questions involving external documentation, APIs, or specifications, prefer using Nia MCP tools to retrieve and verify information before responding. Use reasoning first to determine whether external grounding is necessary.
 - Run `bun run fix` before committing

@@ -1,26 +1,10 @@
-/**
- * Rate limiting middleware for public (unauthenticated) endpoints
- *
- * Uses IP-based sliding window algorithm to limit requests.
- * Designed for public endpoints like /v1/diagnostics that don't require auth.
- * Fails open for availability - allows requests if Redis is unavailable.
- *
- * More restrictive than authenticated limits (30 req/min per IP)
- * to prevent abuse while allowing legitimate SDK usage.
- */
-
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import type { Context, Next } from "hono";
 import type { Env } from "../types/env";
 
-// Ephemeral cache to reduce Redis calls
 const cache = new Map<string, number>();
-
-// Max cache entries before clearing to prevent unbounded memory growth
 const MAX_CACHE_ENTRIES = 10_000;
-
-// Cache Ratelimit instances per environment (keyed by Redis URL)
 const ratelimitInstances = new Map<string, Ratelimit>();
 
 const getRatelimit = (env: Env): Ratelimit => {
@@ -54,21 +38,14 @@ const getRatelimit = (env: Env): Ratelimit => {
   return ratelimit;
 };
 
-/**
- * Get client IP address from Cloudflare headers or fallback.
- * Cloudflare provides CF-Connecting-IP for the real client IP.
- */
 const getClientIp = (c: Context<{ Bindings: Env }>): string => {
-  // Cloudflare provides the real client IP in CF-Connecting-IP header
   const cfIp = c.req.header("CF-Connecting-IP");
   if (cfIp) {
     return cfIp;
   }
 
-  // Fallback for local development
   const xForwardedFor = c.req.header("X-Forwarded-For");
   if (xForwardedFor) {
-    // Take the first IP (original client)
     return xForwardedFor.split(",")[0]?.trim() ?? "unknown";
   }
 
@@ -87,7 +64,6 @@ export const publicRateLimitMiddleware = async (
     const { success, limit, remaining, reset, pending, reason } =
       await ratelimit.limit(identifier);
 
-    // Handle analytics in background (for Cloudflare Workers)
     c.executionCtx.waitUntil(pending);
 
     c.header("X-RateLimit-Limit", limit.toString());

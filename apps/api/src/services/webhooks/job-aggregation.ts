@@ -5,13 +5,6 @@ import { deleteAndPostComment } from "../github/comments";
 import { getProjectContextForComment } from "./db-operations";
 import type { DbClient } from "./types";
 
-// ============================================================================
-// Job Aggregation Logic
-// ============================================================================
-// Checks if all jobs for a commit have completed and triggers comment posting
-// when all jobs are done. Only posts if at least one Detent-enabled job failed.
-
-// SECURITY: Truncate strings in logs to prevent log injection
 const safeLogValue = (value: string, maxLen = 100): string =>
   value.length > maxLen ? `${value.slice(0, maxLen)}...` : value;
 
@@ -26,25 +19,34 @@ export interface AggregationResult {
   totalErrors: number;
 }
 
-/**
- * Check if all jobs for a commit have completed and trigger comment posting.
- *
- * This is called from two places:
- * 1. workflow_job.completed webhook - when a job finishes
- * 2. POST /report - when Detent action reports errors
- *
- * Idempotency: Uses commentPosted flag in commit_job_stats to prevent duplicate comments.
- *
- * Performance: Single query retrieves stats + prNumber from commitJobStats table.
- * The prNumber is denormalized on commitJobStats to avoid JOIN with jobs table.
- */
+const buildAggregationResult = (
+  stats: {
+    totalJobs: number;
+    completedJobs: number;
+    failedJobs: number;
+    detentJobs: number;
+    totalErrors: number;
+    commentPosted?: boolean;
+  } | null,
+  overrides: Partial<AggregationResult> = {}
+): AggregationResult => ({
+  allComplete: false,
+  shouldPostComment: false,
+  commentPosted: stats?.commentPosted ?? false,
+  totalJobs: stats?.totalJobs ?? 0,
+  completedJobs: stats?.completedJobs ?? 0,
+  failedJobs: stats?.failedJobs ?? 0,
+  detentJobs: stats?.detentJobs ?? 0,
+  totalErrors: stats?.totalErrors ?? 0,
+  ...overrides,
+});
+
 export const checkAndTriggerAggregation = async (
   env: Env,
   db: DbClient,
   repository: string,
   commitSha: string
 ): Promise<AggregationResult> => {
-  // Single query: stats + prNumber are both on commitJobStats table
   const stats = (await db.query("commit_job_stats:getByRepoCommit", {
     repository,
     commitSha,
@@ -59,89 +61,36 @@ export const checkAndTriggerAggregation = async (
   } | null;
 
   if (!stats) {
-    // No stats record yet - likely first job event
-    return {
-      allComplete: false,
-      shouldPostComment: false,
-      commentPosted: false,
-      totalJobs: 0,
-      completedJobs: 0,
-      failedJobs: 0,
-      detentJobs: 0,
-      totalErrors: 0,
-    };
+    return buildAggregationResult(null);
   }
 
-  // Check if all jobs are complete
-  // NOTE: Race condition trade-off - GitHub may queue additional jobs (conditional, dependent)
-  // after this check passes. We accept this for faster feedback; the commentPosted flag
-  // prevents duplicates, and late jobs will still be tracked in the dashboard.
   const allComplete =
     stats.completedJobs >= stats.totalJobs && stats.totalJobs > 0;
 
-  // Already posted? Return early
   if (stats.commentPosted) {
-    return {
-      allComplete,
-      shouldPostComment: false,
-      commentPosted: true,
-      totalJobs: stats.totalJobs,
-      completedJobs: stats.completedJobs,
-      failedJobs: stats.failedJobs,
-      detentJobs: stats.detentJobs,
-      totalErrors: stats.totalErrors,
-    };
+    return buildAggregationResult(stats, { allComplete, commentPosted: true });
   }
 
-  // Not all complete? Return and wait
   if (!allComplete) {
-    return {
-      allComplete: false,
-      shouldPostComment: false,
-      commentPosted: false,
-      totalJobs: stats.totalJobs,
-      completedJobs: stats.completedJobs,
-      failedJobs: stats.failedJobs,
-      detentJobs: stats.detentJobs,
-      totalErrors: stats.totalErrors,
-    };
+    return buildAggregationResult(stats);
   }
 
-  // All complete - should we post a comment?
-  // Only post if there are errors from Detent-enabled jobs
   const shouldPostComment = stats.totalErrors > 0 && stats.detentJobs > 0;
 
   if (!shouldPostComment) {
-    return {
-      allComplete: true,
-      shouldPostComment: false,
-      commentPosted: false,
-      totalJobs: stats.totalJobs,
-      completedJobs: stats.completedJobs,
-      failedJobs: stats.failedJobs,
-      detentJobs: stats.detentJobs,
-      totalErrors: stats.totalErrors,
-    };
+    return buildAggregationResult(stats, { allComplete: true });
   }
 
-  // prNumber is denormalized on commitJobStats - no extra query needed
   if (!stats.prNumber) {
     console.log(
       `[job-aggregation] All jobs complete but no PR number found for ${repository}@${commitSha.slice(0, 7)}`
     );
-    return {
+    return buildAggregationResult(stats, {
       allComplete: true,
       shouldPostComment: true,
-      commentPosted: false,
-      totalJobs: stats.totalJobs,
-      completedJobs: stats.completedJobs,
-      failedJobs: stats.failedJobs,
-      detentJobs: stats.detentJobs,
-      totalErrors: stats.totalErrors,
-    };
+    });
   }
 
-  // Post the comment
   const posted = await postAggregatedComment(
     env,
     db,
@@ -152,7 +101,6 @@ export const checkAndTriggerAggregation = async (
   );
 
   if (posted) {
-    // Mark as posted to prevent duplicates
     await db.mutation("commit_job_stats:setCommentPostedByRepoCommit", {
       repository,
       commitSha,
@@ -160,21 +108,13 @@ export const checkAndTriggerAggregation = async (
     });
   }
 
-  return {
+  return buildAggregationResult(stats, {
     allComplete: true,
     shouldPostComment: true,
     commentPosted: posted,
-    totalJobs: stats.totalJobs,
-    completedJobs: stats.completedJobs,
-    failedJobs: stats.failedJobs,
-    detentJobs: stats.detentJobs,
-    totalErrors: stats.totalErrors,
-  };
+  });
 };
 
-/**
- * Post aggregated errors comment to PR.
- */
 const postAggregatedComment = async (
   env: Env,
   db: DbClient,
@@ -185,14 +125,12 @@ const postAggregatedComment = async (
 ): Promise<boolean> => {
   const [owner, repo] = repository.split("/");
   if (!(owner && repo)) {
-    // SECURITY: Truncate repository in log to prevent log injection
     console.error(
       `[job-aggregation] Invalid repository format: ${safeLogValue(repository)}`
     );
     return false;
   }
 
-  // Get project context for comment posting
   const context = await getProjectContextForComment(db, repository);
   if (!context) {
     console.log(

@@ -1,12 +1,7 @@
 /**
  * Autofix command registry for the API.
  *
- * NOTE: This registry is intentionally duplicated in packages/action/src/autofix/registry.ts.
- * This API registry is used by the orchestrator to create heal records with the command.
- * The action registry includes a security allowlist for command validation at execution time.
- * Both registries must be kept in sync when adding new autofix sources.
- *
- * TODO: Consider extracting to a shared package when the monorepo supports it.
+ * Used by the orchestrator to create heal records with the command.
  */
 
 export interface AutofixConfig {

@@ -19,13 +19,13 @@ Cloudflare Workers API for the Detent self-healing CI/CD platform.
                                              |
                             +----------------+----------------+
                             |                |                |
-                     Webhooks           GitHub API       Actions
+                     Webhooks           GitHub API        Healer
                             |                |                |
                             v                v                v
-+------------------+   +--------+   +-----------------+   +--------+
-|  GitHub Actions  |-->| /report|   |  Installation   |   | Healer |
-|  (detent-action) |   +--------+   |     Tokens      |   | (Rail) |
-+------------------+        |       +-----------------+   +--------+
+                    +-----------+   +-----------------+   +--------+
+                    | workflow  |   |  Installation   |   | Healer |
+                    |   _job    |   |     Tokens      |   | (Rail) |
+                    +-----------+   +-----------------+   +--------+
                             |                                  |
                             v                                  v
                     +-------+--------+                  +-------------+
@@ -70,8 +70,6 @@ Request --> CORS --> Security Headers --> Sentry Context --> Route Handlers
 - `POST /webhooks/polar` - Polar billing webhooks
 
 ### API Key Routes (X-Detent-Token)
-- `POST /report` - Error reports from GitHub Actions
-- `POST /v1/diagnostics` - AI-powered error extraction from CI logs
 - `POST /v1/heal/autofix-result` - Autofix results from actions
 
 ### Protected Routes (JWT + Rate Limiting)
@@ -167,36 +165,39 @@ pr_comments (deduplication table)
 
 ```
 +----------------------+     +---------------------+     +------------------+
-| workflow_run         |     | check_suite         |     | installation     |
-| (in_progress)        |     | (requested)         |     | (created/deleted)|
+| workflow_job         |     | check_suite         |     | installation     |
+| (queued/in_progress) |     | (requested)         |     | (created/deleted)|
 +----------+-----------+     +---------+-----------+     +--------+---------+
            |                           |                          |
-   Create check run            Create check run            Upsert org/repos
-   Post waiting comment        (backup path)
-           |                           |
-           v                           v
+   Track job status            Create check run            Upsert org/repos
+                               (backup path)
+           |
+           v
 +----------+-----------+
-| workflow_run         |
+| workflow_job         |
 | (completed)          |
 +----------+-----------+
            |
    +-------+-------+
    |               |
-Wait for all    Lock commit
-workflows       (idempotency)
+On failure      Update job
+   |            stats
+   v               |
+Fetch logs         |
+   |               |
+   v               |
+AI extract         |
+errors             |
+   |               |
+   v               |
+Store errors       |
    |               |
    +-------+-------+
            |
-   Query AI-extracted errors
-   (from /report endpoint)
-           |
    +-------+-------+
    |               |
-Finalize      Orchestrate
-check run       autofixes
-   |               |
-Post PR        Create heal
-comment         records
+Create heals    Post PR
+if errors       comment
 ```
 
 ### Idempotency Strategy
@@ -248,38 +249,28 @@ Shared webhook utilities:
 
 ## Integration Points
 
-### GitHub Actions (detent-action)
+### Webhook-First Error Extraction
 
 ```
-Action runs in CI --> Sends logs --> POST /v1/diagnostics --> AI extracts errors
-                                              |
-                                              v
-                                     POST /report (errors)
-                                              |
-                                              v
-                                     DB stores errors
-                                              |
-                                              v
-                                     Webhook completes
-                                              |
-                                              v
-                                     orchestrateHeals()
-                                              |
-                                              v
-                                     Returns autofix configs
-                                              |
-                                              v
-                                     Action executes fixes
-                                              |
-                                              v
-                                     POST /v1/heal/autofix-result
-                                              |
-                                              v
-                                     Update heal status
-                                     (optional: auto-commit)
+workflow_job.completed (failure)
+           |
+           v
+   Fetch workflow logs
+   (GitHub API)
+           |
+           v
+   AI extracts errors
+   (@detent/extract)
+           |
+           v
+   Store errors in DB
+           |
+           v
+   Create heal records
+   (if auto-trigger enabled)
 ```
 
-The `/v1/diagnostics` endpoint uses Claude Haiku to extract structured errors from raw CI logs. This AI-based extraction handles diverse log formats without requiring format-specific parsers.
+Error extraction happens automatically when a workflow job fails. The `@detent/extract` package uses AI to extract structured errors from raw CI logs, handling diverse log formats without requiring format-specific parsers.
 
 ### Healer Service (Railway)
 

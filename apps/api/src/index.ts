@@ -18,7 +18,6 @@ import apiKeysRoutes from "./routes/api-keys";
 import authRoutes from "./routes/auth";
 import autofixResultRoutes from "./routes/autofix-result";
 import billingRoutes from "./routes/billing";
-import diagnosticsRoutes from "./routes/diagnostics";
 import errorsRoutes from "./routes/errors";
 import githubSecretsRoutes from "./routes/github-secrets";
 import healRoutes from "./routes/heal";
@@ -28,17 +27,14 @@ import organizationMembersRoutes from "./routes/organization-members";
 import organizationsRoutes from "./routes/organizations";
 import orgsByProviderRoutes from "./routes/orgs-by-provider";
 import projectsRoutes from "./routes/projects";
-import reportRoutes from "./routes/report";
 import webhookRoutes from "./routes/webhooks";
 import polarWebhookRoutes from "./routes/webhooks/polar";
 import type { Env } from "./types/env";
 
 const app = new Hono<{ Bindings: Env }>();
 
-// Global middleware
 app.use("*", logger());
 
-// Security headers
 app.use(
   "*",
   secureHeaders({
@@ -51,17 +47,14 @@ app.use(
   })
 );
 
-// CORS configuration - restrict to allowed origins
 app.use(
   "*",
   cors({
     origin: (origin, c) => {
-      // Allow requests with no origin (like mobile apps or curl)
       if (!origin) {
         return null;
       }
 
-      // Allow localhost for development
       if (
         origin.startsWith("http://localhost:") ||
         origin.startsWith("http://127.0.0.1:")
@@ -69,13 +62,11 @@ app.use(
         return origin;
       }
 
-      // Allow configured allowed origins
       const allowedOrigins = c.env.ALLOWED_ORIGINS?.split(",") ?? [];
       if (allowedOrigins.includes(origin)) {
         return origin;
       }
 
-      // Deny all other origins
       return null;
     },
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -91,22 +82,14 @@ app.use(
   })
 );
 
-// Sentry context enrichment (request ID, delivery ID, breadcrumbs)
 app.use("*", sentryContextMiddleware);
 
-// Public routes
 app.get("/", (c) => c.text("detent api"));
 app.route("/health", healthRoutes);
-
-// Webhook routes (verified by signature, not API key)
 app.route("/webhooks", webhookRoutes);
 app.route("/webhooks/polar", polarWebhookRoutes);
-
-// API key authenticated routes (X-Detent-Token header)
-app.route("/report", reportRoutes);
 app.route("/v1/heal/autofix-result", autofixResultRoutes);
 
-// Protected routes (require JWT auth + rate limiting)
 const api = new Hono<{ Bindings: Env }>();
 api.use("*", authMiddleware);
 api.use("*", rateLimitMiddleware);
@@ -125,28 +108,6 @@ api.route("/billing", billingRoutes);
 
 app.route("/v1", api);
 
-// Diagnostics endpoint (API key auth - X-Detent-Token header)
-// Mounted at root because the OpenAPIHono route defines full path for accurate spec generation
-app.route("/", diagnosticsRoutes);
-
-// OpenAPI spec - generated once at module load time, not per request
-const openApiSpec = diagnosticsRoutes.getOpenAPIDocument({
-  openapi: "3.1.0",
-  info: {
-    title: "Detent API",
-    version: "1.0.0",
-    description:
-      "Self-healing CI/CD platform. Parse CI logs, match error patterns, and trigger AI fixes.",
-  },
-  servers: [
-    { url: "https://backend.detent.sh", description: "Production" },
-    { url: "http://localhost:8787", description: "Local development" },
-  ],
-});
-
-app.get("/openapi.json", (c) => c.json(openApiSpec));
-
-// Export type for potential RPC client
 export type AppType = typeof app;
 
 const worker: ExportedHandler<Env> = {

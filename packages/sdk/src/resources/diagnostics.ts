@@ -2,6 +2,10 @@
  * Diagnostics Resource
  *
  * CI log parsing operations.
+ *
+ * @deprecated The /v1/diagnostics endpoint has been removed. Error extraction
+ * now happens automatically via webhook when workflow jobs complete. This
+ * resource will be removed in a future release.
  */
 
 import type { DetentClient } from "../client.js";
@@ -18,6 +22,10 @@ export interface ParseOptions {
   mode?: DiagnosticMode;
 }
 
+/**
+ * @deprecated The /v1/diagnostics endpoint has been removed. Error extraction
+ * now happens automatically via webhook when workflow jobs complete.
+ */
 export class DiagnosticsResource {
   readonly #client: DetentClient;
 
@@ -25,7 +33,10 @@ export class DiagnosticsResource {
     this.#client = client;
   }
 
-  /** Parse CI/build logs into structured diagnostics */
+  /**
+   * Parse CI/build logs into structured diagnostics
+   * @deprecated This method will fail - the endpoint has been removed.
+   */
   async parse(
     content: string,
     options: ParseOptions = {}

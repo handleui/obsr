@@ -1,15 +1,6 @@
 import { fetchAllPages } from "../../lib/convex-pagination";
 import type { DbClient } from "./types";
 
-// ============================================================================
-// Job Tracking Operations (for workflow_job webhook)
-// ============================================================================
-
-/**
- * Look up PR number from runs table for a given commit.
- * GitHub workflow_job webhook doesn't include PR info, so we look it up
- * from previously stored run data (from workflow_run webhook).
- */
 export const lookupPrNumberFromRuns = async (
   db: DbClient,
   repository: string,
@@ -60,10 +51,6 @@ export interface UpsertJobData {
   prNumber?: number;
 }
 
-/**
- * Upsert a job record. Creates new job or updates existing one.
- * Uses ON CONFLICT DO UPDATE for idempotency.
- */
 export const upsertJob = async (
   db: DbClient,
   data: UpsertJobData
@@ -92,14 +79,7 @@ export const upsertJob = async (
   });
 };
 
-/**
- * Mark a job as having Detent action and set error count.
- * Called from POST /report when action reports errors.
- *
- * TODO: Matrix builds have multiple jobs with the same name (e.g., "build" for node 18, 20, 22).
- * Consider matching by providerJobId instead for precise matching. This requires the action
- * to pass GITHUB_RUN_ID in the report payload.
- */
+// HACK: Matrix builds have multiple jobs with the same name - consider matching by providerJobId
 export const markJobAsDetent = async (
   db: DbClient,
   repository: string,
@@ -116,49 +96,53 @@ export const markJobAsDetent = async (
   return updated > 0;
 };
 
-/**
- * Recompute and update commit job stats from jobs table.
- * Called after each job upsert to keep stats in sync.
- */
 export const updateCommitJobStats = async (
   db: DbClient,
   repository: string,
   commitSha: string,
   prNumber?: number
 ): Promise<void> => {
-  const jobs = await fetchAllPages<{
-    status: string;
-    conclusion?: string | null;
-    hasDetent?: boolean;
-    errorCount?: number;
-  }>(db, "jobs:paginateByRepoCommit", { repository, commitSha });
+  const [jobs, existing] = await Promise.all([
+    fetchAllPages<{
+      status: string;
+      conclusion?: string | null;
+      hasDetent?: boolean;
+      errorCount?: number;
+    }>(db, "jobs:paginateByRepoCommit", { repository, commitSha }),
+    db.query("commit_job_stats:getByRepoCommit", {
+      repository,
+      commitSha,
+    }) as Promise<{ commentPosted?: boolean } | null>,
+  ]);
 
   if (jobs.length === 0) {
     return;
   }
 
-  const totalJobs = jobs.length;
-  const completedJobs = jobs.filter((job) => job.status === "completed").length;
-  const failedJobs = jobs.filter((job) => job.conclusion === "failure").length;
-  const detentJobs = jobs.filter((job) => job.hasDetent).length;
-  const totalErrors = jobs.reduce((sum, job) => {
-    if (!job.hasDetent) {
-      return sum;
-    }
-    return sum + (job.errorCount ?? 0);
-  }, 0);
+  let completedJobs = 0;
+  let failedJobs = 0;
+  let detentJobs = 0;
+  let totalErrors = 0;
 
-  const existing = (await db.query("commit_job_stats:getByRepoCommit", {
-    repository,
-    commitSha,
-  })) as { commentPosted?: boolean } | null;
+  for (const job of jobs) {
+    if (job.status === "completed") {
+      completedJobs++;
+    }
+    if (job.conclusion === "failure") {
+      failedJobs++;
+    }
+    if (job.hasDetent) {
+      detentJobs++;
+      totalErrors += job.errorCount ?? 0;
+    }
+  }
 
   const now = Date.now();
   await db.mutation("commit_job_stats:upsert", {
     repository,
     commitSha,
     prNumber,
-    totalJobs,
+    totalJobs: jobs.length,
     completedJobs,
     failedJobs,
     detentJobs,

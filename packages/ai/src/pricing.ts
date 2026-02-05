@@ -16,6 +16,7 @@ interface ModelPricing {
  * Official pricing pages:
  * - Anthropic: https://www.anthropic.com/pricing
  * - OpenAI: https://openai.com/api/pricing
+ * Last verified: 2025-02 (check these pages periodically)
  */
 const MODEL_PREFIXES: Array<{ prefix: string; pricing: ModelPricing }> = [
   {

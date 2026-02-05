@@ -1,0 +1,58 @@
+{
+  "name": "@detent/sdk",
+  "version": "0.1.1",
+  "type": "module",
+  "description": "TypeScript SDK for the Detent API",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/detentsh/detent",
+    "directory": "packages/sdk"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js",
+      "default": "./dist/types.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "detent",
+    "sdk",
+    "api",
+    "ci",
+    "cd",
+    "healing"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@detent/typescript-config": "*",
+    "@types/node": "^22.0.0",
+    "typescript": "5.9.2",
+    "vitest": "^4.0.16"
+  }
+}

@@ -69,6 +69,7 @@ export const addCacheControl = ({
   const cacheOptions = ttl ? CACHE_CONTROL_BY_TTL[ttl] : DEFAULT_CACHE_CONTROL;
 
   return messages.map((message, index) => {
+    // Anthropic caches from the last cache-control marker, so only mark the final message
     if (index === messages.length - 1) {
       const existing = (
         message as { providerOptions?: Record<string, unknown> }

@@ -3,7 +3,6 @@ import { scrubEvent } from "@detent/sentry";
 import * as Sentry from "@sentry/cloudflare";
 import { Hono } from "hono";
 
-// Derive TransactionEvent type from Sentry SDK - avoids fragile local definition
 type TransactionEvent = Parameters<
   NonNullable<Sentry.CloudflareOptions["beforeSendTransaction"]>
 >[0];

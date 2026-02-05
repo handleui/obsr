@@ -23,10 +23,12 @@ import {
   validatePositiveInt,
 } from "./db-operations";
 import type { DbClient } from "./types";
-
-// ============================================================================
-// Types
-// ============================================================================
+import {
+  isValidJobId,
+  isValidRepositoryFormat,
+  SHA_REGEX,
+  safeLogValue,
+} from "./types";
 
 interface WebhookPayload {
   installation: { id: number };
@@ -63,55 +65,12 @@ interface RunError {
   workflowJob?: string | null;
 }
 
-// ============================================================================
-// Constants
-// ============================================================================
-
 const LOG_PREFIX = "[error-extraction]";
 const EXTRACTION_TIMEOUT_MS = 60_000;
 const LOCK_TTL_SECONDS = 300;
-// Maximum heals to create per extraction to prevent resource exhaustion
 const MAX_HEALS_PER_EXTRACTION = 10;
 // SECURITY: Cap R2 log storage at 50 MB to prevent storage abuse
 const MAX_R2_LOG_BYTES = 50 * 1024 * 1024;
-
-// ============================================================================
-// Context & Validation
-// ============================================================================
-
-// SHA validation regex (40 hex characters)
-const SHA_REGEX = /^[a-fA-F0-9]{40}$/;
-
-// GitHub name validation pattern (owner/repo segments)
-const GITHUB_NAME_PATTERN = /^[a-zA-Z0-9][-a-zA-Z0-9._]*$/;
-
-// Maximum safe integer for GitHub job IDs (64-bit but JS safe integer is 53-bit)
-const MAX_JOB_ID = Number.MAX_SAFE_INTEGER;
-
-const isValidJobId = (id: number): boolean =>
-  Number.isInteger(id) && id > 0 && id <= MAX_JOB_ID;
-
-const isValidRepositoryFormat = (repo: string): boolean => {
-  const parts = repo.split("/");
-  if (parts.length !== 2) {
-    return false;
-  }
-  const [owner, name] = parts;
-  return (
-    !!owner &&
-    !!name &&
-    owner.length <= 39 && // GitHub max username length
-    name.length <= 100 && // GitHub max repo name length
-    GITHUB_NAME_PATTERN.test(owner) &&
-    GITHUB_NAME_PATTERN.test(name) &&
-    !owner.includes("..") &&
-    !name.includes("..")
-  );
-};
-
-// SECURITY: Truncate strings in logs to prevent log injection
-const safeLogValue = (value: string, maxLen = 100): string =>
-  value.length > maxLen ? `${value.slice(0, maxLen)}...` : value;
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: Intentionally matching control chars for security
 const CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u2029]/g;
@@ -127,7 +86,6 @@ const buildContext = (payload: WebhookPayload): ExtractionContext | null => {
   const jobId = payload.workflow_job.id;
   const runId = payload.workflow_job.run_id;
 
-  // SECURITY: Validate inputs before processing
   if (!isValidJobId(jobId)) {
     console.error(
       `${LOG_PREFIX} Invalid job ID: ${safeLogValue(String(jobId))}`
@@ -177,19 +135,6 @@ const buildContext = (payload: WebhookPayload): ExtractionContext | null => {
   };
 };
 
-/**
- * Attempts to acquire an idempotency lock using atomic put-if-absent pattern.
- *
- * Uses KV metadata comparison to achieve atomicity: we write with a unique
- * request ID, then read back to verify we won the race. This prevents TOCTOU
- * race conditions where two requests could both see no lock and proceed.
- *
- * Note: KV is eventually consistent, so two concurrent requests may both
- * "win" in rare cases. The failure mode is duplicate extraction attempts,
- * not data corruption. This is acceptable because extraction is idempotent -
- * storing the same errors twice is harmless. For truly atomic locks, use
- * Durable Objects.
- */
 const acquireLock = async (
   kv: KVNamespace,
   repository: string,
@@ -198,25 +143,15 @@ const acquireLock = async (
   const lockKey = `lock:extract:${repository}:${jobId}`;
   const requestId = crypto.randomUUID();
 
-  // Check if lock already exists
   const existing = await kv.get(lockKey);
   if (existing) {
     return false;
   }
 
-  // Try to acquire by writing with our request ID
   await kv.put(lockKey, requestId, { expirationTtl: LOCK_TTL_SECONDS });
-
-  // Read back to verify we won the race (handles concurrent writers)
   const written = await kv.get(lockKey);
-
-  // If our request ID is there, we won. If different, another request won.
   return written === requestId;
 };
-
-// ============================================================================
-// Log Fetching
-// ============================================================================
 
 interface FetchLogsResult {
   logs: string | null;
@@ -255,25 +190,16 @@ const fetchLogs = async (
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("404") || message.includes("expired")) {
-      return { logs: null }; // Expected for old runs, no error
+      return { logs: null };
     }
     return { logs: null, error: `Failed to fetch logs: ${message}` };
   }
 };
 
-// ============================================================================
-// AI Extraction
-// ============================================================================
-
-interface ExtractResult {
-  errors: CIError[];
-  truncated: boolean;
-}
-
 const runExtraction = async (
   env: Env,
   logContent: string
-): Promise<ExtractResult | null> => {
+): Promise<{ errors: CIError[]; truncated: boolean } | null> => {
   try {
     const result = await extractErrors(logContent, {
       timeout: EXTRACTION_TIMEOUT_MS,
@@ -291,13 +217,8 @@ const runExtraction = async (
   }
 };
 
-// ============================================================================
-// Error Mapping & Storage
-// ============================================================================
-
 const mapExtractedToRow = (e: CIError, runId: string, job: string) => ({
   runId,
-  // SECURITY: Truncate fields to prevent database bloat from malicious input
   message:
     truncateString(e.message, MAX_ERROR_MESSAGE_LENGTH) ?? "Unknown error",
   filePath: truncateString(e.filePath, MAX_FILE_PATH_LENGTH),
@@ -371,10 +292,6 @@ const storeErrors = async (
   }
 };
 
-// ============================================================================
-// Heal Creation
-// ============================================================================
-
 const isErrorAutofixable = (error: {
   fixable?: boolean | null;
   source?: string | null;
@@ -414,8 +331,6 @@ const createHealsForErrors = async (
     return;
   }
 
-  // Parallelize independent queries: org settings and PR heals
-  // Note: getHealsByRunId is omitted since runRecordId was just created - it would always be empty
   const [organization, healsByPr] = await Promise.all([
     convex.query("organizations:getById", {
       id: project.organizationId,
@@ -425,8 +340,6 @@ const createHealsForErrors = async (
 
   const orgSettings = getOrgSettings(organization?.settings);
 
-  // Build set of existing signature IDs from heals on this PR for deduplication
-  // Uses stable signatureIds instead of random error IDs
   const existingSignatureIds = new Set(
     healsByPr
       .filter((h) => h.type === "heal")
@@ -496,28 +409,16 @@ const createHealsForErrors = async (
   }
 };
 
-// ============================================================================
-// Main Extraction Function
-// ============================================================================
-
-/**
- * Extract errors from workflow logs and store them.
- * Called from webhook handler when a job completes with failure.
- * Non-critical background task - failures are logged but not thrown.
- */
 export const extractAndStoreErrors = async (
   env: Env,
   payload: WebhookPayload,
   db: DbClient
 ): Promise<void> => {
   const ctx = buildContext(payload);
-
-  // SECURITY: Skip processing if input validation failed
   if (!ctx) {
     return;
   }
 
-  // Idempotency check
   const lockAcquired = await acquireLock(
     env["detent-idempotency"],
     ctx.repository,
@@ -528,7 +429,6 @@ export const extractAndStoreErrors = async (
     return;
   }
 
-  // Look up project
   const project = (await db.query("projects:getByRepoFullName", {
     providerRepoFullName: ctx.repository,
   })) as { _id: string; organizationId: string; removedAt?: number } | null;
@@ -538,7 +438,6 @@ export const extractAndStoreErrors = async (
     return;
   }
 
-  // Fetch logs
   const { logs, error: fetchError } = await fetchLogs(env, ctx);
   if (fetchError) {
     console.error(`${LOG_PREFIX} ${ctx.logCtx}: ${fetchError}`);
@@ -591,7 +490,6 @@ export const extractAndStoreErrors = async (
     `${LOG_PREFIX} ${ctx.logCtx}: Extracted ${extraction.errors.length} error(s)`
   );
 
-  // Look up PR number
   const convex = getConvexClient(env);
   const runs = (await convex.query("runs:listByRepoCommit", {
     repository: ctx.repository,
@@ -600,7 +498,6 @@ export const extractAndStoreErrors = async (
   const prNumber =
     runs.find((r) => typeof r.prNumber === "number")?.prNumber ?? undefined;
 
-  // Store errors
   // SECURITY: Sanitize conclusion to prevent control char injection and DB bloat
   const conclusion = sanitizeField(
     payload.workflow_job.conclusion ?? "failure",
@@ -635,7 +532,6 @@ export const extractAndStoreErrors = async (
     toRunError(e, ctx.jobName)
   );
 
-  // Create heals
   try {
     await createHealsForErrors(
       env,

@@ -4,9 +4,7 @@ import { createGitHubService } from "../github";
 import { deleteAndPostComment } from "../github/comments";
 import { getProjectContextForComment } from "./db-operations";
 import type { DbClient } from "./types";
-
-const safeLogValue = (value: string, maxLen = 100): string =>
-  value.length > maxLen ? `${value.slice(0, maxLen)}...` : value;
+import { safeLogValue } from "./types";
 
 export interface AggregationResult {
   allComplete: boolean;

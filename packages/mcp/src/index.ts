@@ -1,16 +1,5 @@
 #!/usr/bin/env node
 
-/**
- * @detent/mcp
- *
- * MCP server for Detent - AI-powered CI/CD diagnostics and healing.
- *
- * Configuration via environment variables:
- * - DETENT_API_KEY: API key for Detent (dtk_...)
- * - DETENT_JWT_TOKEN: JWT token (alternative to API key)
- * - DETENT_API_URL: Custom API URL (optional)
- */
-
 import { createClient, type DetentClient } from "@detent/sdk";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -24,7 +13,6 @@ const main = async () => {
     version: "0.1.0",
   });
 
-  // Initialize client from environment
   const apiKey = process.env.DETENT_API_KEY;
   const jwtToken = process.env.DETENT_JWT_TOKEN;
   const baseUrl = process.env.DETENT_API_URL;
@@ -46,12 +34,10 @@ const main = async () => {
     );
   }
 
-  // Register all tools
   registerProjectsTools(server, client);
   registerErrorsTools(server, client);
   registerHealsTools(server, client);
 
-  // Connect via stdio transport
   const transport = new StdioServerTransport();
   await server.connect(transport);
 

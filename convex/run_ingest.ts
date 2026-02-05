@@ -1,5 +1,7 @@
+import type { Infer } from "convex/values";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import { mutation } from "./_generated/server";
 import {
   nullableBoolean,
@@ -74,8 +76,8 @@ const signaturePayload = v.object({
 });
 
 const insertRun = async (
-  ctx: Parameters<typeof bulkStore.handler>[0],
-  run: (typeof bulkStore.args.runs)[number],
+  ctx: MutationCtx,
+  run: Infer<typeof runPayload>,
   runIdMap: Map<string, Id<"runs">>
 ) => {
   const existing = await ctx.db
@@ -119,8 +121,8 @@ const insertRun = async (
 };
 
 const insertSignature = async (
-  ctx: Parameters<typeof bulkStore.handler>[0],
-  signature: (typeof bulkStore.args.signatures)[number],
+  ctx: MutationCtx,
+  signature: Infer<typeof signaturePayload>,
   signatureMap: Map<string, Id<"errorSignatures">>,
   now: number
 ) => {
@@ -164,7 +166,7 @@ const buildCommonFiles = (
 };
 
 const upsertOccurrence = async (
-  ctx: Parameters<typeof bulkStore.handler>[0],
+  ctx: MutationCtx,
   signatureId: Id<"errorSignatures">,
   projectId: Id<"projects">,
   filePath: string | undefined,
@@ -232,7 +234,7 @@ export const bulkStore = mutation({
             ctx,
             signatureId,
             args.projectId,
-            signature.filePath,
+            signature.filePath ?? undefined,
             args.commitSha,
             now
           );
@@ -280,8 +282,8 @@ export const bulkStore = mutation({
 });
 
 const upsertRunForJob = async (
-  ctx: Parameters<typeof storeJobReport.handler>[0],
-  run: typeof storeJobReport.args.run
+  ctx: MutationCtx,
+  run: Infer<typeof runPayload>
 ): Promise<Id<"runs">> => {
   const existing = await ctx.db
     .query("runs")
@@ -326,7 +328,7 @@ const upsertRunForJob = async (
 };
 
 const deleteOldJobErrors = async (
-  ctx: Parameters<typeof storeJobReport.handler>[0],
+  ctx: MutationCtx,
   runId: Id<"runs">,
   workflowJob: string,
   source: string
@@ -345,9 +347,9 @@ const deleteOldJobErrors = async (
 };
 
 const insertJobErrors = async (
-  ctx: Parameters<typeof storeJobReport.handler>[0],
+  ctx: MutationCtx,
   runId: Id<"runs">,
-  errors: (typeof storeJobReport.args.errors)[number][],
+  errors: Infer<typeof errorPayload>[],
   workflowJob: string,
   source: string
 ) => {

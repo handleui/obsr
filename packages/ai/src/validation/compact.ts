@@ -1,4 +1,75 @@
 /**
+ * Common Unicode homoglyphs that can bypass ASCII-only pattern matching.
+ * Maps confusable characters to their ASCII equivalents.
+ * Covers Cyrillic, Greek, and other common lookalikes.
+ */
+const HOMOGLYPH_MAP: Record<string, string> = {
+  // Cyrillic lookalikes
+  а: "a",
+  е: "e",
+  і: "i",
+  о: "o",
+  р: "p",
+  с: "c",
+  у: "y",
+  х: "x",
+  А: "A",
+  В: "B",
+  С: "C",
+  Е: "E",
+  Н: "H",
+  І: "I",
+  К: "K",
+  М: "M",
+  О: "O",
+  Р: "P",
+  Т: "T",
+  Х: "X",
+  // Greek lookalikes
+  Α: "A",
+  Β: "B",
+  Ε: "E",
+  Η: "H",
+  Ι: "I",
+  Κ: "K",
+  Μ: "M",
+  Ν: "N",
+  Ο: "O",
+  Ρ: "P",
+  Τ: "T",
+  Χ: "X",
+  Υ: "Y",
+  Ζ: "Z",
+  ο: "o",
+  // Fullwidth variants
+  "＜": "<",
+  "＞": ">",
+  "／": "/",
+  // Other confusables
+  ǀ: "|",
+  ı: "i",
+  ȷ: "j",
+  ｉ: "i",
+  ｏ: "o",
+};
+
+/**
+ * Normalizes Unicode text to ASCII equivalents for pattern matching.
+ * Uses NFKD normalization + homoglyph replacement to defeat bypass attempts.
+ */
+const _normalizeToAscii = (text: string): string => {
+  // First apply NFKD normalization and strip combining marks
+  const normalized = text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+
+  // Then replace known homoglyphs that NFKD doesn't handle
+  let result = "";
+  for (const char of normalized) {
+    result += HOMOGLYPH_MAP[char] ?? char;
+  }
+  return result;
+};
+
+/**
  * Characters that could be used for prompt injection attacks.
  * These are sanitized to prevent malicious CI output from manipulating the LLM.
  */

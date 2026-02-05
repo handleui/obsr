@@ -9,6 +9,10 @@
     "packages/diagnostics": {
       "component": "diagnostics",
       "changelog-path": "CHANGELOG.md"
+    },
+    "packages/sdk": {
+      "component": "sdk",
+      "changelog-path": "CHANGELOG.md"
     }
   },
   "include-component-in-tag": true,

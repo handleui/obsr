@@ -1,4 +1,4 @@
-import type { KVNamespace } from "@cloudflare/workers-types";
+import type { KVNamespace, R2Bucket } from "@cloudflare/workers-types";
 import type { Env } from "../types/env";
 
 const createMockKvNamespace = (): KVNamespace => {
@@ -41,6 +41,20 @@ const createMockKvNamespace = (): KVNamespace => {
   };
 };
 
+const createMockR2Bucket = (): R2Bucket =>
+  ({
+    put: () => Promise.resolve(null),
+    get: () => Promise.resolve(null),
+    delete: () => Promise.resolve(undefined),
+    list: () =>
+      Promise.resolve({ objects: [], truncated: false, delimitedPrefixes: [] }),
+    head: () => Promise.resolve(null),
+    createMultipartUpload: () => Promise.reject(new Error("not implemented")),
+    resumeMultipartUpload: () => {
+      throw new Error("not implemented");
+    },
+  }) as unknown as R2Bucket;
+
 export const createMockEnv = (overrides: Partial<Env> = {}): Env => ({
   GITHUB_APP_ID: "github-app-id",
   GITHUB_CLIENT_ID: "github-client-id",
@@ -51,6 +65,7 @@ export const createMockEnv = (overrides: Partial<Env> = {}): Env => ({
   UPSTASH_REDIS_REST_URL: "https://upstash.test",
   UPSTASH_REDIS_REST_TOKEN: "upstash-token",
   "detent-idempotency": createMockKvNamespace(),
+  LOGS_BUCKET: createMockR2Bucket(),
   RESEND_API_KEY: "resend-key",
   RESEND_EMAIL_FROM: "Detent <noreply@detent.dev>",
   NAVIGATOR_BASE_URL: "https://navigator.detent.sh",
@@ -60,4 +75,4 @@ export const createMockEnv = (overrides: Partial<Env> = {}): Env => ({
   ...overrides,
 });
 
-export const createMockKv = createMockKvNamespace;
+export { createMockKvNamespace as createMockKv };

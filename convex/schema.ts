@@ -187,6 +187,7 @@ export default defineSchema({
     prNumber: v.optional(nullableNumber),
     checkRunId: v.optional(nullableString),
     logBytes: v.optional(nullableNumber),
+    logR2Key: v.optional(nullableString),
     errorCount: v.optional(nullableNumber),
     receivedAt: v.number(),
     workflowName: v.optional(nullableString),
@@ -232,8 +233,6 @@ export default defineSchema({
         v.null()
       )
     ),
-    // Migration note: unknownPattern and lineKnown fields removed in favor of
-    // AI-powered extraction. relatedFiles populated from stack trace parsing.
     relatedFiles: v.optional(nullableStringArray),
     fixable: v.optional(nullableBoolean),
     signatureId: v.optional(v.union(v.id("errorSignatures"), v.null())),

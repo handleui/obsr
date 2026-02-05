@@ -1,4 +1,4 @@
-import type { KVNamespace } from "@cloudflare/workers-types";
+import type { KVNamespace, R2Bucket } from "@cloudflare/workers-types";
 
 // Cloudflare Worker environment bindings
 // Set these via: npx wrangler secret put <NAME>
@@ -86,4 +86,7 @@ export interface Env {
   // AI Gateway API key for AI extraction (generateObject/generateText)
   // Required for @detent/extract to work with the Vercel AI Gateway
   AI_GATEWAY_API_KEY: string;
+
+  // R2 bucket for storing CI logs
+  LOGS_BUCKET: R2Bucket;
 }

@@ -30,10 +30,6 @@ import { CACHE_TTL, cacheKey, getFromCache, setInCache } from "../../lib/cache";
 import type { Env } from "../../types/env";
 import type { DbClient, PreparedRunData, RunIdentifier } from "./types";
 
-// ============================================================================
-// Validation Constants
-// ============================================================================
-// Maximum lengths for text fields to prevent database bloat
 export const MAX_WORKFLOW_NAME_LENGTH = 255;
 export const MAX_BRANCH_NAME_LENGTH = 255;
 export const MAX_CONCLUSION_LENGTH = 50;
@@ -42,20 +38,14 @@ export const MAX_ERROR_MESSAGE_LENGTH = 10_000;
 export const MAX_FILE_PATH_LENGTH = 1000;
 export const MAX_STACK_TRACE_LENGTH = 50_000;
 
-// Validation ranges for numeric fields
 export const MAX_RUN_ID = Number.MAX_SAFE_INTEGER;
 export const MAX_PR_NUMBER = 1_000_000_000; // GitHub PR numbers are 32-bit integers
 
-// SHA validation regex (40 hex characters)
 export const SHA_REGEX = /^[a-fA-F0-9]{40}$/;
 export const MAX_RUN_ATTEMPT = 100; // GitHub allows re-runs but UI typically shows ~10 attempts
 export const MAX_LINE_NUMBER = 10_000_000;
 export const MAX_COLUMN_NUMBER = 100_000;
 
-/**
- * Validates and clamps a numeric value to safe bounds.
- * Returns null if the value is not a valid positive integer.
- */
 export const validatePositiveInt = (
   value: unknown,
   max: number
@@ -66,9 +56,6 @@ export const validatePositiveInt = (
   return Math.min(value, max);
 };
 
-/**
- * Truncates a string to maximum length, returning null for non-strings.
- */
 export const truncateString = (
   value: unknown,
   maxLength: number
@@ -79,10 +66,6 @@ export const truncateString = (
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 };
 
-/**
- * Validates run data and prepares it for database insertion.
- * Returns null if validation fails for critical fields.
- */
 export const prepareRunData = (data: {
   runId: number;
   runName: string;
@@ -96,7 +79,6 @@ export const prepareRunData = (data: {
   runAttempt: number;
   runStartedAt: Date | null;
 }): PreparedRunData | null => {
-  // Validate critical numeric fields
   const validatedRunId = validatePositiveInt(data.runId, MAX_RUN_ID);
   const validatedPrNumber = validatePositiveInt(data.prNumber, MAX_PR_NUMBER);
   const validatedRunAttempt =
@@ -112,7 +94,6 @@ export const prepareRunData = (data: {
     return null;
   }
 
-  // Validate headSha format (40 hex characters)
   if (!SHA_REGEX.test(data.headSha)) {
     console.error(
       `[workflow_run] Invalid SHA format: ${data.headSha.slice(0, 20)}...`
@@ -140,26 +121,7 @@ export const prepareRunData = (data: {
   };
 };
 
-/**
- * Bulk store multiple runs and their errors in a single transaction.
- *
- * Performance optimizations (critical for Cloudflare Workers 128MB limit):
- * - Single database connection for all runs (vs N connections)
- * - Single transaction with bulk inserts (vs N transactions)
- * - Reduces DB round-trips from 2N to 2 (one for runs, one for errors)
- * - Respects Cloudflare Workers' 6 concurrent TCP connection limit
- */
-export const bulkStoreRunsAndErrors = async (
-  env: Env,
-  preparedRuns: PreparedRunData[]
-): Promise<void> => {
-  if (preparedRuns.length === 0) {
-    return;
-  }
-
-  const convex = getConvexClient(env);
-  const completedAt = Date.now();
-
+const collectErrorFingerprints = (preparedRuns: PreparedRunData[]) => {
   const errorsWithFingerprints: Array<{
     error: CIError;
     fingerprints: ReturnType<typeof generateFingerprints>;
@@ -186,41 +148,15 @@ export const bulkStoreRunsAndErrors = async (
       });
     }
   }
+  return errorsWithFingerprints;
+};
 
-  const firstRun = preparedRuns[0];
-  let projectId = firstRun?.projectId;
-  let commitSha: string | undefined;
-  if (firstRun) {
-    commitSha = firstRun.headSha;
-  }
-
-  if (!projectId && firstRun) {
-    const project = (await convex.query("projects:getByRepoFullName", {
-      providerRepoFullName: firstRun.repository,
-    })) as { _id: string; removedAt?: number } | null;
-
-    if (!project || project.removedAt) {
-      if (errorsWithFingerprints.length > 0) {
-        Sentry.captureMessage(
-          "Project not found for repository during error tracking",
-          {
-            level: "warning",
-            extra: {
-              repository: firstRun.repository,
-              errorCount: errorsWithFingerprints.length,
-            },
-          }
-        );
-      }
-      return;
-    }
-    projectId = project._id;
-  }
-
-  if (!projectId) {
-    return;
-  }
-
+const buildSignatureInputs = (
+  errorsWithFingerprints: Array<{
+    error: CIError;
+    fingerprints: ReturnType<typeof generateFingerprints>;
+  }>
+) => {
   const signatureInputs = new Map<
     string,
     {
@@ -251,6 +187,53 @@ export const bulkStoreRunsAndErrors = async (
       });
     }
   }
+  return signatureInputs;
+};
+
+export const bulkStoreRunsAndErrors = async (
+  env: Env,
+  preparedRuns: PreparedRunData[]
+): Promise<void> => {
+  if (preparedRuns.length === 0) {
+    return;
+  }
+
+  const convex = getConvexClient(env);
+  const completedAt = Date.now();
+  const errorsWithFingerprints = collectErrorFingerprints(preparedRuns);
+
+  const firstRun = preparedRuns[0];
+  let projectId = firstRun?.projectId;
+  const commitSha = firstRun?.headSha;
+
+  if (!projectId && firstRun) {
+    const project = (await convex.query("projects:getByRepoFullName", {
+      providerRepoFullName: firstRun.repository,
+    })) as { _id: string; removedAt?: number } | null;
+
+    if (!project || project.removedAt) {
+      if (errorsWithFingerprints.length > 0) {
+        Sentry.captureMessage(
+          "Project not found for repository during error tracking",
+          {
+            level: "warning",
+            extra: {
+              repository: firstRun.repository,
+              errorCount: errorsWithFingerprints.length,
+            },
+          }
+        );
+      }
+      return;
+    }
+    projectId = project._id;
+  }
+
+  if (!projectId) {
+    return;
+  }
+
+  const signatureInputs = buildSignatureInputs(errorsWithFingerprints);
 
   const runRows = preparedRuns.map((data) => ({
     id: data.runRecordId,
@@ -320,17 +303,6 @@ export const bulkStoreRunsAndErrors = async (
   );
 };
 
-// ============================================================================
-// Helper: Check run attempts AND load org settings in single DB connection
-// ============================================================================
-// Run-aware idempotency: Check specific (runId, runAttempt) tuples, not just
-// "any runs for commit". This enables proper re-run handling where the same
-// runId with a different runAttempt should be processed as a new run.
-//
-// Performance optimization: Combines run checks with org settings loading in
-// one DB connection, reducing connection overhead during webhook processing.
-// Also uses in-memory cache for org settings (2 min TTL).
-
 export const checkRunsAndLoadOrgSettings = async (
   env: Env,
   repository: string,
@@ -341,11 +313,9 @@ export const checkRunsAndLoadOrgSettings = async (
   existingRuns: Set<string>;
   orgSettings: Required<OrganizationSettings>;
 }> => {
-  // Check cache first for org settings
   const settingsCacheKey = cacheKey.orgSettings(installationId);
   const cachedSettings = getFromCache<OrganizationSettings>(settingsCacheKey);
 
-  // If we have cached settings and no runs to check, skip DB entirely
   if (cachedSettings && runIdentifiers.length === 0) {
     return {
       allExist: true,
@@ -399,16 +369,6 @@ export const checkRunsAndLoadOrgSettings = async (
   return { allExist, existingRuns: existingSet, orgSettings };
 };
 
-// ============================================================================
-// Helper: PR Comment ID Database Operations
-// ============================================================================
-// Database is the ultimate source of truth for comment IDs.
-// KV serves as a fast cache; these functions handle the persistent layer.
-
-/**
- * Retrieves a comment ID from the database for a PR.
- * Returns null if not found.
- */
 export const getCommentIdFromDb = async (
   db: DbClient,
   repository: string,
@@ -429,14 +389,6 @@ export const getCommentIdFromDb = async (
   }
 };
 
-/**
- * Upserts a comment ID in the database for a PR.
- * Creates new record or updates existing one.
- *
- * Performance: Uses single INSERT...ON CONFLICT DO UPDATE query instead of
- * SELECT+INSERT/UPDATE pattern to reduce DB round-trips from 2 to 1.
- * Leverages the unique index on (repository, prNumber) for conflict detection.
- */
 export const upsertCommentIdInDb = async (
   db: DbClient,
   repository: string,
@@ -455,23 +407,12 @@ export const upsertCommentIdInDb = async (
       `[pr-comments] Upserted comment ID in DB for ${repository}#${prNumber}: ${commentId}`
     );
   } catch (error) {
-    // Non-critical: KV is also storing this, and we have the unique constraint as safety
     console.error(
       `[pr-comments] upsertCommentIdInDb failed for ${repository}#${prNumber}:`,
       error
     );
   }
 };
-
-// ============================================================================
-// Helper: Check for job-reported errors from POST /report
-// ============================================================================
-// Looks up errors that were reported via the GitHub Action (POST /report)
-// rather than parsed from workflow logs. This allows skipping log fetching
-// when the action has already provided structured error data.
-//
-// Performance: Uses JOIN with WHERE filter at DB level instead of loading all
-// errors and filtering in JS. Also selects only needed columns to reduce data transfer.
 
 export interface JobReportedError {
   message: string;
@@ -547,17 +488,6 @@ export const checkForJobReportedErrors = async (
   }));
 };
 
-// ============================================================================
-// Helper: Post Errors Found Comment for a Run
-// ============================================================================
-// Posts a comment when errors are reported via POST /report with isComplete=true.
-// This allows the GitHub Action to trigger comments without waiting for workflow completion.
-//
-// Performance optimization: Accepts optional ProjectContext to avoid redundant DB queries
-// when the caller already has project/org data (e.g., report.ts already queries the project).
-
-// SECURITY: GitHub name validation pattern (defense-in-depth for owner/repo segments)
-// This provides additional validation before using values in GitHub API calls
 const GITHUB_NAME_PATTERN = /^[a-zA-Z0-9][-a-zA-Z0-9._]*$/;
 const isValidGitHubNameSegment = (name: string): boolean =>
   name.length > 0 &&
@@ -565,10 +495,6 @@ const isValidGitHubNameSegment = (name: string): boolean =>
   GITHUB_NAME_PATTERN.test(name) &&
   !name.includes("..");
 
-/**
- * Pre-fetched project context to avoid redundant DB queries.
- * Pass this when the caller already has project and organization data.
- */
 export interface ProjectContext {
   projectId: string;
   installationId: number;
@@ -585,8 +511,6 @@ export const postErrorsFoundCommentForRun = async (
 ): Promise<void> => {
   const [owner, repo] = repository.split("/");
 
-  // SECURITY: Validate owner/repo segments before using in GitHub API calls
-  // This prevents potential injection if repository format is somehow malformed
   if (
     !(
       owner &&
@@ -595,7 +519,6 @@ export const postErrorsFoundCommentForRun = async (
       isValidGitHubNameSegment(repo)
     )
   ) {
-    // SECURITY: Truncate repository in log to prevent log injection
     console.log(
       `[report] Invalid repository format: ${repository.slice(0, 100)}, skipping comment`
     );
@@ -606,11 +529,9 @@ export const postErrorsFoundCommentForRun = async (
   let installationId: number;
 
   if (projectContext) {
-    // Use pre-fetched context - avoids 2 DB queries
     projectId = projectContext.projectId;
     installationId = projectContext.installationId;
   } else {
-    // Fallback: fetch project and org from DB (legacy path)
     const project = (await db.query("projects:getByRepoFullName", {
       providerRepoFullName: repository,
     })) as { _id: string; organizationId: string; removedAt?: number } | null;
@@ -667,12 +588,6 @@ export const postErrorsFoundCommentForRun = async (
   );
 };
 
-/**
- * Get project context for comment posting.
- * Returns projectId and installationId needed for GitHub API calls.
- *
- * Performance: Uses single JOIN query instead of N+1 pattern (was 2 sequential queries).
- */
 export const getProjectContextForComment = async (
   db: DbClient,
   repository: string

@@ -6,7 +6,6 @@
 
 import { DetentApiError, DetentAuthError, DetentNetworkError } from "./errors.js";
 import { AuthResource } from "./resources/auth.js";
-import { DiagnosticsResource } from "./resources/diagnostics.js";
 import { ErrorsResource } from "./resources/errors.js";
 import { HealsResource } from "./resources/heals.js";
 import { InvitationsResource } from "./resources/invitations.js";
@@ -70,8 +69,6 @@ export class DetentClient {
   readonly projects: ProjectsResource;
   /** CI error retrieval */
   readonly errors: ErrorsResource;
-  /** Diagnostics parsing */
-  readonly diagnostics: DiagnosticsResource;
   /** Heal operations */
   readonly heals: HealsResource;
   /** Organization operations */
@@ -101,7 +98,6 @@ export class DetentClient {
     this.auth = new AuthResource(this);
     this.projects = new ProjectsResource(this);
     this.errors = new ErrorsResource(this);
-    this.diagnostics = new DiagnosticsResource(this);
     this.heals = new HealsResource(this);
     this.organizations = new OrganizationsResource(this);
     this.members = new MembersResource(this);

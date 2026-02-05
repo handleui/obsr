@@ -11,9 +11,6 @@
  *   auth: { type: 'apiKey', token: 'dtk_...' }
  * });
  *
- * // Parse CI logs
- * const result = await client.diagnostics.parse(logContent);
- *
  * // Get errors for a commit
  * const errors = await client.errors.get('abc123', 'owner/repo');
  *
@@ -29,7 +26,6 @@ export { sanitizeCredentials, CREDENTIAL_PATTERNS } from "./utils/sanitize.js";
 
 // Re-export resource classes for advanced use cases
 export { AuthResource } from "./resources/auth.js";
-export { DiagnosticsResource, type ParseOptions } from "./resources/diagnostics.js";
 export { ErrorsResource } from "./resources/errors.js";
 export { HealsResource } from "./resources/heals.js";
 export { InvitationsResource } from "./resources/invitations.js";

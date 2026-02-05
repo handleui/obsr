@@ -20,16 +20,6 @@
       }
     },
     {
-      "includes": ["packages/action/src/parsers.ts"],
-      "linter": {
-        "rules": {
-          "suspicious": {
-            "noControlCharactersInRegex": "off"
-          }
-        }
-      }
-    },
-    {
       // Disable organizeImports to preserve separate exports for JSDoc deprecation
       "includes": ["packages/types/src/index.ts"],
       "assist": {

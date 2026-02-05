@@ -5,39 +5,41 @@ import {
   estimateCost,
   normalizeModelId,
 } from "@detent/ai";
-import { generateObject, NoObjectGeneratedError } from "ai";
+import type { CIError, ErrorSource } from "@detent/types";
+import {
+  generateObject,
+  generateText,
+  NoObjectGeneratedError,
+  stepCountIs,
+} from "ai";
 import { prepareForPrompt } from "./preprocess.js";
-import { buildUserPrompt, EXTRACTION_SYSTEM_PROMPT } from "./prompt.js";
+import {
+  buildUserPrompt,
+  EXTRACTION_SYSTEM_PROMPT,
+  EXTRACTION_SYSTEM_PROMPT_TOOLS,
+} from "./prompt.js";
+import {
+  createRegisterErrorTool,
+  createSetDetectedSourceTool,
+} from "./tools.js";
 import {
   type ExtractionResult,
   ExtractionResultSchema,
   type ExtractionUsage,
+  type ToolExtractionOptions,
 } from "./types.js";
 
-/**
- * Pattern to detect content that consists only of [FILTERED] markers and whitespace.
- * Used to skip AI processing for content that was purely injection attempts.
- */
 const FILTERED_ONLY_PATTERN = /^(\s*\[FILTERED\]\s*)+$/;
 
-/**
- * Resolves the model to use for extraction.
- * When an API key is provided, creates a custom gateway instance.
- * Otherwise uses a string model ID that relies on AI_GATEWAY_API_KEY env var.
- */
 const resolveModel = (modelId: string, apiKey?: string) => {
-  if (apiKey) {
-    const gateway = createGateway({ apiKey });
-    return gateway(modelId);
+  if (!apiKey) {
+    return modelId;
   }
-  return modelId;
+  const gateway = createGateway({ apiKey });
+  return gateway(modelId);
 };
 
-/**
- * Validates and normalizes a model name into a proper model ID.
- * Provides helpful error context when normalization fails.
- */
-const validateAndNormalizeModel = (modelName: string): string => {
+const validateModelId = (modelName: string): string => {
   let modelId: string;
   try {
     modelId = normalizeModelId(modelName);
@@ -49,7 +51,7 @@ const validateAndNormalizeModel = (modelName: string): string => {
     );
   }
 
-  if (!modelId || typeof modelId !== "string" || modelId.trim() === "") {
+  if (!modelId?.trim()) {
     throw new Error(
       `Model normalization produced invalid result. Input: ${modelName}, Output: ${modelId}`
     );
@@ -58,91 +60,106 @@ const validateAndNormalizeModel = (modelName: string): string => {
   return modelId;
 };
 
-/**
- * Options for error extraction.
- */
 export interface ExtractionOptions {
-  /** Model to use (default: claude-haiku-4-5) */
   model?: string;
-  /** Maximum output tokens (default: 4096) */
   maxOutputTokens?: number;
-  /** Timeout in milliseconds (default: 30000) */
   timeout?: number;
-  /** Abort signal for cancellation */
   abortSignal?: AbortSignal;
-  /** Maximum content length to process (default: 15000) */
   maxContentLength?: number;
-  /**
-   * AI Gateway API key. Required in environments where process.env is not
-   * available (e.g., Cloudflare Workers). Falls back to AI_GATEWAY_API_KEY
-   * environment variable when not provided.
-   */
   apiKey?: string;
 }
 
-/**
- * Creates an empty extraction result for error cases.
- */
 const createEmptyResult = (truncated: boolean): ExtractionResult => ({
   errors: [],
   detectedSource: null,
   truncated,
 });
 
-/**
- * Extracts errors from CI output using AI.
- *
- * Uses Haiku to parse any CI output format and extract structured errors.
- * This replaces regex-based parsing with a universal AI approach.
- *
- * @param content - Raw CI output to parse
- * @param options - Extraction options
- * @returns Extracted errors with usage and cost information
- *
- * @example
- * ```ts
- * import { extractErrors } from "@detent/extract";
- *
- * const result = await extractErrors(ciLogs);
- * console.log(`Found ${result.errors.length} errors`);
- * console.log(`Cost: $${result.costUsd}`);
- * ```
- */
-export const extractErrors = async (
-  content: string,
-  options?: ExtractionOptions
-): Promise<ExtractionResult> => {
-  const modelName = options?.model ?? DEFAULT_FAST_MODEL;
-  const modelId = validateAndNormalizeModel(modelName);
-  const model = resolveModel(modelId, options?.apiKey);
-  const maxOutputTokens = options?.maxOutputTokens ?? 4096;
-  const timeoutMs = options?.timeout ?? DEFAULT_TIMEOUT_MS;
-  const maxContentLength = options?.maxContentLength ?? 15_000;
+interface PreparedExtraction {
+  model: ReturnType<typeof resolveModel>;
+  modelId: string;
+  prepared: string;
+  truncated: boolean;
+  abortSignal: AbortSignal;
+}
 
-  // Prepare content: compact, sanitize, truncate
-  // Truncation is determined after compaction, so a 20KB input that compacts
-  // to 10KB won't be marked as truncated since all meaningful content was kept
+const prepareExtraction = (
+  content: string,
+  options: {
+    model?: string;
+    apiKey?: string;
+    timeout?: number;
+    maxContentLength?: number;
+    abortSignal?: AbortSignal;
+  }
+): PreparedExtraction | null => {
+  const modelId = validateModelId(options.model ?? DEFAULT_FAST_MODEL);
+  const model = resolveModel(modelId, options.apiKey);
+  const timeoutMs = options.timeout ?? DEFAULT_TIMEOUT_MS;
+  const maxContentLength = options.maxContentLength ?? 15_000;
+
   const { content: prepared, truncated } = prepareForPrompt(
     content,
     maxContentLength
   );
 
-  // Empty content check
-  if (!prepared.trim()) {
-    return createEmptyResult(truncated);
+  if (!prepared.trim() || FILTERED_ONLY_PATTERN.test(prepared)) {
+    return null;
   }
 
-  // Content that was only injection attempts now contains only [FILTERED] markers
-  // Skip AI processing for such content to avoid wasting tokens
-  if (FILTERED_ONLY_PATTERN.test(prepared)) {
-    return createEmptyResult(truncated);
-  }
-
-  // Combine user-provided abort signal with timeout
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  const abortSignal = options?.abortSignal
+  const abortSignal = options.abortSignal
     ? AbortSignal.any([options.abortSignal, timeoutSignal])
     : timeoutSignal;
+
+  return { model, modelId, prepared, truncated, abortSignal };
+};
+
+const buildUsage = (
+  usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number },
+  modelId: string
+) => {
+  const inputTokens = usage.inputTokens ?? 0;
+  const outputTokens = usage.outputTokens ?? 0;
+  return {
+    usage: {
+      inputTokens,
+      outputTokens,
+      totalTokens: usage.totalTokens ?? inputTokens + outputTokens,
+    } as ExtractionUsage,
+    costUsd: estimateCost(modelId, inputTokens, outputTokens),
+  };
+};
+
+const handleExtractionError = (error: unknown): Error => {
+  const isTimeout =
+    error instanceof Error &&
+    (error.name === "AbortError" || error.name === "TimeoutError");
+  return new Error(
+    isTimeout ? "AI extraction timed out" : "AI extraction failed"
+  );
+};
+
+/**
+ * Extract errors from CI output using AI (primary method).
+ *
+ * Uses generateObject() for single-shot structured extraction. This is the
+ * production method used by webhook handlers. Prefer this over extractErrorsWithTools.
+ */
+export const extractErrors = async (
+  content: string,
+  options?: ExtractionOptions
+): Promise<ExtractionResult> => {
+  const prep = prepareExtraction(content, options ?? {});
+  if (!prep) {
+    const { truncated } = prepareForPrompt(
+      content,
+      options?.maxContentLength ?? 15_000
+    );
+    return createEmptyResult(truncated);
+  }
+
+  const { model, modelId, prepared, truncated, abortSignal } = prep;
 
   try {
     const { object, usage } = await generateObject({
@@ -150,19 +167,11 @@ export const extractErrors = async (
       schema: ExtractionResultSchema,
       system: EXTRACTION_SYSTEM_PROMPT,
       prompt: buildUserPrompt(prepared),
-      maxOutputTokens,
+      maxOutputTokens: options?.maxOutputTokens ?? 4096,
       abortSignal,
     });
 
-    // Calculate usage and cost
-    const inputTokens = usage.inputTokens ?? 0;
-    const outputTokens = usage.outputTokens ?? 0;
-    const extractionUsage: ExtractionUsage = {
-      inputTokens,
-      outputTokens,
-      totalTokens: usage.totalTokens ?? inputTokens + outputTokens,
-    };
-    const costUsd = estimateCost(modelId, inputTokens, outputTokens);
+    const { usage: extractionUsage, costUsd } = buildUsage(usage, modelId);
 
     return {
       errors: object.errors,
@@ -172,16 +181,89 @@ export const extractErrors = async (
       truncated,
     };
   } catch (error) {
-    // Return empty result on extraction failure
     if (NoObjectGeneratedError.isInstance(error)) {
       return createEmptyResult(truncated);
     }
-    // Sanitize error to avoid leaking AI SDK internals to callers
-    const isTimeout =
-      error instanceof Error &&
-      (error.name === "AbortError" || error.name === "TimeoutError");
-    throw new Error(
-      isTimeout ? "AI extraction timed out" : "AI extraction failed"
+    throw handleExtractionError(error);
+  }
+};
+
+/**
+ * EXPERIMENTAL - NOT USED IN PRODUCTION
+ *
+ * Tool-based extraction using register_error tool calls instead of generateObject.
+ * This approach is currently unused and its value is uncertain.
+ *
+ * Why this exists (and why you probably shouldn't use it):
+ * - Theory: Tool calling might be more exhaustive than single-shot JSON generation
+ * - Reality: generateObject() works fine, this adds complexity with unclear benefit
+ * - The onError callback enables streaming writes but we don't need that yet
+ *
+ * FUTURE PRODUCT IDEA (parser/bidirectional terminal):
+ * This tooling pattern could enable a "bidirectional terminal" product where:
+ * - Users see human-readable logs in their terminal (normal CI output)
+ * - AI receives structured JSON errors via tool calls in real-time
+ * - Commands execute normally but emit structured data for AI consumption
+ *
+ * Think: `npm test` outputs human logs, but an AI wrapper intercepts tool calls
+ * to build a structured error database as tests run. The terminal is bidirectional -
+ * readable by humans, parseable by AI, without post-processing log files.
+ *
+ * Until that product exists, prefer extractErrors() for all extraction needs.
+ */
+// biome-ignore lint/correctness/noUnusedVariables: Experimental - kept for future "bidirectional terminal" product
+const extractErrorsWithTools = async (
+  content: string,
+  options?: ToolExtractionOptions
+): Promise<ExtractionResult> => {
+  const prep = prepareExtraction(content, options ?? {});
+  if (!prep) {
+    const { truncated } = prepareForPrompt(
+      content,
+      options?.maxContentLength ?? 15_000
     );
+    return createEmptyResult(truncated);
+  }
+
+  const { model, modelId, prepared, truncated, abortSignal } = prep;
+  const maxErrors = options?.maxErrors ?? 200;
+  const errors: CIError[] = [];
+  let detectedSource: ErrorSource | null = null;
+
+  try {
+    const { usage } = await generateText({
+      model,
+      system: EXTRACTION_SYSTEM_PROMPT_TOOLS,
+      prompt: buildUserPrompt(prepared),
+      stopWhen: stepCountIs(maxErrors + 10),
+      tools: {
+        register_error: createRegisterErrorTool(async (error) => {
+          if (errors.length < maxErrors) {
+            errors.push(error);
+            await options?.onError?.(error);
+          }
+        }),
+        set_detected_source: createSetDetectedSourceTool((source) => {
+          detectedSource = source;
+        }),
+      },
+      maxOutputTokens: options?.maxOutputTokens ?? 8192,
+      abortSignal,
+    });
+
+    const { usage: extractionUsage, costUsd } = buildUsage(usage, modelId);
+
+    return {
+      errors,
+      detectedSource,
+      usage: extractionUsage,
+      costUsd,
+      truncated,
+    };
+  } catch (error) {
+    if (errors.length > 0) {
+      return { errors, detectedSource, truncated };
+    }
+    throw handleExtractionError(error);
   }
 };

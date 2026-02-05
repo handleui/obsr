@@ -119,8 +119,6 @@ const createGitHubServiceInternal = (env: Env) => {
     return data.token;
   };
 
-  // DEPRECATED: Log fetching is no longer used - errors come from job-reported action.
-  // Keeping for potential rollback. Remove once action-first approach is validated.
   const fetchWorkflowLogs = async (
     token: string,
     owner: string,
@@ -202,6 +200,95 @@ const createGitHubServiceInternal = (env: Env) => {
     console.log(`[github] Posted comment to ${owner}/${repo}#${issueNumber}`);
   };
 
+  const getBranchSha = async (
+    headers: Record<string, string>,
+    owner: string,
+    repo: string,
+    branch: string
+  ): Promise<string> => {
+    const response = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/git/ref/heads/${branch}`,
+      { headers }
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to get branch ref: ${response.status}`);
+    }
+    const data = (await response.json()) as RefResponse;
+    return data.object.sha;
+  };
+
+  const createGitTree = async (
+    headers: Record<string, string>,
+    owner: string,
+    repo: string,
+    baseSha: string,
+    files: Array<{ path: string; content: string }>
+  ): Promise<string> => {
+    const treeItems: GitTreeItem[] = files.map((file) => ({
+      path: file.path,
+      mode: "100644" as const,
+      type: "blob" as const,
+      content: file.content,
+    }));
+
+    const response = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/git/trees`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ base_tree: baseSha, tree: treeItems }),
+      }
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to create tree: ${response.status}`);
+    }
+    const data = (await response.json()) as CreateTreeResponse;
+    return data.sha;
+  };
+
+  const createGitCommit = async (
+    headers: Record<string, string>,
+    owner: string,
+    repo: string,
+    message: string,
+    treeSha: string,
+    parentSha: string
+  ): Promise<string> => {
+    const response = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/git/commits`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ message, tree: treeSha, parents: [parentSha] }),
+      }
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to create commit: ${response.status}`);
+    }
+    const data = (await response.json()) as CreateCommitResponse;
+    return data.sha;
+  };
+
+  const updateBranchRef = async (
+    headers: Record<string, string>,
+    owner: string,
+    repo: string,
+    branch: string,
+    sha: string
+  ): Promise<void> => {
+    const response = await fetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/git/refs/heads/${branch}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ sha }),
+      }
+    );
+    if (!response.ok) {
+      throw new Error(`Failed to update ref: ${response.status}`);
+    }
+  };
+
   const pushCommit = async (
     token: string,
     owner: string,
@@ -210,7 +297,6 @@ const createGitHubServiceInternal = (env: Env) => {
     message: string,
     files: Array<{ path: string; content: string }>
   ): Promise<string> => {
-    // Validate inputs to prevent URL manipulation
     if (!(isValidGitHubName(owner) && isValidGitHubName(repo))) {
       throw new Error("Invalid owner or repo name");
     }
@@ -226,87 +312,23 @@ const createGitHubServiceInternal = (env: Env) => {
       "Content-Type": "application/json",
     };
 
-    // 1. Get current commit SHA for the branch
-    const refResponse = await fetch(
-      `${GITHUB_API}/repos/${owner}/${repo}/git/ref/heads/${branch}`,
-      { headers }
+    const baseSha = await getBranchSha(headers, owner, repo, branch);
+    const treeSha = await createGitTree(headers, owner, repo, baseSha, files);
+    const commitSha = await createGitCommit(
+      headers,
+      owner,
+      repo,
+      message,
+      treeSha,
+      baseSha
     );
-
-    if (!refResponse.ok) {
-      throw new Error(`Failed to get branch ref: ${refResponse.status}`);
-    }
-
-    const refData = (await refResponse.json()) as RefResponse;
-    const baseSha = refData.object.sha;
-
-    // 2. Build tree items with content (GitHub creates blobs automatically)
-    const treeItems: GitTreeItem[] = files.map((file) => ({
-      path: file.path,
-      mode: "100644" as const,
-      type: "blob" as const,
-      content: file.content,
-    }));
-
-    // 3. Create tree (GitHub will create blobs from content)
-    const treeResponse = await fetch(
-      `${GITHUB_API}/repos/${owner}/${repo}/git/trees`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          base_tree: baseSha,
-          tree: treeItems,
-        }),
-      }
-    );
-
-    if (!treeResponse.ok) {
-      throw new Error(`Failed to create tree: ${treeResponse.status}`);
-    }
-
-    const treeData = (await treeResponse.json()) as CreateTreeResponse;
-
-    // 4. Create commit
-    const commitResponse = await fetch(
-      `${GITHUB_API}/repos/${owner}/${repo}/git/commits`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          message,
-          tree: treeData.sha,
-          parents: [baseSha],
-        }),
-      }
-    );
-
-    if (!commitResponse.ok) {
-      throw new Error(`Failed to create commit: ${commitResponse.status}`);
-    }
-
-    const commitData = (await commitResponse.json()) as CreateCommitResponse;
-
-    // 5. Update branch ref
-    const updateRefResponse = await fetch(
-      `${GITHUB_API}/repos/${owner}/${repo}/git/refs/heads/${branch}`,
-      {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify({
-          sha: commitData.sha,
-        }),
-      }
-    );
-
-    if (!updateRefResponse.ok) {
-      throw new Error(`Failed to update ref: ${updateRefResponse.status}`);
-    }
+    await updateBranchRef(headers, owner, repo, branch, commitSha);
 
     console.log(
-      `[github] Pushed commit ${commitData.sha.slice(0, 7)} to ${owner}/${repo}:${branch}`
+      `[github] Pushed commit ${commitSha.slice(0, 7)} to ${owner}/${repo}:${branch}`
     );
 
-    return commitData.sha;
+    return commitSha;
   };
 
   const getPullRequestForRun = async (
@@ -658,9 +680,6 @@ const createGitHubServiceInternal = (env: Env) => {
     return allMembers;
   };
 
-  // GET /repos/{owner}/{repo}/actions/runs?head_sha={sha}
-  // Returns all workflow runs for a commit with full evaluation details
-  // Includes metadata for run tracking (branch, attempt, timing, event)
   const listWorkflowRunsForCommit = async (
     token: string,
     owner: string,
@@ -766,8 +785,6 @@ const createGitHubServiceInternal = (env: Env) => {
     return { allCompleted, runs: nonBlacklistedRuns, evaluation };
   };
 
-  // GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs
-  // Returns all jobs for a workflow run with evaluation details
   const listJobsForWorkflowRun = async (
     token: string,
     owner: string,
@@ -846,7 +863,6 @@ const createGitHubServiceInternal = (env: Env) => {
     return { jobs, evaluation };
   };
 
-  // POST /repos/{owner}/{repo}/check-runs
   const createCheckRun = async (
     token: string,
     options: {
@@ -920,7 +936,6 @@ const createGitHubServiceInternal = (env: Env) => {
     return { id: data.id, htmlUrl: data.html_url };
   };
 
-  // PATCH /repos/{owner}/{repo}/check-runs/{check_run_id}
   const updateCheckRun = async (
     token: string,
     options:
@@ -1008,7 +1023,6 @@ const createGitHubServiceInternal = (env: Env) => {
     console.log(`[github] ${context}: Updated to ${logStatus}`);
   };
 
-  // POST /repos/{owner}/{repo}/issues/{issue_number}/comments - returns comment ID
   const postCommentWithId = async (
     token: string,
     owner: string,
@@ -1069,7 +1083,6 @@ const createGitHubServiceInternal = (env: Env) => {
     return { id: data.id, htmlUrl: data.html_url };
   };
 
-  // PATCH /repos/{owner}/{repo}/issues/comments/{comment_id} - update existing comment
   const updateComment = async (
     token: string,
     owner: string,
@@ -1119,9 +1132,6 @@ const createGitHubServiceInternal = (env: Env) => {
     console.log(`[github] ${context}: Updated comment`);
   };
 
-  // POST /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions
-  // Fire-and-forget: logs errors but doesn't throw (reactions are non-critical)
-  // Per GitHub docs: 201 = created, 200 = already exists, 422 = validation/spam
   const addReactionToComment = async (
     token: string,
     owner: string,

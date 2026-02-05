@@ -39,3 +39,31 @@ export const ExtractionResultSchema = z.object({
 });
 
 export type ExtractionResultSchemaType = z.infer<typeof ExtractionResultSchema>;
+
+/**
+ * Callback invoked for each error as it's extracted.
+ * Useful for streaming errors to a database or UI as they're found.
+ */
+export type OnErrorCallback = (error: CIError) => Promise<void>;
+
+/**
+ * Options for tool-based error extraction.
+ */
+export interface ToolExtractionOptions {
+  /** Model to use (default: claude-haiku-4-5) */
+  model?: string;
+  /** Maximum output tokens (default: 8192) */
+  maxOutputTokens?: number;
+  /** Timeout in milliseconds (default: 30000) */
+  timeout?: number;
+  /** Abort signal for cancellation */
+  abortSignal?: AbortSignal;
+  /** Maximum content length to process (default: 15000) */
+  maxContentLength?: number;
+  /** AI Gateway API key */
+  apiKey?: string;
+  /** Called for each error as it's found - can write to DB here */
+  onError?: OnErrorCallback;
+  /** Maximum errors to extract (default: 200) */
+  maxErrors?: number;
+}

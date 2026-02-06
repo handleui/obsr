@@ -46,12 +46,6 @@ const validateModelId = (modelName: string): string => {
     }
     return modelId;
   } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message.startsWith("Model normalization")
-    ) {
-      throw error;
-    }
     const message =
       error instanceof Error ? error.message : "Unknown normalization error";
     throw new Error(

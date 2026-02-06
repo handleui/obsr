@@ -18,7 +18,7 @@
     "@biomejs/biome": "2.3.11",
     "lefthook": "^2.0.13",
     "lint-staged": "^16.2.7",
-    "turbo": "^2.8.1",
+    "turbo": "^2.8.3",
     "typescript": "^5.9.3",
     "ultracite": "7.0.11",
     "wrangler": "^4.60.0"

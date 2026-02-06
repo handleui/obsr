@@ -191,8 +191,18 @@ const buildRunPatch = (
     logManifest?: unknown;
     extractionStatus?: string | null;
   }
-): Record<string, unknown> => {
-  const patch: Record<string, unknown> = {};
+): Partial<{
+  logR2Key: string;
+  logManifest: Infer<typeof runPayload>["logManifest"];
+  logManifestTruncated: true;
+  extractionStatus: Infer<typeof extractionStatus>;
+}> => {
+  const patch: Partial<{
+    logR2Key: string;
+    logManifest: Infer<typeof runPayload>["logManifest"];
+    logManifestTruncated: true;
+    extractionStatus: Infer<typeof extractionStatus>;
+  }> = {};
   if (run.logR2Key && !existing.logR2Key) {
     patch.logR2Key = run.logR2Key;
   }
@@ -417,6 +427,7 @@ const upsertRunForJob = async (
 
   const patch = {
     ...buildRunPatch(run, existing),
+    // Always overwrite: job reports refine these on each invocation
     errorCount: run.errorCount,
     conclusion: run.conclusion,
   };

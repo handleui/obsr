@@ -238,6 +238,7 @@ const extractErrorsWithTools = async (
     prepared,
     truncated,
     segmentsTruncated,
+    segments,
     abortSignal,
   } = prep;
   const maxErrors = options?.maxErrors ?? 200;
@@ -274,10 +275,11 @@ const extractErrorsWithTools = async (
       costUsd,
       truncated,
       segmentsTruncated,
+      segments,
     };
   } catch (error) {
     if (errors.length > 0) {
-      return { errors, detectedSource, truncated, segmentsTruncated };
+      return { errors, detectedSource, truncated, segmentsTruncated, segments };
     }
     throw handleExtractionError(error);
   }

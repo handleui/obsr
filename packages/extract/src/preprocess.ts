@@ -217,7 +217,9 @@ const countNewlinesInSlice = (str: string, end: number): number => {
 };
 
 // Approximates newline count for large strings by sampling the first 500KB.
-// Inaccuracy is acceptable since this only determines the noise segment endpoint after early cutoff.
+// Assumes uniform newline distribution — can be 2-3x off for skewed logs
+// (e.g. dense short-line preamble followed by long output lines).
+// Acceptable since this only determines the noise segment endpoint after early cutoff.
 const countNewlines = (str: string): number => {
   if (str.length <= MAX_NEWLINE_SCAN_BYTES) {
     return countNewlinesInSlice(str, str.length);

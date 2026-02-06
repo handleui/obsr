@@ -121,6 +121,18 @@ describe("validateLogManifest", () => {
     expect(result.segments).toBeNull();
   });
 
+  it("distinguishes empty input ([]) from all-invalid input (returns null)", () => {
+    // Empty array: segments pass through as-is
+    const empty = validateLogManifest([]);
+    expect(empty.segments).toEqual([]);
+
+    // All-invalid: segments become null (not empty array)
+    const allInvalid = validateLogManifest([
+      { start: 10, end: 5, signal: true },
+    ]);
+    expect(allInvalid.segments).toBeNull();
+  });
+
   it("handles segments at boundary values (start=1)", () => {
     const segments = [{ start: 1, end: 5, signal: true }];
     const result = validateLogManifest(segments);

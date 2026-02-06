@@ -83,6 +83,7 @@ const sanitizeField = (value: string, maxLen: number): string => {
   return cleaned.length > maxLen ? cleaned.slice(0, maxLen) : cleaned;
 };
 
+// Only 502 (Bad Gateway) and 503 (Service Unavailable) — these are the transient server errors worth retrying
 const HTTP_SERVER_ERROR = /\b50[23]\b/;
 const HTTP_RATE_LIMIT = /\b429\b/;
 
@@ -115,9 +116,9 @@ const countLines = (text: string): number => {
   return count;
 };
 
-const logValidationError = (field: string, value: string): null => {
+const logValidationError = (field: string, value: string): false => {
   console.error(`${LOG_PREFIX} Invalid ${field}: ${safeLogValue(value)}`);
-  return null;
+  return false;
 };
 
 const validatePayloadIds = (
@@ -128,19 +129,19 @@ const validatePayloadIds = (
   commitSha: string
 ): boolean => {
   if (!isValidJobId(jobId)) {
-    return !!logValidationError("job ID", String(jobId));
+    return logValidationError("job ID", String(jobId));
   }
   if (!isValidJobId(runId)) {
-    return !!logValidationError("run ID", String(runId));
+    return logValidationError("run ID", String(runId));
   }
   if (!isValidJobId(installationId)) {
-    return !!logValidationError("installation ID", String(installationId));
+    return logValidationError("installation ID", String(installationId));
   }
   if (!isValidRepositoryFormat(repository)) {
-    return !!logValidationError("repository format", repository);
+    return logValidationError("repository format", repository);
   }
   if (!SHA_REGEX.test(commitSha)) {
-    return !!logValidationError("commit SHA", commitSha);
+    return logValidationError("commit SHA", commitSha);
   }
   return true;
 };
@@ -625,15 +626,6 @@ interface ExtractionPipelineContext {
   conclusion: string;
 }
 
-const resolveExtractionStatus = (
-  extraction: JobExtractionResult
-): ExtractionStatus => {
-  if (extraction.errors.length === 0 && extraction.status === "success") {
-    return "skipped";
-  }
-  return extraction.status;
-};
-
 const storeEmptyExtraction = async (
   pipeline: ExtractionPipelineContext
 ): Promise<void> => {
@@ -645,7 +637,7 @@ const storeEmptyExtraction = async (
     prNumber: pipeline.prNumber,
     conclusion: pipeline.conclusion,
     totalLogLines: pipeline.totalLogLines,
-    extractionStatus: resolveExtractionStatus(pipeline.extraction),
+    extractionStatus: pipeline.extraction.status,
     logR2Key: pipeline.logR2Key,
     logManifest: pipeline.extraction.segments,
     logManifestTruncated: pipeline.extraction.segmentsTruncated,

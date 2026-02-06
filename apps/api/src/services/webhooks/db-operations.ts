@@ -71,6 +71,11 @@ export const truncateString = (
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 };
 
+/**
+ * Clamps log line range to the actual log size.
+ * Precondition: `start` and `end` must either both be null or form a valid range (start <= end).
+ * Call `validateLineRange` first to ensure this invariant.
+ */
 export const clampLogLines = (
   start: number | null,
   end: number | null,

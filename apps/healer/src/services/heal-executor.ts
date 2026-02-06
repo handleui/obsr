@@ -1,3 +1,4 @@
+import { DEFAULT_FAST_MODEL, DEFAULT_SMART_MODEL } from "@detent/ai";
 import {
   createConfig,
   createToolRegistry,
@@ -18,17 +19,19 @@ const SANDBOX_TEMPLATE = "base";
 const SANDBOX_TIMEOUT_SEC = 600;
 const CLONE_TIMEOUT_MS = 120_000;
 const INSTALL_TIMEOUT_MS = 300_000;
-const DEFAULT_MODEL = "openai/gpt-5.2-codex";
 
 const MAX_HEAL_ID_LENGTH = 128;
 const MAX_BRANCH_LENGTH = 256;
 const MAX_REPO_URL_LENGTH = 2048;
 const MAX_PROMPT_LENGTH = 100_000;
+const MAX_REMAINING_MONTHLY_USD = 10_000;
 
 const SAFE_STRING_PATTERN = /^[a-zA-Z0-9_\-./]+$/;
 
 const GITHUB_REPO_URL_PATTERN =
   /^https:\/\/(x-access-token:[^@]+@)?github\.com\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+\.git$/;
+
+const ALLOWED_HEAL_MODELS = new Set([DEFAULT_FAST_MODEL, DEFAULT_SMART_MODEL]);
 
 const healRequestSchema = z.object({
   healId: z
@@ -47,8 +50,14 @@ const healRequestSchema = z.object({
     .max(MAX_BRANCH_LENGTH)
     .regex(SAFE_STRING_PATTERN, "Invalid branch name"),
   userPrompt: z.string().min(1).max(MAX_PROMPT_LENGTH),
+  model: z
+    .string()
+    .min(1)
+    .max(100)
+    .refine((m) => ALLOWED_HEAL_MODELS.has(m), "Model not in server allowlist")
+    .optional(),
   budgetPerRunUSD: z.number().positive().max(100).optional(),
-  remainingMonthlyUSD: z.number().optional(),
+  remainingMonthlyUSD: z.number().max(MAX_REMAINING_MONTHLY_USD).optional(),
 });
 
 export type HealRequest = z.infer<typeof healRequestSchema>;
@@ -171,30 +180,32 @@ const sanitizeForLogging = (value: string): string => {
   return value;
 };
 
+const buildFailureResponse = (model: string, error: string): HealResponse => ({
+  success: false,
+  patch: null,
+  filesChanged: [],
+  result: {
+    model,
+    iterations: 0,
+    costUSD: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    finalMessage: "",
+  },
+  error,
+});
+
 export const executeHeal = async (
   appEnv: Env,
   rawRequest: unknown
 ): Promise<HealResponse> => {
-  let resolvedModel = DEFAULT_MODEL;
+  let resolvedModel = DEFAULT_SMART_MODEL;
   const parseResult = healRequestSchema.safeParse(rawRequest);
   if (!parseResult.success) {
     const errors = parseResult.error.errors
       .map((e) => `${e.path.join(".")}: ${e.message}`)
       .join("; ");
-    return {
-      success: false,
-      patch: null,
-      filesChanged: [],
-      result: {
-        model: resolvedModel,
-        iterations: 0,
-        costUSD: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        finalMessage: "",
-      },
-      error: `Invalid request: ${errors}`,
-    };
+    return buildFailureResponse(resolvedModel, `Invalid request: ${errors}`);
   }
 
   const request = parseResult.data;
@@ -215,10 +226,7 @@ export const executeHeal = async (
       `[heal-executor] Sandbox ${sandbox.sandboxId} created, cloning repo`
     );
 
-    // SECURITY: Shell injection is prevented by strict regex validation:
-    // - branch: SAFE_STRING_PATTERN allows only [a-zA-Z0-9_\-./]
-    // - repoUrl: GITHUB_REPO_URL_PATTERN requires exact GitHub URL format
-    // These patterns explicitly disallow shell metacharacters ($, `, ;, |, &, etc.)
+    // HACK: Shell injection prevented by SAFE_STRING_PATTERN and GITHUB_REPO_URL_PATTERN regex validation above
     const cloneCmd = `git clone --depth 1 --branch ${request.branch} ${request.repoUrl} ${worktreePath}`;
     const cloneResult = await sandbox.commands.run(cloneCmd, {
       timeoutMs: CLONE_TIMEOUT_MS,
@@ -243,16 +251,13 @@ export const executeHeal = async (
     const registry = createToolRegistry(toolContext);
     registry.registerAll(createSandboxTools(sandbox));
 
-    // AI_GATEWAY_API_KEY is validated at startup in env.ts and already set in process.env
-    // No need to set it again per-request
-
+    resolvedModel = request.model ?? DEFAULT_SMART_MODEL;
     const config = createConfig(
-      DEFAULT_MODEL,
+      resolvedModel,
       10,
       request.budgetPerRunUSD ?? 1.0,
       request.remainingMonthlyUSD ?? -1
     );
-    resolvedModel = config.model;
 
     const loop = new HealLoop(registry, config);
 
@@ -296,21 +301,7 @@ export const executeHeal = async (
     const rawMessage = error instanceof Error ? error.message : String(error);
     const safeMessage = sanitizeForLogging(rawMessage);
     console.error(`[heal-executor] Error: ${safeMessage}`);
-
-    return {
-      success: false,
-      patch: null,
-      filesChanged: [],
-      result: {
-        model: resolvedModel,
-        iterations: 0,
-        costUSD: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        finalMessage: "",
-      },
-      error: safeMessage,
-    };
+    return buildFailureResponse(resolvedModel, safeMessage);
   } finally {
     if (sandbox) {
       try {

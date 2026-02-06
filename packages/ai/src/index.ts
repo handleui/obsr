@@ -20,6 +20,8 @@ export {
   type ModelParam,
 } from "./pricing.js";
 
+export { selectModelForErrors } from "./routing.js";
+
 export {
   DEFAULT_FAST_MODEL,
   DEFAULT_MAX_OUTPUT_TOKENS,

@@ -35,6 +35,14 @@ const invitationStatus = v.union(
   v.literal("revoked")
 );
 
+// Keep in sync with apps/api/src/services/webhooks/error-extraction.ts and convex/run_ingest.ts
+const extractionStatus = v.union(
+  v.literal("success"),
+  v.literal("failed"),
+  v.literal("timeout"),
+  v.literal("skipped")
+);
+
 const usageEventName = v.union(v.literal("ai"), v.literal("sandbox"));
 const usageMetadata = v.object({
   runId: v.optional(nullableString),
@@ -188,12 +196,23 @@ export default defineSchema({
     checkRunId: v.optional(nullableString),
     logBytes: v.optional(nullableNumber),
     logR2Key: v.optional(nullableString),
+    logManifest: v.optional(
+      v.array(
+        v.object({
+          start: v.number(),
+          end: v.number(),
+          signal: v.boolean(),
+        })
+      )
+    ),
+    logManifestTruncated: v.optional(v.boolean()),
     errorCount: v.optional(nullableNumber),
     receivedAt: v.number(),
     workflowName: v.optional(nullableString),
     conclusion: v.optional(nullableString),
     headBranch: v.optional(nullableString),
     runAttempt: v.number(),
+    extractionStatus: v.optional(v.union(extractionStatus, v.null())),
     runStartedAt: v.optional(nullableNumber),
     runCompletedAt: v.optional(nullableNumber),
   })
@@ -219,6 +238,7 @@ export default defineSchema({
     source: v.optional(nullableString),
     stackTrace: v.optional(nullableString),
     hints: v.optional(nullableStringArray),
+    providerJobId: v.optional(nullableString),
     workflowJob: v.optional(nullableString),
     workflowStep: v.optional(nullableString),
     workflowAction: v.optional(nullableString),
@@ -235,6 +255,8 @@ export default defineSchema({
     ),
     relatedFiles: v.optional(nullableStringArray),
     fixable: v.optional(nullableBoolean),
+    logLineStart: v.optional(nullableNumber),
+    logLineEnd: v.optional(nullableNumber),
     signatureId: v.optional(v.union(v.id("errorSignatures"), v.null())),
     createdAt: v.number(),
   })

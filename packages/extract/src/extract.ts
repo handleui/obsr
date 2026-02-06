@@ -7,7 +7,7 @@ import {
 } from "@detent/ai";
 import type { CIError, ErrorSource } from "@detent/types";
 import { generateText, Output, stepCountIs } from "ai";
-import { prepareForPrompt } from "./preprocess.js";
+import { type LogSegment, prepareForPrompt } from "./preprocess.js";
 import {
   buildUserPrompt,
   EXTRACTION_SYSTEM_PROMPT,
@@ -63,10 +63,16 @@ export interface ExtractionOptions {
   apiKey?: string;
 }
 
-const createEmptyResult = (truncated: boolean): ExtractionResult => ({
+const createEmptyResult = (
+  truncated: boolean,
+  segmentsTruncated: boolean,
+  segments?: LogSegment[]
+): ExtractionResult => ({
   errors: [],
   detectedSource: null,
   truncated,
+  segmentsTruncated,
+  segments,
 });
 
 interface PreparedExtraction {
@@ -74,6 +80,8 @@ interface PreparedExtraction {
   modelId: string;
   prepared: string;
   truncated: boolean;
+  segmentsTruncated: boolean;
+  segments: LogSegment[];
   abortSignal: AbortSignal;
 }
 
@@ -92,10 +100,12 @@ const prepareExtraction = (
   const timeoutMs = options.timeout ?? DEFAULT_TIMEOUT_MS;
   const maxContentLength = options.maxContentLength ?? 15_000;
 
-  const { content: prepared, truncated } = prepareForPrompt(
-    content,
-    maxContentLength
-  );
+  const {
+    content: prepared,
+    truncated,
+    segments,
+    segmentsTruncated,
+  } = prepareForPrompt(content, maxContentLength);
 
   if (!prepared.trim() || FILTERED_ONLY_PATTERN.test(prepared)) {
     return null;
@@ -106,7 +116,15 @@ const prepareExtraction = (
     ? AbortSignal.any([options.abortSignal, timeoutSignal])
     : timeoutSignal;
 
-  return { model, modelId, prepared, truncated, abortSignal };
+  return {
+    model,
+    modelId,
+    prepared,
+    truncated,
+    segmentsTruncated,
+    segments,
+    abortSignal,
+  };
 };
 
 const buildUsage = (
@@ -138,8 +156,11 @@ const emptyResultForContent = (
   content: string,
   maxContentLength: number
 ): ExtractionResult => {
-  const { truncated } = prepareForPrompt(content, maxContentLength);
-  return createEmptyResult(truncated);
+  const { truncated, segments, segmentsTruncated } = prepareForPrompt(
+    content,
+    maxContentLength
+  );
+  return createEmptyResult(truncated, segmentsTruncated, segments);
 };
 
 const DEFAULT_MAX_CONTENT_LENGTH = 15_000;
@@ -156,7 +177,15 @@ export const extractErrors = async (
     );
   }
 
-  const { model, modelId, prepared, truncated, abortSignal } = prep;
+  const {
+    model,
+    modelId,
+    prepared,
+    truncated,
+    segmentsTruncated,
+    segments,
+    abortSignal,
+  } = prep;
 
   try {
     const { output, usage } = await generateText({
@@ -169,7 +198,7 @@ export const extractErrors = async (
     });
 
     if (!output) {
-      return createEmptyResult(truncated);
+      return createEmptyResult(truncated, segmentsTruncated, segments);
     }
 
     const { usage: extractionUsage, costUsd } = buildUsage(usage, modelId);
@@ -180,6 +209,8 @@ export const extractErrors = async (
       usage: extractionUsage,
       costUsd,
       truncated,
+      segmentsTruncated,
+      segments,
     };
   } catch (error) {
     throw handleExtractionError(error);
@@ -201,7 +232,15 @@ const extractErrorsWithTools = async (
     );
   }
 
-  const { model, modelId, prepared, truncated, abortSignal } = prep;
+  const {
+    model,
+    modelId,
+    prepared,
+    truncated,
+    segmentsTruncated,
+    segments,
+    abortSignal,
+  } = prep;
   const maxErrors = options?.maxErrors ?? 200;
   const errors: CIError[] = [];
   let detectedSource: ErrorSource | null = null;
@@ -235,10 +274,12 @@ const extractErrorsWithTools = async (
       usage: extractionUsage,
       costUsd,
       truncated,
+      segmentsTruncated,
+      segments,
     };
   } catch (error) {
     if (errors.length > 0) {
-      return { errors, detectedSource, truncated };
+      return { errors, detectedSource, truncated, segmentsTruncated, segments };
     }
     throw handleExtractionError(error);
   }

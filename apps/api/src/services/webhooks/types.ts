@@ -16,7 +16,6 @@ export interface PreparedRunData {
   headBranch: string;
   runAttempt: number;
   runStartedAt: Date | null;
-  /** Project ID for occurrence tracking (optional, avoids extra DB query if provided) */
   projectId?: string;
 }
 
@@ -63,5 +62,10 @@ export const isValidRepositoryFormat = (repo: string): boolean => {
   );
 };
 
-export const safeLogValue = (value: string, maxLen = 100): string =>
-  value.length > maxLen ? `${value.slice(0, maxLen)}...` : value;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: Intentionally stripping control chars to prevent log injection
+const LOG_CONTROL_CHARS = /[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u2029]/g;
+
+export const safeLogValue = (value: string, maxLen = 100): string => {
+  const cleaned = value.replace(LOG_CONTROL_CHARS, "");
+  return cleaned.length > maxLen ? `${cleaned.slice(0, maxLen)}...` : cleaned;
+};

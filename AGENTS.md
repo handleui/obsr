@@ -17,11 +17,6 @@ bun run dt <command>       # Use local build (not ./dist/dt)
 # CLI (production)
 dt <command>               # Global install
 detent <command>           # Alias
-
-# Database (from apps/api/)
-bun run db:generate        # Create migration after editing schema.ts
-bun run db:migrate         # Apply migrations
-bun run db:studio          # Open Drizzle Studio
 ```
 
 ## Tech Stack
@@ -29,7 +24,7 @@ bun run db:studio          # Open Drizzle Studio
 - **Runtime**: Bun, Node.js 22
 - **Monorepo**: Turborepo
 - **API**: Hono on Cloudflare Workers
-- **Database**: Neon PostgreSQL, Drizzle ORM (`drizzle-orm/pg-core`), Cloudflare Hyperdrive
+- **Database**: Convex (serverless backend), schema at `convex/schema.ts`
 - **Web**: Next.js 16, React 19, Tailwind CSS
 - **CLI**: TypeScript, Citty, Ink
 - **Auth**: WorkOS, JWT (Jose)
@@ -55,14 +50,14 @@ packages/
 └── ui/        # Shared React components
 ```
 
-## Database Migrations
+## Database
 
-Source of truth: `apps/api/src/db/schema.ts`
+Source of truth: `convex/schema.ts`
 
-1. Edit `schema.ts`
-2. Run `db:generate` → creates migration in `drizzle/`
-3. Run `db:migrate` → applies to database
-4. Commit both `schema.ts` AND `drizzle/` files
+1. Edit `convex/schema.ts`
+2. Edit corresponding mutation/query files in `convex/`
+3. Deploy via `npx convex deploy` (schema changes apply automatically)
+4. Commit schema and mutation files together
 
 ## Boundaries
 
@@ -72,7 +67,7 @@ Source of truth: `apps/api/src/db/schema.ts`
 - When answering questions involving external documentation, APIs, or specifications, prefer using Nia MCP tools to retrieve and verify information before responding. Use reasoning first to determine whether external grounding is necessary.
 - Run `bun run fix` before committing
 - Use `bun run dt x` for local CLI testing
-- Edit `schema.ts` then run `db:generate` for DB changes
+- Edit `convex/schema.ts` then deploy for DB changes
 
 ### Ask First
 - Database schema changes affecting production
@@ -80,8 +75,7 @@ Source of truth: `apps/api/src/db/schema.ts`
 - Modifications to webhook handlers
 
 ### Never Do
-- Edit files in `drizzle/*.sql` or `drizzle/meta/` directly (use `db:generate`)
-- Use `db:push` in production (causes data loss on renames)
+- Edit Convex `_generated/` files directly
 - Run `./dist/dt` directly (use `bun run dt` instead)
 - Commit without running `bun run fix`
 - Create markdown files when closing tasks (no summaries or reports needed)

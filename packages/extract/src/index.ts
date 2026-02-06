@@ -2,7 +2,9 @@
 
 export { type ExtractionOptions, extractErrors } from "./extract.js";
 export {
+  type CompactResult,
   compactCiOutput,
+  type LogSegment,
   type PrepareResult,
   prepareForPrompt,
   sanitizeForPrompt,

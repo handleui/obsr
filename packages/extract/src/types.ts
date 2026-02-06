@@ -1,6 +1,7 @@
 import type { CIError, ErrorSource } from "@detent/types";
 import { CIErrorSchemaWithValidation, ErrorSourceSchema } from "@detent/types";
 import { z } from "zod";
+import type { LogSegment } from "./preprocess.js";
 
 export interface ExtractionUsage {
   inputTokens: number;
@@ -14,7 +15,15 @@ export interface ExtractionResult {
   usage?: ExtractionUsage;
   costUsd?: number;
   truncated: boolean;
+  segmentsTruncated: boolean;
+  segments?: LogSegment[];
 }
+
+const LogSegmentSchema = z.object({
+  start: z.number(),
+  end: z.number(),
+  signal: z.boolean(),
+});
 
 export const ExtractionResultSchema = z.object({
   errors: z
@@ -23,6 +32,17 @@ export const ExtractionResultSchema = z.object({
   detectedSource: ErrorSourceSchema.nullable().describe(
     "The primary tool that produced the output, if identifiable"
   ),
+  truncated: z.boolean(),
+  segmentsTruncated: z.boolean(),
+  segments: z.array(LogSegmentSchema).optional(),
+  usage: z
+    .object({
+      inputTokens: z.number(),
+      outputTokens: z.number(),
+      totalTokens: z.number(),
+    })
+    .optional(),
+  costUsd: z.number().optional(),
 });
 
 export type ExtractionResultSchemaType = z.infer<typeof ExtractionResultSchema>;

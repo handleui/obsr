@@ -69,5 +69,7 @@ jobs:
 
       - name: Publish @detent/sdk
         if: ${{ steps.release.outputs['packages/sdk--release_created'] }}
-        run: npm publish --provenance
+        run: npm publish
         working-directory: packages/sdk
+        env:
+          NPM_CONFIG_PROVENANCE: false

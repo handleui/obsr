@@ -1,4 +1,4 @@
-import { extractErrors } from "@detent/extract";
+import { extractErrors, type LogSegment } from "@detent/extract";
 import type { CIError, HealCreateStatus } from "@detent/types";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK is designed for namespace import
 import * as Sentry from "@sentry/cloudflare";
@@ -12,16 +12,7 @@ import type { Env } from "../../types/env";
 import { hasAutofix } from "../autofix/registry";
 import { canRunHeal } from "../billing";
 import { createGitHubService } from "../github";
-import {
-  MAX_COLUMN_NUMBER,
-  MAX_ERROR_MESSAGE_LENGTH,
-  MAX_FILE_PATH_LENGTH,
-  MAX_LINE_NUMBER,
-  MAX_STACK_TRACE_LENGTH,
-  MAX_WORKFLOW_NAME_LENGTH,
-  truncateString,
-  validatePositiveInt,
-} from "./db-operations";
+import { ciErrorToRow } from "./db-operations";
 import type { DbClient } from "./types";
 import {
   isValidJobId,
@@ -65,53 +56,105 @@ interface RunError {
   workflowJob?: string | null;
 }
 
+type ExtractionStatus = "success" | "failed" | "timeout" | "skipped";
+
+interface JobExtractionResult {
+  errors: CIError[];
+  truncated: boolean;
+  segmentsTruncated: boolean;
+  status: ExtractionStatus;
+  segments?: LogSegment[];
+}
+
 const LOG_PREFIX = "[error-extraction]";
 const EXTRACTION_TIMEOUT_MS = 60_000;
 const LOCK_TTL_SECONDS = 300;
 const MAX_HEALS_PER_EXTRACTION = 10;
-// SECURITY: Cap R2 log storage at 50 MB to prevent storage abuse
+// Retry budget: worst-case wall time ~187s (3 × 60s extraction timeout + 7s delays).
+// Runs via waitUntil so it won't block the webhook response.
+const RETRY_DELAYS_MS = [2000, 5000];
 const MAX_R2_LOG_BYTES = 50 * 1024 * 1024;
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: Intentionally matching control chars for security
 const CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u2029]/g;
 
-// SECURITY: Sanitize webhook string fields (strip control chars + truncate to limit)
 const sanitizeField = (value: string, maxLen: number): string => {
   const cleaned = value.replace(CONTROL_CHAR_PATTERN, "");
   return cleaned.length > maxLen ? cleaned.slice(0, maxLen) : cleaned;
+};
+
+const HTTP_SERVER_ERROR = /\b50[23]\b/;
+const HTTP_RATE_LIMIT = /\b429\b/;
+
+const isRetryableError = (message: string): boolean => {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("timed out") ||
+    lower.includes("etimedout") ||
+    lower.includes("econnreset") ||
+    lower.includes("socket hang up") ||
+    lower.includes("network error") ||
+    lower.includes("network timeout") ||
+    lower.includes("fetch failed") ||
+    HTTP_SERVER_ERROR.test(message) ||
+    HTTP_RATE_LIMIT.test(message) ||
+    lower.includes("rate limit")
+  );
+};
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+const countLines = (text: string): number => {
+  let count = 1;
+  for (const ch of text) {
+    if (ch === "\n") {
+      count++;
+    }
+  }
+  return count;
+};
+
+const logValidationError = (field: string, value: string): null => {
+  console.error(`${LOG_PREFIX} Invalid ${field}: ${safeLogValue(value)}`);
+  return null;
+};
+
+const validatePayloadIds = (
+  jobId: number,
+  runId: number,
+  installationId: number,
+  repository: string,
+  commitSha: string
+): boolean => {
+  if (!isValidJobId(jobId)) {
+    return !!logValidationError("job ID", String(jobId));
+  }
+  if (!isValidJobId(runId)) {
+    return !!logValidationError("run ID", String(runId));
+  }
+  if (!isValidJobId(installationId)) {
+    return !!logValidationError("installation ID", String(installationId));
+  }
+  if (!isValidRepositoryFormat(repository)) {
+    return !!logValidationError("repository format", repository);
+  }
+  if (!SHA_REGEX.test(commitSha)) {
+    return !!logValidationError("commit SHA", commitSha);
+  }
+  return true;
 };
 
 const buildContext = (payload: WebhookPayload): ExtractionContext | null => {
   const repository = payload.repository.full_name;
   const jobId = payload.workflow_job.id;
   const runId = payload.workflow_job.run_id;
-
-  if (!isValidJobId(jobId)) {
-    console.error(
-      `${LOG_PREFIX} Invalid job ID: ${safeLogValue(String(jobId))}`
-    );
-    return null;
-  }
-
-  if (!isValidJobId(runId)) {
-    console.error(
-      `${LOG_PREFIX} Invalid run ID: ${safeLogValue(String(runId))}`
-    );
-    return null;
-  }
-
-  if (!isValidRepositoryFormat(repository)) {
-    console.error(
-      `${LOG_PREFIX} Invalid repository format: ${safeLogValue(repository)}`
-    );
-    return null;
-  }
-
+  const installationId = payload.installation.id;
   const commitSha = payload.workflow_job.head_sha;
-  if (!SHA_REGEX.test(commitSha)) {
-    console.error(
-      `${LOG_PREFIX} Invalid commit SHA: ${safeLogValue(commitSha)}`
-    );
+
+  if (
+    !validatePayloadIds(jobId, runId, installationId, repository, commitSha)
+  ) {
     return null;
   }
 
@@ -121,7 +164,6 @@ const buildContext = (payload: WebhookPayload): ExtractionContext | null => {
     runId,
     jobName: sanitizeField(payload.workflow_job.name, 255),
     commitSha: commitSha.toLowerCase(),
-    // SECURITY: Sanitize webhook fields to prevent control char injection and DB bloat
     headBranch: sanitizeField(
       payload.workflow_job.head_branch ?? "unknown",
       255
@@ -130,14 +172,11 @@ const buildContext = (payload: WebhookPayload): ExtractionContext | null => {
       payload.workflow_job.workflow_name ?? "Unknown",
       255
     ),
-    installationId: payload.installation.id,
+    installationId,
     logCtx: `${safeLogValue(repository)}#${jobId}`,
   };
 };
 
-// KV has no atomic CAS, so we use a simple dedup key.
-// Duplicate extractions are idempotent (storeJobReport upserts), so the rare
-// race where two workers both proceed is harmless.
 const acquireLock = async (
   kv: KVNamespace,
   repository: string,
@@ -168,10 +207,10 @@ const fetchLogs = async (
   let token: string;
   try {
     token = await github.getInstallationToken(ctx.installationId);
-  } catch (error) {
+  } catch (_error) {
     return {
       logs: null,
-      error: `Failed to get token: ${error instanceof Error ? error.message : String(error)}`,
+      error: "Failed to get installation token",
     };
   }
 
@@ -193,61 +232,126 @@ const fetchLogs = async (
     if (message.includes("404") || message.includes("expired")) {
       return { logs: null };
     }
-    return { logs: null, error: `Failed to fetch logs: ${message}` };
+    return { logs: null, error: "Failed to fetch workflow logs" };
   }
+};
+
+const logExtractionExhausted = (
+  ctx: ExtractionContext,
+  lastError: string | undefined
+): JobExtractionResult => {
+  const status: ExtractionStatus = lastError?.includes("timed out")
+    ? "timeout"
+    : "failed";
+  console.warn(
+    JSON.stringify({
+      level: "warn",
+      msg: "AI extraction failed after all retries",
+      prefix: LOG_PREFIX,
+      repository: ctx.repository,
+      runId: ctx.runId,
+      jobName: ctx.jobName,
+      status,
+      lastError: lastError ? sanitizeField(lastError, 500) : undefined,
+      attempts: RETRY_DELAYS_MS.length + 1,
+    })
+  );
+  return { errors: [], truncated: false, segmentsTruncated: false, status };
 };
 
 const runExtraction = async (
   env: Env,
-  logContent: string
-): Promise<{ errors: CIError[]; truncated: boolean } | null> => {
-  try {
-    const result = await extractErrors(logContent, {
-      timeout: EXTRACTION_TIMEOUT_MS,
-      apiKey: env.AI_GATEWAY_API_KEY,
-    });
-    return { errors: result.errors, truncated: result.truncated ?? false };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("timed out")) {
-      console.warn(`${LOG_PREFIX} AI extraction timed out`);
-    } else {
-      console.error(`${LOG_PREFIX} AI extraction failed: ${message}`);
+  logContent: string,
+  ctx: ExtractionContext
+): Promise<JobExtractionResult> => {
+  let lastError: string | undefined;
+
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      const result = await extractErrors(logContent, {
+        timeout: EXTRACTION_TIMEOUT_MS,
+        apiKey: env.AI_GATEWAY_API_KEY,
+      });
+      if (attempt > 0) {
+        console.log(
+          `${LOG_PREFIX} ${ctx.logCtx}: AI extraction succeeded on retry ${attempt}`
+        );
+      }
+      return {
+        errors: result.errors,
+        truncated: result.truncated ?? false,
+        segmentsTruncated: result.segmentsTruncated ?? false,
+        status: "success",
+        segments: result.segments,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      lastError = message;
+      const isTimeout = message.includes("timed out");
+
+      if (!isRetryableError(message)) {
+        console.error(
+          `${LOG_PREFIX} ${ctx.logCtx}: AI extraction failed (non-retryable): ${sanitizeField(message, 500)}`
+        );
+        return {
+          errors: [],
+          truncated: false,
+          segmentsTruncated: false,
+          status: "failed",
+        };
+      }
+
+      const delay = RETRY_DELAYS_MS[attempt];
+      if (delay !== undefined) {
+        console.warn(
+          `${LOG_PREFIX} ${ctx.logCtx}: AI extraction ${isTimeout ? "timed out" : "failed"} (attempt ${attempt + 1}/${RETRY_DELAYS_MS.length + 1}), retrying in ${delay}ms`
+        );
+        await sleep(delay);
+      }
     }
-    return null;
   }
+
+  return logExtractionExhausted(ctx, lastError);
 };
 
-const mapExtractedToRow = (e: CIError, runId: string, job: string) => ({
-  runId,
-  message:
-    truncateString(e.message, MAX_ERROR_MESSAGE_LENGTH) ?? "Unknown error",
-  filePath: truncateString(e.filePath, MAX_FILE_PATH_LENGTH),
-  line: validatePositiveInt(e.line, MAX_LINE_NUMBER),
-  column: validatePositiveInt(e.column, MAX_COLUMN_NUMBER),
-  severity: truncateString(e.severity, 50) ?? "error",
-  ruleId: truncateString(e.ruleId, 200),
-  stackTrace: truncateString(e.stackTrace, MAX_STACK_TRACE_LENGTH),
-  workflowJob: truncateString(job, MAX_WORKFLOW_NAME_LENGTH) ?? "Unknown",
-  source: "webhook-extraction",
-  fixable: e.fixable ?? null,
-  hints: e.hints ?? null,
-  createdAt: Date.now(),
-});
+interface StoreErrorsOptions {
+  env: Env;
+  ctx: ExtractionContext;
+  project: { _id: string };
+  errors: CIError[];
+  prNumber: number | undefined;
+  conclusion: string;
+  totalLogLines: number;
+  extractionStatus: ExtractionStatus;
+  logR2Key?: string | null;
+  logManifest?: LogSegment[];
+  logManifestTruncated?: boolean;
+}
 
 const storeErrors = async (
-  env: Env,
-  ctx: ExtractionContext,
-  project: { _id: string },
-  errors: CIError[],
-  prNumber: number | undefined,
-  conclusion: string,
-  logR2Key?: string | null
+  options: StoreErrorsOptions
 ): Promise<string | null> => {
+  const {
+    env,
+    ctx,
+    project,
+    errors,
+    prNumber,
+    conclusion,
+    totalLogLines,
+    extractionStatus,
+    logR2Key,
+    logManifest,
+    logManifestTruncated,
+  } = options;
+
   const runRecordId = crypto.randomUUID();
   const convex = getConvexClient(env);
   const errorRows = errors.map((e) =>
-    mapExtractedToRow(e, runRecordId, ctx.jobName)
+    ciErrorToRow(e, runRecordId, ctx.jobName, {
+      source: "webhook-extraction",
+      totalLogLines,
+    })
   );
 
   try {
@@ -266,11 +370,15 @@ const storeErrors = async (
         runAttempt: 1,
         errorCount: errors.length,
         conclusion,
+        extractionStatus,
         logR2Key,
+        logManifest,
+        logManifestTruncated: logManifestTruncated === true ? true : undefined,
         receivedAt: Date.now(),
       },
       errors: errorRows,
       workflowJob: ctx.jobName,
+      providerJobId: String(ctx.jobId),
       source: "webhook-extraction",
     });
     return runRecordId;
@@ -319,55 +427,48 @@ const groupErrorsByWorkflowJob = (
     return groups.set(error.workflowJob, existing);
   }, new Map<string, RunError[]>());
 
-const createHealsForErrors = async (
+const hasUncoveredSignatures = (
+  signatures: string[],
+  existingIds: Set<string>
+): boolean =>
+  signatures.length === 0 || !signatures.every((id) => existingIds.has(id));
+
+const resolveHealStatus = async (
   env: Env,
-  convex: DbClient,
-  project: { _id: string; organizationId: string },
-  runRecordId: string,
-  commitSha: string,
-  prNumber: number | undefined,
-  runErrors: RunError[]
-): Promise<void> => {
-  if (runErrors.length === 0) {
-    return;
+  orgSettings: Required<OrganizationSettings>,
+  organizationId: string
+): Promise<HealCreateStatus> => {
+  if (!orgSettings.healAutoTrigger) {
+    return "found";
   }
+  const billing = await canRunHeal(env, organizationId);
+  return billing.allowed ? "pending" : "found";
+};
 
-  const [organization, healsByPr] = await Promise.all([
-    convex.query("organizations:getById", {
-      id: project.organizationId,
-    }) as Promise<{ settings?: OrganizationSettings | null } | null>,
-    prNumber ? getHealsByPr(env, project._id, prNumber) : Promise.resolve([]),
-  ]);
+interface DispatchHealsOptions {
+  env: Env;
+  errorsByJob: Map<string, RunError[]>;
+  existingSignatureIds: Set<string>;
+  healStatus: HealCreateStatus;
+  projectId: string;
+  runRecordId: string;
+  commitSha: string;
+  prNumber: number | undefined;
+}
 
-  const orgSettings = getOrgSettings(organization?.settings);
-
-  const existingSignatureIds = new Set(
-    healsByPr
-      .filter((h) => h.type === "heal")
-      .flatMap((h) => h.signatureIds ?? [])
-  );
-
-  const errorsByJob = groupErrorsByWorkflowJob(runErrors);
-
-  let healStatus: HealCreateStatus = "found";
-  if (orgSettings.healAutoTrigger) {
-    const billing = await canRunHeal(env, project.organizationId);
-    if (billing.allowed) {
-      healStatus = "pending";
-    }
-  }
-
-  const shouldCreateHeal = (
-    signatures: string[],
-    existingIds: Set<string>
-  ): boolean => {
-    if (signatures.length === 0) {
-      return true;
-    }
-    return !signatures.every((id) => existingIds.has(id));
-  };
-
+const dispatchHeals = async (options: DispatchHealsOptions): Promise<void> => {
+  const {
+    env,
+    errorsByJob,
+    existingSignatureIds,
+    healStatus,
+    projectId,
+    runRecordId,
+    commitSha,
+    prNumber,
+  } = options;
   const promises: Promise<string>[] = [];
+
   for (const [jobName, errors] of errorsByJob.entries()) {
     if (promises.length >= MAX_HEALS_PER_EXTRACTION) {
       console.warn(
@@ -384,7 +485,7 @@ const createHealsForErrors = async (
       .map((e) => e.signatureId)
       .filter((id): id is string => typeof id === "string");
 
-    if (!shouldCreateHeal(signatureIds, existingSignatureIds)) {
+    if (!hasUncoveredSignatures(signatureIds, existingSignatureIds)) {
       console.log(
         `${LOG_PREFIX} Skipping duplicate heal for job "${jobName}" - signatures already covered`
       );
@@ -395,7 +496,7 @@ const createHealsForErrors = async (
       createHeal(env, {
         type: "heal",
         status: healStatus,
-        projectId: project._id,
+        projectId,
         runId: runRecordId,
         commitSha,
         prNumber,
@@ -410,18 +511,210 @@ const createHealsForErrors = async (
   }
 };
 
-/**
- * Extract errors from workflow logs and store them.
- * Called from webhook handler when a job completes with failure.
- * Non-critical background task - failures are logged but not thrown.
- */
+interface CreateHealsOptions {
+  env: Env;
+  convex: DbClient;
+  project: { _id: string; organizationId: string };
+  runRecordId: string;
+  commitSha: string;
+  prNumber: number | undefined;
+  runErrors: RunError[];
+}
+
+const createHealsForErrors = async (
+  options: CreateHealsOptions
+): Promise<void> => {
+  const { env, convex, project, runRecordId, commitSha, prNumber, runErrors } =
+    options;
+
+  if (runErrors.length === 0) {
+    return;
+  }
+
+  const [organization, healsByPr] = await Promise.all([
+    convex.query("organizations:getById", {
+      id: project.organizationId,
+    }) as Promise<{ settings?: OrganizationSettings | null } | null>,
+    prNumber ? getHealsByPr(env, project._id, prNumber) : Promise.resolve([]),
+  ]);
+
+  const orgSettings = getOrgSettings(organization?.settings);
+  const existingSignatureIds = new Set(
+    healsByPr
+      .filter((h) => h.type === "heal")
+      .flatMap((h) => h.signatureIds ?? [])
+  );
+  const errorsByJob = groupErrorsByWorkflowJob(runErrors);
+  const healStatus = await resolveHealStatus(
+    env,
+    orgSettings,
+    project.organizationId
+  );
+
+  await dispatchHeals({
+    env,
+    errorsByJob,
+    existingSignatureIds,
+    healStatus,
+    projectId: project._id,
+    runRecordId,
+    commitSha,
+    prNumber,
+  });
+};
+
+const storeLogsInR2 = async (
+  env: Env,
+  organizationId: string,
+  ctx: ExtractionContext,
+  logs: string
+): Promise<string | null> => {
+  const logBytes = new Blob([logs]).size;
+  if (logBytes > MAX_R2_LOG_BYTES) {
+    console.warn(
+      `${LOG_PREFIX} ${ctx.logCtx}: Log too large for R2 (${(logBytes / 1024 / 1024).toFixed(1)} MB), skipping storage`
+    );
+    return null;
+  }
+  try {
+    const key = `logs/${organizationId}/${ctx.repository}/${ctx.runId}.txt`;
+    await env.LOGS_BUCKET.put(key, logs, {
+      httpMetadata: { contentType: "text/plain" },
+    });
+    return key;
+  } catch (e) {
+    console.error(
+      `${LOG_PREFIX} ${ctx.logCtx}: R2 put failed:`,
+      e instanceof Error ? e.message : String(e)
+    );
+    return null;
+  }
+};
+
+const findPrNumber = async (
+  convex: ReturnType<typeof getConvexClient>,
+  repository: string,
+  commitSha: string
+): Promise<number | undefined> => {
+  const runs = (await convex.query("runs:listByRepoCommit", {
+    repository,
+    commitSha,
+  })) as Array<{ prNumber?: number | null }>;
+  return (
+    runs.find((r) => typeof r.prNumber === "number")?.prNumber ?? undefined
+  );
+};
+
+const toRunError = (e: CIError, jobName: string): RunError => ({
+  _id: crypto.randomUUID(),
+  fixable: e.fixable ?? null,
+  source: "webhook-extraction",
+  // HACK: ruleId is a weak proxy for signatureId — true signatures aren't available in the webhook extraction path
+  signatureId: e.ruleId ?? null,
+  workflowJob: jobName,
+});
+
+interface ExtractionPipelineContext {
+  env: Env;
+  ctx: ExtractionContext;
+  project: { _id: string; organizationId: string };
+  extraction: JobExtractionResult;
+  logR2Key: string | null;
+  totalLogLines: number;
+  prNumber: number | undefined;
+  conclusion: string;
+}
+
+const resolveExtractionStatus = (
+  extraction: JobExtractionResult
+): ExtractionStatus => {
+  if (extraction.errors.length === 0 && extraction.status === "success") {
+    return "skipped";
+  }
+  return extraction.status;
+};
+
+const storeEmptyExtraction = async (
+  pipeline: ExtractionPipelineContext
+): Promise<void> => {
+  await storeErrors({
+    env: pipeline.env,
+    ctx: pipeline.ctx,
+    project: pipeline.project,
+    errors: [],
+    prNumber: pipeline.prNumber,
+    conclusion: pipeline.conclusion,
+    totalLogLines: pipeline.totalLogLines,
+    extractionStatus: resolveExtractionStatus(pipeline.extraction),
+    logR2Key: pipeline.logR2Key,
+    logManifest: pipeline.extraction.segments,
+    logManifestTruncated: pipeline.extraction.segmentsTruncated,
+  });
+  console.log(
+    `${LOG_PREFIX} ${pipeline.ctx.logCtx}: No errors extracted (status=${pipeline.extraction.status})`
+  );
+};
+
+const storeAndHealErrors = async (
+  pipeline: ExtractionPipelineContext
+): Promise<void> => {
+  const { env, ctx, project, extraction, prNumber } = pipeline;
+
+  if (extraction.truncated) {
+    console.log(`${LOG_PREFIX} ${ctx.logCtx}: Log content was truncated`);
+  }
+  console.log(
+    `${LOG_PREFIX} ${ctx.logCtx}: Extracted ${extraction.errors.length} error(s)`
+  );
+
+  const runRecordId = await storeErrors({
+    env,
+    ctx,
+    project,
+    errors: extraction.errors,
+    prNumber,
+    conclusion: pipeline.conclusion,
+    totalLogLines: pipeline.totalLogLines,
+    extractionStatus: "success",
+    logR2Key: pipeline.logR2Key,
+    logManifest: extraction.segments,
+    logManifestTruncated: extraction.segmentsTruncated,
+  });
+  if (!runRecordId) {
+    return;
+  }
+
+  console.log(
+    `${LOG_PREFIX} ${ctx.logCtx}: Stored ${extraction.errors.length} errors`
+  );
+
+  const convex = getConvexClient(env);
+  const runErrors = extraction.errors.map((e) => toRunError(e, ctx.jobName));
+
+  try {
+    await createHealsForErrors({
+      env,
+      convex,
+      project,
+      runRecordId,
+      commitSha: ctx.commitSha,
+      prNumber,
+      runErrors,
+    });
+  } catch (error) {
+    console.error(
+      `${LOG_PREFIX} ${ctx.logCtx}: Failed to create heals:`,
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+};
+
 export const extractAndStoreErrors = async (
   env: Env,
   payload: WebhookPayload,
   db: DbClient
 ): Promise<void> => {
   const ctx = buildContext(payload);
-
   if (!ctx) {
     return;
   }
@@ -455,103 +748,30 @@ export const extractAndStoreErrors = async (
     return;
   }
 
-  const storeLogsInR2 = async (): Promise<string | null> => {
-    // SECURITY: Enforce size limit to prevent R2 storage abuse
-    const logBytes = new Blob([logs]).size;
-    if (logBytes > MAX_R2_LOG_BYTES) {
-      console.warn(
-        `${LOG_PREFIX} ${ctx.logCtx}: Log too large for R2 (${(logBytes / 1024 / 1024).toFixed(1)} MB), skipping storage`
-      );
-      return null;
-    }
-    try {
-      const key = `logs/${project.organizationId}/${ctx.repository}/${ctx.runId}.txt`;
-      await env.LOGS_BUCKET.put(key, logs, {
-        httpMetadata: { contentType: "text/plain" },
-      });
-      return key;
-    } catch (e) {
-      console.error(
-        `${LOG_PREFIX} ${ctx.logCtx}: R2 put failed:`,
-        e instanceof Error ? e.message : String(e)
-      );
-      return null;
-    }
-  };
-
   const [extraction, logR2Key] = await Promise.all([
-    runExtraction(env, logs),
-    storeLogsInR2(),
+    runExtraction(env, logs, ctx),
+    storeLogsInR2(env, project.organizationId, ctx, logs),
   ]);
-  if (!extraction || extraction.errors.length === 0) {
-    console.log(`${LOG_PREFIX} ${ctx.logCtx}: No errors extracted`);
-    return;
-  }
 
-  if (extraction.truncated) {
-    console.log(`${LOG_PREFIX} ${ctx.logCtx}: Log content was truncated`);
-  }
-
-  console.log(
-    `${LOG_PREFIX} ${ctx.logCtx}: Extracted ${extraction.errors.length} error(s)`
-  );
-
-  const convex = getConvexClient(env);
-  const runs = (await convex.query("runs:listByRepoCommit", {
-    repository: ctx.repository,
-    commitSha: ctx.commitSha,
-  })) as Array<{ prNumber?: number | null }>;
-  const prNumber =
-    runs.find((r) => typeof r.prNumber === "number")?.prNumber ?? undefined;
-
-  // SECURITY: Sanitize conclusion to prevent control char injection and DB bloat
-  const conclusion = sanitizeField(
-    payload.workflow_job.conclusion ?? "failure",
-    50
-  );
-  const runRecordId = await storeErrors(
+  const pipeline: ExtractionPipelineContext = {
     env,
     ctx,
     project,
-    extraction.errors,
-    prNumber,
-    conclusion,
-    logR2Key
-  );
-  if (!runRecordId) {
+    extraction,
+    logR2Key,
+    totalLogLines: countLines(logs),
+    prNumber: await findPrNumber(
+      getConvexClient(env),
+      ctx.repository,
+      ctx.commitSha
+    ),
+    conclusion: sanitizeField(payload.workflow_job.conclusion ?? "failure", 50),
+  };
+
+  if (extraction.status !== "success" || extraction.errors.length === 0) {
+    await storeEmptyExtraction(pipeline);
     return;
   }
 
-  console.log(
-    `${LOG_PREFIX} ${ctx.logCtx}: Stored ${extraction.errors.length} errors`
-  );
-
-  const toRunError = (e: CIError, jobName: string): RunError => ({
-    _id: crypto.randomUUID(),
-    fixable: e.fixable ?? null,
-    source: "webhook-extraction",
-    signatureId: e.ruleId ?? null,
-    workflowJob: jobName,
-  });
-
-  const runErrors: RunError[] = extraction.errors.map((e) =>
-    toRunError(e, ctx.jobName)
-  );
-
-  try {
-    await createHealsForErrors(
-      env,
-      convex,
-      project,
-      runRecordId,
-      ctx.commitSha,
-      prNumber,
-      runErrors
-    );
-  } catch (error) {
-    console.error(
-      `${LOG_PREFIX} ${ctx.logCtx}: Failed to create heals:`,
-      error instanceof Error ? error.message : String(error)
-    );
-  }
+  await storeAndHealErrors(pipeline);
 };

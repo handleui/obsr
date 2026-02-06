@@ -21,7 +21,7 @@ import type { CIError } from "@detent/types";
 import { CACHE_TTL, cacheKey, getFromCache, setInCache } from "../../lib/cache";
 import type { Env } from "../../types/env";
 import type { DbClient, PreparedRunData, RunIdentifier } from "./types";
-import { SHA_REGEX } from "./types";
+import { GITHUB_NAME_PATTERN, SHA_REGEX } from "./types";
 
 export const MAX_WORKFLOW_NAME_LENGTH = 255;
 export const MAX_BRANCH_NAME_LENGTH = 255;
@@ -48,6 +48,19 @@ export const validatePositiveInt = (
   return Math.min(value, max);
 };
 
+export const validateLineRange = (
+  start: number | null,
+  end: number | null
+): { start: number | null; end: number | null } => {
+  if (start === null || end === null) {
+    return { start: null, end: null };
+  }
+  if (end < start) {
+    return { start: null, end: null };
+  }
+  return { start, end };
+};
+
 export const truncateString = (
   value: unknown,
   maxLength: number
@@ -56,6 +69,72 @@ export const truncateString = (
     return null;
   }
   return value.length > maxLength ? value.slice(0, maxLength) : value;
+};
+
+export const clampLogLines = (
+  start: number | null,
+  end: number | null,
+  totalLines: number
+): { start: number | null; end: number | null } => {
+  const clampedStart = start !== null && start > totalLines ? null : start;
+  if (end === null || end <= totalLines) {
+    return { start: clampedStart, end };
+  }
+  const clampedEnd = clampedStart !== null ? totalLines : null;
+  return { start: clampedStart, end: clampedEnd };
+};
+
+export const ciErrorToRow = (
+  error: CIError,
+  runId: string,
+  job: string,
+  opts?: { source?: string; totalLogLines?: number; createdAt?: number }
+) => {
+  const rawStart = validatePositiveInt(error.logLineStart, 1_000_000);
+  const rawEnd = validatePositiveInt(error.logLineEnd, 1_000_000);
+  const rangeValidated = validateLineRange(rawStart, rawEnd);
+  const { start: logLineStart, end: logLineEnd } = opts?.totalLogLines
+    ? clampLogLines(
+        rangeValidated.start,
+        rangeValidated.end,
+        opts.totalLogLines
+      )
+    : rangeValidated;
+
+  return {
+    runId,
+    message:
+      truncateString(error.message, MAX_ERROR_MESSAGE_LENGTH) ??
+      "Unknown error",
+    filePath: truncateString(error.filePath, MAX_FILE_PATH_LENGTH),
+    line: validatePositiveInt(error.line, MAX_LINE_NUMBER),
+    column: validatePositiveInt(error.column, MAX_COLUMN_NUMBER),
+    category: truncateString(error.category, 100),
+    severity: truncateString(error.severity, 50) ?? "error",
+    ruleId: truncateString(error.ruleId, 200),
+    source: opts?.source ?? error.source,
+    stackTrace: truncateString(error.stackTrace, MAX_STACK_TRACE_LENGTH),
+    codeSnippet: error.codeSnippet ?? null,
+    relatedFiles: error.relatedFiles ?? null,
+    hints: error.hints ?? null,
+    workflowJob:
+      truncateString(
+        error.workflowJob ?? error.workflowContext?.job,
+        MAX_WORKFLOW_NAME_LENGTH
+      ) ?? job,
+    workflowStep: truncateString(
+      error.workflowContext?.step,
+      MAX_WORKFLOW_NAME_LENGTH
+    ),
+    workflowAction: truncateString(
+      error.workflowContext?.action,
+      MAX_WORKFLOW_NAME_LENGTH
+    ),
+    fixable: error.fixable ?? null,
+    logLineStart,
+    logLineEnd,
+    createdAt: opts?.createdAt ?? Date.now(),
+  };
 };
 
 export const prepareRunData = (data: {
@@ -182,6 +261,78 @@ const buildSignatureInputs = (
   return signatureInputs;
 };
 
+const resolveProjectId = async (
+  convex: ReturnType<typeof getConvexClient>,
+  firstRun: PreparedRunData,
+  errorCount: number
+): Promise<string | null> => {
+  if (firstRun.projectId) {
+    return firstRun.projectId;
+  }
+
+  const project = (await convex.query("projects:getByRepoFullName", {
+    providerRepoFullName: firstRun.repository,
+  })) as { _id: string; removedAt?: number } | null;
+
+  if (project && !project.removedAt) {
+    return project._id;
+  }
+
+  if (errorCount > 0) {
+    Sentry.captureMessage(
+      "Project not found for repository during error tracking",
+      {
+        level: "warning",
+        extra: {
+          repository: firstRun.repository,
+          errorCount,
+        },
+      }
+    );
+  }
+  return null;
+};
+
+const buildRunRow = (
+  data: PreparedRunData,
+  projectId: string,
+  completedAt: number
+) => ({
+  id: data.runRecordId,
+  projectId: data.projectId ?? projectId,
+  provider: "github" as const,
+  source: "github",
+  format: "github-actions",
+  runId: String(data.runId),
+  repository: data.repository,
+  commitSha: data.headSha,
+  prNumber: data.prNumber,
+  checkRunId: data.checkRunId ? String(data.checkRunId) : undefined,
+  errorCount: data.errors.length,
+  workflowName: data.runName,
+  conclusion: data.conclusion ?? undefined,
+  headBranch: data.headBranch,
+  runAttempt: data.runAttempt,
+  runStartedAt: data.runStartedAt ? data.runStartedAt.getTime() : undefined,
+  runCompletedAt: completedAt,
+  receivedAt: completedAt,
+});
+
+const buildErrorRow = (
+  entry: {
+    error: CIError;
+    fingerprints: ReturnType<typeof generateFingerprints>;
+    runRecordId: string;
+    runName: string;
+  },
+  completedAt: number
+) => ({
+  ...ciErrorToRow(entry.error, entry.runRecordId, entry.runName, {
+    createdAt: completedAt,
+  }),
+  fingerprint: entry.fingerprints.lore,
+});
+
 export const bulkStoreRunsAndErrors = async (
   env: Env,
   preparedRuns: PreparedRunData[]
@@ -195,104 +346,59 @@ export const bulkStoreRunsAndErrors = async (
   const errorsWithFingerprints = collectErrorFingerprints(preparedRuns);
 
   const firstRun = preparedRuns[0];
-  let projectId = firstRun?.projectId;
-  const commitSha = firstRun?.headSha;
-
-  if (!projectId && firstRun) {
-    const project = (await convex.query("projects:getByRepoFullName", {
-      providerRepoFullName: firstRun.repository,
-    })) as { _id: string; removedAt?: number } | null;
-
-    if (!project || project.removedAt) {
-      if (errorsWithFingerprints.length > 0) {
-        Sentry.captureMessage(
-          "Project not found for repository during error tracking",
-          {
-            level: "warning",
-            extra: {
-              repository: firstRun.repository,
-              errorCount: errorsWithFingerprints.length,
-            },
-          }
-        );
-      }
-      return;
-    }
-    projectId = project._id;
+  if (!firstRun) {
+    return;
   }
 
+  const projectId = await resolveProjectId(
+    convex,
+    firstRun,
+    errorsWithFingerprints.length
+  );
   if (!projectId) {
     return;
   }
 
-  const signatureInputs = buildSignatureInputs(errorsWithFingerprints);
-
-  const runRows = preparedRuns.map((data) => ({
-    id: data.runRecordId,
-    projectId: data.projectId ?? projectId,
-    provider: "github" as const,
-    source: "github",
-    format: "github-actions",
-    runId: String(data.runId),
-    repository: data.repository,
-    commitSha: data.headSha,
-    prNumber: data.prNumber,
-    checkRunId: data.checkRunId ? String(data.checkRunId) : undefined,
-    errorCount: data.errors.length,
-    workflowName: data.runName,
-    conclusion: data.conclusion ?? undefined,
-    headBranch: data.headBranch,
-    runAttempt: data.runAttempt,
-    runStartedAt: data.runStartedAt ? data.runStartedAt.getTime() : undefined,
-    runCompletedAt: completedAt,
-    receivedAt: completedAt,
-  }));
-
-  const errorRows = errorsWithFingerprints.map((entry) => ({
-    runId: entry.runRecordId,
-    fingerprint: entry.fingerprints.lore,
-    filePath: truncateString(entry.error.filePath, MAX_FILE_PATH_LENGTH),
-    line: validatePositiveInt(entry.error.line, MAX_LINE_NUMBER),
-    column: validatePositiveInt(entry.error.column, MAX_COLUMN_NUMBER),
-    message:
-      truncateString(entry.error.message, MAX_ERROR_MESSAGE_LENGTH) ??
-      "Unknown error",
-    category: truncateString(entry.error.category, 100),
-    severity: truncateString(entry.error.severity, 50),
-    ruleId: truncateString(entry.error.ruleId, 200),
-    source: truncateString(entry.error.source, 100),
-    stackTrace: truncateString(entry.error.stackTrace, MAX_STACK_TRACE_LENGTH),
-    hints: entry.error.hints ?? undefined,
-    codeSnippet: entry.error.codeSnippet ?? undefined,
-    workflowJob:
-      truncateString(
-        entry.error.workflowJob ?? entry.error.workflowContext?.job,
-        MAX_WORKFLOW_NAME_LENGTH
-      ) ?? entry.runName,
-    workflowStep: truncateString(
-      entry.error.workflowContext?.step,
-      MAX_WORKFLOW_NAME_LENGTH
-    ),
-    workflowAction: truncateString(
-      entry.error.workflowContext?.action,
-      MAX_WORKFLOW_NAME_LENGTH
-    ),
-    fixable: entry.error.fixable ?? undefined,
-    createdAt: completedAt,
-  }));
-
   await convex.mutation("run_ingest:bulkStore", {
-    runs: runRows,
-    errors: errorRows,
-    signatures: Array.from(signatureInputs.values()),
+    runs: preparedRuns.map((data) => buildRunRow(data, projectId, completedAt)),
+    errors: errorsWithFingerprints.map((entry) =>
+      buildErrorRow(entry, completedAt)
+    ),
+    signatures: Array.from(
+      buildSignatureInputs(errorsWithFingerprints).values()
+    ),
     projectId,
-    commitSha,
+    commitSha: firstRun.headSha,
   });
 
   const totalErrors = preparedRuns.reduce((sum, r) => sum + r.errors.length, 0);
   console.log(
     `[workflow_run] Bulk stored ${preparedRuns.length} runs with ${totalErrors} total errors`
   );
+};
+
+const fetchAndCacheOrgSettings = async (
+  convex: ReturnType<typeof getConvexClient>,
+  installationId: number,
+  repository: string,
+  settingsCacheKey: string
+): Promise<Required<OrganizationSettings>> => {
+  let settings: OrganizationSettings | null = null;
+  try {
+    const orgs = (await convex.query(
+      "organizations:listByProviderInstallationId",
+      { providerInstallationId: String(installationId) }
+    )) as Array<{ settings?: OrganizationSettings | null }>;
+    settings = orgs[0]?.settings ?? null;
+  } catch (error) {
+    Sentry.captureException(error, {
+      extra: { installationId, repository },
+      tags: { operation: "org_settings_query" },
+    });
+  }
+
+  setInCache(settingsCacheKey, settings, CACHE_TTL.ORG_SETTINGS);
+  return getOrgSettings(settings);
 };
 
 export const checkRunsAndLoadOrgSettings = async (
@@ -334,29 +440,14 @@ export const checkRunsAndLoadOrgSettings = async (
     runIdentifiers.length === 0 ||
     runIdentifiers.every((r) => existingSet.has(`${r.runId}:${r.runAttempt}`));
 
-  let orgSettings: Required<OrganizationSettings>;
-  if (cachedSettings) {
-    orgSettings = getOrgSettings(cachedSettings);
-  } else {
-    let settings: OrganizationSettings | null = null;
-    try {
-      const orgs = (await convex.query(
-        "organizations:listByProviderInstallationId",
-        {
-          providerInstallationId: String(installationId),
-        }
-      )) as Array<{ settings?: OrganizationSettings | null }>;
-      settings = orgs[0]?.settings ?? null;
-    } catch (error) {
-      Sentry.captureException(error, {
-        extra: { installationId, repository },
-        tags: { operation: "org_settings_query" },
-      });
-    }
-
-    orgSettings = getOrgSettings(settings);
-    setInCache(settingsCacheKey, settings, CACHE_TTL.ORG_SETTINGS);
-  }
+  const orgSettings = cachedSettings
+    ? getOrgSettings(cachedSettings)
+    : await fetchAndCacheOrgSettings(
+        convex,
+        installationId,
+        repository,
+        settingsCacheKey
+      );
 
   return { allExist, existingRuns: existingSet, orgSettings };
 };
@@ -480,7 +571,6 @@ export const checkForJobReportedErrors = async (
   }));
 };
 
-const GITHUB_NAME_PATTERN = /^[a-zA-Z0-9][-a-zA-Z0-9._]*$/;
 const isValidGitHubNameSegment = (name: string): boolean =>
   name.length > 0 &&
   name.length <= 100 &&
@@ -492,17 +582,20 @@ export interface ProjectContext {
   installationId: number;
 }
 
-export const postErrorsFoundCommentForRun = async (
-  env: Env,
-  db: DbClient,
-  repository: string,
-  prNumber: number,
-  errorCount: number,
-  failedRunCount: number,
-  projectContext?: ProjectContext
-): Promise<void> => {
-  const [owner, repo] = repository.split("/");
+interface PostErrorsCommentOptions {
+  env: Env;
+  db: DbClient;
+  repository: string;
+  prNumber: number;
+  errorCount: number;
+  failedRunCount: number;
+  projectContext?: ProjectContext;
+}
 
+const parseRepoOwner = (
+  repository: string
+): { owner: string; repo: string } | null => {
+  const [owner, repo] = repository.split("/");
   if (
     !(
       owner &&
@@ -511,68 +604,62 @@ export const postErrorsFoundCommentForRun = async (
       isValidGitHubNameSegment(repo)
     )
   ) {
+    return null;
+  }
+  return { owner, repo };
+};
+
+export const postErrorsFoundCommentForRun = async (
+  options: PostErrorsCommentOptions
+): Promise<void> => {
+  const {
+    env,
+    db,
+    repository,
+    prNumber,
+    errorCount,
+    failedRunCount,
+    projectContext,
+  } = options;
+
+  const parsed = parseRepoOwner(repository);
+  if (!parsed) {
     console.log(
       `[report] Invalid repository format: ${repository.slice(0, 100)}, skipping comment`
     );
     return;
   }
 
-  let projectId: string;
-  let installationId: number;
-
-  if (projectContext) {
-    projectId = projectContext.projectId;
-    installationId = projectContext.installationId;
-  } else {
-    const project = (await db.query("projects:getByRepoFullName", {
-      providerRepoFullName: repository,
-    })) as { _id: string; organizationId: string; removedAt?: number } | null;
-
-    if (!project || project.removedAt) {
-      console.log(
-        `[report] Project not found for ${repository}, skipping comment`
-      );
-      return;
-    }
-
-    const org = (await db.query("organizations:getById", {
-      id: project.organizationId,
-    })) as { providerInstallationId?: string | null } | null;
-
-    if (!org?.providerInstallationId) {
-      console.log(
-        `[report] Organization or installation not found for ${repository}, skipping comment`
-      );
-      return;
-    }
-
-    projectId = project._id;
-    installationId = Number.parseInt(org.providerInstallationId, 10);
+  const resolved =
+    projectContext ?? (await getProjectContextForComment(db, repository));
+  if (!resolved) {
+    console.log(
+      `[report] Project context not found for ${repository}, skipping comment`
+    );
+    return;
   }
 
-  const projectUrl = `${env.NAVIGATOR_BASE_URL}/dashboard/${projectId}`;
-
+  const { projectId, installationId } = resolved;
   const commentBody = formatErrorsFoundComment({
     errorCount,
     jobCount: failedRunCount,
-    projectUrl,
+    projectUrl: `${env.NAVIGATOR_BASE_URL}/dashboard/${projectId}`,
   });
 
   const github = createGitHubService(env);
   const token = await github.getInstallationToken(installationId);
-  const appId = Number.parseInt(env.GITHUB_APP_ID, 10);
 
   await deleteAndPostComment({
     github,
     token,
     kv: env["detent-idempotency"],
     db,
-    owner,
-    repo,
+    owner: parsed.owner,
+    repo: parsed.repo,
     repository,
     prNumber,
     commentBody,
-    appId,
+    appId: Number.parseInt(env.GITHUB_APP_ID, 10),
   });
 
   console.log(

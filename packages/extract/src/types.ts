@@ -1,6 +1,7 @@
 import type { CIError, ErrorSource } from "@detent/types";
 import { CIErrorSchemaWithValidation, ErrorSourceSchema } from "@detent/types";
 import { z } from "zod";
+import type { LogSegment } from "./preprocess.js";
 
 export interface ExtractionUsage {
   inputTokens: number;
@@ -14,6 +15,8 @@ export interface ExtractionResult {
   usage?: ExtractionUsage;
   costUsd?: number;
   truncated: boolean;
+  segmentsTruncated: boolean;
+  segments?: LogSegment[];
 }
 
 export const ExtractionResultSchema = z.object({

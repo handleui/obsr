@@ -10,7 +10,78 @@ import {
   nullableStringArray,
 } from "./validators";
 
+const MAX_ERRORS_PER_JOB = 500;
+const MAX_PROVIDER_JOB_ID_LENGTH = 64;
+const MAX_WORKFLOW_JOB_LENGTH = 255;
+const MAX_LOG_MANIFEST_SEGMENTS = 1000;
+const MAX_SEGMENT_LINE_NUMBER = 1_000_000;
+
+const truncateField = (
+  value: string | null | undefined,
+  maxLen: number
+): string | null | undefined => {
+  if (value == null) {
+    return value;
+  }
+  return value.length > maxLen ? value.slice(0, maxLen) : value;
+};
+
+interface LogSegment {
+  start: number;
+  end: number;
+  signal: boolean;
+}
+
+interface ValidatedLogManifest {
+  segments: LogSegment[] | null | undefined;
+  truncated: boolean;
+}
+
+const isValidSegment = (seg: LogSegment): boolean => {
+  if (
+    typeof seg.start !== "number" ||
+    typeof seg.end !== "number" ||
+    typeof seg.signal !== "boolean"
+  ) {
+    return false;
+  }
+  if (!(Number.isInteger(seg.start) && Number.isInteger(seg.end))) {
+    return false;
+  }
+  const inRange = (n: number) => n >= 1 && n <= MAX_SEGMENT_LINE_NUMBER;
+  return inRange(seg.start) && inRange(seg.end) && seg.start <= seg.end;
+};
+
+export const validateLogManifest = (
+  segments: LogSegment[] | null | undefined,
+  truncatedHint?: boolean
+): ValidatedLogManifest => {
+  if (!segments || segments.length === 0) {
+    return { segments, truncated: truncatedHint ?? false };
+  }
+
+  let truncated = truncatedHint ?? false;
+  let toValidate = segments;
+
+  if (segments.length > MAX_LOG_MANIFEST_SEGMENTS) {
+    toValidate = segments.slice(0, MAX_LOG_MANIFEST_SEGMENTS);
+    truncated = true;
+  }
+
+  const validated = toValidate.filter(isValidSegment);
+  return {
+    segments: validated.length > 0 ? validated : null,
+    truncated,
+  };
+};
+
 const provider = v.union(v.literal("github"), v.literal("gitlab"));
+const extractionStatus = v.union(
+  v.literal("success"),
+  v.literal("failed"),
+  v.literal("timeout"),
+  v.literal("skipped")
+);
 
 const runPayload = v.object({
   id: v.string(),
@@ -25,11 +96,22 @@ const runPayload = v.object({
   checkRunId: v.optional(nullableString),
   logBytes: v.optional(nullableNumber),
   logR2Key: v.optional(nullableString),
+  logManifest: v.optional(
+    v.array(
+      v.object({
+        start: v.number(),
+        end: v.number(),
+        signal: v.boolean(),
+      })
+    )
+  ),
+  logManifestTruncated: v.optional(v.boolean()),
   errorCount: v.optional(nullableNumber),
   receivedAt: v.number(),
   workflowName: v.optional(nullableString),
   conclusion: v.optional(nullableString),
   headBranch: v.optional(nullableString),
+  extractionStatus: v.optional(v.union(extractionStatus, v.null())),
   runAttempt: v.number(),
   runStartedAt: v.optional(nullableNumber),
   runCompletedAt: v.optional(nullableNumber),
@@ -56,12 +138,15 @@ const errorPayload = v.object({
   source: v.optional(nullableString),
   stackTrace: v.optional(nullableString),
   hints: v.optional(nullableStringArray),
+  providerJobId: v.optional(nullableString),
   workflowJob: v.optional(nullableString),
   workflowStep: v.optional(nullableString),
   workflowAction: v.optional(nullableString),
   codeSnippet: v.optional(nullableCodeSnippet),
   relatedFiles: v.optional(nullableStringArray),
   fixable: v.optional(nullableBoolean),
+  logLineStart: v.optional(nullableNumber),
+  logLineEnd: v.optional(nullableNumber),
   createdAt: v.number(),
 });
 
@@ -75,12 +160,21 @@ const signaturePayload = v.object({
   filePath: v.optional(nullableString),
 });
 
-const insertRun = async (
-  ctx: MutationCtx,
-  run: Infer<typeof runPayload>,
-  runIdMap: Map<string, Id<"runs">>
-) => {
-  const existing = await ctx.db
+const toRunFields = (run: Infer<typeof runPayload>) => {
+  const { id: _id, logManifest, logManifestTruncated, ...rest } = run;
+  const { segments, truncated } = validateLogManifest(
+    logManifest,
+    logManifestTruncated
+  );
+  return {
+    ...rest,
+    logManifest: segments ?? undefined,
+    logManifestTruncated: truncated || undefined,
+  };
+};
+
+const findExistingRun = (ctx: MutationCtx, run: Infer<typeof runPayload>) =>
+  ctx.db
     .query("runs")
     .withIndex("by_repo_run_attempt", (q) =>
       q
@@ -89,35 +183,52 @@ const insertRun = async (
         .eq("runAttempt", run.runAttempt)
     )
     .first();
-  if (existing) {
-    if (run.logR2Key && !existing.logR2Key) {
-      await ctx.db.patch(existing._id, { logR2Key: run.logR2Key });
+
+const buildRunPatch = (
+  run: Infer<typeof runPayload>,
+  existing: {
+    logR2Key?: string | null;
+    logManifest?: unknown;
+    extractionStatus?: string | null;
+  }
+): Record<string, unknown> => {
+  const patch: Record<string, unknown> = {};
+  if (run.logR2Key && !existing.logR2Key) {
+    patch.logR2Key = run.logR2Key;
+  }
+  if (run.logManifest && !existing.logManifest) {
+    const { segments, truncated } = validateLogManifest(
+      run.logManifest,
+      run.logManifestTruncated
+    );
+    patch.logManifest = segments ?? undefined;
+    if (truncated) {
+      patch.logManifestTruncated = true;
     }
-    runIdMap.set(run.id, existing._id);
+  }
+  if (run.extractionStatus && !existing.extractionStatus) {
+    patch.extractionStatus = run.extractionStatus;
+  }
+  return patch;
+};
+
+const insertRun = async (
+  ctx: MutationCtx,
+  run: Infer<typeof runPayload>,
+  runIdMap: Map<string, Id<"runs">>
+) => {
+  const existing = await findExistingRun(ctx, run);
+  if (!existing) {
+    const id = await ctx.db.insert("runs", toRunFields(run));
+    runIdMap.set(run.id, id);
     return;
   }
-  const id = await ctx.db.insert("runs", {
-    projectId: run.projectId,
-    provider: run.provider,
-    source: run.source,
-    format: run.format,
-    runId: run.runId,
-    repository: run.repository,
-    commitSha: run.commitSha,
-    prNumber: run.prNumber,
-    checkRunId: run.checkRunId,
-    logBytes: run.logBytes,
-    logR2Key: run.logR2Key,
-    errorCount: run.errorCount,
-    receivedAt: run.receivedAt,
-    workflowName: run.workflowName,
-    conclusion: run.conclusion,
-    headBranch: run.headBranch,
-    runAttempt: run.runAttempt,
-    runStartedAt: run.runStartedAt,
-    runCompletedAt: run.runCompletedAt,
-  });
-  runIdMap.set(run.id, id);
+
+  const patch = buildRunPatch(run, existing);
+  if (Object.keys(patch).length > 0) {
+    await ctx.db.patch(existing._id, patch);
+  }
+  runIdMap.set(run.id, existing._id);
 };
 
 const insertSignature = async (
@@ -205,6 +316,57 @@ const upsertOccurrence = async (
   });
 };
 
+const toErrorFields = (error: Infer<typeof errorPayload>) => {
+  const { runId: _runId, fingerprint: _fingerprint, ...fields } = error;
+  return fields;
+};
+
+const upsertSignatureOccurrences = async (
+  ctx: MutationCtx,
+  signatures: Infer<typeof signaturePayload>[],
+  signatureMap: Map<string, Id<"errorSignatures">>,
+  projectId: Id<"projects">,
+  commitSha: string | null | undefined,
+  now: number
+) => {
+  for (const sig of signatures) {
+    const signatureId = signatureMap.get(sig.fingerprint);
+    if (!signatureId) {
+      continue;
+    }
+    await upsertOccurrence(
+      ctx,
+      signatureId,
+      projectId,
+      sig.filePath ?? undefined,
+      commitSha,
+      now
+    );
+  }
+};
+
+const insertBulkErrors = async (
+  ctx: MutationCtx,
+  errors: Infer<typeof errorPayload>[],
+  runIdMap: Map<string, Id<"runs">>,
+  signatureMap: Map<string, Id<"errorSignatures">>
+) => {
+  for (const error of errors) {
+    const runId = runIdMap.get(error.runId);
+    if (!runId) {
+      continue;
+    }
+
+    await ctx.db.insert("runErrors", {
+      runId,
+      signatureId: error.fingerprint
+        ? signatureMap.get(error.fingerprint)
+        : undefined,
+      ...toErrorFields(error),
+    });
+  }
+};
+
 export const bulkStore = mutation({
   args: {
     runs: v.array(runPayload),
@@ -221,57 +383,20 @@ export const bulkStore = mutation({
     for (const run of args.runs) {
       await insertRun(ctx, run, runIdMap);
     }
-
     for (const signature of args.signatures) {
       await insertSignature(ctx, signature, signatureMap, now);
     }
-
     if (args.projectId) {
-      for (const signature of args.signatures) {
-        const signatureId = signatureMap.get(signature.fingerprint);
-        if (signatureId) {
-          await upsertOccurrence(
-            ctx,
-            signatureId,
-            args.projectId,
-            signature.filePath ?? undefined,
-            args.commitSha,
-            now
-          );
-        }
-      }
+      await upsertSignatureOccurrences(
+        ctx,
+        args.signatures,
+        signatureMap,
+        args.projectId,
+        args.commitSha,
+        now
+      );
     }
-
-    for (const error of args.errors) {
-      const runId = runIdMap.get(error.runId);
-      if (!runId) {
-        continue;
-      }
-
-      await ctx.db.insert("runErrors", {
-        runId,
-        signatureId: error.fingerprint
-          ? signatureMap.get(error.fingerprint)
-          : undefined,
-        filePath: error.filePath,
-        line: error.line,
-        column: error.column,
-        message: error.message,
-        category: error.category,
-        severity: error.severity,
-        ruleId: error.ruleId,
-        source: error.source,
-        stackTrace: error.stackTrace,
-        hints: error.hints,
-        workflowJob: error.workflowJob,
-        workflowStep: error.workflowStep,
-        workflowAction: error.workflowAction,
-        codeSnippet: error.codeSnippet,
-        relatedFiles: error.relatedFiles,
-        fixable: error.fixable,
-        createdAt: error.createdAt,
-      });
-    }
+    await insertBulkErrors(ctx, args.errors, runIdMap, signatureMap);
 
     return {
       runs: args.runs.length,
@@ -285,46 +410,18 @@ const upsertRunForJob = async (
   ctx: MutationCtx,
   run: Infer<typeof runPayload>
 ): Promise<Id<"runs">> => {
-  const existing = await ctx.db
-    .query("runs")
-    .withIndex("by_repo_run_attempt", (q) =>
-      q
-        .eq("repository", run.repository)
-        .eq("runId", run.runId)
-        .eq("runAttempt", run.runAttempt)
-    )
-    .first();
-
-  if (existing) {
-    await ctx.db.patch(existing._id, {
-      errorCount: run.errorCount,
-      conclusion: run.conclusion,
-      ...(run.logR2Key && !existing.logR2Key ? { logR2Key: run.logR2Key } : {}),
-    });
-    return existing._id;
+  const existing = await findExistingRun(ctx, run);
+  if (!existing) {
+    return ctx.db.insert("runs", toRunFields(run));
   }
 
-  return ctx.db.insert("runs", {
-    projectId: run.projectId,
-    provider: run.provider,
-    source: run.source,
-    format: run.format,
-    runId: run.runId,
-    repository: run.repository,
-    commitSha: run.commitSha,
-    prNumber: run.prNumber,
-    checkRunId: run.checkRunId,
-    logBytes: run.logBytes,
-    logR2Key: run.logR2Key,
+  const patch = {
+    ...buildRunPatch(run, existing),
     errorCount: run.errorCount,
-    receivedAt: run.receivedAt,
-    workflowName: run.workflowName,
     conclusion: run.conclusion,
-    headBranch: run.headBranch,
-    runAttempt: run.runAttempt,
-    runStartedAt: run.runStartedAt,
-    runCompletedAt: run.runCompletedAt,
-  });
+  };
+  await ctx.db.patch(existing._id, patch);
+  return existing._id;
 };
 
 const deleteOldJobErrors = async (
@@ -351,28 +448,16 @@ const insertJobErrors = async (
   runId: Id<"runs">,
   errors: Infer<typeof errorPayload>[],
   workflowJob: string,
-  source: string
+  source: string,
+  providerJobId?: string
 ) => {
   for (const error of errors) {
     await ctx.db.insert("runErrors", {
       runId,
-      filePath: error.filePath,
-      line: error.line,
-      column: error.column,
-      message: error.message,
-      category: error.category,
-      severity: error.severity,
-      ruleId: error.ruleId,
+      ...toErrorFields(error),
       source,
-      stackTrace: error.stackTrace,
-      hints: error.hints,
+      providerJobId: providerJobId ?? error.providerJobId,
       workflowJob,
-      workflowStep: error.workflowStep,
-      workflowAction: error.workflowAction,
-      codeSnippet: error.codeSnippet,
-      relatedFiles: error.relatedFiles,
-      fixable: error.fixable,
-      createdAt: error.createdAt,
     });
   }
 };
@@ -382,13 +467,33 @@ export const storeJobReport = mutation({
     run: runPayload,
     errors: v.array(errorPayload),
     workflowJob: v.string(),
+    providerJobId: v.optional(nullableString),
     source: v.optional(nullableString),
   },
   handler: async (ctx, args) => {
     const source = args.source ?? "job-report";
+    const workflowJob =
+      truncateField(args.workflowJob, MAX_WORKFLOW_JOB_LENGTH) ??
+      args.workflowJob;
+    const sanitizedJobId =
+      truncateField(args.providerJobId, MAX_PROVIDER_JOB_ID_LENGTH) ??
+      undefined;
+    const cappedErrors = args.errors.slice(0, MAX_ERRORS_PER_JOB);
+    if (args.errors.length > MAX_ERRORS_PER_JOB) {
+      console.warn(
+        `[run_ingest] storeJobReport: truncated ${args.errors.length} errors to ${MAX_ERRORS_PER_JOB}`
+      );
+    }
     const runId = await upsertRunForJob(ctx, args.run);
-    await deleteOldJobErrors(ctx, runId, args.workflowJob, source);
-    await insertJobErrors(ctx, runId, args.errors, args.workflowJob, source);
+    await deleteOldJobErrors(ctx, runId, workflowJob, source);
+    await insertJobErrors(
+      ctx,
+      runId,
+      cappedErrors,
+      workflowJob,
+      source,
+      sanitizedJobId
+    );
     return { runId: String(runId) };
   },
 });

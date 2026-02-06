@@ -343,7 +343,7 @@ async function executeGitHubFetch(
   url: string,
   options: RequestInit,
   parseBody: false
-): Promise<GitHubCallResult<void>>;
+): Promise<GitHubCallResult<undefined>>;
 async function executeGitHubFetch<T>(
   url: string,
   options: RequestInit,

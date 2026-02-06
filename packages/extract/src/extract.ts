@@ -6,12 +6,7 @@ import {
   normalizeModelId,
 } from "@detent/ai";
 import type { CIError, ErrorSource } from "@detent/types";
-import {
-  generateObject,
-  generateText,
-  NoObjectGeneratedError,
-  stepCountIs,
-} from "ai";
+import { generateText, Output, stepCountIs } from "ai";
 import { prepareForPrompt } from "./preprocess.js";
 import {
   buildUserPrompt,
@@ -31,6 +26,8 @@ import {
 
 const FILTERED_ONLY_PATTERN = /^(\s*\[FILTERED\]\s*)+$/;
 
+const EXTRACTION_OUTPUT = Output.object({ schema: ExtractionResultSchema });
+
 const resolveModel = (modelId: string, apiKey?: string) => {
   if (!apiKey) {
     return modelId;
@@ -40,9 +37,14 @@ const resolveModel = (modelId: string, apiKey?: string) => {
 };
 
 const validateModelId = (modelName: string): string => {
-  let modelId: string;
   try {
-    modelId = normalizeModelId(modelName);
+    const modelId = normalizeModelId(modelName);
+    if (!modelId?.trim()) {
+      throw new Error(
+        `Model normalization produced invalid result. Input: ${modelName}, Output: ${modelId}`
+      );
+    }
+    return modelId;
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unknown normalization error";
@@ -50,14 +52,6 @@ const validateModelId = (modelName: string): string => {
       `Invalid model ID after normalization. Original: ${modelName}. ${message}`
     );
   }
-
-  if (!modelId?.trim()) {
-    throw new Error(
-      `Model normalization produced invalid result. Input: ${modelName}, Output: ${modelId}`
-    );
-  }
-
-  return modelId;
 };
 
 export interface ExtractionOptions {
@@ -165,28 +159,29 @@ export const extractErrors = async (
   const { model, modelId, prepared, truncated, abortSignal } = prep;
 
   try {
-    const { object, usage } = await generateObject({
+    const { output, usage } = await generateText({
       model,
-      schema: ExtractionResultSchema,
+      output: EXTRACTION_OUTPUT,
       system: EXTRACTION_SYSTEM_PROMPT,
       prompt: buildUserPrompt(prepared),
       maxOutputTokens: options?.maxOutputTokens ?? 4096,
       abortSignal,
     });
 
+    if (!output) {
+      return createEmptyResult(truncated);
+    }
+
     const { usage: extractionUsage, costUsd } = buildUsage(usage, modelId);
 
     return {
-      errors: object.errors,
-      detectedSource: object.detectedSource,
+      errors: output.errors,
+      detectedSource: output.detectedSource,
       usage: extractionUsage,
       costUsd,
       truncated,
     };
   } catch (error) {
-    if (NoObjectGeneratedError.isInstance(error)) {
-      return createEmptyResult(truncated);
-    }
     throw handleExtractionError(error);
   }
 };

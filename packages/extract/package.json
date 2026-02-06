@@ -18,11 +18,11 @@
     "eval:score": "bun run src/eval/index.ts --score"
   },
   "dependencies": {
-    "@ai-sdk/gateway": "^2.0.0",
+    "@ai-sdk/gateway": "^3.0.0",
     "@ai-sdk/provider": "^3.0.7",
     "@detent/ai": "workspace:*",
     "@detent/types": "workspace:*",
-    "ai": "^5.0.0",
+    "ai": "^6.0.0",
     "zod": "^3.25.34"
   },
   "devDependencies": {

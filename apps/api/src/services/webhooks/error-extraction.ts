@@ -56,6 +56,7 @@ interface RunError {
   workflowJob?: string | null;
 }
 
+// Keep in sync with convex/schema.ts and convex/run_ingest.ts
 type ExtractionStatus = "success" | "failed" | "timeout" | "skipped";
 
 interface JobExtractionResult {
@@ -108,8 +109,8 @@ const sleep = (ms: number): Promise<void> =>
 
 const countLines = (text: string): number => {
   let count = 1;
-  for (const ch of text) {
-    if (ch === "\n") {
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 10) {
       count++;
     }
   }
@@ -374,7 +375,7 @@ const storeErrors = async (
         extractionStatus,
         logR2Key,
         logManifest,
-        logManifestTruncated: logManifestTruncated === true ? true : undefined,
+        logManifestTruncated: logManifestTruncated || undefined,
         receivedAt: Date.now(),
       },
       errors: errorRows,

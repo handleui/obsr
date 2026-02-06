@@ -35,6 +35,7 @@ const invitationStatus = v.union(
   v.literal("revoked")
 );
 
+// Keep in sync with apps/api/src/services/webhooks/error-extraction.ts and convex/run_ingest.ts
 const extractionStatus = v.union(
   v.literal("success"),
   v.literal("failed"),

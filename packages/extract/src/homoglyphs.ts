@@ -393,10 +393,12 @@ const HOMOGLYPH_MAP: Record<string, string> = {
   "\u2089": "9", // subscript nine
 };
 
-const HOMOGLYPH_PATTERN = new RegExp(
-  `[${Object.keys(HOMOGLYPH_MAP).join("")}]`,
-  "gu"
-);
+const HOMOGLYPH_LOOKUP = new Map(Object.entries(HOMOGLYPH_MAP));
 
-export const normalizeHomoglyphs = (str: string): string =>
-  str.replace(HOMOGLYPH_PATTERN, (char) => HOMOGLYPH_MAP[char] ?? char);
+export const normalizeHomoglyphs = (str: string): string => {
+  let result = "";
+  for (const char of str) {
+    result += HOMOGLYPH_LOOKUP.get(char) ?? char;
+  }
+  return result;
+};

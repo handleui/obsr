@@ -19,6 +19,12 @@ export interface ExtractionResult {
   segments?: LogSegment[];
 }
 
+const LogSegmentSchema = z.object({
+  start: z.number(),
+  end: z.number(),
+  signal: z.boolean(),
+});
+
 export const ExtractionResultSchema = z.object({
   errors: z
     .array(CIErrorSchemaWithValidation)
@@ -26,6 +32,17 @@ export const ExtractionResultSchema = z.object({
   detectedSource: ErrorSourceSchema.nullable().describe(
     "The primary tool that produced the output, if identifiable"
   ),
+  truncated: z.boolean(),
+  segmentsTruncated: z.boolean(),
+  segments: z.array(LogSegmentSchema).optional(),
+  usage: z
+    .object({
+      inputTokens: z.number(),
+      outputTokens: z.number(),
+      totalTokens: z.number(),
+    })
+    .optional(),
+  costUsd: z.number().optional(),
 });
 
 export type ExtractionResultSchemaType = z.infer<typeof ExtractionResultSchema>;

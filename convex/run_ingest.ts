@@ -33,7 +33,7 @@ interface LogSegment {
 }
 
 interface ValidatedLogManifest {
-  segments: LogSegment[] | null | undefined;
+  segments: LogSegment[] | undefined;
   truncated: boolean;
 }
 
@@ -57,7 +57,7 @@ export const validateLogManifest = (
   truncatedHint?: boolean
 ): ValidatedLogManifest => {
   if (!segments || segments.length === 0) {
-    return { segments, truncated: truncatedHint ?? false };
+    return { segments: undefined, truncated: truncatedHint ?? false };
   }
 
   let truncated = truncatedHint ?? false;
@@ -70,12 +70,13 @@ export const validateLogManifest = (
 
   const validated = toValidate.filter(isValidSegment);
   return {
-    segments: validated.length > 0 ? validated : null,
+    segments: validated.length > 0 ? validated : undefined,
     truncated,
   };
 };
 
 const provider = v.union(v.literal("github"), v.literal("gitlab"));
+// Keep in sync with apps/api/src/services/webhooks/error-extraction.ts and convex/schema.ts
 const extractionStatus = v.union(
   v.literal("success"),
   v.literal("failed"),
@@ -495,7 +496,8 @@ export const storeJobReport = mutation({
         `[run_ingest] storeJobReport: truncated ${args.errors.length} errors to ${MAX_ERRORS_PER_JOB}`
       );
     }
-    const runId = await upsertRunForJob(ctx, args.run);
+    const runPayload = { ...args.run, errorCount: cappedErrors.length };
+    const runId = await upsertRunForJob(ctx, runPayload);
     await deleteOldJobErrors(ctx, runId, workflowJob, source);
     await insertJobErrors(
       ctx,

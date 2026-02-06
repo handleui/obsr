@@ -93,24 +93,26 @@ const clampLineNum = (lineNum: number): number =>
   Math.max(1, Math.min(lineNum, MAX_SEGMENT_LINES));
 
 const pushSegment = (
-  segments: LogSegment[],
+  state: FilterState,
   start: number,
   end: number,
   signal: boolean
 ): void => {
-  if (segments.length >= MAX_SEGMENTS) {
+  if (state.segments.length >= MAX_SEGMENTS) {
+    state.truncated = true;
     return;
   }
   const cStart = clampLineNum(start);
   const cEnd = clampLineNum(end);
   if (cStart <= cEnd) {
-    segments.push({ start: cStart, end: cEnd, signal });
+    state.segments.push({ start: cStart, end: cEnd, signal });
   }
 };
 
 interface FilterState {
   result: string[];
   segments: LogSegment[];
+  truncated: boolean;
   consecutiveNoiseCount: number;
   noiseStartLine: number;
   signalStartLine: number;
@@ -123,7 +125,7 @@ const handleSignalLine = (
   line: string
 ): void => {
   if (state.consecutiveNoiseCount > 0) {
-    pushSegment(state.segments, state.noiseStartLine, lineNum - 1, false);
+    pushSegment(state, state.noiseStartLine, lineNum - 1, false);
   }
   appendOmissionMarker(
     state.result,
@@ -141,7 +143,7 @@ const handleSignalLine = (
 
 const handleNoiseLine = (state: FilterState, lineNum: number): void => {
   if (state.inSignal) {
-    pushSegment(state.segments, state.signalStartLine, lineNum - 1, true);
+    pushSegment(state, state.signalStartLine, lineNum - 1, true);
     state.inSignal = false;
   }
   if (state.consecutiveNoiseCount === 0) {
@@ -153,9 +155,9 @@ const handleNoiseLine = (state: FilterState, lineNum: number): void => {
 const finalizeSegments = (state: FilterState, totalLines: number): void => {
   const finalLineNum = clampLineNum(totalLines);
   if (state.consecutiveNoiseCount > 0) {
-    pushSegment(state.segments, state.noiseStartLine, finalLineNum, false);
+    pushSegment(state, state.noiseStartLine, finalLineNum, false);
   } else if (state.inSignal) {
-    pushSegment(state.segments, state.signalStartLine, finalLineNum, true);
+    pushSegment(state, state.signalStartLine, finalLineNum, true);
   }
   appendOmissionMarker(
     state.result,
@@ -169,6 +171,7 @@ const filterNoiseLines = (lines: string[]): FilterResult => {
   const state: FilterState = {
     result: [],
     segments: [],
+    truncated: false,
     consecutiveNoiseCount: 0,
     noiseStartLine: 0,
     signalStartLine: 0,
@@ -189,7 +192,7 @@ const filterNoiseLines = (lines: string[]): FilterResult => {
   return {
     lines: state.result,
     segments: state.segments,
-    segmentsTruncated: state.segments.length >= MAX_SEGMENTS,
+    segmentsTruncated: state.truncated,
   };
 };
 

@@ -675,7 +675,7 @@ const storeAndHealErrors = async (
     prNumber,
     conclusion: pipeline.conclusion,
     totalLogLines: pipeline.totalLogLines,
-    extractionStatus: "success",
+    extractionStatus: extraction.status,
     logR2Key: pipeline.logR2Key,
     logManifest: extraction.segments,
     logManifestTruncated: extraction.segmentsTruncated,

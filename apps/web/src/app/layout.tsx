@@ -12,7 +12,7 @@ import "./globals.css";
 
 const neueMontreal = localFont({
   src: "./fonts/PPNeueMontreal-Regular.woff2",
-  variable: "--font-sans",
+  variable: "--font-neue-montreal",
   display: "swap",
 });
 

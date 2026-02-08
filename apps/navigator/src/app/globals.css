@@ -2,7 +2,12 @@
 @source "../../node_modules/@detent/ui/src";
 
 @theme inline {
-  --font-sans: var(--font-sans);
+  --font-sans: var(--font-neue-montreal);
+  --font-pixel-square: var(--font-geist-pixel-square);
+  --font-pixel-grid: var(--font-geist-pixel-grid);
+  --font-pixel-circle: var(--font-geist-pixel-circle);
+  --font-pixel-triangle: var(--font-geist-pixel-triangle);
+  --font-pixel-line: var(--font-geist-pixel-line);
 }
 
 @layer base {

@@ -1,11 +1,18 @@
 import { BetterStackWebVitals } from "@logtail/next/webVitals";
+import {
+  GeistPixelCircle,
+  GeistPixelGrid,
+  GeistPixelLine,
+  GeistPixelSquare,
+  GeistPixelTriangle,
+} from "geist/font/pixel";
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 
 const neueMontreal = localFont({
   src: "./fonts/PPNeueMontreal-Regular.woff2",
-  variable: "--font-sans",
+  variable: "--font-neue-montreal",
   display: "swap",
 });
 
@@ -46,7 +53,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${neueMontreal.variable} antialiased`}>
+      <body
+        className={`${neueMontreal.variable} ${GeistPixelSquare.variable} ${GeistPixelGrid.variable} ${GeistPixelCircle.variable} ${GeistPixelTriangle.variable} ${GeistPixelLine.variable} antialiased`}
+      >
         <BetterStackWebVitals />
         {children}
       </body>

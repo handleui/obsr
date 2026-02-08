@@ -8,6 +8,7 @@ import {
   getOrgSettings,
   type OrganizationSettings,
 } from "../../lib/org-settings";
+import { scrubSecrets } from "../../lib/scrub-secrets";
 import type { Env } from "../../types/env";
 import { hasAutofix } from "../autofix/registry";
 import { canRunHeal } from "../billing";
@@ -75,6 +76,14 @@ const MAX_HEALS_PER_EXTRACTION = 10;
 // Runs via waitUntil so it won't block the webhook response.
 const RETRY_DELAYS_MS = [2000, 5000];
 const MAX_R2_LOG_BYTES = 50 * 1024 * 1024;
+
+// prepareForPrompt (in @detent/extract) truncates to maxContentLength * 3 before
+// doing any work. Default maxContentLength is 15_000 → early cutoff at 45_000 chars.
+// Scrubbing the full 50MB log when only ≤45KB will be used wastes CPU on 15+ regex
+// passes over data that gets thrown away. Pre-slice to this boundary before scrubbing.
+const EXTRACTION_CONTENT_LIMIT = 15_000;
+const EARLY_CUTOFF_MULTIPLIER = 3;
+const SCRUB_PRE_SLICE = EXTRACTION_CONTENT_LIMIT * EARLY_CUTOFF_MULTIPLIER;
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: Intentionally matching control chars for security
 const CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f\u200b-\u200f\u2028-\u2029]/g;
@@ -741,8 +750,10 @@ export const extractAndStoreErrors = async (
     return;
   }
 
+  // Pre-slice before scrubbing: prepareForPrompt will discard everything past
+  // SCRUB_PRE_SLICE anyway, so running 15+ regex passes over the full 50MB is waste.
   const [extraction, logR2Key] = await Promise.all([
-    runExtraction(env, logs, ctx),
+    runExtraction(env, scrubSecrets(logs.slice(0, SCRUB_PRE_SLICE)), ctx),
     storeLogsInR2(env, project.organizationId, ctx, logs),
   ]);
 

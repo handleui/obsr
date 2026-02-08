@@ -181,7 +181,7 @@ const toRunFields = (run: Infer<typeof runPayload>) => {
   );
   return {
     ...rest,
-    logManifest: segments ?? undefined,
+    logManifest: segments === undefined ? undefined : segments,
     logManifestTruncated: truncated || undefined,
   };
 };
@@ -221,7 +221,7 @@ const buildRunPatch = (
       run.logManifest,
       run.logManifestTruncated
     );
-    patch.logManifest = segments ?? undefined;
+    patch.logManifest = segments === undefined ? undefined : segments;
     if (truncated) {
       patch.logManifestTruncated = true;
     }

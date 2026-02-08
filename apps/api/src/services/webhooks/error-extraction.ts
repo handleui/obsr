@@ -330,12 +330,15 @@ interface StoreErrorsOptions {
   logManifestTruncated?: boolean;
 }
 
+const MAX_ERRORS_PER_JOB = 500;
+
 const buildJobReportPayload = (
   options: StoreErrorsOptions,
   runRecordId: string
 ) => {
   const { ctx, project, errors, prNumber, conclusion, totalLogLines } = options;
-  const errorsWithFingerprints = errors.map((e) => ({
+  const cappedErrors = errors.slice(0, MAX_ERRORS_PER_JOB);
+  const errorsWithFingerprints = cappedErrors.map((e) => ({
     error: e,
     fingerprints: generateFingerprints(e),
   }));
@@ -362,7 +365,7 @@ const buildJobReportPayload = (
       prNumber,
       workflowName: ctx.workflowName,
       runAttempt: 1,
-      errorCount: errors.length,
+      errorCount: cappedErrors.length,
       conclusion,
       extractionStatus: options.extractionStatus,
       logR2Key: options.logR2Key,

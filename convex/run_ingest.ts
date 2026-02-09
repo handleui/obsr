@@ -39,7 +39,7 @@ interface LogSegment {
 }
 
 interface ValidatedLogManifest {
-  segments: LogSegment[] | null | undefined;
+  segments: LogSegment[] | undefined;
   truncated: boolean;
 }
 
@@ -63,7 +63,7 @@ export const validateLogManifest = (
   truncatedHint?: boolean
 ): ValidatedLogManifest => {
   if (segments === null) {
-    return { segments: null, truncated: truncatedHint ?? false };
+    return { segments: undefined, truncated: truncatedHint ?? false };
   }
   if (!segments) {
     return { segments: undefined, truncated: truncatedHint ?? false };
@@ -82,7 +82,7 @@ export const validateLogManifest = (
 
   const validated = toValidate.filter(isValidSegment);
   return {
-    segments: validated.length > 0 ? validated : null,
+    segments: validated.length > 0 ? validated : undefined,
     truncated,
   };
 };
@@ -181,7 +181,7 @@ const toRunFields = (run: Infer<typeof runPayload>) => {
   );
   return {
     ...rest,
-    logManifest: segments === undefined ? undefined : segments,
+    logManifest: segments ?? undefined,
     logManifestTruncated: truncated || undefined,
   };
 };
@@ -221,7 +221,7 @@ const buildRunPatch = (
       run.logManifest,
       run.logManifestTruncated
     );
-    patch.logManifest = segments === undefined ? undefined : segments;
+    patch.logManifest = segments ?? undefined;
     if (truncated) {
       patch.logManifestTruncated = true;
     }

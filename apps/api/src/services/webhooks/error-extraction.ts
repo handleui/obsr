@@ -670,11 +670,13 @@ const storeAndHealErrors = async (
     `${LOG_PREFIX} ${ctx.logCtx}: Extracted ${extraction.errors.length} error(s)`
   );
 
+  const cappedErrors = extraction.errors.slice(0, MAX_ERRORS_PER_JOB);
+
   const runRecordId = await storeErrors({
     env,
     ctx,
     project,
-    errors: extraction.errors,
+    errors: cappedErrors,
     prNumber,
     conclusion: pipeline.conclusion,
     totalLogLines: pipeline.totalLogLines,
@@ -688,11 +690,11 @@ const storeAndHealErrors = async (
   }
 
   console.log(
-    `${LOG_PREFIX} ${ctx.logCtx}: Stored ${extraction.errors.length} errors`
+    `${LOG_PREFIX} ${ctx.logCtx}: Stored ${cappedErrors.length} errors`
   );
 
   const convex = getConvexClient(env);
-  const runErrors = extraction.errors.map((e) => {
+  const runErrors = cappedErrors.map((e) => {
     const fingerprints = generateFingerprints(e);
     return toRunError(e, ctx.jobName, fingerprints.lore);
   });

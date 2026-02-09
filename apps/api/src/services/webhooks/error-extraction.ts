@@ -1,4 +1,5 @@
 import { extractErrors, type LogSegment } from "@detent/extract";
+import { generateFingerprints } from "@detent/lore";
 import type { CIError, HealCreateStatus } from "@detent/types";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK is designed for namespace import
 import * as Sentry from "@sentry/cloudflare";
@@ -13,7 +14,7 @@ import type { Env } from "../../types/env";
 import { hasAutofix } from "../autofix/registry";
 import { canRunHeal } from "../billing";
 import { createGitHubService } from "../github";
-import { ciErrorToRow } from "./db-operations";
+import { buildSignatureInputs, ciErrorToRow } from "./db-operations";
 import type { DbClient } from "./types";
 import {
   isValidJobId,
@@ -93,7 +94,6 @@ const sanitizeField = (value: string, maxLen: number): string => {
   return cleaned.length > maxLen ? cleaned.slice(0, maxLen) : cleaned;
 };
 
-// Only 502 (Bad Gateway) and 503 (Service Unavailable) — these are the transient server errors worth retrying
 const HTTP_SERVER_ERROR = /\b50[23]\b/;
 const HTTP_RATE_LIMIT = /\b429\b/;
 
@@ -339,65 +339,72 @@ interface StoreErrorsOptions {
   logManifestTruncated?: boolean;
 }
 
-const storeErrors = async (
-  options: StoreErrorsOptions
-): Promise<string | null> => {
-  const {
-    env,
-    ctx,
-    project,
-    errors,
-    prNumber,
-    conclusion,
-    totalLogLines,
-    extractionStatus,
-    logR2Key,
-    logManifest,
-    logManifestTruncated,
-  } = options;
+const MAX_ERRORS_PER_JOB = 500;
 
-  const runRecordId = crypto.randomUUID();
-  const convex = getConvexClient(env);
-  const errorRows = errors.map((e) =>
-    ciErrorToRow(e, runRecordId, ctx.jobName, {
-      source: "webhook-extraction",
-      totalLogLines,
+const buildJobReportPayload = (
+  options: StoreErrorsOptions,
+  runRecordId: string
+) => {
+  const { ctx, project, errors, prNumber, conclusion, totalLogLines } = options;
+  const cappedErrors = errors.slice(0, MAX_ERRORS_PER_JOB);
+  const errorsWithFingerprints = cappedErrors.map((e) => ({
+    error: e,
+    fingerprints: generateFingerprints(e),
+  }));
+  const errorRows = errorsWithFingerprints.map(
+    ({ error: e, fingerprints }) => ({
+      ...ciErrorToRow(e, runRecordId, ctx.jobName, {
+        source: "webhook-extraction",
+        totalLogLines,
+      }),
+      fingerprint: fingerprints.lore,
     })
   );
 
+  return {
+    run: {
+      id: runRecordId,
+      projectId: project._id,
+      provider: "github" as const,
+      source: "webhook-extraction" as const,
+      runId: String(ctx.runId),
+      repository: ctx.repository,
+      commitSha: ctx.commitSha,
+      headBranch: ctx.headBranch,
+      prNumber,
+      workflowName: ctx.workflowName,
+      runAttempt: 1,
+      errorCount: cappedErrors.length,
+      conclusion,
+      extractionStatus: options.extractionStatus,
+      logR2Key: options.logR2Key,
+      logManifest: options.logManifest,
+      logManifestTruncated: options.logManifestTruncated || undefined,
+      receivedAt: Date.now(),
+    },
+    errors: errorRows,
+    signatures: Array.from(
+      buildSignatureInputs(errorsWithFingerprints).values()
+    ),
+    workflowJob: ctx.jobName,
+    providerJobId: String(ctx.jobId),
+    source: "webhook-extraction" as const,
+  };
+};
+
+const storeErrors = async (
+  options: StoreErrorsOptions
+): Promise<string | null> => {
+  const { env, ctx, errors } = options;
+  const runRecordId = crypto.randomUUID();
+  const payload = buildJobReportPayload(options, runRecordId);
+
   try {
-    await convex.mutation("run_ingest:storeJobReport", {
-      run: {
-        id: runRecordId,
-        projectId: project._id,
-        provider: "github",
-        source: "webhook-extraction",
-        runId: String(ctx.runId),
-        repository: ctx.repository,
-        commitSha: ctx.commitSha,
-        headBranch: ctx.headBranch,
-        prNumber,
-        workflowName: ctx.workflowName,
-        runAttempt: 1,
-        errorCount: errors.length,
-        conclusion,
-        extractionStatus,
-        logR2Key,
-        logManifest,
-        logManifestTruncated: logManifestTruncated || undefined,
-        receivedAt: Date.now(),
-      },
-      errors: errorRows,
-      workflowJob: ctx.jobName,
-      providerJobId: String(ctx.jobId),
-      source: "webhook-extraction",
-    });
+    await getConvexClient(env).mutation("run_ingest:storeJobReport", payload);
     return runRecordId;
   } catch (error) {
-    console.error(
-      `${LOG_PREFIX} ${ctx.logCtx}: Failed to store:`,
-      error instanceof Error ? error.message : String(error)
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`${LOG_PREFIX} ${ctx.logCtx}: Failed to store:`, message);
     Sentry.captureMessage("Failed to store extracted errors", {
       level: "error",
       extra: {
@@ -405,7 +412,7 @@ const storeErrors = async (
         errorCount: errors.length,
         runId: ctx.runId,
         jobName: ctx.jobName,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       },
     });
     return null;
@@ -616,12 +623,15 @@ const findPrNumber = async (
   );
 };
 
-const toRunError = (e: CIError, jobName: string): RunError => ({
+const toRunError = (
+  e: CIError,
+  jobName: string,
+  signatureId: string | null = null
+): RunError => ({
   _id: crypto.randomUUID(),
   fixable: e.fixable ?? null,
   source: "webhook-extraction",
-  // HACK: ruleId is a weak proxy for signatureId — true signatures aren't available in the webhook extraction path
-  signatureId: e.ruleId ?? null,
+  signatureId,
   workflowJob: jobName,
 });
 
@@ -669,11 +679,13 @@ const storeAndHealErrors = async (
     `${LOG_PREFIX} ${ctx.logCtx}: Extracted ${extraction.errors.length} error(s)`
   );
 
+  const cappedErrors = extraction.errors.slice(0, MAX_ERRORS_PER_JOB);
+
   const runRecordId = await storeErrors({
     env,
     ctx,
     project,
-    errors: extraction.errors,
+    errors: cappedErrors,
     prNumber,
     conclusion: pipeline.conclusion,
     totalLogLines: pipeline.totalLogLines,
@@ -687,11 +699,14 @@ const storeAndHealErrors = async (
   }
 
   console.log(
-    `${LOG_PREFIX} ${ctx.logCtx}: Stored ${extraction.errors.length} errors`
+    `${LOG_PREFIX} ${ctx.logCtx}: Stored ${cappedErrors.length} errors`
   );
 
   const convex = getConvexClient(env);
-  const runErrors = extraction.errors.map((e) => toRunError(e, ctx.jobName));
+  const runErrors = cappedErrors.map((e) => {
+    const fingerprints = generateFingerprints(e);
+    return toRunError(e, ctx.jobName, fingerprints.lore);
+  });
 
   try {
     await createHealsForErrors({

@@ -261,9 +261,6 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_run_id", ["runId"])
-    .index("by_category", ["category"])
-    .index("by_source", ["source"])
-    .index("by_rule_id", ["ruleId"])
     .index("by_signature", ["signatureId"])
     .index("by_run_id_source", ["runId", "source"]),
 

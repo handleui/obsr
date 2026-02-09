@@ -15,6 +15,12 @@ const MAX_PROVIDER_JOB_ID_LENGTH = 64;
 const MAX_WORKFLOW_JOB_LENGTH = 255;
 const MAX_LOG_MANIFEST_SEGMENTS = 1000;
 const MAX_SEGMENT_LINE_NUMBER = 1_000_000;
+const MAX_SIGNATURE_SOURCE_LENGTH = 200;
+const MAX_SIGNATURE_RULE_ID_LENGTH = 200;
+const MAX_SIGNATURE_CATEGORY_LENGTH = 100;
+const MAX_SIGNATURE_PATTERN_LENGTH = 500;
+const MAX_SIGNATURE_MESSAGE_LENGTH = 500;
+const MAX_SIGNATURE_FILE_PATH_LENGTH = 1000;
 
 const truncateField = (
   value: string | null | undefined,
@@ -56,8 +62,14 @@ export const validateLogManifest = (
   segments: LogSegment[] | null | undefined,
   truncatedHint?: boolean
 ): ValidatedLogManifest => {
-  if (!segments || segments.length === 0) {
+  if (segments === null) {
     return { segments: undefined, truncated: truncatedHint ?? false };
+  }
+  if (!segments) {
+    return { segments: undefined, truncated: truncatedHint ?? false };
+  }
+  if (segments.length === 0) {
+    return { segments: [], truncated: truncatedHint ?? false };
   }
 
   let truncated = truncatedHint ?? false;
@@ -185,6 +197,13 @@ const findExistingRun = (ctx: MutationCtx, run: Infer<typeof runPayload>) =>
     )
     .first();
 
+interface RunPatch {
+  logR2Key?: string;
+  logManifest?: Infer<typeof runPayload>["logManifest"];
+  logManifestTruncated?: true;
+  extractionStatus?: Infer<typeof extractionStatus>;
+}
+
 const buildRunPatch = (
   run: Infer<typeof runPayload>,
   existing: {
@@ -192,18 +211,8 @@ const buildRunPatch = (
     logManifest?: unknown;
     extractionStatus?: string | null;
   }
-): Partial<{
-  logR2Key: string;
-  logManifest: Infer<typeof runPayload>["logManifest"];
-  logManifestTruncated: true;
-  extractionStatus: Infer<typeof extractionStatus>;
-}> => {
-  const patch: Partial<{
-    logR2Key: string;
-    logManifest: Infer<typeof runPayload>["logManifest"];
-    logManifestTruncated: true;
-    extractionStatus: Infer<typeof extractionStatus>;
-  }> = {};
+): RunPatch => {
+  const patch: RunPatch = {};
   if (run.logR2Key && !existing.logR2Key) {
     patch.logR2Key = run.logR2Key;
   }
@@ -221,25 +230,6 @@ const buildRunPatch = (
     patch.extractionStatus = run.extractionStatus;
   }
   return patch;
-};
-
-const insertRun = async (
-  ctx: MutationCtx,
-  run: Infer<typeof runPayload>,
-  runIdMap: Map<string, Id<"runs">>
-) => {
-  const existing = await findExistingRun(ctx, run);
-  if (!existing) {
-    const id = await ctx.db.insert("runs", toRunFields(run));
-    runIdMap.set(run.id, id);
-    return;
-  }
-
-  const patch = buildRunPatch(run, existing);
-  if (Object.keys(patch).length > 0) {
-    await ctx.db.patch(existing._id, patch);
-  }
-  runIdMap.set(run.id, existing._id);
 };
 
 const insertSignature = async (
@@ -262,11 +252,17 @@ const insertSignature = async (
 
   const id = await ctx.db.insert("errorSignatures", {
     fingerprint: signature.fingerprint,
-    source: signature.source,
-    ruleId: signature.ruleId,
-    category: signature.category,
-    normalizedPattern: signature.normalizedPattern,
-    exampleMessage: signature.exampleMessage,
+    source: truncateField(signature.source, MAX_SIGNATURE_SOURCE_LENGTH),
+    ruleId: truncateField(signature.ruleId, MAX_SIGNATURE_RULE_ID_LENGTH),
+    category: truncateField(signature.category, MAX_SIGNATURE_CATEGORY_LENGTH),
+    normalizedPattern: truncateField(
+      signature.normalizedPattern,
+      MAX_SIGNATURE_PATTERN_LENGTH
+    ),
+    exampleMessage: truncateField(
+      signature.exampleMessage,
+      MAX_SIGNATURE_MESSAGE_LENGTH
+    ),
     createdAt: now,
     updatedAt: now,
   });
@@ -345,77 +341,18 @@ const upsertSignatureOccurrences = async (
     if (!signatureId) {
       continue;
     }
+    const truncatedPath =
+      truncateField(sig.filePath, MAX_SIGNATURE_FILE_PATH_LENGTH) ?? undefined;
     await upsertOccurrence(
       ctx,
       signatureId,
       projectId,
-      sig.filePath ?? undefined,
+      truncatedPath,
       commitSha,
       now
     );
   }
 };
-
-const insertBulkErrors = async (
-  ctx: MutationCtx,
-  errors: Infer<typeof errorPayload>[],
-  runIdMap: Map<string, Id<"runs">>,
-  signatureMap: Map<string, Id<"errorSignatures">>
-) => {
-  for (const error of errors) {
-    const runId = runIdMap.get(error.runId);
-    if (!runId) {
-      continue;
-    }
-
-    await ctx.db.insert("runErrors", {
-      runId,
-      signatureId: error.fingerprint
-        ? signatureMap.get(error.fingerprint)
-        : undefined,
-      ...toErrorFields(error),
-    });
-  }
-};
-
-export const bulkStore = mutation({
-  args: {
-    runs: v.array(runPayload),
-    errors: v.array(errorPayload),
-    signatures: v.array(signaturePayload),
-    projectId: v.optional(v.id("projects")),
-    commitSha: v.optional(nullableString),
-  },
-  handler: async (ctx, args) => {
-    const now = Date.now();
-    const runIdMap = new Map<string, Id<"runs">>();
-    const signatureMap = new Map<string, Id<"errorSignatures">>();
-
-    for (const run of args.runs) {
-      await insertRun(ctx, run, runIdMap);
-    }
-    for (const signature of args.signatures) {
-      await insertSignature(ctx, signature, signatureMap, now);
-    }
-    if (args.projectId) {
-      await upsertSignatureOccurrences(
-        ctx,
-        args.signatures,
-        signatureMap,
-        args.projectId,
-        args.commitSha,
-        now
-      );
-    }
-    await insertBulkErrors(ctx, args.errors, runIdMap, signatureMap);
-
-    return {
-      runs: args.runs.length,
-      errors: args.errors.length,
-      signatures: signatureMap.size,
-    };
-  },
-});
 
 const upsertRunForJob = async (
   ctx: MutationCtx,
@@ -461,11 +398,15 @@ const insertJobErrors = async (
   errors: Infer<typeof errorPayload>[],
   workflowJob: string,
   source: string,
-  providerJobId?: string
+  providerJobId?: string,
+  signatureMap?: Map<string, Id<"errorSignatures">>
 ) => {
   for (const error of errors) {
     await ctx.db.insert("runErrors", {
       runId,
+      signatureId: error.fingerprint
+        ? signatureMap?.get(error.fingerprint)
+        : undefined,
       ...toErrorFields(error),
       source,
       providerJobId: providerJobId ?? error.providerJobId,
@@ -478,11 +419,13 @@ export const storeJobReport = mutation({
   args: {
     run: runPayload,
     errors: v.array(errorPayload),
+    signatures: v.optional(v.array(signaturePayload)),
     workflowJob: v.string(),
     providerJobId: v.optional(nullableString),
     source: v.optional(nullableString),
   },
   handler: async (ctx, args) => {
+    const now = Date.now();
     const source = args.source ?? "job-report";
     const workflowJob =
       truncateField(args.workflowJob, MAX_WORKFLOW_JOB_LENGTH) ??
@@ -499,13 +442,31 @@ export const storeJobReport = mutation({
     const runPayload = { ...args.run, errorCount: cappedErrors.length };
     const runId = await upsertRunForJob(ctx, runPayload);
     await deleteOldJobErrors(ctx, runId, workflowJob, source);
+
+    const signatureMap = new Map<string, Id<"errorSignatures">>();
+    const cappedSignatures = args.signatures?.slice(0, MAX_ERRORS_PER_JOB);
+    if (cappedSignatures?.length) {
+      for (const signature of cappedSignatures) {
+        await insertSignature(ctx, signature, signatureMap, now);
+      }
+      await upsertSignatureOccurrences(
+        ctx,
+        cappedSignatures,
+        signatureMap,
+        args.run.projectId,
+        args.run.commitSha,
+        now
+      );
+    }
+
     await insertJobErrors(
       ctx,
       runId,
       cappedErrors,
       workflowJob,
       source,
-      sanitizedJobId
+      sanitizedJobId,
+      signatureMap
     );
     return { runId: String(runId) };
   },

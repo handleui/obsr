@@ -1,38 +1,10 @@
-import type { CIError } from "@detent/types";
 import type { ConvexHttpClient } from "convex/browser";
 
 export type DbClient = ConvexHttpClient;
 
-export interface PreparedRunData {
-  runRecordId: string;
-  runId: number;
-  runName: string;
-  prNumber: number;
-  headSha: string;
-  errors: CIError[];
-  repository: string;
-  checkRunId: number | null;
-  conclusion: string | null;
-  headBranch: string;
-  runAttempt: number;
-  runStartedAt: Date | null;
-  projectId?: string;
-}
-
 export interface RunIdentifier {
   runId: number;
   runAttempt: number;
-}
-
-export interface WorkflowRunMeta {
-  id: number;
-  name: string;
-  status: string;
-  conclusion: string | null;
-  headBranch: string;
-  runAttempt: number;
-  runStartedAt: Date | null;
-  event: string;
 }
 
 export const SHA_REGEX = /^[a-fA-F0-9]{40}$/;

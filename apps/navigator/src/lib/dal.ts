@@ -64,6 +64,21 @@ const isNextRedirect = (error: unknown): boolean =>
   "digest" in error &&
   String((error as { digest?: string }).digest).includes("NEXT_REDIRECT");
 
+const sanitizeProfilePictureUrl = (url: string | null): string | null => {
+  if (!url || typeof url !== "string") {
+    return null;
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.href;
+  } catch {
+    return null;
+  }
+};
+
 interface OrganizationDoc {
   _id: Id<"organizations">;
   name: string;
@@ -134,6 +149,7 @@ export interface Session {
   userId: string;
   email: string;
   name: string | null;
+  profilePictureUrl: string | null;
   token: string;
 }
 
@@ -160,6 +176,7 @@ export const verifySession = cache(async (): Promise<Session> => {
       user.firstName && user.lastName
         ? `${user.firstName} ${user.lastName}`
         : user.firstName || user.lastName || null,
+    profilePictureUrl: sanitizeProfilePictureUrl(user.profilePictureUrl),
     token,
   };
 });
@@ -185,6 +202,7 @@ export const getUser = cache(async (): Promise<Session | null> => {
       user.firstName && user.lastName
         ? `${user.firstName} ${user.lastName}`
         : user.firstName || user.lastName || null,
+    profilePictureUrl: sanitizeProfilePictureUrl(user.profilePictureUrl),
     token,
   };
 });

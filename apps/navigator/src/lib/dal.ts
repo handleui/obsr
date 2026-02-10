@@ -70,7 +70,7 @@ const sanitizeProfilePictureUrl = (url: string | null): string | null => {
   }
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== "https:") {
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
       return null;
     }
     return parsed.href;

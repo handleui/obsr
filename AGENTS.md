@@ -79,6 +79,7 @@ Source of truth: `convex/schema.ts`
 - Run `./dist/dt` directly (use `bun run dt` instead)
 - Commit without running `bun run fix`
 - Create markdown files when closing tasks (no summaries or reports needed)
+- Manually bump package versions (release-please handles versioning)
 
 ## Style (Project-Specific Only)
 

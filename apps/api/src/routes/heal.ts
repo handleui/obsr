@@ -1,3 +1,4 @@
+import { createDb, runErrorOps, runOps } from "@detent/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { getConvexClient } from "../db/convex";
@@ -513,7 +514,6 @@ app.post("/trigger", async (c) => {
   const { project, organization } = accessResult;
   const orgSettings = getOrgSettings(organization.settings);
 
-  const { createDb, runOps, runErrorOps } = await import("@detent/db");
   const { db, pool } = createDb(c.env.DATABASE_URL);
   try {
     const run = await runOps.getLatestByProjectPr(

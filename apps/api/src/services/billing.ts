@@ -135,13 +135,19 @@ export const recordUsage = async (
   }
 
   const { db, pool } = createDb(env.DATABASE_URL);
-  const event = await usageEventOps.create(db, {
-    organizationId: orgId,
-    eventName: usage.type,
-    metadata: buildLocalMetadata(usage, runId),
-    polarIngested: false,
-    createdAt: Date.now(),
-  });
+  let event: Awaited<ReturnType<typeof usageEventOps.create>>;
+  try {
+    event = await usageEventOps.create(db, {
+      organizationId: orgId,
+      eventName: usage.type,
+      metadata: buildLocalMetadata(usage, runId),
+      polarIngested: false,
+      createdAt: Date.now(),
+    });
+  } catch (error) {
+    await pool.end();
+    throw error;
+  }
 
   const polar = createPolarClient(env);
   retryPolarIngestion(() =>

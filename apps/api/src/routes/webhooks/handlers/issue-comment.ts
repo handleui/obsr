@@ -1,3 +1,4 @@
+import { createDb, type Db, runErrorOps, runOps } from "@detent/db";
 import { getConvexClient } from "../../../db/convex";
 import { getHealsByPr, triggerHeal } from "../../../db/operations/heals";
 import {
@@ -14,21 +15,15 @@ import {
   releaseHealCommandLock,
 } from "../../../services/idempotency";
 import { classifyError } from "../../../services/webhooks/error-classifier";
+import { safeLogValue } from "../../../services/webhooks/types";
 import type {
   DetentCommand,
   IssueCommentPayload,
   WebhookContext,
 } from "../types";
 
-// Top-level regex for performance (avoid creating in loops)
 const DETENTSH_COMMAND_PATTERN = /@detentsh(?:\s+(.*))?/i;
 
-// Maximum user instructions length for early truncation in webhook handler.
-// This is intentionally smaller than the DB layer limit (2000 in heals.ts) because:
-// 1. Early truncation reduces payload size through the system
-// 2. Shorter instructions are more likely to be actionable
-// 3. Limits prompt injection surface area before sanitization
-// The DB layer provides a secondary safety net for any paths that bypass this handler.
 const MAX_USER_INSTRUCTIONS_LENGTH = 500;
 
 // SECURITY: Patterns that indicate prompt injection attempts
@@ -66,13 +61,13 @@ interface HealProjectContext {
 }
 
 interface HealRun {
-  _id: string;
+  id: string;
   commitSha?: string | null;
   headBranch?: string | null;
 }
 
 interface HealError {
-  _id: string;
+  id: string;
   source?: string | null;
   signatureId?: string | null;
   fixable?: boolean | null;
@@ -98,22 +93,13 @@ const buildControlCharPattern = (): RegExp => {
 };
 const CONTROL_CHAR_PATTERN = buildControlCharPattern();
 
-/**
- * Sanitize user instructions to mitigate prompt injection risks.
- * Returns sanitized string or null if content appears malicious.
- *
- * SECURITY: This is defense-in-depth. The AI model should also be instructed
- * to treat user content as data, not instructions (see SYSTEM_PROMPT).
- *
- * @internal Exported for testing only
- */
+// SECURITY: defense-in-depth against prompt injection; model also treats user content as data
+// @internal Exported for testing only
 export const sanitizeUserInstructions = (
   instructions: string
 ): { sanitized: string; blocked: boolean } => {
-  // Truncate to max length first
   const truncated = instructions.slice(0, MAX_USER_INSTRUCTIONS_LENGTH);
 
-  // SECURITY: Check for null bytes (encoding attacks) first
   if (truncated.includes(String.fromCharCode(0))) {
     console.warn(
       "[issue_comment] Blocked potential encoding attack: null byte detected"
@@ -121,7 +107,6 @@ export const sanitizeUserInstructions = (
     return { sanitized: "", blocked: true };
   }
 
-  // Check for obvious prompt injection patterns
   for (const pattern of PROMPT_INJECTION_PATTERNS) {
     if (pattern.test(truncated)) {
       console.warn(
@@ -131,30 +116,24 @@ export const sanitizeUserInstructions = (
     }
   }
 
-  // Remove control characters except newlines, tabs, and carriage returns
   const cleaned = truncated.replace(CONTROL_CHAR_PATTERN, "");
 
   return { sanitized: cleaned, blocked: false };
 };
 
-// Parse @detentsh commands from comment body
 const parseDetentCommand = (body: string): DetentCommand | null => {
-  // Match @detentsh with optional text after it
   const match = body.match(DETENTSH_COMMAND_PATTERN);
 
   if (!match) {
     return null;
   }
 
-  // Extract any text after @detentsh as user instructions
   const instructionsText = match[1]?.trim();
 
   if (instructionsText) {
-    // SECURITY: Sanitize user instructions to mitigate prompt injection
     const { sanitized, blocked } = sanitizeUserInstructions(instructionsText);
 
     if (blocked) {
-      // Return command without instructions if blocked
       return { type: "heal" };
     }
 
@@ -217,7 +196,7 @@ const loadHealProjectContext = async (
 
 const loadLatestRun = async (
   c: WebhookContext,
-  convex: ReturnType<typeof getConvexClient>,
+  db: Db,
   github: ReturnType<typeof createGitHubService>,
   token: string,
   owner: string,
@@ -225,10 +204,7 @@ const loadLatestRun = async (
   prNumber: number,
   projectId: string
 ): Promise<HealRun | Response> => {
-  const run = (await convex.query("runs:getLatestByProjectPr", {
-    projectId,
-    prNumber,
-  })) as HealRun | null;
+  const run = await runOps.getLatestByProjectPr(db, projectId, prNumber);
   if (!run) {
     await github.postComment(
       token,
@@ -245,6 +221,7 @@ const loadLatestRun = async (
 
 const loadFixableErrors = async (
   c: WebhookContext,
+  db: Db,
   convex: ReturnType<typeof getConvexClient>,
   github: ReturnType<typeof createGitHubService>,
   token: string,
@@ -254,9 +231,10 @@ const loadFixableErrors = async (
   prNumber: number,
   runId: string
 ): Promise<HealError[] | Response> => {
-  const errors = (await convex.query("run_errors:listFixableByRunId", {
-    runId,
-  })) as HealError[];
+  const errors = (await runErrorOps.listFixableByRunId(
+    db,
+    runId
+  )) as HealError[];
 
   if (errors.length === 0) {
     const commentBody = formatNoHealCandidatesComment();
@@ -329,14 +307,14 @@ const maybeCreateMissingHeals = async (
   const result = await orchestrateHeals({
     env: c.env,
     projectId,
-    runId: run._id,
+    runId: run.id,
     commitSha: run.commitSha,
     prNumber,
     branch: run.headBranch ?? "main",
     repoFullName: repositoryFullName,
     installationId: Number.parseInt(installationId, 10),
     errors: errors.map((e) => ({
-      id: e._id,
+      id: e.id,
       source: e.source ?? undefined,
       signatureId: e.signatureId ?? undefined,
       fixable: e.fixable ?? false,
@@ -357,7 +335,6 @@ const maybeCreateMissingHeals = async (
   return existingHeals;
 };
 
-// Handle @detentsh heal command
 const handleHealCommand = async (
   c: WebhookContext,
   payload: IssueCommentPayload,
@@ -371,6 +348,7 @@ const handleHealCommand = async (
   const repo = repository.name;
 
   const convex = getConvexClient(c.env);
+  const { db: drizzleDb, pool } = createDb(c.env.DATABASE_URL);
 
   try {
     const projectContextResult = await loadHealProjectContext(
@@ -390,7 +368,7 @@ const handleHealCommand = async (
 
     const runResult = await loadLatestRun(
       c,
-      convex,
+      drizzleDb,
       github,
       token,
       owner,
@@ -405,6 +383,7 @@ const handleHealCommand = async (
 
     const errorsResult = await loadFixableErrors(
       c,
+      drizzleDb,
       convex,
       github,
       token,
@@ -412,15 +391,13 @@ const handleHealCommand = async (
       repo,
       repository.full_name,
       prNumber,
-      run._id
+      run.id
     );
     if (errorsResult instanceof Response) {
       return errorsResult;
     }
     const errors = errorsResult;
 
-    // Acquire lock to prevent race condition when two heal commands fire simultaneously
-    // This ensures only one orchestration runs at a time per PR
     const kv = c.env["detent-idempotency"];
     const lockResult = await acquireHealCommandLock(kv, project._id, prNumber);
     if (!lockResult.acquired) {
@@ -449,15 +426,14 @@ const handleHealCommand = async (
       }
       const existingHeals = existingHealsResult;
 
-      // Trigger all found heals by updating their status to pending
       const healIdsToTrigger = existingHeals
         .filter((h) => h.status === "found")
         .map((h) => h.id);
 
       if (healIdsToTrigger.length > 0) {
-        for (const healId of healIdsToTrigger) {
-          await triggerHeal(c.env, healId);
-        }
+        await Promise.all(
+          healIdsToTrigger.map((healId) => triggerHeal(c.env, healId))
+        );
 
         console.log(
           `[issue_comment] Triggered ${healIdsToTrigger.length} heals for PR #${prNumber}`
@@ -466,8 +442,6 @@ const handleHealCommand = async (
 
       const totalHeals = existingHeals.length;
 
-      // If still no heals after orchestration attempt, post "no heal candidates" comment
-      // This can happen when autofix is disabled or no errors have matching autofix handlers
       if (totalHeals === 0) {
         const commentBody = formatNoHealCandidatesComment();
         const appId = Number.parseInt(c.env.GITHUB_APP_ID, 10);
@@ -497,7 +471,6 @@ const handleHealCommand = async (
         errorCount: errors.length,
       });
     } finally {
-      // Release the heal command lock
       await releaseHealCommandLock(kv, project._id, prNumber);
     }
   } catch (error) {
@@ -512,10 +485,11 @@ const handleHealCommand = async (
       },
       500
     );
+  } finally {
+    c.executionCtx.waitUntil(pool.end());
   }
 };
 
-// Handle issue_comment events (@detentsh mentions)
 export const handleIssueCommentEvent = async (
   c: WebhookContext,
   payload: IssueCommentPayload
@@ -523,46 +497,38 @@ export const handleIssueCommentEvent = async (
   const { action, comment, issue, repository, installation } = payload;
   const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
 
-  // Only process new comments
   if (action !== "created") {
     return c.json({ message: "ignored", reason: "not created" });
   }
 
-  // Only process PR comments (not issues)
   if (!issue.pull_request) {
     return c.json({ message: "ignored", reason: "not a pull request" });
   }
 
-  // Ignore comments from bots (e.g., changeset-bot mentions @detent/cli package names)
   if (comment.user.type === "Bot") {
     return c.json({ message: "ignored", reason: "bot comment" });
   }
 
-  // Check for @detentsh mention
   const body = comment.body.toLowerCase();
   if (!body.includes("@detentsh")) {
     return c.json({ message: "ignored", reason: "no @detentsh mention" });
   }
 
   console.log(
-    `[issue_comment] @detentsh mentioned in ${repository.full_name}#${issue.number} by ${comment.user.login}`
+    `[issue_comment] @detentsh mentioned in ${safeLogValue(repository.full_name)}#${issue.number} by ${safeLogValue(comment.user.login)}`
   );
 
-  // Parse command
   const command = parseDetentCommand(comment.body);
 
   if (!command) {
     return c.json({ message: "ignored", reason: "no valid command" });
   }
 
-  // Get GitHub service
   const github = createGitHubService(c.env);
 
   try {
-    // Get installation token
     const token = await github.getInstallationToken(installation.id);
 
-    // Add eyes reaction to acknowledge the command
     await github.addReactionToComment(
       token,
       repository.owner.login,

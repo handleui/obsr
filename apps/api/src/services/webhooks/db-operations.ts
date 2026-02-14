@@ -1,3 +1,4 @@
+import { createDb, runErrorOps, runOps } from "@detent/db";
 import { type generateFingerprints, sanitizeSensitiveData } from "@detent/lore";
 import type { CIError } from "@detent/types";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK official pattern
@@ -206,34 +207,38 @@ export const checkRunsAndLoadOrgSettings = async (
     };
   }
 
-  const convex = getConvexClient(env);
+  const { db, pool } = createDb(env.DATABASE_URL);
+  try {
+    const convex = getConvexClient(env);
 
-  const runIds = runIdentifiers.map((r) => String(r.runId));
-  const existingRunsResult =
-    runIds.length > 0
-      ? ((await convex.query("runs:listByRepositoryRunIds", {
-          repository,
-          runIds,
-        })) as Array<{ runId: string; runAttempt: number }>)
-      : [];
+    const runIds = runIdentifiers.map((r) => String(r.runId));
+    const existingRunsResult =
+      runIds.length > 0
+        ? await runOps.listByRepositoryRunIds(db, repository, runIds)
+        : [];
 
-  const existingSet = new Set(
-    existingRunsResult.map((r) => `${r.runId}:${r.runAttempt ?? 1}`)
-  );
-  const allExist =
-    runIdentifiers.length === 0 ||
-    runIdentifiers.every((r) => existingSet.has(`${r.runId}:${r.runAttempt}`));
-
-  const orgSettings = cachedSettings
-    ? getOrgSettings(cachedSettings)
-    : await fetchAndCacheOrgSettings(
-        convex,
-        installationId,
-        repository,
-        settingsCacheKey
+    const existingSet = new Set(
+      existingRunsResult.map((r) => `${r.runId}:${r.runAttempt ?? 1}`)
+    );
+    const allExist =
+      runIdentifiers.length === 0 ||
+      runIdentifiers.every((r) =>
+        existingSet.has(`${r.runId}:${r.runAttempt}`)
       );
 
-  return { allExist, existingRuns: existingSet, orgSettings };
+    const orgSettings = cachedSettings
+      ? getOrgSettings(cachedSettings)
+      : await fetchAndCacheOrgSettings(
+          convex,
+          installationId,
+          repository,
+          settingsCacheKey
+        );
+
+    return { allExist, existingRuns: existingSet, orgSettings };
+  } finally {
+    await pool.end();
+  }
 };
 
 export const getCommentIdFromDb = async (
@@ -303,56 +308,57 @@ export const checkForJobReportedErrors = async (
     return null;
   }
 
-  const convex = getConvexClient(env);
-  const runIds = runsToCheck.map((r) => String(r.id));
-  const runs = (await convex.query("runs:listByRepositoryRunIds", {
-    repository,
-    runIds,
-  })) as Array<{ _id: string }>;
+  const { db, pool } = createDb(env.DATABASE_URL);
+  try {
+    const runIds = runsToCheck.map((r) => String(r.id));
+    const matchedRuns = await runOps.listByRepositoryRunIds(
+      db,
+      repository,
+      runIds
+    );
 
-  if (runs.length === 0) {
-    return null;
+    if (matchedRuns.length === 0) {
+      return null;
+    }
+
+    const errorsByRun = await Promise.all(
+      matchedRuns.map((run) =>
+        runErrorOps.listByRunIdSource(db, run.id, "job-report", 1000)
+      )
+    );
+
+    const jobReportedErrors = errorsByRun.flat() as Array<{
+      message: string;
+      filePath?: string;
+      line?: number;
+      column?: number;
+      category?: string;
+      severity?: string;
+      ruleId?: string;
+      stackTrace?: string;
+      workflowJob?: string;
+      source?: string;
+    }>;
+
+    if (jobReportedErrors.length === 0) {
+      return null;
+    }
+
+    return jobReportedErrors.map((e) => ({
+      message: e.message,
+      filePath: e.filePath ?? undefined,
+      line: e.line ?? undefined,
+      column: e.column ?? undefined,
+      category: e.category ?? undefined,
+      severity: e.severity as "error" | "warning" | undefined,
+      ruleId: e.ruleId ?? undefined,
+      stackTrace: e.stackTrace ?? undefined,
+      workflowJob: e.workflowJob ?? undefined,
+      source: e.source ?? undefined,
+    }));
+  } finally {
+    await pool.end();
   }
-
-  const errorsByRun = await Promise.all(
-    runs.map((run) =>
-      convex.query("run_errors:listByRunIdSource", {
-        runId: run._id,
-        source: "job-report",
-        limit: 1000,
-      })
-    )
-  );
-
-  const jobReportedErrors = errorsByRun.flat() as Array<{
-    message: string;
-    filePath?: string;
-    line?: number;
-    column?: number;
-    category?: string;
-    severity?: string;
-    ruleId?: string;
-    stackTrace?: string;
-    workflowJob?: string;
-    source?: string;
-  }>;
-
-  if (jobReportedErrors.length === 0) {
-    return null;
-  }
-
-  return jobReportedErrors.map((e) => ({
-    message: e.message,
-    filePath: e.filePath ?? undefined,
-    line: e.line ?? undefined,
-    column: e.column ?? undefined,
-    category: e.category ?? undefined,
-    severity: e.severity as "error" | "warning" | undefined,
-    ruleId: e.ruleId ?? undefined,
-    stackTrace: e.stackTrace ?? undefined,
-    workflowJob: e.workflowJob ?? undefined,
-    source: e.source ?? undefined,
-  }));
 };
 
 const isValidGitHubNameSegment = (name: string): boolean =>

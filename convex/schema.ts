@@ -1,12 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
-import {
-  nullableBoolean,
-  nullableNumber,
-  nullableString,
-  nullableStringArray,
-} from "./validators";
+import { nullableBoolean, nullableNumber, nullableString } from "./validators";
 
 const healStatus = v.union(
   v.literal("found"),
@@ -34,26 +29,6 @@ const invitationStatus = v.union(
   v.literal("expired"),
   v.literal("revoked")
 );
-
-// Keep in sync with apps/api/src/services/webhooks/error-extraction.ts and convex/run_ingest.ts
-const extractionStatus = v.union(
-  v.literal("success"),
-  v.literal("failed"),
-  v.literal("timeout"),
-  v.literal("skipped")
-);
-
-const usageEventName = v.union(v.literal("ai"), v.literal("sandbox"));
-const usageMetadata = v.object({
-  runId: v.optional(nullableString),
-  model: v.optional(nullableString),
-  inputTokens: v.optional(nullableNumber),
-  outputTokens: v.optional(nullableNumber),
-  cacheReadTokens: v.optional(nullableNumber),
-  cacheWriteTokens: v.optional(nullableNumber),
-  durationMinutes: v.optional(nullableNumber),
-  costUSD: v.optional(nullableNumber),
-});
 
 const jobStatus = v.union(
   v.literal("queued"),
@@ -184,140 +159,16 @@ export default defineSchema({
     .index("by_repo_full_name", ["providerRepoFullName"])
     .index("by_repo_id", ["providerRepoId"]),
 
-  runs: defineTable({
-    projectId: v.id("projects"),
-    provider,
-    source: v.optional(nullableString),
-    format: v.optional(nullableString),
-    runId: v.string(),
-    repository: v.string(),
-    commitSha: v.optional(nullableString),
-    prNumber: v.optional(nullableNumber),
-    checkRunId: v.optional(nullableString),
-    logBytes: v.optional(nullableNumber),
-    logR2Key: v.optional(nullableString),
-    logManifest: v.optional(
-      v.array(
-        v.object({
-          start: v.number(),
-          end: v.number(),
-          signal: v.boolean(),
-        })
-      )
-    ),
-    logManifestTruncated: v.optional(v.boolean()),
-    errorCount: v.optional(nullableNumber),
-    receivedAt: v.number(),
-    workflowName: v.optional(nullableString),
-    conclusion: v.optional(nullableString),
-    headBranch: v.optional(nullableString),
-    runAttempt: v.number(),
-    extractionStatus: v.optional(v.union(extractionStatus, v.null())),
-    runStartedAt: v.optional(nullableNumber),
-    runCompletedAt: v.optional(nullableNumber),
-  })
-    .index("by_project", ["projectId"])
-    .index("by_project_received_at", ["projectId", "receivedAt"])
-    .index("by_project_pr_received_at", ["projectId", "prNumber", "receivedAt"])
-    .index("by_provider_run", ["provider", "runId"])
-    .index("by_commit_sha", ["commitSha"])
-    .index("by_repo_commit", ["repository", "commitSha"])
-    .index("by_pr_number", ["prNumber"])
-    .index("by_repo_run_attempt", ["repository", "runId", "runAttempt"])
-    .index("by_workflow_name", ["workflowName"]),
-
-  runErrors: defineTable({
-    runId: v.id("runs"),
-    filePath: v.optional(nullableString),
-    line: v.optional(nullableNumber),
-    column: v.optional(nullableNumber),
-    message: v.string(),
-    category: v.optional(nullableString),
-    severity: v.optional(nullableString),
-    ruleId: v.optional(nullableString),
-    source: v.optional(nullableString),
-    stackTrace: v.optional(nullableString),
-    hints: v.optional(nullableStringArray),
-    providerJobId: v.optional(nullableString),
-    workflowJob: v.optional(nullableString),
-    workflowStep: v.optional(nullableString),
-    workflowAction: v.optional(nullableString),
-    codeSnippet: v.optional(
-      v.union(
-        v.object({
-          lines: v.array(v.string()),
-          startLine: v.number(),
-          errorLine: v.number(),
-          language: v.string(),
-        }),
-        v.null()
-      )
-    ),
-    relatedFiles: v.optional(nullableStringArray),
-    fixable: v.optional(nullableBoolean),
-    logLineStart: v.optional(nullableNumber),
-    logLineEnd: v.optional(nullableNumber),
-    signatureId: v.optional(v.union(v.id("errorSignatures"), v.null())),
-    createdAt: v.number(),
-  })
-    .index("by_run_id", ["runId"])
-    .index("by_signature", ["signatureId"])
-    .index("by_run_id_source", ["runId", "source"]),
-
-  errorSignatures: defineTable({
-    fingerprint: v.string(),
-    source: v.optional(nullableString),
-    ruleId: v.optional(nullableString),
-    category: v.optional(nullableString),
-    normalizedPattern: v.optional(nullableString),
-    exampleMessage: v.optional(nullableString),
-    loreCandidate: v.optional(nullableBoolean),
-    loreSyncedAt: v.optional(nullableNumber),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_fingerprint", ["fingerprint"])
-    .index("by_source_rule", ["source", "ruleId"]),
-
-  errorOccurrences: defineTable({
-    signatureId: v.id("errorSignatures"),
-    projectId: v.id("projects"),
-    occurrenceCount: v.number(),
-    runCount: v.number(),
-    firstSeenCommit: v.optional(nullableString),
-    firstSeenAt: v.number(),
-    lastSeenCommit: v.optional(nullableString),
-    lastSeenAt: v.number(),
-    fixedAt: v.optional(nullableNumber),
-    fixedByCommit: v.optional(nullableString),
-    fixVerified: v.optional(nullableBoolean),
-    commonFiles: v.optional(v.array(v.string())),
-  })
-    .index("by_project", ["projectId"])
-    .index("by_last_seen", ["lastSeenAt"])
-    .index("by_signature_project", ["signatureId", "projectId"]),
-
-  usageEvents: defineTable({
-    organizationId: v.id("organizations"),
-    eventName: usageEventName,
-    metadata: v.optional(usageMetadata),
-    polarIngested: v.boolean(),
-    createdAt: v.number(),
-  })
-    .index("by_org", ["organizationId"])
-    .index("by_org_created_at", ["organizationId", "createdAt"])
-    .index("by_polar_ingested_created_at", ["polarIngested", "createdAt"]),
-
   heals: defineTable({
     type: healType,
     status: healStatus,
-    runId: v.optional(v.union(v.id("runs"), v.null())),
+    runId: v.optional(nullableString),
     projectId: v.id("projects"),
     commitSha: v.optional(nullableString),
     prNumber: v.optional(nullableNumber),
     checkRunId: v.optional(nullableString),
-    errorIds: v.optional(v.array(v.id("runErrors"))),
-    signatureIds: v.optional(v.array(v.id("errorSignatures"))),
+    errorIds: v.optional(v.array(v.string())),
+    signatureIds: v.optional(v.array(v.string())),
     patch: v.optional(nullableString),
     commitMessage: v.optional(nullableString),
     filesChanged: v.optional(v.array(v.string())),
@@ -359,7 +210,7 @@ export default defineSchema({
 
   jobs: defineTable({
     providerJobId: v.string(),
-    runId: v.optional(v.union(v.id("runs"), v.null())),
+    runId: v.optional(nullableString),
     repository: v.string(),
     commitSha: v.string(),
     prNumber: v.optional(nullableNumber),

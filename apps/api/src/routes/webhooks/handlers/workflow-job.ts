@@ -1,3 +1,4 @@
+import { createDb } from "@detent/db";
 import { getConvexClient } from "../../../db/convex";
 import { extractAndStoreErrors } from "../../../services/webhooks/error-extraction";
 import { checkAndTriggerAggregation } from "../../../services/webhooks/job-aggregation";
@@ -74,12 +75,14 @@ const prepareJobHandler = async (
   );
 
   const db = getConvexClient(c.env);
+  const { db: drizzleDb, pool } = createDb(c.env.DATABASE_URL);
   const normalizedSha = workflow_job.head_sha.toLowerCase();
   const prNumber = await lookupPrNumberFromRuns(
-    db,
+    drizzleDb,
     repository.full_name,
     normalizedSha
   );
+  c.executionCtx.waitUntil(pool.end());
 
   return { c, payload, normalizedSha, prNumber, db, deliveryId };
 };

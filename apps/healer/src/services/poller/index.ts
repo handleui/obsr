@@ -1,10 +1,12 @@
 import { selectModelForErrors } from "@detent/ai";
+import { type Db, runErrorOps, runOps } from "@detent/db";
 import { HealTypes } from "@detent/types";
 import type { ConvexHttpClient } from "convex/browser";
 import type { FunctionReference } from "convex/server";
 import type { Env } from "../../env.js";
 import { env } from "../../env.js";
 import { createConvexClient } from "../convex-client.js";
+import { createDbClient } from "../db-client.js";
 import { getInstallationToken } from "../github/token.js";
 import { executeHeal } from "../heal-executor.js";
 
@@ -214,50 +216,38 @@ const fetchProject = async (
   };
 };
 
-const fetchRun = async (
-  convex: ConvexHttpClient,
-  runId: string
-): Promise<RunRow | null> => {
-  const run = (await convex.query(asQuery("runs:getById"), {
-    id: runId,
-  })) as Record<string, unknown> | null;
+const fetchRun = async (db: Db, runId: string): Promise<RunRow | null> => {
+  const run = await runOps.getById(db, runId);
 
   if (!run) {
     return null;
   }
 
   return {
-    id: typeof run._id === "string" ? run._id : runId,
-    commitSha: typeof run.commitSha === "string" ? run.commitSha : null,
-    headBranch: typeof run.headBranch === "string" ? run.headBranch : null,
-  };
-};
-
-const mapRunError = (error: Record<string, unknown>): RunErrorRow => {
-  return {
-    id: typeof error.id === "string" ? error.id : String(error._id ?? ""),
-    message: typeof error.message === "string" ? error.message : "",
-    filePath: typeof error.filePath === "string" ? error.filePath : null,
-    line: typeof error.line === "number" ? error.line : null,
-    column: typeof error.column === "number" ? error.column : null,
-    category: typeof error.category === "string" ? error.category : null,
-    severity: typeof error.severity === "string" ? error.severity : null,
-    ruleId: typeof error.ruleId === "string" ? error.ruleId : null,
-    source: typeof error.source === "string" ? error.source : null,
-    stackTrace: typeof error.stackTrace === "string" ? error.stackTrace : null,
+    id: run.id,
+    commitSha: run.commitSha ?? null,
+    headBranch: run.headBranch ?? null,
   };
 };
 
 const fetchRunErrors = async (
-  convex: ConvexHttpClient,
+  db: Db,
   runId: string
 ): Promise<RunErrorRow[]> => {
-  const result = (await convex.query(asQuery("run_errors:listByRunId"), {
-    runId,
-    limit: 1000,
-  })) as Record<string, unknown>[];
+  const rows = await runErrorOps.listByRunId(db, runId, 1000);
 
-  return result.map(mapRunError);
+  return rows.map((row) => ({
+    id: row.id,
+    message: row.message,
+    filePath: row.filePath ?? null,
+    line: row.line ?? null,
+    column: row.column ?? null,
+    category: row.category ?? null,
+    severity: row.severity ?? null,
+    ruleId: row.ruleId ?? null,
+    source: row.source ?? null,
+    stackTrace: row.stackTrace ?? null,
+  }));
 };
 
 const fetchOrganization = async (
@@ -453,6 +443,7 @@ const isValidGitSha = (sha: string): boolean => GIT_SHA_PATTERN.test(sha);
 
 const sanitizeErrorForCheckRun = (error: string): string => {
   const sanitized = error
+    .replace(/postgres(ql)?:\/\/[^\s]+/gi, "[REDACTED_CONNECTION_STRING]")
     .replace(/https?:\/\/[^\s]+/g, "[URL]")
     .replace(/\/[\w/.-]+/g, "[PATH]")
     .replace(/token[=:]\s*\S+/gi, "token=[REDACTED]");
@@ -700,18 +691,18 @@ const formatErrorsForPrompt = (errors: RunErrorRow[]): string => {
       ? `${err.filePath}:${err.line ?? "-"}:${err.column ?? "-"}`
       : `line ${err.line ?? "-"}:${err.column ?? "-"}`;
 
-    let line = `[${err.category ?? "unknown"}] ${location}: ${err.message}`;
+    let entry = `[${err.category ?? "unknown"}] ${location}: ${err.message}`;
 
     if (err.ruleId || err.source) {
-      line += `\n  Rule: ${err.ruleId ?? "-"} | Source: ${err.source ?? "-"}`;
+      entry += `\n  Rule: ${err.ruleId ?? "-"} | Source: ${err.source ?? "-"}`;
     }
 
     if (err.stackTrace) {
       const stackLines = err.stackTrace.split("\n").slice(0, 10);
-      line += `\n  Stack trace:\n    ${stackLines.join("\n    ")}`;
+      entry += `\n  Stack trace:\n    ${stackLines.join("\n    ")}`;
     }
 
-    return line;
+    return entry;
   });
 
   return formatted.join("\n\n");
@@ -787,6 +778,7 @@ interface HealContext {
 
 const resolveHealContext = async (
   convex: ConvexHttpClient,
+  db: Db,
   heal: HealRow,
   appEnv: Env
 ): Promise<HealContext> => {
@@ -802,8 +794,8 @@ const resolveHealContext = async (
 
   if (heal.runId) {
     const [run, runErrors] = await Promise.all([
-      fetchRun(convex, heal.runId),
-      fetchRunErrors(convex, heal.runId),
+      fetchRun(db, heal.runId),
+      fetchRunErrors(db, heal.runId),
     ]);
     if (run) {
       branch = run.headBranch ?? branch;
@@ -901,8 +893,146 @@ const notifyFailure = async (
   });
 };
 
+// HACK: strip connection strings that may leak in Neon/pg driver errors
+const sanitizeErrorMessage = (error: unknown): string => {
+  const raw = error instanceof Error ? error.message : String(error);
+  return raw.replace(/postgres(ql)?:\/\/[^\s]+/gi, "[REDACTED]");
+};
+
+const handleHealSuccess = async (
+  convex: ConvexHttpClient,
+  appEnv: Env,
+  heal: HealRow,
+  result: {
+    patch: string | null;
+    filesChanged: string[];
+    result: {
+      model: string;
+      iterations: number;
+      costUSD: number;
+      inputTokens: number;
+      outputTokens: number;
+      finalMessage: string;
+    };
+  },
+  installationId: number | null,
+  repoFullName: string | null,
+  newCheckRunId: string | undefined
+): Promise<void> => {
+  await markHealCompleted(convex, heal.id, {
+    patch: result.patch,
+    filesChanged: result.filesChanged,
+    result: result.result,
+  });
+  console.log(`[poller] Heal ${heal.id} completed successfully`);
+
+  await notifyHealCompletion({
+    appEnv,
+    heal,
+    installationId,
+    repoFullName,
+    conclusion: "success",
+    checkRunOutput: {
+      title: "Healing complete",
+      summary: `Found fixes for ${result.filesChanged.length} files. Review in dashboard.`,
+    },
+    prComment: formatHealSuccessComment(
+      result.filesChanged.length,
+      heal.projectId,
+      appEnv.NAVIGATOR_BASE_URL
+    ),
+    checkRunIdOverride: newCheckRunId,
+  });
+};
+
+const handleHealFailure = async (
+  convex: ConvexHttpClient,
+  appEnv: Env,
+  heal: HealRow,
+  errorMessage: string,
+  installationId: number | null,
+  repoFullName: string | null,
+  newCheckRunId: string | undefined
+): Promise<void> => {
+  await markHealFailed(convex, heal.id, errorMessage);
+  console.log(`[poller] Heal ${heal.id} failed: ${errorMessage}`);
+  await notifyFailure(
+    appEnv,
+    heal,
+    installationId,
+    repoFullName,
+    newCheckRunId,
+    errorMessage
+  );
+};
+
+const runHealPipeline = async (
+  convex: ConvexHttpClient,
+  db: Db,
+  heal: HealRow,
+  appEnv: Env
+): Promise<{
+  installationId: number | null;
+  repoFullName: string | null;
+  newCheckRunId: string | undefined;
+}> => {
+  await markHealRunning(convex, heal.id);
+
+  const ctx = await resolveHealContext(convex, db, heal, appEnv);
+  const healModel = selectModelForErrors(ctx.errors);
+  console.log(`[poller] Model: ${healModel} for ${ctx.errors.length} errors`);
+
+  const newCheckRunId = await tryCreateCheckRun(convex, heal, appEnv, ctx);
+
+  const { url: repoUrl, masked: maskedRepoUrl } = buildRepoUrl(
+    ctx.project.providerRepoFullName,
+    ctx.token
+  );
+  console.log(`[poller] Cloning ${maskedRepoUrl} branch ${ctx.branch}`);
+
+  const userPrompt = buildHealPrompt(ctx.errors, heal.userInstructions);
+
+  const result = await executeHeal(appEnv, {
+    healId: heal.id,
+    repoUrl,
+    branch: ctx.branch,
+    userPrompt,
+    model: healModel,
+    budgetPerRunUSD: 1.0,
+    remainingMonthlyUSD: -1,
+  });
+
+  const installationId = ctx.installationId;
+  const repoFullName = ctx.project.providerRepoFullName;
+
+  if (result.success) {
+    await handleHealSuccess(
+      convex,
+      appEnv,
+      heal,
+      result,
+      installationId,
+      repoFullName,
+      newCheckRunId
+    );
+  } else {
+    await handleHealFailure(
+      convex,
+      appEnv,
+      heal,
+      result.error ?? "Heal failed",
+      installationId,
+      repoFullName,
+      newCheckRunId
+    );
+  }
+
+  return { installationId, repoFullName, newCheckRunId };
+};
+
 const processHeal = async (
   convex: ConvexHttpClient,
+  db: Db,
   heal: HealRow,
   appEnv: Env
 ): Promise<void> => {
@@ -913,92 +1043,34 @@ const processHeal = async (
   let newCheckRunId: string | undefined;
 
   try {
-    await markHealRunning(convex, heal.id);
-
-    const ctx = await resolveHealContext(convex, heal, appEnv);
-    installationId = ctx.installationId;
-    repoFullName = ctx.project.providerRepoFullName;
-
-    const healModel = selectModelForErrors(ctx.errors);
-    console.log(`[poller] Model: ${healModel} for ${ctx.errors.length} errors`);
-
-    newCheckRunId = await tryCreateCheckRun(convex, heal, appEnv, ctx);
-
-    const { url: repoUrl, masked: maskedRepoUrl } = buildRepoUrl(
-      ctx.project.providerRepoFullName,
-      ctx.token
-    );
-    console.log(`[poller] Cloning ${maskedRepoUrl} branch ${ctx.branch}`);
-
-    const userPrompt = buildHealPrompt(ctx.errors, heal.userInstructions);
-
-    const result = await executeHeal(appEnv, {
-      healId: heal.id,
-      repoUrl,
-      branch: ctx.branch,
-      userPrompt,
-      model: healModel,
-      budgetPerRunUSD: 1.0,
-      remainingMonthlyUSD: -1,
-    });
-
-    if (result.success) {
-      await markHealCompleted(convex, heal.id, {
-        patch: result.patch,
-        filesChanged: result.filesChanged,
-        result: result.result,
-      });
-      console.log(`[poller] Heal ${heal.id} completed successfully`);
-
-      await notifyHealCompletion({
-        appEnv,
-        heal,
-        installationId,
-        repoFullName,
-        conclusion: "success",
-        checkRunOutput: {
-          title: "Healing complete",
-          summary: `Found fixes for ${result.filesChanged.length} files. Review in dashboard.`,
-        },
-        prComment: formatHealSuccessComment(
-          result.filesChanged.length,
-          heal.projectId,
-          appEnv.NAVIGATOR_BASE_URL
-        ),
-        checkRunIdOverride: newCheckRunId,
-      });
-    } else {
-      const errorMessage = result.error ?? "Heal failed";
-      await markHealFailed(convex, heal.id, errorMessage);
-      console.log(`[poller] Heal ${heal.id} failed: ${result.error}`);
-      await notifyFailure(
-        appEnv,
-        heal,
-        installationId,
-        repoFullName,
-        newCheckRunId,
-        errorMessage
-      );
-    }
+    const pipeline = await runHealPipeline(convex, db, heal, appEnv);
+    installationId = pipeline.installationId;
+    repoFullName = pipeline.repoFullName;
+    newCheckRunId = pipeline.newCheckRunId;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = sanitizeErrorMessage(error);
     console.error(`[poller] Error processing heal ${heal.id}: ${message}`);
-    await markHealFailed(convex, heal.id, message);
-    await notifyFailure(
+    await handleHealFailure(
+      convex,
       appEnv,
       heal,
+      message,
       installationId,
       repoFullName,
-      newCheckRunId,
-      message
+      newCheckRunId
     );
   }
 };
 
-const pollLoop = async (appEnv: Env): Promise<void> => {
+const pollLoop = async (
+  convex: ConvexHttpClient,
+  db: Db,
+  appEnv: Env,
+  pool: ReturnType<typeof createDbClient>["pool"]
+): Promise<void> => {
   while (state.isRunning) {
     try {
-      const pendingHeals = await fetchPendingHeals(createConvexClient());
+      const pendingHeals = await fetchPendingHeals(convex);
 
       for (const heal of pendingHeals) {
         if (!state.isRunning) {
@@ -1011,7 +1083,7 @@ const pollLoop = async (appEnv: Env): Promise<void> => {
 
         state.activeHealIds.add(heal.id);
 
-        processHeal(createConvexClient(), heal, appEnv)
+        processHeal(convex, db, heal, appEnv)
           .catch((err) => {
             console.error(
               `[poller] Unhandled error in processHeal: ${err instanceof Error ? err.message : String(err)}`
@@ -1029,6 +1101,8 @@ const pollLoop = async (appEnv: Env): Promise<void> => {
 
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
+
+  await pool.end();
 };
 
 interface StaleHealEntry {
@@ -1080,6 +1154,39 @@ const resolveStaleHealCheckRunContext = async (
   return { installationId, owner, repo, checkRunId };
 };
 
+const updateStaleCheckRun = async (
+  appEnv: Env,
+  convex: ConvexHttpClient,
+  heal: StaleHealEntry
+): Promise<void> => {
+  const ctx = await resolveStaleHealCheckRunContext(convex, heal);
+  if (!ctx) {
+    return;
+  }
+
+  try {
+    await updateCheckRun(
+      appEnv,
+      ctx.installationId,
+      ctx.owner,
+      ctx.repo,
+      ctx.checkRunId,
+      "failure",
+      {
+        title: "Healing timed out",
+        summary: "The heal operation exceeded the 30 minute timeout limit.",
+      }
+    );
+    console.log(
+      `[poller] Updated stale check run ${heal.checkRunId} for heal ${heal.id}`
+    );
+  } catch (error) {
+    console.error(
+      `[poller] Failed to update stale check run for heal ${heal.id}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+};
+
 const markStaleHealsAsFailed = async (
   convex: ConvexHttpClient,
   appEnv: Env
@@ -1101,37 +1208,7 @@ const markStaleHealsAsFailed = async (
     console.log(`[poller] Marked ${staleHeals.length} stale heals as failed`);
 
     for (const heal of staleHeals) {
-      const checkRunContext = await resolveStaleHealCheckRunContext(
-        convex,
-        heal
-      );
-      if (!checkRunContext) {
-        continue;
-      }
-      const { installationId, owner, repo, checkRunId } = checkRunContext;
-
-      try {
-        await updateCheckRun(
-          appEnv,
-          installationId,
-          owner,
-          repo,
-          checkRunId,
-          "failure",
-          {
-            title: "Healing timed out",
-            summary: "The heal operation exceeded the 30 minute timeout limit.",
-          }
-        );
-
-        console.log(
-          `[poller] Updated stale check run ${heal.checkRunId} for heal ${heal.id}`
-        );
-      } catch (error) {
-        console.error(
-          `[poller] Failed to update stale check run for heal ${heal.id}: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
+      await updateStaleCheckRun(appEnv, convex, heal);
     }
   } catch (error) {
     console.error(
@@ -1151,9 +1228,12 @@ export const startPoller = async (): Promise<void> => {
   try {
     state.isRunning = true;
 
-    await markStaleHealsAsFailed(createConvexClient(), env);
+    const convex = createConvexClient();
+    const { db, pool } = createDbClient(env.DATABASE_URL);
 
-    pollLoop(env).catch((err) => {
+    await markStaleHealsAsFailed(convex, env);
+
+    pollLoop(convex, db, env, pool).catch((err) => {
       console.error(
         `[poller] Fatal error: ${err instanceof Error ? err.message : String(err)}`
       );

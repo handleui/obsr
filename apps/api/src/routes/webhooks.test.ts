@@ -226,7 +226,6 @@ describe("webhooks - installation events", () => {
       "organizations:getById",
       "projects:getByRepoId",
       "projects:getByRepoFullName",
-      "runs:getLatestByProjectPr",
     ]);
 
     const toPageArray = (value: unknown): unknown[] => {

@@ -1,7 +1,12 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
-import { nullableBoolean, nullableNumber, nullableString } from "./validators";
+import {
+  buildPatch,
+  nullableBoolean,
+  nullableNumber,
+  nullableString,
+} from "./validators";
 
 const healStatus = v.union(
   v.literal("found"),
@@ -28,18 +33,6 @@ const filesChangedWithContent = v.array(
     content: v.union(v.string(), v.null()),
   })
 );
-
-const buildPatch = (
-  fields: Record<string, unknown>
-): Record<string, unknown> => {
-  const patch: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(fields)) {
-    if (value !== undefined) {
-      patch[key] = value;
-    }
-  }
-  return patch;
-};
 
 const MAX_COMMIT_LENGTH = 64;
 const MAX_SOURCE_LENGTH = 64;
@@ -129,12 +122,12 @@ export const create = mutation({
     type: healType,
     status: v.optional(healStatus),
     projectId: v.id("projects"),
-    runId: v.optional(v.id("runs")),
+    runId: v.optional(v.string()),
     commitSha: v.optional(nullableString),
     prNumber: v.optional(nullableNumber),
     checkRunId: v.optional(nullableString),
-    errorIds: v.optional(v.array(v.id("runErrors"))),
-    signatureIds: v.optional(v.array(v.id("errorSignatures"))),
+    errorIds: v.optional(v.array(v.string())),
+    signatureIds: v.optional(v.array(v.string())),
     patch: v.optional(nullableString),
     commitMessage: v.optional(nullableString),
     filesChanged: v.optional(v.array(v.string())),
@@ -252,9 +245,6 @@ export const getByProjectStatus = query({
 export const getActiveByProject = query({
   args: { projectId: v.id("projects") },
   handler: async (ctx, args) => {
-    // Fetch active heals (non-terminal states) using the existing index
-    // Active statuses: found, pending, running, completed
-    // Terminal statuses: applied, rejected, failed
     const activeStatuses = [
       "found",
       "pending",
@@ -277,7 +267,7 @@ export const getActiveByProject = query({
 });
 
 export const getByRunId = query({
-  args: { runId: v.id("runs") },
+  args: { runId: v.string() },
   handler: async (ctx, args) => {
     return await ctx.db
       .query("heals")

@@ -12,7 +12,8 @@
         "WORKOS_COOKIE_PASSWORD",
         "WORKOS_API_KEY",
         "POLAR_CHECKOUT_TOKEN",
-        "CONVEX_URL"
+        "CONVEX_URL",
+        "DATABASE_URL"
       ]
     },
     "@detent/cli#build": {
@@ -26,12 +27,16 @@
       "outputs": ["dist/**"]
     },
     "@detent/api#build": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["@detent/db#build", "^build"],
       "inputs": ["src/**", "wrangler.jsonc", "tsconfig.json", "package.json"],
       "outputs": ["dist/**"]
     },
     "@detent/healer#build": {
-      "dependsOn": ["@detent/healing#build", "@detent/sandbox#build"],
+      "dependsOn": [
+        "@detent/db#build",
+        "@detent/healing#build",
+        "@detent/sandbox#build"
+      ],
       "inputs": ["src/**/*.ts", "tsconfig.json", "package.json"],
       "outputs": ["dist/**"]
     },

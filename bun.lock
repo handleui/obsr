@@ -332,7 +332,7 @@
     },
     "packages/sdk": {
       "name": "@detent/sdk",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "devDependencies": {
         "@detent/typescript-config": "*",
         "@types/node": "^22.0.0",

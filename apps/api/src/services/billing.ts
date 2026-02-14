@@ -291,7 +291,7 @@ export interface CreditUsageSummary {
     id: string;
     eventName: string;
     metadata: Record<string, unknown> | null;
-    createdAt: Date;
+    createdAt: string;
   }>;
 }
 
@@ -337,7 +337,7 @@ export const getCreditUsageSummary = async (
         id: e.id,
         eventName: e.eventName,
         metadata: (e.metadata as Record<string, unknown>) ?? null,
-        createdAt: new Date(e.createdAt),
+        createdAt: new Date(e.createdAt).toISOString(),
       })),
     };
   } finally {

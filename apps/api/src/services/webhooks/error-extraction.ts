@@ -1,3 +1,4 @@
+import { createDb, runOps, storeJobReport } from "@detent/db";
 import { extractErrors, type LogSegment } from "@detent/extract";
 import { generateFingerprints } from "@detent/lore";
 import type { CIError, HealCreateStatus } from "@detent/types";
@@ -58,7 +59,6 @@ interface RunError {
   workflowJob?: string | null;
 }
 
-// Keep in sync with convex/schema.ts and convex/run_ingest.ts
 type ExtractionStatus = "success" | "failed" | "timeout" | "skipped";
 
 interface JobExtractionResult {
@@ -200,7 +200,16 @@ const acquireLock = async (
     return false;
   }
 
-  await kv.put(lockKey, "1", { expirationTtl: LOCK_TTL_SECONDS });
+  // Write-then-verify: use a unique lockId to detect races with other workers
+  const lockId = crypto.randomUUID();
+  await kv.put(lockKey, lockId, { expirationTtl: LOCK_TTL_SECONDS });
+
+  // Read back without cache to verify we own the lock
+  const verification = await kv.get(lockKey);
+  if (verification !== lockId) {
+    return false;
+  }
+
   return true;
 };
 
@@ -326,6 +335,7 @@ const runExtraction = async (
 };
 
 interface StoreErrorsOptions {
+  db: ReturnType<typeof createDb>["db"];
   env: Env;
   ctx: ExtractionContext;
   project: { _id: string };
@@ -395,15 +405,20 @@ const buildJobReportPayload = (
 const storeErrors = async (
   options: StoreErrorsOptions
 ): Promise<string | null> => {
-  const { env, ctx, errors } = options;
+  const { db, ctx, errors } = options;
   const runRecordId = crypto.randomUUID();
   const payload = buildJobReportPayload(options, runRecordId);
 
   try {
-    await getConvexClient(env).mutation("run_ingest:storeJobReport", payload);
+    await storeJobReport(db, payload);
     return runRecordId;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    // HACK: strip connection strings that may leak in Neon/pg driver errors
+    const message = rawMessage.replace(
+      /postgres(ql)?:\/\/[^\s]+/gi,
+      "[REDACTED_CONNECTION_STRING]"
+    );
     console.error(`${LOG_PREFIX} ${ctx.logCtx}: Failed to store:`, message);
     Sentry.captureMessage("Failed to store extracted errors", {
       level: "error",
@@ -610,14 +625,11 @@ const storeLogsInR2 = async (
 };
 
 const findPrNumber = async (
-  convex: ReturnType<typeof getConvexClient>,
+  db: ReturnType<typeof createDb>["db"],
   repository: string,
   commitSha: string
 ): Promise<number | undefined> => {
-  const runs = (await convex.query("runs:listByRepoCommit", {
-    repository,
-    commitSha,
-  })) as Array<{ prNumber?: number | null }>;
+  const runs = await runOps.listByRepoCommit(db, repository, commitSha);
   return (
     runs.find((r) => typeof r.prNumber === "number")?.prNumber ?? undefined
   );
@@ -636,6 +648,7 @@ const toRunError = (
 });
 
 interface ExtractionPipelineContext {
+  sqlDb: ReturnType<typeof createDb>["db"];
   env: Env;
   ctx: ExtractionContext;
   project: { _id: string; organizationId: string };
@@ -650,6 +663,7 @@ const storeEmptyExtraction = async (
   pipeline: ExtractionPipelineContext
 ): Promise<void> => {
   await storeErrors({
+    db: pipeline.sqlDb,
     env: pipeline.env,
     ctx: pipeline.ctx,
     project: pipeline.project,
@@ -682,6 +696,7 @@ const storeAndHealErrors = async (
   const cappedErrors = extraction.errors.slice(0, MAX_ERRORS_PER_JOB);
 
   const runRecordId = await storeErrors({
+    db: pipeline.sqlDb,
     env,
     ctx,
     project,
@@ -772,25 +787,30 @@ export const extractAndStoreErrors = async (
     storeLogsInR2(env, project.organizationId, ctx, logs),
   ]);
 
-  const pipeline: ExtractionPipelineContext = {
-    env,
-    ctx,
-    project,
-    extraction,
-    logR2Key,
-    totalLogLines: countLines(logs),
-    prNumber: await findPrNumber(
-      getConvexClient(env),
-      ctx.repository,
-      ctx.commitSha
-    ),
-    conclusion: sanitizeField(payload.workflow_job.conclusion ?? "failure", 50),
-  };
+  const { db: sqlDb, pool } = createDb(env.DATABASE_URL);
+  try {
+    const pipeline: ExtractionPipelineContext = {
+      sqlDb,
+      env,
+      ctx,
+      project,
+      extraction,
+      logR2Key,
+      totalLogLines: countLines(logs),
+      prNumber: await findPrNumber(sqlDb, ctx.repository, ctx.commitSha),
+      conclusion: sanitizeField(
+        payload.workflow_job.conclusion ?? "failure",
+        50
+      ),
+    };
 
-  if (extraction.status !== "success" || extraction.errors.length === 0) {
-    await storeEmptyExtraction(pipeline);
-    return;
+    if (extraction.status !== "success" || extraction.errors.length === 0) {
+      await storeEmptyExtraction(pipeline);
+      return;
+    }
+
+    await storeAndHealErrors(pipeline);
+  } finally {
+    await pool.end();
   }
-
-  await storeAndHealErrors(pipeline);
 };

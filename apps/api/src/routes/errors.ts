@@ -1,21 +1,13 @@
-/**
- * Errors API routes
- *
- * Provides access to CI errors for a commit, used by the CLI `detent errors` command.
- */
-
+import { createDb, runErrorOps, runOps } from "@detent/db";
 import { Hono } from "hono";
 import { getConvexClient } from "../db/convex";
 import { verifyOrgAccess } from "../lib/org-access";
 import { scrubSecrets } from "../lib/scrub-secrets";
 import type { Env } from "../types/env";
 
-// Validation patterns
-// Commit SHA: 7-40 hex characters (supports short and full SHAs)
 const COMMIT_SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
-// Repository: owner/repo format with allowed characters matching GitHub's rules
-// Only alphanumeric, hyphens, underscores, and dots - prevents injection attacks
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const MAX_PREFIX_RUNS = 5000;
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -40,80 +32,171 @@ interface OrganizationDoc {
 }
 
 interface RunDoc {
-  _id: string;
+  id: string;
   runId: string;
-  workflowName?: string;
-  conclusion?: string;
+  workflowName?: string | null;
+  conclusion?: string | null;
   runAttempt: number;
-  errorCount?: number;
-  commitSha?: string;
-  headBranch?: string;
-  runCompletedAt?: number;
+  errorCount?: number | null;
+  commitSha?: string | null;
+  headBranch?: string | null;
+  runCompletedAt?: number | null;
   repository: string;
 }
 
 interface RunErrorDoc {
-  _id: string;
+  id: string;
   runId: string;
-  filePath?: string;
-  line?: number;
-  column?: number;
+  filePath?: string | null;
+  line?: number | null;
+  column?: number | null;
   message: string;
-  category?: string;
-  severity?: string;
-  source?: string;
-  ruleId?: string;
-  hints?: string[];
-  stackTrace?: string;
+  category?: string | null;
+  severity?: string | null;
+  source?: string | null;
+  ruleId?: string | null;
+  hints?: string[] | null;
+  stackTrace?: string | null;
   codeSnippet?: {
     lines: string[];
     startLine: number;
     errorLine: number;
     language: string;
-  };
-  workflowJob?: string;
+  } | null;
+  workflowJob?: string | null;
 }
 
-/**
- * GET /
- * Get errors for a commit
- *
- * Query params:
- * - commit: Commit SHA (required, can be short or full)
- * - repository: Repository in "owner/repo" format (required)
- */
+const validateCommitQuery = (
+  commitParam: string | undefined,
+  repository: string | undefined
+):
+  | { valid: true; commit: string; repository: string }
+  | { valid: false; error: string } => {
+  if (!commitParam) {
+    return { valid: false, error: "commit query parameter is required" };
+  }
+  if (!repository) {
+    return { valid: false, error: "repository query parameter is required" };
+  }
+  if (!COMMIT_SHA_PATTERN.test(commitParam)) {
+    return {
+      valid: false,
+      error: "Invalid commit SHA format (expected 7-40 hex characters)",
+    };
+  }
+  if (!REPOSITORY_PATTERN.test(repository)) {
+    return {
+      valid: false,
+      error: "Invalid repository format (expected 'owner/repo')",
+    };
+  }
+  return { valid: true, commit: commitParam, repository };
+};
+
+const fetchCommitRuns = async (
+  db: ReturnType<typeof createDb>["db"],
+  repository: string,
+  normalizedCommit: string
+): Promise<
+  { runs: RunDoc[]; truncated: boolean } | { error: string; status: 400 | 404 }
+> => {
+  if (normalizedCommit.length === 40) {
+    const runs = (await runOps.listByRepoCommit(
+      db,
+      repository,
+      normalizedCommit
+    )) as RunDoc[];
+    return { runs, truncated: false };
+  }
+
+  const result = await runOps.listByRepoCommitPrefix(
+    db,
+    repository,
+    normalizedCommit,
+    MAX_PREFIX_RUNS
+  );
+  return { runs: result.runs as RunDoc[], truncated: result.isTruncated };
+};
+
+const validateCommitAmbiguity = (
+  commitRuns: RunDoc[],
+  normalizedCommit: string
+): { error: string; status: 400 } | null => {
+  const commitShas = commitRuns
+    .map((r) => r.commitSha)
+    .filter((value): value is string => Boolean(value));
+  const distinctCommits = new Set(commitShas);
+
+  if (distinctCommits.size > 1) {
+    return {
+      error: `Ambiguous commit SHA: '${normalizedCommit}' matches ${distinctCommits.size} different commits. Please use a longer SHA prefix.`,
+      status: 400,
+    };
+  }
+  return null;
+};
+
+const deduplicateRunsByLatestAttempt = (commitRuns: RunDoc[]): RunDoc[] => {
+  const sortedRuns = [...commitRuns].sort(
+    (a, b) => b.runAttempt - a.runAttempt
+  );
+  const latestRunsMap = new Map<string, RunDoc>();
+  for (const run of sortedRuns) {
+    if (run.runId && !latestRunsMap.has(run.runId)) {
+      latestRunsMap.set(run.runId, run);
+    }
+  }
+  return Array.from(latestRunsMap.values());
+};
+
+const formatRunResponse = (r: RunDoc) => ({
+  id: r.id,
+  runId: r.runId,
+  workflowName: r.workflowName,
+  conclusion: r.conclusion,
+  runAttempt: r.runAttempt,
+  errorCount: r.errorCount,
+  headBranch: r.headBranch,
+  completedAt: r.runCompletedAt
+    ? new Date(r.runCompletedAt).toISOString()
+    : null,
+});
+
+// SECURITY: Scrub secrets from user-facing fields to prevent credential leakage
+const formatErrorResponse = (e: RunErrorDoc) => ({
+  id: e.id,
+  filePath: e.filePath,
+  line: e.line,
+  column: e.column,
+  message: scrubSecrets(e.message),
+  category: e.category,
+  severity: e.severity,
+  source: e.source,
+  ruleId: e.ruleId,
+  hints: e.hints?.map(scrubSecrets),
+  stackTrace: e.stackTrace ? scrubSecrets(e.stackTrace) : null,
+  codeSnippet: e.codeSnippet
+    ? {
+        ...e.codeSnippet,
+        lines: e.codeSnippet.lines.map(scrubSecrets),
+      }
+    : null,
+  workflowJob: e.workflowJob,
+});
+
 app.get("/", async (c) => {
   const auth = c.get("auth");
   const commitParam = c.req.query("commit");
   const repository = c.req.query("repository");
 
-  if (!commitParam) {
-    return c.json({ error: "commit query parameter is required" }, 400);
-  }
-
-  if (!repository) {
-    return c.json({ error: "repository query parameter is required" }, 400);
-  }
-
-  // Validate commit SHA format (7-40 hex characters)
-  if (!COMMIT_SHA_PATTERN.test(commitParam)) {
-    return c.json(
-      { error: "Invalid commit SHA format (expected 7-40 hex characters)" },
-      400
-    );
-  }
-
-  // Validate repository format
-  if (!REPOSITORY_PATTERN.test(repository)) {
-    return c.json(
-      { error: "Invalid repository format (expected 'owner/repo')" },
-      400
-    );
+  const validated = validateCommitQuery(commitParam, repository);
+  if (!validated.valid) {
+    return c.json({ error: validated.error }, 400);
   }
 
   const convex = getConvexClient(c.env);
   const project = (await convex.query("projects:getByRepoFullName", {
-    providerRepoFullName: repository,
+    providerRepoFullName: validated.repository,
   })) as ProjectDoc | null;
 
   if (!project || project.removedAt) {
@@ -128,112 +211,64 @@ app.get("/", async (c) => {
     return c.json({ error: "Organization not found" }, 404);
   }
 
-  // Verify user has access to the organization
   const access = await verifyOrgAccess(auth.userId, organization, c.env);
   if (!access.allowed) {
     return c.json({ error: access.error }, 403);
   }
 
-  const normalizedCommit = commitParam.toLowerCase();
-  let commitRuns: RunDoc[] = [];
-  let truncated = false;
-  if (normalizedCommit.length === 40) {
-    commitRuns = (await convex.query("runs:listByRepoCommit", {
-      repository,
-      commitSha: normalizedCommit,
-    })) as RunDoc[];
-  } else {
-    const result = (await convex.query("runs:listByRepoCommitPrefix", {
-      repository,
-      commitPrefix: normalizedCommit,
-      limit: 5000,
-    })) as { runs: RunDoc[]; isTruncated: boolean };
-    commitRuns = result.runs;
-    truncated = result.isTruncated;
-  }
-
-  if (commitRuns.length === 0) {
-    return c.json({ error: "No CI runs found for this commit" }, 404);
-  }
-
-  if (truncated) {
-    return c.json(
-      {
-        error:
-          "Commit SHA prefix matches too many runs. Please use a longer SHA prefix.",
-      },
-      400
+  const { db, pool } = createDb(c.env.DATABASE_URL);
+  try {
+    const normalizedCommit = validated.commit.toLowerCase();
+    const fetchResult = await fetchCommitRuns(
+      db,
+      validated.repository,
+      normalizedCommit
     );
-  }
 
-  // Detect ambiguous short SHA matches (multiple distinct commits)
-  const commitShas = commitRuns
-    .map((r) => r.commitSha)
-    .filter((value): value is string => Boolean(value));
-  const distinctCommits = new Set(commitShas);
-  if (distinctCommits.size > 1) {
-    return c.json(
-      {
-        error: `Ambiguous commit SHA: '${normalizedCommit}' matches ${distinctCommits.size} different commits. Please use a longer SHA prefix.`,
-      },
-      400
-    );
-  }
-
-  const fullCommitSha = commitShas[0] ?? normalizedCommit;
-
-  const sortedRuns = [...commitRuns].sort(
-    (a, b) => b.runAttempt - a.runAttempt
-  );
-  const latestRunsMap = new Map<string, RunDoc>();
-  for (const run of sortedRuns) {
-    if (run.runId && !latestRunsMap.has(run.runId)) {
-      latestRunsMap.set(run.runId, run);
+    if ("error" in fetchResult) {
+      return c.json({ error: fetchResult.error }, fetchResult.status);
     }
+
+    if (fetchResult.runs.length === 0) {
+      return c.json({ error: "No CI runs found for this commit" }, 404);
+    }
+
+    if (fetchResult.truncated) {
+      return c.json(
+        {
+          error:
+            "Commit SHA prefix matches too many runs. Please use a longer SHA prefix.",
+        },
+        400
+      );
+    }
+
+    const ambiguityError = validateCommitAmbiguity(
+      fetchResult.runs,
+      normalizedCommit
+    );
+    if (ambiguityError) {
+      return c.json({ error: ambiguityError.error }, ambiguityError.status);
+    }
+
+    const fullCommitSha =
+      fetchResult.runs.find((r) => r.commitSha)?.commitSha ?? normalizedCommit;
+    const latestRuns = deduplicateRunsByLatestAttempt(fetchResult.runs);
+
+    const errorsByRun = await Promise.all(
+      latestRuns.map((r) => runErrorOps.listByRunId(db, r.id, 1000))
+    );
+    const errors = errorsByRun.flat() as RunErrorDoc[];
+
+    return c.json({
+      commit: fullCommitSha,
+      repository: validated.repository,
+      runs: latestRuns.map(formatRunResponse),
+      errors: errors.map(formatErrorResponse),
+    });
+  } finally {
+    c.executionCtx.waitUntil(pool.end());
   }
-  const latestRuns = Array.from(latestRunsMap.values());
-
-  const runIds = latestRuns.map((r) => r._id);
-  const errorsByRun = await Promise.all(
-    runIds.map((runId) =>
-      convex.query("run_errors:listByRunId", { runId, limit: 1000 })
-    )
-  );
-  const errors = errorsByRun.flat() as RunErrorDoc[];
-
-  return c.json({
-    commit: fullCommitSha,
-    repository,
-    runs: latestRuns.map((r) => ({
-      id: r._id,
-      runId: r.runId,
-      workflowName: r.workflowName,
-      conclusion: r.conclusion,
-      runAttempt: r.runAttempt,
-      errorCount: r.errorCount,
-      headBranch: r.headBranch,
-      completedAt: r.runCompletedAt
-        ? new Date(r.runCompletedAt).toISOString()
-        : null,
-    })),
-    // SECURITY: Scrub secrets from user-facing fields to prevent credential leakage
-    // CI logs may contain API keys, tokens, or credentials in error messages/hints
-    errors: errors.map((e) => ({
-      id: e._id,
-      filePath: e.filePath,
-      line: e.line,
-      column: e.column,
-      message: scrubSecrets(e.message),
-      category: e.category,
-      severity: e.severity,
-      source: e.source,
-      ruleId: e.ruleId,
-      hints: e.hints?.map(scrubSecrets),
-      stackTrace: e.stackTrace ? scrubSecrets(e.stackTrace) : null,
-      codeSnippet: e.codeSnippet,
-      workflowJob: e.workflowJob,
-    })),
-  });
 });
 
 export default app;

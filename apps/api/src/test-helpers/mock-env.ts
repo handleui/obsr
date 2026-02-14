@@ -72,6 +72,7 @@ export const createMockEnv = (overrides: Partial<Env> = {}): Env => ({
   CONVEX_URL: "https://test.convex.cloud",
   CONVEX_SERVICE_TOKEN: "convex-service-token",
   AI_GATEWAY_API_KEY: "ai-gateway-api-key",
+  DATABASE_URL: "postgresql://localhost:5432/detent_test",
   ...overrides,
 });
 

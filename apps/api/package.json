@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@detent/ai": "*",
+    "@detent/db": "*",
     "@detent/extract": "*",
     "@detent/healing": "*",
     "@detent/lore": "*",

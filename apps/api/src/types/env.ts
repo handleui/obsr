@@ -87,6 +87,9 @@ export interface Env {
   // Required for @detent/extract to work with the Vercel AI Gateway
   AI_GATEWAY_API_KEY: string;
 
+  // Neon Postgres connection string
+  DATABASE_URL: string;
+
   // R2 bucket for storing CI logs
   LOGS_BUCKET: R2Bucket;
 }

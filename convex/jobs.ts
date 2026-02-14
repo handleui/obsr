@@ -31,7 +31,7 @@ const jobConclusion = v.union(
 
 const jobInput = {
   providerJobId: v.string(),
-  runId: v.optional(v.id("runs")),
+  runId: v.optional(v.string()),
   repository: v.string(),
   commitSha: v.string(),
   prNumber: v.optional(nullableNumber),
@@ -136,7 +136,7 @@ export const listByRepoCommitName = query({
 });
 
 export const listByRunId = query({
-  args: { runId: v.id("runs"), limit: v.optional(nullableNumber) },
+  args: { runId: v.string(), limit: v.optional(nullableNumber) },
   handler: async (ctx, args) => {
     const limit = clampLimit(args.limit, 1, 500, 200);
     return await ctx.db
@@ -239,7 +239,7 @@ export const update = mutation({
   args: {
     id: v.id("jobs"),
     providerJobId: v.optional(v.string()),
-    runId: v.optional(v.id("runs")),
+    runId: v.optional(v.string()),
     repository: v.optional(v.string()),
     commitSha: v.optional(v.string()),
     prNumber: v.optional(nullableNumber),

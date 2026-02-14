@@ -1,16 +1,13 @@
+import { type Db, runOps } from "@detent/db";
 import { fetchAllPages } from "../../lib/convex-pagination";
 import type { DbClient } from "./types";
 
 export const lookupPrNumberFromRuns = async (
-  db: DbClient,
+  db: Db,
   repository: string,
   commitSha: string
 ): Promise<number | undefined> => {
-  const runs = (await db.query("runs:listByRepoCommit", {
-    repository,
-    commitSha,
-  })) as Array<{ prNumber?: number | null }>;
-
+  const runs = await runOps.listByRepoCommit(db, repository, commitSha);
   const match = runs.find((run) => typeof run.prNumber === "number");
   return match?.prNumber ?? undefined;
 };
@@ -96,29 +93,14 @@ export const markJobAsDetent = async (
   return updated > 0;
 };
 
-export const updateCommitJobStats = async (
-  db: DbClient,
-  repository: string,
-  commitSha: string,
-  prNumber?: number
-): Promise<void> => {
-  const [jobs, existing] = await Promise.all([
-    fetchAllPages<{
-      status: string;
-      conclusion?: string | null;
-      hasDetent?: boolean;
-      errorCount?: number;
-    }>(db, "jobs:paginateByRepoCommit", { repository, commitSha }),
-    db.query("commit_job_stats:getByRepoCommit", {
-      repository,
-      commitSha,
-    }) as Promise<{ commentPosted?: boolean } | null>,
-  ]);
+interface JobStatEntry {
+  status: string;
+  conclusion?: string | null;
+  hasDetent?: boolean;
+  errorCount?: number;
+}
 
-  if (jobs.length === 0) {
-    return;
-  }
-
+const aggregateJobStats = (jobs: JobStatEntry[]) => {
   let completedJobs = 0;
   let failedJobs = 0;
   let detentJobs = 0;
@@ -137,16 +119,38 @@ export const updateCommitJobStats = async (
     }
   }
 
+  return { completedJobs, failedJobs, detentJobs, totalErrors };
+};
+
+export const updateCommitJobStats = async (
+  db: DbClient,
+  repository: string,
+  commitSha: string,
+  prNumber?: number
+): Promise<void> => {
+  const [jobs, existing] = await Promise.all([
+    fetchAllPages<JobStatEntry>(db, "jobs:paginateByRepoCommit", {
+      repository,
+      commitSha,
+    }),
+    db.query("commit_job_stats:getByRepoCommit", {
+      repository,
+      commitSha,
+    }) as Promise<{ commentPosted?: boolean } | null>,
+  ]);
+
+  if (jobs.length === 0) {
+    return;
+  }
+
+  const stats = aggregateJobStats(jobs);
   const now = Date.now();
   await db.mutation("commit_job_stats:upsert", {
     repository,
     commitSha,
     prNumber,
     totalJobs: jobs.length,
-    completedJobs,
-    failedJobs,
-    detentJobs,
-    totalErrors,
+    ...stats,
     commentPosted: existing?.commentPosted ?? false,
     createdAt: now,
     updatedAt: now,

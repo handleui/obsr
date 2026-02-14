@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { validateLogManifest } from "./run_ingest";
+import { validateLogManifest } from "@detent/db";
 
 describe("validateLogManifest", () => {
   it("returns null segments for null input", () => {

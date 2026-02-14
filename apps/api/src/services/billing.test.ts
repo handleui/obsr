@@ -14,6 +14,27 @@ vi.mock("../db/convex", () => ({
   getConvexClient: vi.fn(() => mockConvex),
 }));
 
+const mockPool = {
+  end: vi.fn().mockResolvedValue(undefined),
+};
+const mockDb = {} as unknown;
+const mockUsageEventOps = {
+  create: vi.fn(),
+  update: vi.fn(),
+  listByOrgSince: vi.fn(),
+  listByPolarIngested: vi.fn(),
+  markPolarIngestedBatch: vi.fn(),
+};
+const mockRunOps = {
+  listByProjectSince: vi.fn(),
+};
+
+vi.mock("@detent/db", () => ({
+  createDb: vi.fn(() => ({ db: mockDb, pool: mockPool })),
+  usageEventOps: mockUsageEventOps,
+  runOps: mockRunOps,
+}));
+
 const mockIngestUsageEvents = vi.fn();
 const mockGetCustomerStateByExternalId = vi.fn();
 vi.mock("./polar", () => ({
@@ -47,6 +68,13 @@ describe("billing service", () => {
     mockMutation.mockReset();
     mockQuery.mockImplementation(() => Promise.resolve([]));
     mockIngestUsageEvents.mockResolvedValue(undefined);
+    mockUsageEventOps.create.mockResolvedValue({ id: "evt-mock-id" });
+    mockUsageEventOps.update.mockResolvedValue(undefined);
+    mockUsageEventOps.listByOrgSince.mockResolvedValue([]);
+    mockUsageEventOps.listByPolarIngested.mockResolvedValue([]);
+    mockUsageEventOps.markPolarIngestedBatch.mockResolvedValue(undefined);
+    mockRunOps.listByProjectSince.mockResolvedValue([]);
+    mockPool.end.mockResolvedValue(undefined);
   });
 
   // ==========================================================================
@@ -75,7 +103,7 @@ describe("billing service", () => {
       );
 
       // Should NOT insert to database
-      expect(mockMutation).not.toHaveBeenCalled();
+      expect(mockUsageEventOps.create).not.toHaveBeenCalled();
       // Should NOT ingest to Polar
       expect(mockIngestUsageEvents).not.toHaveBeenCalled();
     });
@@ -97,8 +125,8 @@ describe("billing service", () => {
       );
 
       // Should create a usage event
-      expect(mockMutation).toHaveBeenCalledWith(
-        "usage_events:create",
+      expect(mockUsageEventOps.create).toHaveBeenCalledWith(
+        mockDb,
         expect.objectContaining({ eventName: "sandbox" })
       );
     });
@@ -123,8 +151,8 @@ describe("billing service", () => {
         false // byok=false
       );
 
-      expect(mockMutation).toHaveBeenCalledWith(
-        "usage_events:create",
+      expect(mockUsageEventOps.create).toHaveBeenCalledWith(
+        mockDb,
         expect.objectContaining({ eventName: "ai" })
       );
     });
@@ -155,9 +183,9 @@ describe("billing service", () => {
         false
       );
 
-      const createCall = mockMutation.mock.calls.find(
-        ([name]) => name === "usage_events:create"
-      )?.[1] as Record<string, unknown> | undefined;
+      const createCall = mockUsageEventOps.create.mock.calls[0]?.[1] as
+        | Record<string, unknown>
+        | undefined;
       expect(createCall?.eventName).toBe("ai");
       expect(createCall?.metadata).toMatchObject({
         runId: "run-456",
@@ -186,9 +214,9 @@ describe("billing service", () => {
         false
       );
 
-      const createCall = mockMutation.mock.calls.find(
-        ([name]) => name === "usage_events:create"
-      )?.[1] as Record<string, unknown> | undefined;
+      const createCall = mockUsageEventOps.create.mock.calls[0]?.[1] as
+        | Record<string, unknown>
+        | undefined;
       expect(createCall?.eventName).toBe("sandbox");
       expect(createCall?.metadata).toMatchObject({
         runId: "run-456",
@@ -396,12 +424,7 @@ describe("billing service", () => {
       const { getCreditUsageSummary } = await getBilling();
       const env = createBillingEnv();
 
-      mockQuery.mockImplementation((name: string) => {
-        if (name === "usage_events:listByOrgSince") {
-          return Promise.resolve([]);
-        }
-        return Promise.resolve([]);
-      });
+      mockUsageEventOps.listByOrgSince.mockResolvedValue([]);
 
       const result = await getCreditUsageSummary(env, "org-123");
 
@@ -414,25 +437,20 @@ describe("billing service", () => {
       const { getCreditUsageSummary } = await getBilling();
       const env = createBillingEnv();
 
-      mockQuery.mockImplementation((name: string) => {
-        if (name === "usage_events:listByOrgSince") {
-          return Promise.resolve([
-            {
-              _id: "event-1",
-              eventName: "ai",
-              metadata: { costUSD: 0.75 },
-              createdAt: Date.now(),
-            },
-            {
-              _id: "event-2",
-              eventName: "sandbox",
-              metadata: { costUSD: 0.25 },
-              createdAt: Date.now(),
-            },
-          ]);
-        }
-        return Promise.resolve([]);
-      });
+      mockUsageEventOps.listByOrgSince.mockResolvedValue([
+        {
+          id: "event-1",
+          eventName: "ai",
+          metadata: { costUSD: 0.75 },
+          createdAt: Date.now(),
+        },
+        {
+          id: "event-2",
+          eventName: "sandbox",
+          metadata: { costUSD: 0.25 },
+          createdAt: Date.now(),
+        },
+      ]);
 
       const result = await getCreditUsageSummary(env, "org-123");
 
@@ -446,12 +464,7 @@ describe("billing service", () => {
       const { getCreditUsageSummary } = await getBilling();
       const env = createBillingEnv();
 
-      mockQuery.mockImplementation((name: string) => {
-        if (name === "usage_events:listByOrgSince") {
-          return Promise.resolve([]);
-        }
-        return Promise.resolve([]);
-      });
+      mockUsageEventOps.listByOrgSince.mockResolvedValue([]);
 
       const result = await getCreditUsageSummary(env, "org-123");
 
@@ -470,12 +483,7 @@ describe("billing service", () => {
     it("returns zeros when no failed events exist", async () => {
       const { retryFailedPolarIngestions } = await getBilling();
       const env = createBillingEnv();
-      mockQuery.mockImplementation((name: string) => {
-        if (name === "usage_events:listByPolarIngested") {
-          return Promise.resolve([]);
-        }
-        return Promise.resolve([]);
-      });
+      mockUsageEventOps.listByPolarIngested.mockResolvedValue([]);
 
       const result = await retryFailedPolarIngestions(env);
 
@@ -487,41 +495,36 @@ describe("billing service", () => {
       const { retryFailedPolarIngestions } = await getBilling();
       const env = createBillingEnv();
 
-      mockQuery.mockImplementation((name: string) => {
-        if (name === "usage_events:listByPolarIngested") {
-          return Promise.resolve([
-            {
-              _id: "event-1",
-              organizationId: "org-A",
-              eventName: "ai",
-              metadata: {
-                model: "claude-3",
-                inputTokens: 100,
-                outputTokens: 50,
-                costUSD: 0.01,
-              },
-            },
-            {
-              _id: "event-2",
-              organizationId: "org-A",
-              eventName: "sandbox",
-              metadata: { durationMinutes: 5, costUSD: 0.05 },
-            },
-            {
-              _id: "event-3",
-              organizationId: "org-B",
-              eventName: "ai",
-              metadata: {
-                model: "claude-3",
-                inputTokens: 200,
-                outputTokens: 100,
-                costUSD: 0.02,
-              },
-            },
-          ]);
-        }
-        return Promise.resolve([]);
-      });
+      mockUsageEventOps.listByPolarIngested.mockResolvedValue([
+        {
+          id: "event-1",
+          organizationId: "org-A",
+          eventName: "ai",
+          metadata: {
+            model: "claude-3",
+            inputTokens: 100,
+            outputTokens: 50,
+            costUSD: 0.01,
+          },
+        },
+        {
+          id: "event-2",
+          organizationId: "org-A",
+          eventName: "sandbox",
+          metadata: { durationMinutes: 5, costUSD: 0.05 },
+        },
+        {
+          id: "event-3",
+          organizationId: "org-B",
+          eventName: "ai",
+          metadata: {
+            model: "claude-3",
+            inputTokens: 200,
+            outputTokens: 100,
+            costUSD: 0.02,
+          },
+        },
+      ]);
 
       await retryFailedPolarIngestions(env);
 
@@ -550,35 +553,30 @@ describe("billing service", () => {
       const { retryFailedPolarIngestions } = await getBilling();
       const env = createBillingEnv();
 
-      mockQuery.mockImplementation((name: string) => {
-        if (name === "usage_events:listByPolarIngested") {
-          return Promise.resolve([
-            {
-              _id: "event-1",
-              organizationId: "org-A",
-              eventName: "ai",
-              metadata: {
-                model: "claude-3",
-                inputTokens: 100,
-                outputTokens: 50,
-                costUSD: 0.01,
-              },
-            },
-            {
-              _id: "event-2",
-              organizationId: "org-B",
-              eventName: "ai",
-              metadata: {
-                model: "claude-3",
-                inputTokens: 200,
-                outputTokens: 100,
-                costUSD: 0.02,
-              },
-            },
-          ]);
-        }
-        return Promise.resolve([]);
-      });
+      mockUsageEventOps.listByPolarIngested.mockResolvedValue([
+        {
+          id: "event-1",
+          organizationId: "org-A",
+          eventName: "ai",
+          metadata: {
+            model: "claude-3",
+            inputTokens: 100,
+            outputTokens: 50,
+            costUSD: 0.01,
+          },
+        },
+        {
+          id: "event-2",
+          organizationId: "org-B",
+          eventName: "ai",
+          metadata: {
+            model: "claude-3",
+            inputTokens: 200,
+            outputTokens: 100,
+            costUSD: 0.02,
+          },
+        },
+      ]);
 
       // First org fails after all retries, second succeeds
       mockIngestUsageEvents
@@ -599,24 +597,19 @@ describe("billing service", () => {
       const { retryFailedPolarIngestions } = await getBilling();
       const env = createBillingEnv();
 
-      mockQuery.mockImplementation((name: string) => {
-        if (name === "usage_events:listByPolarIngested") {
-          return Promise.resolve([
-            {
-              _id: "event-1",
-              organizationId: "org-A",
-              eventName: "ai",
-              metadata: {
-                model: "claude-sonnet-4-20250514",
-                inputTokens: 1000,
-                outputTokens: 500,
-                costUSD: 0.05,
-              },
-            },
-          ]);
-        }
-        return Promise.resolve([]);
-      });
+      mockUsageEventOps.listByPolarIngested.mockResolvedValue([
+        {
+          id: "event-1",
+          organizationId: "org-A",
+          eventName: "ai",
+          metadata: {
+            model: "claude-sonnet-4-20250514",
+            inputTokens: 1000,
+            outputTokens: 500,
+            costUSD: 0.05,
+          },
+        },
+      ]);
 
       await retryFailedPolarIngestions(env);
 
@@ -638,22 +631,17 @@ describe("billing service", () => {
       const { retryFailedPolarIngestions } = await getBilling();
       const env = createBillingEnv();
 
-      mockQuery.mockImplementation((name: string) => {
-        if (name === "usage_events:listByPolarIngested") {
-          return Promise.resolve([
-            {
-              _id: "event-1",
-              organizationId: "org-A",
-              eventName: "sandbox",
-              metadata: {
-                durationMinutes: 10,
-                costUSD: 0.2,
-              },
-            },
-          ]);
-        }
-        return Promise.resolve([]);
-      });
+      mockUsageEventOps.listByPolarIngested.mockResolvedValue([
+        {
+          id: "event-1",
+          organizationId: "org-A",
+          eventName: "sandbox",
+          metadata: {
+            durationMinutes: 10,
+            costUSD: 0.2,
+          },
+        },
+      ]);
 
       await retryFailedPolarIngestions(env);
 
@@ -674,19 +662,14 @@ describe("billing service", () => {
       const { retryFailedPolarIngestions } = await getBilling();
       const env = createBillingEnv();
 
-      mockQuery.mockImplementation((name: string) => {
-        if (name === "usage_events:listByPolarIngested") {
-          return Promise.resolve([
-            {
-              _id: "event-1",
-              organizationId: "org-A",
-              eventName: "ai",
-              metadata: { costUSD: 0.01 }, // Missing model, inputTokens, outputTokens
-            },
-          ]);
-        }
-        return Promise.resolve([]);
-      });
+      mockUsageEventOps.listByPolarIngested.mockResolvedValue([
+        {
+          id: "event-1",
+          organizationId: "org-A",
+          eventName: "ai",
+          metadata: { costUSD: 0.01 }, // Missing model, inputTokens, outputTokens
+        },
+      ]);
 
       await retryFailedPolarIngestions(env);
 

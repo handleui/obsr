@@ -1,3 +1,4 @@
+import { type Db, runErrorOps, runOps } from "@detent/db";
 import { type generateFingerprints, sanitizeSensitiveData } from "@detent/lore";
 import type { CIError } from "@detent/types";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK official pattern
@@ -187,6 +188,7 @@ const fetchAndCacheOrgSettings = async (
 
 export const checkRunsAndLoadOrgSettings = async (
   env: Env,
+  db: Db,
   repository: string,
   runIdentifiers: RunIdentifier[],
   installationId: number
@@ -211,10 +213,7 @@ export const checkRunsAndLoadOrgSettings = async (
   const runIds = runIdentifiers.map((r) => String(r.runId));
   const existingRunsResult =
     runIds.length > 0
-      ? ((await convex.query("runs:listByRepositoryRunIds", {
-          repository,
-          runIds,
-        })) as Array<{ runId: string; runAttempt: number }>)
+      ? await runOps.listByRepositoryRunIds(db, repository, runIds)
       : [];
 
   const existingSet = new Set(
@@ -295,7 +294,7 @@ export interface JobReportedError {
 }
 
 export const checkForJobReportedErrors = async (
-  env: Env,
+  db: Db,
   repository: string,
   runsToCheck: Array<{ id: number }>
 ): Promise<JobReportedError[] | null> => {
@@ -303,24 +302,20 @@ export const checkForJobReportedErrors = async (
     return null;
   }
 
-  const convex = getConvexClient(env);
   const runIds = runsToCheck.map((r) => String(r.id));
-  const runs = (await convex.query("runs:listByRepositoryRunIds", {
+  const matchedRuns = await runOps.listByRepositoryRunIds(
+    db,
     repository,
-    runIds,
-  })) as Array<{ _id: string }>;
+    runIds
+  );
 
-  if (runs.length === 0) {
+  if (matchedRuns.length === 0) {
     return null;
   }
 
   const errorsByRun = await Promise.all(
-    runs.map((run) =>
-      convex.query("run_errors:listByRunIdSource", {
-        runId: run._id,
-        source: "job-report",
-        limit: 1000,
-      })
+    matchedRuns.map((run) =>
+      runErrorOps.listByRunIdSource(db, run.id, "job-report", 1000)
     )
   );
 

@@ -3,9 +3,11 @@
 import { createClient } from "@detent/sdk";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { registerBillingTools } from "./tools/billing-tools.js";
 import { registerErrorsTools } from "./tools/errors-tools.js";
 import { registerHealsTools } from "./tools/heals-tools.js";
 import { registerProjectsTools } from "./tools/projects-tools.js";
+import { registerSettingsTools } from "./tools/settings-tools.js";
 
 const resolveAuth = () => {
   const apiKey = process.env.DETENT_API_KEY;
@@ -33,6 +35,8 @@ const main = async () => {
   registerProjectsTools(server, client);
   registerErrorsTools(server, client);
   registerHealsTools(server, client);
+  registerBillingTools(server, client);
+  registerSettingsTools(server, client);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

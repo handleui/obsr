@@ -1,11 +1,14 @@
 import { DetentApiError, DetentAuthError, DetentNetworkError } from "./errors.js";
+import { ApiKeysResource } from "./resources/api-keys.js";
 import { AuthResource } from "./resources/auth.js";
+import { BillingResource } from "./resources/billing.js";
 import { ErrorsResource } from "./resources/errors.js";
 import { HealsResource } from "./resources/heals.js";
 import { InvitationsResource } from "./resources/invitations.js";
 import { MembersResource } from "./resources/members.js";
 import { OrganizationsResource } from "./resources/organizations.js";
 import { ProjectsResource } from "./resources/projects.js";
+import { SettingsResource } from "./resources/settings.js";
 import type { AuthConfig, DetentConfig } from "./types.js";
 import { sanitizeCredentials } from "./utils/sanitize.js";
 
@@ -40,7 +43,7 @@ const validateAuth = (auth: AuthConfig): void => {
 };
 
 interface RequestOptions {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   headers?: Record<string, string>;
 }
@@ -62,6 +65,9 @@ export class DetentClient {
   readonly organizations: OrganizationsResource;
   readonly members: MembersResource;
   readonly invitations: InvitationsResource;
+  readonly billing: BillingResource;
+  readonly apiKeys: ApiKeysResource;
+  readonly settings: SettingsResource;
 
   constructor(config: DetentConfig) {
     const baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
@@ -85,6 +91,9 @@ export class DetentClient {
     this.organizations = new OrganizationsResource(this);
     this.members = new MembersResource(this);
     this.invitations = new InvitationsResource(this);
+    this.billing = new BillingResource(this);
+    this.apiKeys = new ApiKeysResource(this);
+    this.settings = new SettingsResource(this);
   }
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {

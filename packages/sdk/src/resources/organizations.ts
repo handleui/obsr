@@ -1,17 +1,14 @@
-/**
- * Organizations Resource
- *
- * Organization management operations.
- */
-
 import type { DetentClient } from "../client.js";
-import type { DeleteOrganizationResponse } from "../types.js";
+import type {
+  DeleteOrganizationResponse,
+  OrganizationStatusDetail,
+} from "../types.js";
 
-export interface OrganizationStatusResponse {
-  organization_id: string;
-  github_synced: boolean;
-  last_sync_at: string | null;
-}
+const validateOrgId = (orgId: string): void => {
+  if (!orgId || typeof orgId !== "string" || orgId.trim() === "") {
+    throw new Error("Organization ID must be a non-empty string");
+  }
+};
 
 export class OrganizationsResource {
   readonly #client: DetentClient;
@@ -20,25 +17,21 @@ export class OrganizationsResource {
     this.#client = client;
   }
 
-  /** Get organization GitHub sync status */
-  async getStatus(organizationId: string): Promise<OrganizationStatusResponse> {
-    // Validate parameter
-    if (!organizationId || typeof organizationId !== "string" || organizationId.trim() === "") {
-      throw new Error("Organization ID must be a non-empty string");
-    }
-
-    return this.#client.request<OrganizationStatusResponse>(
+  /** Get organization status including settings, project count, and sync state */
+  async getStatus(
+    organizationId: string
+  ): Promise<OrganizationStatusDetail> {
+    validateOrgId(organizationId);
+    return this.#client.request<OrganizationStatusDetail>(
       `/v1/organizations/${encodeURIComponent(organizationId)}/status`
     );
   }
 
   /** Delete an organization */
-  async delete(organizationId: string): Promise<DeleteOrganizationResponse> {
-    // Validate parameter
-    if (!organizationId || typeof organizationId !== "string" || organizationId.trim() === "") {
-      throw new Error("Organization ID must be a non-empty string");
-    }
-
+  async delete(
+    organizationId: string
+  ): Promise<DeleteOrganizationResponse> {
+    validateOrgId(organizationId);
     return this.#client.request<DeleteOrganizationResponse>(
       `/v1/organizations/${encodeURIComponent(organizationId)}`,
       { method: "DELETE" }

@@ -186,42 +186,196 @@ export interface RevokeInvitationResponse {
 }
 
 export type HealStatus =
+  | "found"
   | "pending"
+  | "running"
   | "in_progress"
   | "completed"
   | "failed"
   | "rejected"
   | "applied";
 
+export type HealType = "autofix" | "heal";
+
 export interface Heal {
   id: string;
-  project_id: string;
-  pr_number: number;
+  type: HealType;
   status: HealStatus;
-  error_ids: string[];
-  patch?: string;
-  created_at: string;
-  updated_at: string;
+  commitSha: string | null;
+  prNumber: number | null;
+  errorIds: string[];
+  signatureIds: string[];
+  patch: string | null;
+  commitMessage: string | null;
+  filesChanged: string[] | null;
+  autofixSource: string | null;
+  autofixCommand: string | null;
+  healResult: string | null;
+  costUsd: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  appliedAt: string | null;
+  appliedCommitSha: string | null;
+  rejectedAt: string | null;
+  rejectedBy: string | null;
+  rejectionReason: string | null;
+  failedReason: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface HealsResponse {
   heals: Heal[];
 }
 
-export interface HealDetailsResponse extends Heal {
-  errors: ErrorInfo[];
+export interface HealDetailsResponse {
+  heal: Heal & { runId: string | null; projectId: string };
 }
 
 export interface TriggerHealResponse {
-  heal_id: string;
-  status: HealStatus;
+  success: boolean;
+  status: string;
+}
+
+export interface TriggerHealByPrResponse {
+  success: boolean;
+  message: string;
+  projectId: string;
+  prNumber: number;
+  healsCreated: number;
+  healIds: string[];
+  autofixes: number;
 }
 
 export interface ApplyHealResponse {
   success: boolean;
-  commit_sha?: string;
+  message: string;
+  commitSha: string;
+  commitUrl: string;
 }
 
 export interface RejectHealResponse {
+  success: boolean;
+  message: string;
+}
+
+// ── Billing ──
+
+export interface UsageSummary {
+  orgId: string;
+  period: { start: string; end: string };
+  runs: { total: number; successful: number; failed: number };
+}
+
+export interface CreditUsageSummary {
+  totalCostUSD: number;
+  breakdown: {
+    ai: { costUSD: number; percentage: number };
+    sandbox: { costUSD: number; percentage: number };
+  };
+  eventCount: number;
+  recentEvents: Array<{
+    id: string;
+    eventName: string;
+    metadata: Record<string, unknown> | null;
+    createdAt: string;
+  }>;
+}
+
+export interface CreateCustomerResponse {
+  customerId: string;
+}
+
+export interface CheckoutResponse {
+  checkoutUrl: string;
+}
+
+export interface PortalResponse {
+  portalUrl: string;
+}
+
+// ── API Keys ──
+
+export interface ApiKey {
+  id: string;
+  key_prefix: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface ApiKeysResponse {
+  api_keys: ApiKey[];
+}
+
+export interface CreateApiKeyResponse {
+  id: string;
+  key: string;
+  key_prefix: string;
+  name: string;
+  created_at: string;
+}
+
+export interface DeleteApiKeyResponse {
+  success: boolean;
+  deleted_id: string;
+}
+
+// ── Organization Settings ──
+
+export interface OrganizationSettings {
+  enable_inline_annotations: boolean;
+  enable_pr_comments: boolean;
+  heal_auto_trigger: boolean;
+  validation_enabled: boolean;
+}
+
+export interface UpdateSettingsResponse {
+  success: boolean;
+  settings: OrganizationSettings;
+}
+
+// ── Organization Status (extended) ──
+
+export interface OrganizationStatusDetail {
+  organization_id: string;
+  organization_name: string;
+  organization_slug: string;
+  provider: string;
+  provider_account_login: string;
+  provider_account_type: "organization" | "user";
+  app_installed: boolean;
+  suspended_at: string | null;
+  project_count: number;
+  created_at: string;
+  last_synced_at: string | null;
+  settings: OrganizationSettings;
+}
+
+// ── Projects (create/delete) ──
+
+export interface CreateProjectRequest {
+  organization_id: string;
+  provider_repo_id: string;
+  provider_repo_name: string;
+  provider_repo_full_name: string;
+  provider_default_branch?: string;
+  is_private?: boolean;
+  handle?: string;
+}
+
+export interface CreateProjectResponse {
+  project_id: string;
+  organization_id: string;
+  handle: string;
+  provider_repo_id: string;
+  provider_repo_name: string;
+  provider_repo_full_name: string;
+  provider_default_branch: string | null;
+  is_private: boolean;
+  created: boolean;
+}
+
+export interface DeleteProjectResponse {
   success: boolean;
 }

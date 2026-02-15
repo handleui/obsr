@@ -51,7 +51,9 @@
         "CONVEX_URL",
         "NEXT_PUBLIC_APP_URL",
         "WORKOS_COOKIE_PASSWORD",
-        "POLAR_CHECKOUT_TOKEN"
+        "POLAR_CHECKOUT_TOKEN",
+        "FLAGS",
+        "FLAGS_SECRET"
       ]
     },
     "@detent/web#build": {

@@ -65,6 +65,7 @@ Source of truth: `convex/schema.ts`
 
 ### Always Do
 - When answering questions involving external documentation, APIs, or specifications, prefer using Nia MCP tools to retrieve and verify information before responding. Use reasoning first to determine whether external grounding is necessary.
+- **Do NOT spam `nia index`**. Search what's already indexed first (`manage_resource(action='list')`). If not available, use **Context7** (`mcp__context7`) instead of indexing. Only index when the source will be reused repeatedly, and always index top-level URLs (e.g., `handleui.com/docs`, not deep subpages).
 - Run `bun run fix` before committing
 - Use `bun run dt x` for local CLI testing
 - Edit `convex/schema.ts` then deploy for DB changes
@@ -80,6 +81,10 @@ Source of truth: `convex/schema.ts`
 - Commit without running `bun run fix`
 - Create markdown files when closing tasks (no summaries or reports needed)
 
+## Icons
+
+- **Library**: `iconoir-react` — browse available icons at [iconoir.com](https://iconoir.com) or use Nia/Context7 to search. Do NOT grep `node_modules/dist` to find icons.
+
 ## Style (Project-Specific Only)
 
 Biome handles all standard linting. These are project-specific deviations:
@@ -88,6 +93,7 @@ Biome handles all standard linting. These are project-specific deviations:
 - **Types**: Interfaces over type aliases; import with `type` keyword
 - **Functions**: Arrow functions only
 - **Comments**: None unless critical; prefix hacks with `// HACK: reason`
+- **Tailwind**: Always read `globals.css` / design tokens first. Use semantic and project-defined utility classes — no hardcoded values or redundant classes.
 
 ## Git
 
@@ -103,6 +109,13 @@ Biome handles all standard linting. These are project-specific deviations:
 - **URL**: `detent.sh`
 - **API**: `backend.detent.sh`
 - **Auth**: `navigator.detent.sh`
+
+## Navigator Proxy (Middleware)
+
+- `apps/navigator/src/proxy.ts` is the Next.js middleware (Turbopack auto-detects it)
+- Rewrites `/:org/:project/:run` → `/run/:org/:project/:run` for dashboard routes
+- Real app routes use provider prefixes: `gh/` (GitHub) or `gl/` (GitLab) — e.g. `/gh/detentsh/detent/159`
+- Demo page uses `/handleui/detent/159` (no provider prefix) — this is NOT a real app route, just demo data rendered by the same `/run` page via the proxy rewrite
 
 ## Healing Architecture
 

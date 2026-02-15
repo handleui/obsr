@@ -17,10 +17,12 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@base-ui-components/react": "^1.0.0-rc.0",
     "@radix-ui/react-slot": "^1.2.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "facehash": "^0.0.7",
+    "iconoir-react": "^7.11.0",
     "lucide-react": "^0.469.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

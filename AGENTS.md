@@ -69,6 +69,7 @@ Dual-DB: Neon Postgres (non-realtime) + Convex (realtime).
 - Run `bun run fix` before every commit
 - Use `bun run dt x` for local CLI testing
 - Never edit Convex `_generated/` files
+- Never edit Drizzle generated SQL/files manually (including `packages/db/drizzle/**`); only change schema files and regenerate
 - Never create markdown summary files when closing tasks
 
 ### Ask First

@@ -6,6 +6,7 @@ on:
     paths:
       - "convex/**"
       - "packages/db/drizzle/**"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,7 +14,7 @@ permissions:
 jobs:
   convex:
     runs-on: ubuntu-latest
-    if: contains(toJSON(github.event.commits.*.modified), 'convex/') || contains(toJSON(github.event.commits.*.added), 'convex/')
+    if: github.event_name == 'workflow_dispatch' || contains(toJSON(github.event.commits.*.modified), 'convex/') || contains(toJSON(github.event.commits.*.added), 'convex/')
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -21,7 +22,6 @@ jobs:
       - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
         with:
           bun-version: latest
-          cache: true
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -33,7 +33,7 @@ jobs:
 
   neon:
     runs-on: ubuntu-latest
-    if: contains(toJSON(github.event.commits.*.modified), 'packages/db/drizzle/') || contains(toJSON(github.event.commits.*.added), 'packages/db/drizzle/')
+    if: github.event_name == 'workflow_dispatch' || contains(toJSON(github.event.commits.*.modified), 'packages/db/drizzle/') || contains(toJSON(github.event.commits.*.added), 'packages/db/drizzle/')
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -41,7 +41,6 @@ jobs:
       - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
         with:
           bun-version: latest
-          cache: true
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

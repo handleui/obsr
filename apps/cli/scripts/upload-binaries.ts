@@ -21,6 +21,7 @@ const PACKAGE_JSON_PATH = join(CLI_ROOT, "package.json");
 
 const MANIFEST_PATH = "cli/manifest.json";
 const MAX_VERSIONS_TO_KEEP = 20;
+const CLI_VERSION_PREFIX_REGEX = /^cli-v/;
 
 const log = (msg: string) => console.log(`[upload] ${msg}`);
 const fatal = (msg: string): never => {
@@ -144,7 +145,12 @@ const updateManifest = async (version: string): Promise<Manifest> => {
   }
 
   // Sort descending by semver (handles pre-release versions correctly)
-  manifest.versions.sort((a, b) => rcompare(a, b));
+  manifest.versions.sort((a, b) =>
+    rcompare(
+      a.replace(CLI_VERSION_PREFIX_REGEX, ""),
+      b.replace(CLI_VERSION_PREFIX_REGEX, "")
+    )
+  );
 
   manifest.latest = manifest.versions[0] || tag;
   manifest.updatedAt = new Date().toISOString();

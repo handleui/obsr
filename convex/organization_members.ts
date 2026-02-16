@@ -1,7 +1,12 @@
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { type MutationCtx, mutation, query } from "./_generated/server";
+import {
+  type MutationCtx,
+  mutation,
+  type QueryCtx,
+  query,
+} from "./_generated/server";
 import { requireServiceAuth } from "./service_auth";
 import {
   buildPatch,
@@ -134,7 +139,7 @@ export const listByOrgProviderUser = query({
 });
 
 const collectOrgMembers = async (
-  ctx: { db: MutationCtx["db"] },
+  ctx: { db: QueryCtx["db"] },
   organizationId: Id<"organizations">,
   includeRemoved: boolean | null | undefined,
   limit: number

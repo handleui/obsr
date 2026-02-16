@@ -224,6 +224,7 @@ describe("webhooks - installation events", () => {
       "organizations:getByProviderAccountLogin",
       "organizations:getBySlug",
       "organizations:getById",
+      "projects:getByOrgRepo",
       "projects:getByRepoId",
       "projects:getByRepoFullName",
     ]);
@@ -242,6 +243,9 @@ describe("webhooks - installation events", () => {
       const queued = queryQueue.get(name);
       if (queued && queued.length > 0) {
         return queued.shift();
+      }
+      if (name === "organizations:listByProviderInstallationId") {
+        return [];
       }
       const result = await resolveQueryResult();
       if (singleQueryNames.has(name)) {
@@ -800,6 +804,10 @@ describe("webhooks - repository events", () => {
     // Setup mock chain for update
     mockUpdate.mockReturnValue({ set: mockSet });
     mockSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+
+    setQueryResult("organizations:listByProviderInstallationId", [
+      { _id: "org-123", slug: "gh/test-org" },
+    ]);
   });
 
   const createRepositoryPayload = (
@@ -1187,6 +1195,10 @@ describe("webhooks - installation.deleted data integrity", () => {
 
     mockUpdate.mockReturnValue({ set: mockSet });
     mockSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+
+    setQueryResult("organizations:listByProviderInstallationId", [
+      { _id: "org-123", slug: "gh/test-org" },
+    ]);
   });
 
   it("soft-deletes organization (sets deletedAt, does not hard delete)", async () => {
@@ -1233,6 +1245,10 @@ describe("webhooks - repository renamed (critical)", () => {
 
     mockUpdate.mockReturnValue({ set: mockSet });
     mockSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+
+    setQueryResult("organizations:listByProviderInstallationId", [
+      { _id: "org-123", slug: "gh/test-org" },
+    ]);
   });
 
   it("updates providerRepoName and providerRepoFullName on rename", async () => {
@@ -1365,6 +1381,10 @@ describe("webhooks - repository transferred", () => {
 
     mockUpdate.mockReturnValue({ set: mockSet });
     mockSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+
+    setQueryResult("organizations:listByProviderInstallationId", [
+      { _id: "org-123", slug: "gh/test-org" },
+    ]);
   });
 
   it("updates providerRepoFullName on transfer", async () => {
@@ -1407,7 +1427,7 @@ describe("webhooks - repository transferred", () => {
     );
   });
 
-  it("keeps project linked to original organization after transfer", async () => {
+  it("moves project to installation organization after transfer", async () => {
     const originalProjectId = "project-stays-with-org";
 
     mockLimit.mockResolvedValueOnce([
@@ -1437,9 +1457,9 @@ describe("webhooks - repository transferred", () => {
     expect(res.status).toBe(200);
     expect(json.project_id).toBe(originalProjectId);
 
-    // Only providerRepoFullName updated, not organizationId
+    // Transfer should move linkage to org resolved from installation
     const setCallArgs = mockSet.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(setCallArgs).not.toHaveProperty("organizationId");
+    expect(setCallArgs).toHaveProperty("organizationId", "org-123");
   });
 });
 
@@ -1453,6 +1473,10 @@ describe("webhooks - repository visibility changed", () => {
 
     mockUpdate.mockReturnValue({ set: mockSet });
     mockSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+
+    setQueryResult("organizations:listByProviderInstallationId", [
+      { _id: "org-123", slug: "gh/test-org" },
+    ]);
   });
 
   it("updates isPrivate to true when privatized", async () => {
@@ -1555,8 +1579,7 @@ describe("webhooks - installation_repositories (add/remove)", () => {
   });
 
   it("creates new projects when repositories are added", async () => {
-    // Mock finding the organization
-    mockLimit.mockResolvedValueOnce([
+    setQueryResult("organizations:listByProviderInstallationId", [
       { _id: "org-uuid-123", slug: "gh/test-org", settings: {} },
     ]);
 
@@ -1618,7 +1641,7 @@ describe("webhooks - installation_repositories (add/remove)", () => {
   });
 
   it("soft-deletes projects when repositories are removed (sets removedAt)", async () => {
-    mockLimit.mockResolvedValueOnce([
+    setQueryResult("organizations:listByProviderInstallationId", [
       { _id: "org-uuid-456", slug: "gh/test-org", settings: {} },
     ]);
 
@@ -1665,7 +1688,7 @@ describe("webhooks - installation_repositories (add/remove)", () => {
   });
 
   it("handles both added and removed in same event", async () => {
-    mockLimit.mockResolvedValueOnce([
+    setQueryResult("organizations:listByProviderInstallationId", [
       { _id: "org-uuid-789", slug: "gh/test-org", settings: {} },
     ]);
 
@@ -1710,7 +1733,7 @@ describe("webhooks - installation_repositories (add/remove)", () => {
   });
 
   it("returns organization not found when installation has no org", async () => {
-    mockLimit.mockResolvedValueOnce([]); // No org found
+    setQueryResult("organizations:listByProviderInstallationId", []); // No org found
 
     const payload = {
       action: "added",
@@ -1762,14 +1785,11 @@ describe("webhooks - organization events", () => {
   });
 
   it("updates organization login when GitHub org is renamed", async () => {
-    // Mock finding existing org
-    mockLimit.mockResolvedValueOnce([
-      {
-        _id: "org-uuid-rename",
-        slug: "gh/old-org-name",
-        providerAccountLogin: "old-org-name",
-      },
-    ]);
+    setQueryResult("organizations:getByProviderAccount", {
+      _id: "org-uuid-rename",
+      slug: "gh/old-org-name",
+      providerAccountLogin: "old-org-name",
+    });
 
     const payload = {
       action: "renamed",
@@ -1856,6 +1876,65 @@ describe("webhooks - organization events", () => {
       memberAdded: false,
       memberDemoted: false,
     });
+  });
+});
+
+describe("webhooks - installation_target events", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockSelect.mockReturnValue({ from: mockFrom });
+    mockFrom.mockReturnValue({ where: mockWhere });
+    mockWhere.mockReturnValue({ limit: mockLimit });
+    mockLimit.mockResolvedValue([]);
+
+    mockUpdate.mockReturnValue({ set: mockSet });
+    mockSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+  });
+
+  it("updates organization login when installation target is renamed", async () => {
+    setQueryResult("organizations:getByProviderAccount", {
+      _id: "org-uuid-install-target-rename",
+      slug: "gh/old-target-name",
+      providerAccountLogin: "old-target-name",
+    });
+
+    const payload = {
+      action: "renamed",
+      installation_target: {
+        id: 87_654_321,
+        login: "new-target-name",
+        type: "Organization" as const,
+        avatar_url: "https://avatars.example.com/u/87654321",
+      },
+      changes: {
+        login: {
+          from: "old-target-name",
+        },
+      },
+    };
+
+    const res = await makeWebhookRequest("installation_target", payload);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json).toEqual({
+      message: "installation target renamed",
+      organization_id: "org-uuid-install-target-rename",
+      old_login: "old-target-name",
+      new_login: "new-target-name",
+      old_slug: "gh/old-target-name",
+      new_slug: "gh/new-target-name",
+    });
+
+    expect(mockUpdate).toHaveBeenCalled();
+    expect(mockSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerAccountLogin: "new-target-name",
+        slug: "gh/new-target-name",
+        name: "new-target-name",
+      })
+    );
   });
 });
 

@@ -134,7 +134,8 @@ export const handleInstallationRepositoriesEvent = async (
     // Handle removed repositories (soft-delete) - batch update for performance
     if (repositories_removed.length > 0) {
       const repoIds = repositories_removed.map((repo) => String(repo.id));
-      await convex.mutation("projects:softDeleteByRepoIds", {
+      await convex.mutation("projects:softDeleteByOrgRepoIds", {
+        organizationId: org._id,
         providerRepoIds: repoIds,
         removedAt: Date.now(),
       });

@@ -176,6 +176,7 @@ export const listByRepoIds = query({
 export const update = mutation({
   args: {
     id: v.id("projects"),
+    organizationId: v.optional(v.id("organizations")),
     handle: v.optional(v.string()),
     providerRepoId: v.optional(v.string()),
     providerRepoName: v.optional(v.string()),
@@ -384,6 +385,43 @@ export const softDeleteByRepoIds = mutation({
       const project = await ctx.db
         .query("projects")
         .withIndex("by_repo_id", (q) => q.eq("providerRepoId", repoId))
+        .first();
+
+      if (!project || project.removedAt) {
+        continue;
+      }
+
+      await ctx.db.patch(project._id, {
+        removedAt: now,
+        updatedAt: now,
+      });
+      updated += 1;
+    }
+
+    return { updated };
+  },
+});
+
+export const softDeleteByOrgRepoIds = mutation({
+  args: {
+    organizationId: v.id("organizations"),
+    providerRepoIds: v.array(v.string()),
+    removedAt: v.optional(nullableNumber),
+    serviceToken,
+  },
+  handler: async (ctx, args) => {
+    await requireServiceAuth(ctx, args);
+    const now = args.removedAt ?? Date.now();
+    let updated = 0;
+
+    for (const repoId of args.providerRepoIds) {
+      const project = await ctx.db
+        .query("projects")
+        .withIndex("by_org_repo", (q) =>
+          q
+            .eq("organizationId", args.organizationId)
+            .eq("providerRepoId", repoId)
+        )
         .first();
 
       if (!project || project.removedAt) {

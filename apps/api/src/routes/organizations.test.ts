@@ -71,6 +71,9 @@ const createOrganization = (
     name: string;
     slug: string;
     provider: "github" | "gitlab";
+    providerAccountId: string;
+    providerAccountLogin: string;
+    providerAccountType: "organization" | "user";
     providerInstallationId: string | null;
     suspendedAt: Date | null;
     deletedAt: Date | null;
@@ -81,9 +84,10 @@ const createOrganization = (
   name: overrides.name ?? "test-org",
   slug: overrides.slug ?? "gh/test-org",
   provider: overrides.provider ?? "github",
-  providerAccountId: "12345",
-  providerAccountLogin: "test-org",
-  providerAccountType: "organization" as const,
+  providerAccountId: overrides.providerAccountId ?? "12345",
+  providerAccountLogin: overrides.providerAccountLogin ?? "test-org",
+  providerAccountType:
+    overrides.providerAccountType ?? ("organization" as const),
   providerInstallationId:
     "providerInstallationId" in overrides
       ? overrides.providerInstallationId
@@ -183,6 +187,120 @@ interface SyncResponse {
   synced?: boolean;
   error?: string;
 }
+
+describe("organizations - GET /:organizationId/github-app", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    mockOrgFindFirst.mockReset();
+    mockFindFirst.mockReset();
+    mockQuery.mockReset();
+    mockMutation.mockReset();
+    mockGetInstallationInfo.mockReset();
+
+    mockOrgFindFirst.mockResolvedValue(createOrganization());
+    mockFindFirst.mockResolvedValue(createMember("owner"));
+    mockGetInstallationInfo.mockResolvedValue({
+      id: 123,
+      suspended_at: null,
+      account: { login: "test-org" },
+      permissions: { members: "read" },
+    });
+
+    mockQuery.mockImplementation(async (name: string) => {
+      if (name === "organizations:getById") {
+        return await mockOrgFindFirst();
+      }
+      if (name === "organization_members:getByOrgUser") {
+        return await mockFindFirst();
+      }
+      return null;
+    });
+  });
+
+  it("returns connect URL when app is not installed", async () => {
+    mockOrgFindFirst.mockResolvedValue(
+      createOrganization({ providerInstallationId: null })
+    );
+
+    const res = await makeRequest(
+      "GET",
+      `/organizations/${TEST_ORG_ID}/github-app`
+    );
+    const json = (await res.json()) as Record<string, unknown>;
+
+    expect(res.status).toBe(200);
+    expect(json.app_installed).toBe(false);
+    expect(json.github_app_install_url).toBe(
+      "https://github.com/apps/detent/installations/new?target_id=12345"
+    );
+    expect(json.github_app_manage_url).toBeNull();
+    expect(json.github_app_disconnect_url).toBeNull();
+    expect(json.github_app_permissions).toBeNull();
+    expect(json.members_read_enabled).toBeNull();
+  });
+
+  it("returns manage/disconnect URL for organization installation", async () => {
+    const res = await makeRequest(
+      "GET",
+      `/organizations/${TEST_ORG_ID}/github-app`
+    );
+    const json = (await res.json()) as Record<string, unknown>;
+
+    expect(res.status).toBe(200);
+    expect(json.app_installed).toBe(true);
+    expect(json.github_app_installation_id).toBe("inst-123");
+    expect(json.github_app_manage_url).toBe(
+      "https://github.com/organizations/test-org/settings/installations/inst-123"
+    );
+    expect(json.github_app_disconnect_url).toBe(
+      "https://github.com/organizations/test-org/settings/installations/inst-123"
+    );
+    expect(json.members_read_enabled).toBe(true);
+  });
+
+  it("uses user settings URL for personal account installations", async () => {
+    mockOrgFindFirst.mockResolvedValue(
+      createOrganization({
+        providerAccountType: "user",
+        providerAccountLogin: "alice",
+      })
+    );
+
+    const res = await makeRequest(
+      "GET",
+      `/organizations/${TEST_ORG_ID}/github-app`
+    );
+    const json = (await res.json()) as Record<string, unknown>;
+
+    expect(res.status).toBe(200);
+    expect(json.github_app_manage_url).toBe(
+      "https://github.com/settings/installations/inst-123"
+    );
+    expect(json.github_app_disconnect_url).toBe(
+      "https://github.com/settings/installations/inst-123"
+    );
+  });
+
+  it("blocks non-admin members", async () => {
+    mockFindFirst.mockResolvedValue({
+      ...createMember("member"),
+      role: "member",
+    });
+
+    const res = await makeRequest(
+      "GET",
+      `/organizations/${TEST_ORG_ID}/github-app`
+    );
+    const json = (await res.json()) as Record<string, unknown>;
+
+    expect(res.status).toBe(403);
+    expect(json).toEqual({
+      error: "Insufficient permissions",
+      message: "Only organization owners or admins can manage GitHub App links",
+    });
+  });
+});
 
 describe("organizations - POST /:organizationId/sync", () => {
   beforeEach(() => {

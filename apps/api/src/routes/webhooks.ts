@@ -6,6 +6,7 @@ import {
   handleCheckSuiteRequested,
   handleInstallationEvent,
   handleInstallationRepositoriesEvent,
+  handleInstallationTargetEvent,
   handleIssueCommentEvent,
   handleOrganizationEvent,
   handleRepositoryEvent,
@@ -17,6 +18,7 @@ import {
   handleWorkflowRunInProgress,
   type InstallationPayload,
   type InstallationRepositoriesPayload,
+  type InstallationTargetPayload,
   type IssueCommentPayload,
   type OrganizationPayload,
   type PingPayload,
@@ -75,6 +77,12 @@ app.post("/github", webhookSignatureMiddleware, (c: WebhookContext) => {
       return handleInstallationRepositoriesEvent(
         c,
         payload as InstallationRepositoriesPayload
+      );
+
+    case "installation_target":
+      return handleInstallationTargetEvent(
+        c,
+        payload as InstallationTargetPayload
       );
 
     case "repository":

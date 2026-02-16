@@ -143,6 +143,21 @@ export interface OrganizationPayload {
   installation?: { id: number };
 }
 
+export interface InstallationTargetPayload {
+  action: "renamed";
+  installation_target: {
+    id: number;
+    login: string;
+    type: "Organization" | "User";
+    avatar_url?: string;
+  };
+  changes?: {
+    login?: {
+      from: string;
+    };
+  };
+}
+
 export interface CheckSuitePayload {
   action: "requested" | "rerequested" | "completed";
   check_suite: {
@@ -253,6 +268,7 @@ export interface WebhookVariables {
     | InstallationRepositoriesPayload
     | RepositoryPayload
     | OrganizationPayload
+    | InstallationTargetPayload
     | CheckSuitePayload;
 }
 

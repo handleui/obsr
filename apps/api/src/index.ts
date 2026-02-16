@@ -69,7 +69,12 @@ app.use(
       return null;
     },
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization", "X-Detent-Token"],
+    allowHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Detent-Token",
+      "X-GitHub-Token",
+    ],
     exposeHeaders: [
       "Content-Length",
       "X-RateLimit-Limit",

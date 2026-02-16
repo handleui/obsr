@@ -6,6 +6,7 @@ export { handleInstallationRepositoriesEvent } from "./handlers/installation-rep
 export { handleIssueCommentEvent } from "./handlers/issue-comment";
 export { handleOrganizationWebhook } from "./handlers/organization";
 export {
+  handleInstallationTargetEvent,
   handleOrganizationEvent,
   handleRepositoryEvent,
 } from "./handlers/repository";

@@ -54,6 +54,86 @@ interface RemovedMemberLookups {
   mirrorRemovedById: Map<string, string>;
 }
 
+interface GitHubAppPermissionState {
+  installationHtmlUrl: string | null;
+  installationPermissions: Record<string, string> | null;
+  membersReadEnabled: boolean | null;
+}
+
+const GITHUB_APP_NAME = "detent";
+
+const getGitHubAppInstallUrl = (providerAccountId: string): string =>
+  `https://github.com/apps/${GITHUB_APP_NAME}/installations/new?target_id=${providerAccountId}`;
+
+const getGitHubAppManageUrl = (organization: {
+  providerInstallationId?: string | null;
+  providerAccountType: string;
+  providerAccountLogin: string;
+}): string | null => {
+  const installationId = organization.providerInstallationId;
+  if (!installationId) {
+    return null;
+  }
+
+  if (organization.providerAccountType === "organization") {
+    return `https://github.com/organizations/${encodeURIComponent(organization.providerAccountLogin)}/settings/installations/${installationId}`;
+  }
+
+  return `https://github.com/settings/installations/${installationId}`;
+};
+
+const loadGitHubInstallationPermissionState = async (
+  env: Env,
+  organization: {
+    slug: string;
+    providerInstallationId?: string | null;
+  },
+  context: string
+): Promise<GitHubAppPermissionState> => {
+  if (!organization.providerInstallationId) {
+    return {
+      installationHtmlUrl: null,
+      installationPermissions: null,
+      membersReadEnabled: null,
+    };
+  }
+
+  try {
+    const github = createGitHubService(env);
+    const installationInfo = await github.getInstallationInfo(
+      Number(organization.providerInstallationId)
+    );
+
+    if (!installationInfo?.permissions) {
+      return {
+        installationHtmlUrl: installationInfo?.html_url ?? null,
+        installationPermissions: null,
+        membersReadEnabled: null,
+      };
+    }
+
+    const installationPermissions = installationInfo.permissions;
+    const membersPermission = installationPermissions.members;
+
+    return {
+      installationHtmlUrl: installationInfo.html_url ?? null,
+      installationPermissions,
+      membersReadEnabled:
+        membersPermission === "read" || membersPermission === "write",
+    };
+  } catch (error) {
+    console.warn(
+      `[organizations/${context}] Failed to load installation permissions for ${organization.slug}:`,
+      error instanceof Error ? error.message : error
+    );
+    return {
+      installationHtmlUrl: null,
+      installationPermissions: null,
+      membersReadEnabled: null,
+    };
+  }
+};
+
 /**
  * Build lookup maps for blocked and mirror-removed members
  */
@@ -317,6 +397,91 @@ const syncOrganizationMembers = async (
 const app = new Hono<{ Bindings: Env }>();
 
 /**
+ * GET /:organizationId/github-app
+ * Backend-only control surface for connect/manage/disconnect links.
+ */
+app.get("/:organizationId/github-app", async (c) => {
+  const auth = c.get("auth");
+  const organizationId = c.req.param("organizationId");
+  const convex = getConvexClient(c.env);
+
+  const organization = (await convex.query("organizations:getById", {
+    id: organizationId,
+  })) as {
+    _id: string;
+    name: string;
+    slug: string;
+    provider: string;
+    providerAccountId: string;
+    providerAccountLogin: string;
+    providerAccountType: string;
+    providerInstallationId?: string | null;
+    deletedAt?: number | null;
+  } | null;
+
+  if (!organization || organization.deletedAt) {
+    return c.json({ error: "Organization not found" }, 404);
+  }
+
+  if (organization.provider !== "github") {
+    return c.json(
+      { error: "GitLab organizations use token-based access" },
+      400
+    );
+  }
+
+  const membership = (await convex.query("organization_members:getByOrgUser", {
+    organizationId: organization._id,
+    userId: auth.userId,
+  })) as {
+    role: string;
+    removedAt?: number | null;
+    providerUserId?: string | null;
+  } | null;
+
+  if (!membership || membership.removedAt) {
+    return c.json({ error: "Not a member of this organization" }, 403);
+  }
+
+  if (membership.role !== "owner" && membership.role !== "admin") {
+    return c.json(
+      {
+        error: "Insufficient permissions",
+        message:
+          "Only organization owners or admins can manage GitHub App links",
+      },
+      403
+    );
+  }
+
+  const appInstalled = Boolean(organization.providerInstallationId);
+  const permissionState = await loadGitHubInstallationPermissionState(
+    c.env,
+    organization,
+    "github-app"
+  );
+  const manageUrl = getGitHubAppManageUrl(organization);
+  const installUrl = getGitHubAppInstallUrl(organization.providerAccountId);
+
+  return c.json({
+    organization_id: organization._id,
+    organization_name: organization.name,
+    organization_slug: organization.slug,
+    provider_account_login: organization.providerAccountLogin,
+    provider_account_type: organization.providerAccountType,
+    app_installed: appInstalled,
+    github_app_installation_id: organization.providerInstallationId ?? null,
+    github_app_install_url: installUrl,
+    github_app_manage_url: permissionState.installationHtmlUrl ?? manageUrl,
+    github_app_disconnect_url: permissionState.installationHtmlUrl ?? manageUrl,
+    github_app_permissions: permissionState.installationPermissions,
+    members_read_enabled: permissionState.membersReadEnabled,
+    current_user_role: membership.role,
+    current_user_github_linked: Boolean(membership.providerUserId),
+  });
+});
+
+/**
  * GET /:organizationId/status
  * Get detailed status of an organization including GitHub App installation
  */
@@ -335,6 +500,7 @@ app.get("/:organizationId/status", githubOrgAccessMiddleware, async (c) => {
       name: string;
       slug: string;
       provider: string;
+      providerAccountId: string;
       providerAccountLogin: string;
       providerAccountType: string;
       suspendedAt?: number | null;
@@ -353,6 +519,19 @@ app.get("/:organizationId/status", githubOrgAccessMiddleware, async (c) => {
 
   const appInstalled = Boolean(organization.providerInstallationId);
   const settings = getOrgSettings(fullOrg.settings);
+  const permissionState = await loadGitHubInstallationPermissionState(
+    c.env,
+    {
+      slug: organization.slug,
+      providerInstallationId: organization.providerInstallationId,
+    },
+    "status"
+  );
+  const manageUrl = getGitHubAppManageUrl({
+    providerInstallationId: organization.providerInstallationId,
+    providerAccountType: fullOrg.providerAccountType,
+    providerAccountLogin: fullOrg.providerAccountLogin,
+  });
 
   return c.json({
     organization_id: fullOrg._id,
@@ -376,6 +555,12 @@ app.get("/:organizationId/status", githubOrgAccessMiddleware, async (c) => {
       heal_auto_trigger: settings.healAutoTrigger,
       validation_enabled: settings.validationEnabled,
     },
+    github_app_installation_id: organization.providerInstallationId,
+    github_app_install_url: getGitHubAppInstallUrl(fullOrg.providerAccountId),
+    github_app_manage_url: permissionState.installationHtmlUrl ?? manageUrl,
+    github_app_disconnect_url: permissionState.installationHtmlUrl ?? manageUrl,
+    github_app_permissions: permissionState.installationPermissions,
+    members_read_enabled: permissionState.membersReadEnabled,
   });
 });
 

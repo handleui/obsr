@@ -40,6 +40,7 @@ export interface RefResponse {
 
 export interface InstallationInfo {
   id: number;
+  html_url?: string;
   account: {
     id: number;
     login: string;
@@ -47,6 +48,7 @@ export interface InstallationInfo {
     avatar_url?: string;
   };
   suspended_at: string | null;
+  permissions?: Record<string, string>;
 }
 
 export interface InstallationReposResponse {

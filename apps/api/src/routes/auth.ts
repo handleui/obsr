@@ -690,6 +690,25 @@ const linkGitHubMemberOrganizations = async (
 app.post("/sync-user", async (c) => {
   const auth = c.get("auth");
   const providedGitHubToken = c.req.header("X-GitHub-Token");
+  let verifiedGitHubToken: string | undefined;
+
+  // Security: never trust raw X-GitHub-Token without ownership verification.
+  // If verification fails, continue with WorkOS identity fallback.
+  if (providedGitHubToken) {
+    const tokenResult = await getVerifiedOptionalGitHubToken(
+      providedGitHubToken,
+      auth.userId,
+      c.env.WORKOS_API_KEY
+    );
+
+    if (tokenResult.success) {
+      verifiedGitHubToken = tokenResult.token;
+    } else {
+      console.warn(
+        `[sync-user] Ignoring unverified GitHub token for user ${auth.userId}: ${tokenResult.reason}`
+      );
+    }
+  }
 
   const userResponse = await fetch(
     `https://api.workos.com/user_management/users/${auth.userId}`,
@@ -711,7 +730,7 @@ app.post("/sync-user", async (c) => {
   const identity = await resolveGitHubIdentity(
     auth.userId,
     c.env.WORKOS_API_KEY,
-    providedGitHubToken
+    verifiedGitHubToken
   );
 
   if (!identity) {
@@ -756,13 +775,13 @@ app.post("/sync-user", async (c) => {
 
   // Auto-join GitHub orgs where app is already installed (non-installer path)
   let autoJoinedCount = 0;
-  if (providedGitHubToken && identity.username) {
+  if (verifiedGitHubToken && identity.username) {
     autoJoinedCount = await linkGitHubMemberOrganizations(
       convex,
       auth.userId,
       identity.userId,
       identity.username,
-      providedGitHubToken,
+      verifiedGitHubToken,
       c.env
     );
   }
@@ -1028,6 +1047,10 @@ type TokenResult =
   | { success: true; token: string }
   | ({ success: false } & TokenErrorResult);
 
+type OptionalTokenResult =
+  | { success: true; token: string }
+  | { success: false; reason: string };
+
 /**
  * Get a verified GitHub token from the X-GitHub-Token header
  * Validates format, verifies token ownership, and checks required scopes
@@ -1086,6 +1109,38 @@ const getVerifiedGitHubToken = async (
       code: "token_verification_failed",
       status: 401,
     };
+  }
+
+  return { success: true, token: providedToken };
+};
+
+/**
+ * Validate an optional GitHub token for ownership/scope.
+ * Returns failure reason instead of HTTP status because callers may fall back.
+ */
+const getVerifiedOptionalGitHubToken = async (
+  providedToken: string,
+  userId: string,
+  workosApiKey: string
+): Promise<OptionalTokenResult> => {
+  if (!isValidGitHubTokenFormat(providedToken)) {
+    return { success: false, reason: "invalid_token_format" };
+  }
+
+  const verifyResult = await verifyGitHubTokenOwnership(
+    providedToken,
+    userId,
+    workosApiKey
+  );
+
+  if (!verifyResult.success) {
+    if (verifyResult.rateLimited) {
+      return { success: false, reason: "rate_limit_exceeded" };
+    }
+    if (verifyResult.missingScopes && verifyResult.missingScopes.length > 0) {
+      return { success: false, reason: "missing_scopes" };
+    }
+    return { success: false, reason: "token_verification_failed" };
   }
 
   return { success: true, token: providedToken };
@@ -1171,27 +1226,39 @@ app.get("/github-orgs", async (c) => {
 
   const githubToken = tokenResult.token;
 
-  // Fetch user's GitHub organizations
-  const orgsResponse = await fetch("https://api.github.com/user/orgs", {
-    headers: {
-      Authorization: `Bearer ${githubToken}`,
-      Accept: "application/vnd.github.v3+json",
-      "User-Agent": "Detent-API",
-    },
-  });
+  // Fetch all orgs with pagination (users can belong to >100 orgs)
+  const githubOrgs: GitHubOrg[] = [];
+  let url: string | null = "https://api.github.com/user/orgs?per_page=100";
 
-  if (!orgsResponse.ok) {
-    const errorResult = handleGitHubApiError(orgsResponse);
-    return c.json(
-      {
-        error: errorResult.error,
-        ...(errorResult.code && { code: errorResult.code }),
+  while (url) {
+    const orgsResponse: Response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${githubToken}`,
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "Detent-API",
       },
-      errorResult.status
-    );
-  }
+    });
 
-  const githubOrgs = (await orgsResponse.json()) as GitHubOrg[];
+    if (!orgsResponse.ok) {
+      const errorResult = handleGitHubApiError(orgsResponse);
+      return c.json(
+        {
+          error: errorResult.error,
+          ...(errorResult.code && { code: errorResult.code }),
+        },
+        errorResult.status
+      );
+    }
+
+    const pageOrgs = (await orgsResponse.json()) as GitHubOrg[];
+    githubOrgs.push(...pageOrgs);
+
+    const linkHeader: string | null = orgsResponse.headers.get("link");
+    const nextMatch: RegExpMatchArray | null | undefined = linkHeader?.match(
+      GITHUB_LINK_NEXT_REGEX
+    );
+    url = nextMatch?.[1] ?? null;
+  }
 
   if (githubOrgs.length === 0) {
     return c.json({ orgs: [] });

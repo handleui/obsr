@@ -3,6 +3,7 @@ import { createProviderSlug } from "../../../lib/org-settings";
 import { captureWebhookError } from "../../../lib/sentry";
 import { classifyError } from "../../../services/webhooks/error-classifier";
 import type {
+  InstallationTargetPayload,
   OrganizationPayload,
   RepositoryPayload,
   WebhookContext,
@@ -28,24 +29,92 @@ export const handleRepositoryEvent = async (
   const convex = getConvexClient(c.env);
 
   try {
-    // Find the project by provider repo ID
-    const project = (await convex.query("projects:getByRepoId", {
+    const orgs = (await convex.query(
+      "organizations:listByProviderInstallationId",
+      {
+        providerInstallationId: String(installation.id),
+      }
+    )) as Array<{
+      _id: string;
+      slug: string;
+      deletedAt?: number | null;
+    }>;
+    const org = orgs.find((item) => !item.deletedAt) ?? null;
+
+    if (!org) {
+      console.log(
+        `[repository] Organization not found for installation ${installation.id}, skipping`
+      );
+      return c.json({
+        message: "organization not found",
+        installation_id: installation.id,
+      });
+    }
+
+    // Resolve project in installation scope first to avoid cross-org ambiguity.
+    let project = (await convex.query("projects:getByOrgRepo", {
+      organizationId: org._id,
       providerRepoId: String(repository.id),
     })) as {
       _id: string;
+      organizationId: string;
       handle: string;
       providerRepoName: string;
       providerRepoFullName: string;
       isPrivate: boolean;
     } | null;
+
+    // Fallback for legacy rows created before scoped lookup.
     if (!project) {
-      console.log(
-        `[repository] Project not found for repo ID ${repository.id}, skipping`
-      );
-      return c.json({
-        message: "project not found",
-        repo_id: repository.id,
+      project = (await convex.query("projects:getByRepoId", {
+        providerRepoId: String(repository.id),
+      })) as {
+        _id: string;
+        organizationId: string;
+        handle: string;
+        providerRepoName: string;
+        providerRepoFullName: string;
+        isPrivate: boolean;
+      } | null;
+    }
+
+    if (!project) {
+      // Ensure repository events can self-heal missing project rows.
+      await convex.mutation("projects:syncFromGitHub", {
+        organizationId: org._id,
+        repos: [
+          {
+            id: String(repository.id),
+            name: repository.name,
+            fullName: repository.full_name,
+            defaultBranch: repository.default_branch,
+            isPrivate: repository.private,
+          },
+        ],
+        syncRemoved: false,
       });
+
+      project = (await convex.query("projects:getByOrgRepo", {
+        organizationId: org._id,
+        providerRepoId: String(repository.id),
+      })) as {
+        _id: string;
+        organizationId: string;
+        handle: string;
+        providerRepoName: string;
+        providerRepoFullName: string;
+        isPrivate: boolean;
+      } | null;
+
+      if (!project) {
+        console.log(
+          `[repository] Project not found for repo ID ${repository.id}, skipping`
+        );
+        return c.json({
+          message: "project not found",
+          repo_id: repository.id,
+        });
+      }
     }
 
     switch (action) {
@@ -91,16 +160,19 @@ export const handleRepositoryEvent = async (
       }
 
       case "transferred": {
-        // Repository was transferred to another owner
-        // The project stays with the original org, but we update the full_name
+        // Move repository to org tied to this installation and update name metadata.
         await convex.mutation("projects:update", {
           id: project._id,
+          organizationId: org._id,
+          providerRepoName: repository.name,
           providerRepoFullName: repository.full_name,
+          isPrivate: repository.private,
+          providerDefaultBranch: repository.default_branch,
           updatedAt: Date.now(),
         });
 
         console.log(
-          `[repository] Repository transferred, updated full_name to ${repository.full_name}`
+          `[repository] Repository transferred, updated full_name to ${repository.full_name} (org: ${project.organizationId} -> ${org._id})`
         );
 
         return c.json({
@@ -259,6 +331,117 @@ export const handleOrganizationEvent = async (
         hint: classified.hint,
         deliveryId,
         organization: organization.login,
+      },
+      500
+    );
+  }
+};
+
+// Handle installation_target events (account renamed)
+export const handleInstallationTargetEvent = async (
+  c: WebhookContext,
+  payload: InstallationTargetPayload
+) => {
+  const { action, installation_target, changes } = payload;
+  const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
+
+  console.log(
+    `[installation_target] ${action}: ${installation_target.login} (account ID: ${installation_target.id}) [delivery: ${deliveryId}]`
+  );
+
+  if (action !== "renamed") {
+    return c.json({ message: "ignored", action });
+  }
+
+  const oldLogin = changes?.login?.from;
+  if (!oldLogin) {
+    console.log(
+      "[installation_target] No login change found in payload, skipping"
+    );
+    return c.json({ message: "ignored", reason: "no login change" });
+  }
+
+  const convex = getConvexClient(c.env);
+
+  try {
+    const org = (await convex.query("organizations:getByProviderAccount", {
+      provider: "github",
+      providerAccountId: String(installation_target.id),
+    })) as {
+      _id: string;
+      slug: string;
+      providerAccountLogin: string;
+    } | null;
+
+    if (!org) {
+      console.log(
+        `[installation_target] Organization not found for account ID ${installation_target.id}, skipping`
+      );
+      return c.json({
+        message: "organization not found",
+        github_account_id: installation_target.id,
+      });
+    }
+
+    const updates: {
+      providerAccountLogin: string;
+      providerAvatarUrl: string | null;
+      updatedAt: number;
+      slug?: string;
+      name?: string;
+    } = {
+      providerAccountLogin: installation_target.login,
+      providerAvatarUrl: installation_target.avatar_url ?? null,
+      updatedAt: Date.now(),
+    };
+
+    const oldProviderSlug = createProviderSlug("github", oldLogin);
+    if (org.slug === oldProviderSlug) {
+      const newProviderSlug = createProviderSlug(
+        "github",
+        installation_target.login
+      );
+      updates.slug = newProviderSlug;
+      updates.name = installation_target.login;
+    }
+
+    await convex.mutation("organizations:update", {
+      id: org._id,
+      ...updates,
+    });
+
+    console.log(
+      `[installation_target] Updated organization ${org._id}: login ${oldLogin} -> ${installation_target.login}${
+        updates.slug ? `, slug ${org.slug} -> ${updates.slug}` : ""
+      }`
+    );
+
+    return c.json({
+      message: "installation target renamed",
+      organization_id: org._id,
+      old_login: oldLogin,
+      new_login: installation_target.login,
+      old_slug: org.slug,
+      new_slug: updates.slug ?? org.slug,
+    });
+  } catch (error) {
+    console.error(
+      `[installation_target] Error processing [delivery: ${deliveryId}]:`,
+      error
+    );
+    const classified = classifyError(error);
+    captureWebhookError(error, classified.code, {
+      eventType: "installation_target",
+      deliveryId,
+    });
+    return c.json(
+      {
+        message: "installation target error",
+        errorCode: classified.code,
+        error: classified.message,
+        hint: classified.hint,
+        deliveryId,
+        account: installation_target.login,
       },
       500
     );

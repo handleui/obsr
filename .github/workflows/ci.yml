@@ -22,8 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-        with:
-          cache: true
       - run: bun install --frozen-lockfile
       - run: bun x ultracite check .
       - name: Verify secured functions sync
@@ -35,8 +33,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-        with:
-          cache: true
       - run: bun install --frozen-lockfile
       - run: bun run check-types
 
@@ -46,8 +42,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-        with:
-          cache: true
       - run: bun install --frozen-lockfile
       - run: bun run build
       - run: bun run test
@@ -61,8 +55,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-        with:
-          cache: true
       - run: bun install --frozen-lockfile
       - run: bun run build
     env:

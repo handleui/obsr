@@ -5,18 +5,9 @@ import type * as React from "react";
 
 import { cn } from "../../lib/utils";
 
-interface TooltipRootProps
-  extends React.ComponentPropsWithoutRef<typeof Tooltip.Root> {
-  delay?: number;
-}
-
 const TooltipProvider = Tooltip.Provider;
 
-const TooltipRoot = ({ delay = 200, ...props }: TooltipRootProps) => (
-  <Tooltip.Provider delay={delay}>
-    <Tooltip.Root {...props} />
-  </Tooltip.Provider>
-);
+const TooltipRoot = Tooltip.Root;
 
 const TooltipTrigger = Tooltip.Trigger;
 

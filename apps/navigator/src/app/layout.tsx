@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import Script from "next/script";
 import "./globals.css";
+import { Providers } from "./providers";
 import WebVitals from "./web-vitals";
 
 const neueMontreal = localFont({
@@ -183,7 +184,7 @@ const RootLayout = ({
         />
       )}
       {process.env.NODE_ENV === "production" && <WebVitals />}
-      {children}
+      <Providers>{children}</Providers>
     </body>
   </html>
 );

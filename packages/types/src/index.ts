@@ -55,12 +55,15 @@ export type {
   HealUpdateStatus,
 } from "./heal.js";
 export { HealStatuses, HealTypes } from "./heal.js";
-export type { RedactionPattern } from "./sanitize.js";
+export type { DiagnosticLike, RedactionPattern } from "./sanitize.js";
 export {
   redactionPatterns,
   redactPII,
   redactSensitiveData,
   sanitizeForTelemetry,
+  scrubDiagnostic,
+  scrubFilePath,
+  scrubSecrets,
 } from "./sanitize.js";
 export type { ErrorSeverity } from "./severity.js";
 export type { ErrorSource } from "./source.js";

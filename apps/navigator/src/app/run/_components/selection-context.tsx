@@ -48,16 +48,10 @@ export const SelectionProvider = ({ children }: { children: ReactNode }) => {
     });
   }, []);
 
-  const deselect = useCallback((id: string) => {
-    setSelectedIds((prev) => {
-      if (!prev.has(id)) {
-        return prev;
-      }
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  }, []);
+  const deselect = useCallback(
+    (id: string) => setSelectedIds((prev) => removeFromSet(prev, [id])),
+    []
+  );
 
   const deselectMany = useCallback(
     (ids: Iterable<string>) =>

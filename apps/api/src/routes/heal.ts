@@ -1,4 +1,4 @@
-import { createDb, runErrorOps, runOps } from "@detent/db";
+import { runErrorOps, runOps } from "@detent/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { getConvexClient } from "../db/convex";
@@ -11,6 +11,7 @@ import {
   rejectHeal,
   triggerHeal,
 } from "../db/operations/heals";
+import { getDb } from "../lib/db.js";
 import { verifyOrgAccess } from "../lib/org-access";
 import { getOrgSettings } from "../lib/org-settings";
 import { generateAutofixCommitMessage } from "../services/autofix/commit-message";
@@ -226,7 +227,7 @@ app.get("/", async (c) => {
   }
 
   const prNumber = Number.parseInt(prNumberStr, 10);
-  if (Number.isNaN(prNumber) || prNumber <= 0) {
+  if (Number.isNaN(prNumber) || prNumber <= 0 || prNumber > 2_147_483_647) {
     return c.json({ error: "prNumber must be a positive integer" }, 400);
   }
 
@@ -493,7 +494,12 @@ app.post("/trigger", async (c) => {
     return c.json({ error: "prNumber is required" }, 400);
   }
 
-  if (typeof body.prNumber !== "number" || body.prNumber <= 0) {
+  if (
+    typeof body.prNumber !== "number" ||
+    !Number.isInteger(body.prNumber) ||
+    body.prNumber <= 0 ||
+    body.prNumber > 2_147_483_647
+  ) {
     return c.json({ error: "prNumber must be a positive integer" }, 400);
   }
 
@@ -514,7 +520,7 @@ app.post("/trigger", async (c) => {
   const { project, organization } = accessResult;
   const orgSettings = getOrgSettings(organization.settings);
 
-  const { db, pool } = createDb(c.env.DATABASE_URL);
+  const { db, pool } = getDb(c.env);
   try {
     const run = await runOps.getLatestByProjectPr(
       db,

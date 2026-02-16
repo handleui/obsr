@@ -35,6 +35,53 @@ const ProviderIcon = ({ src }: { src: string }) => (
   <Image alt="" className="size-3" height={12} src={src} width={12} />
 );
 
+const OpenLink = ({ provider }: { provider: Provider }) => (
+  <TooltipRoot>
+    <TooltipTrigger
+      className="flex h-full items-center justify-center gap-2 border-subtle border-l px-3 hover:bg-surface"
+      render={
+        // biome-ignore lint/a11y/useAnchorContent: content provided by TooltipTrigger children
+        <a href={provider.url} rel="noopener noreferrer" target="_blank" />
+      }
+    >
+      <ProviderIcon src={provider.icon} />
+      <span className="font-geist text-[12px] text-black">Open</span>
+    </TooltipTrigger>
+    <TooltipContent>Open in {provider.name}</TooltipContent>
+  </TooltipRoot>
+);
+
+const ProviderDropdown = ({
+  anchorRef,
+}: {
+  anchorRef: React.RefObject<HTMLDivElement | null>;
+}) => (
+  <Select.Portal>
+    <Select.Positioner
+      align="end"
+      alignItemWithTrigger={false}
+      anchor={anchorRef}
+      side="bottom"
+      sideOffset={0}
+    >
+      <Select.Popup className="w-[var(--anchor-width)] border border-subtle border-t-0 border-r-0 bg-white">
+        <Select.List>
+          {PROVIDERS.map((provider) => (
+            <Select.Item
+              className="flex cursor-pointer items-center gap-2 px-3 py-2 text-[12px] text-black data-[highlighted]:bg-surface"
+              key={provider.name}
+              value={provider.name}
+            >
+              <ProviderIcon src={provider.icon} />
+              <Select.ItemText>{provider.name}</Select.ItemText>
+            </Select.Item>
+          ))}
+        </Select.List>
+      </Select.Popup>
+    </Select.Positioner>
+  </Select.Portal>
+);
+
 const ProviderSelect = () => {
   const [selected, setSelected] = useState(DEFAULT_PROVIDER);
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -52,23 +99,7 @@ const ProviderSelect = () => {
       onValueChange={handleValueChange}
     >
       <div className="flex h-10 items-center" ref={anchorRef}>
-        <TooltipRoot>
-          <TooltipTrigger
-            className="flex h-full items-center justify-center gap-2 border-subtle border-l px-3 hover:bg-surface"
-            render={
-              // biome-ignore lint/a11y/useAnchorContent: content provided by TooltipTrigger children
-              <a
-                href={selected.url}
-                rel="noopener noreferrer"
-                target="_blank"
-              />
-            }
-          >
-            <ProviderIcon src={selected.icon} />
-            <span className="font-geist text-[12px] text-black">Open</span>
-          </TooltipTrigger>
-          <TooltipContent>Open in {selected.name}</TooltipContent>
-        </TooltipRoot>
+        <OpenLink provider={selected} />
         <TooltipRoot>
           <TooltipTrigger render={<span />}>
             <Select.Trigger className="flex size-10 cursor-pointer items-center justify-center border-subtle border-l hover:bg-surface">
@@ -80,30 +111,7 @@ const ProviderSelect = () => {
           <TooltipContent>Switch provider</TooltipContent>
         </TooltipRoot>
       </div>
-      <Select.Portal>
-        <Select.Positioner
-          align="end"
-          alignItemWithTrigger={false}
-          anchor={anchorRef}
-          side="bottom"
-          sideOffset={0}
-        >
-          <Select.Popup className="w-[var(--anchor-width)] border border-subtle border-t-0 border-r-0 bg-white">
-            <Select.List>
-              {PROVIDERS.map((provider) => (
-                <Select.Item
-                  className="flex cursor-pointer items-center gap-2 px-3 py-2 text-[12px] text-black data-[highlighted]:bg-surface"
-                  key={provider.name}
-                  value={provider.name}
-                >
-                  <ProviderIcon src={provider.icon} />
-                  <Select.ItemText>{provider.name}</Select.ItemText>
-                </Select.Item>
-              ))}
-            </Select.List>
-          </Select.Popup>
-        </Select.Positioner>
-      </Select.Portal>
+      <ProviderDropdown anchorRef={anchorRef} />
     </Select.Root>
   );
 };

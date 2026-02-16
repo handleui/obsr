@@ -24,31 +24,43 @@ const JOB_LABELS: Record<string, string> = {
   "check-types": "Check Types",
 };
 
-const groupByJob = (errors: ErrorDetailData[], healingErrorId: string) => {
-  const resolved = errors.map((e) => ({
+type ResolvedError = ErrorDetailData & { status: string };
+
+const resolveHealingStatus = (
+  errors: ErrorDetailData[],
+  healingErrorId: string
+): ResolvedError[] =>
+  errors.map((e) => ({
     ...e,
     status: e.id === healingErrorId ? "Healing" : e.status,
   }));
 
-  const jobMap = new Map<string, typeof resolved>();
-  for (const error of resolved) {
+const collectByJobPrefix = (errors: ResolvedError[]) => {
+  const jobMap = new Map<string, ResolvedError[]>();
+  for (const error of errors) {
     const prefix = error.id.split("-")[0];
     const existing = jobMap.get(prefix) ?? [];
     existing.push(error);
     jobMap.set(prefix, existing);
   }
+  return jobMap;
+};
 
-  const groups: { label: string; items: typeof resolved }[] = [];
-  for (const [prefix, items] of jobMap) {
-    const sorted = [...items].sort(
-      (a, b) =>
-        STATUS_ORDER.indexOf(a.status as (typeof STATUS_ORDER)[number]) -
-        STATUS_ORDER.indexOf(b.status as (typeof STATUS_ORDER)[number])
-    );
-    groups.push({ label: JOB_LABELS[prefix] ?? prefix, items: sorted });
-  }
+const sortByStatusOrder = (items: ResolvedError[]) =>
+  [...items].sort(
+    (a, b) =>
+      STATUS_ORDER.indexOf(a.status as (typeof STATUS_ORDER)[number]) -
+      STATUS_ORDER.indexOf(b.status as (typeof STATUS_ORDER)[number])
+  );
 
-  return groups;
+const groupByJob = (errors: ErrorDetailData[], healingErrorId: string) => {
+  const resolved = resolveHealingStatus(errors, healingErrorId);
+  const jobMap = collectByJobPrefix(resolved);
+
+  return [...jobMap.entries()].map(([prefix, items]) => ({
+    label: JOB_LABELS[prefix] ?? prefix,
+    items: sortByStatusOrder(items),
+  }));
 };
 
 const HealSidebar = ({

@@ -23,6 +23,59 @@ const shortenPath = (path: string): { prefix: string; name: string } => {
   return { prefix, name };
 };
 
+const DiffStatsBadge = ({
+  additions,
+  deletions,
+}: {
+  additions?: number;
+  deletions?: number;
+}) => {
+  if (additions == null && deletions == null) {
+    return null;
+  }
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 font-mono text-[12px] leading-[1.1]">
+      {additions != null && additions > 0 && (
+        <span className="text-[#34d399]">+{additions}</span>
+      )}
+      {deletions != null && deletions > 0 && (
+        <span className="text-failure-fg">-{deletions}</span>
+      )}
+    </span>
+  );
+};
+
+const OverflowToggle = ({
+  overflow,
+  onToggle,
+}: {
+  overflow: "wrap" | "scroll";
+  onToggle: () => void;
+}) => (
+  // biome-ignore lint/a11y/useSemanticElements: nested inside Accordion.Trigger (button), cannot nest another button
+  <span
+    className="flex size-6 cursor-pointer items-center justify-center text-muted transition-colors hover:text-black"
+    onClick={(e) => {
+      e.stopPropagation();
+      onToggle();
+    }}
+    onKeyDown={(e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.stopPropagation();
+        onToggle();
+      }
+    }}
+    role="button"
+    tabIndex={0}
+  >
+    {overflow === "wrap" ? (
+      <WrapText height={12} strokeWidth={1.2} width={12} />
+    ) : (
+      <AlignLeft height={12} strokeWidth={1.2} width={12} />
+    )}
+  </span>
+);
+
 const FileAccordionHeader = ({
   filename,
   overflow,
@@ -41,40 +94,10 @@ const FileAccordionHeader = ({
             {prefix && <span className="text-muted">{prefix}/</span>}
             <span className="text-black">{name}</span>
           </span>
-          {(additions != null || deletions != null) && (
-            <span className="flex shrink-0 items-center gap-1.5 font-mono text-[12px] leading-[1.1]">
-              {additions != null && additions > 0 && (
-                <span className="text-[#34d399]">+{additions}</span>
-              )}
-              {deletions != null && deletions > 0 && (
-                <span className="text-failure-fg">-{deletions}</span>
-              )}
-            </span>
-          )}
+          <DiffStatsBadge additions={additions} deletions={deletions} />
         </span>
         <span className="flex shrink-0 items-center gap-2">
-          {/* biome-ignore lint/a11y/useSemanticElements: nested inside Accordion.Trigger (button), cannot nest another button */}
-          <span
-            className="flex size-6 cursor-pointer items-center justify-center text-muted transition-colors hover:text-black"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleOverflow();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.stopPropagation();
-                onToggleOverflow();
-              }
-            }}
-            role="button"
-            tabIndex={0}
-          >
-            {overflow === "wrap" ? (
-              <WrapText height={12} strokeWidth={1.2} width={12} />
-            ) : (
-              <AlignLeft height={12} strokeWidth={1.2} width={12} />
-            )}
-          </span>
+          <OverflowToggle onToggle={onToggleOverflow} overflow={overflow} />
           <NavArrowDown className="size-3 text-black transition-transform group-data-[panel-open]:rotate-180" />
         </span>
       </Accordion.Trigger>

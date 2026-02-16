@@ -1,24 +1,16 @@
 "use client";
 
+import { UserAvatar } from "@detent/ui/avatar";
 import { Button } from "@detent/ui/button";
 import { Dropdown } from "@detent/ui/dropdown";
 import { ArrowRight, Sparks } from "iconoir-react";
-import Image from "next/image";
 import { JobList } from "./job-list";
 import { useRunData } from "./run-data-context";
 import { RunFilters } from "./run-filters";
 
 const AuthorBadge = ({ name }: { name: string }) => (
   <div className="flex items-center gap-2">
-    <div className="relative size-[12px] overflow-clip rounded-[2px]">
-      <div className="absolute inset-0 rounded-[2px] bg-[#d9d9d9]" />
-      <Image
-        alt=""
-        className="rounded-[2px] object-cover"
-        fill
-        src="/demo/avatar.png"
-      />
-    </div>
+    <UserAvatar className="size-[12px] rounded-[2px]" name={name} size={12} />
     <p className="text-[13px] text-black leading-[1.2]">{name}</p>
   </div>
 );
@@ -39,7 +31,7 @@ const DiffStats = ({
   deletions: number;
 }) => (
   <div className="flex items-center gap-2 text-[13px] leading-[1.2]">
-    <p className="text-[#00ec7e]">+{additions}</p>
+    <p className="text-[#34d399]">+{additions}</p>
     <p className="text-failure-fg">-{deletions}</p>
   </div>
 );
@@ -52,12 +44,24 @@ const StatusBar = () => (
         Waiting for jobs to complete
       </p>
     </div>
-    <Button className="flex-1 gap-2.5 text-[14px] leading-[1.1]">
+    <Button className="flex-1 gap-2.5 text-[14px] leading-[1.1]" type="button">
       <Sparks className="!size-3" color="white" />
       Heal All Jobs
     </Button>
   </div>
 );
+
+const PullRequestMeta = () => {
+  const { run } = useRunData();
+  return (
+    <div className="flex items-center gap-6">
+      <AuthorBadge name={run.author} />
+      <BranchInfo source={run.branch.source} target={run.branch.target} />
+      <p className="text-[13px] text-black leading-[1.2]">{run.files} files</p>
+      <DiffStats additions={run.additions} deletions={run.deletions} />
+    </div>
+  );
+};
 
 const PullRequestHeader = () => {
   const { run } = useRunData();
@@ -71,14 +75,7 @@ const PullRequestHeader = () => {
           </p>
           <p className="w-full text-[24px] text-black">{run.title}</p>
         </div>
-        <div className="flex items-center gap-6">
-          <AuthorBadge name={run.author} />
-          <BranchInfo source={run.branch.source} target={run.branch.target} />
-          <p className="text-[13px] text-black leading-[1.2]">
-            {run.files} files
-          </p>
-          <DiffStats additions={run.additions} deletions={run.deletions} />
-        </div>
+        <PullRequestMeta />
       </div>
 
       <StatusBar />

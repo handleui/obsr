@@ -35,5 +35,11 @@
       "binding": "LOGS_BUCKET",
       "bucket_name": "detent-logs"
     }
+  ],
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "4a61e3f0436a4a8da456beeaebbe9f26"
+    }
   ]
 }

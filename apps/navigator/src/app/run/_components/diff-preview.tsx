@@ -2,6 +2,7 @@
 
 import { Accordion } from "@base-ui-components/react/accordion";
 import { PatchDiff } from "@pierre/diffs/react";
+import type * as React from "react";
 import { useMemo, useState } from "react";
 import { FileAccordionHeader } from "./file-accordion-header";
 import { BASE_PIERRE_STYLE, COLUMN_CSS } from "./pierre-css";

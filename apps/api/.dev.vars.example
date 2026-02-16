@@ -1,36 +1,46 @@
-# Local development environment variables (required only)
+# API (Cloudflare Workers) environment variables
 # Copy to .dev.vars and fill in your values
 
-GITHUB_APP_ID=your_app_id
-GITHUB_CLIENT_ID=your_client_id
-# IMPORTANT: Private key must be single-line with literal \n (dotenv doesn't support multiline)
-# Convert with: awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' your-key.pem
-GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n...\n-----END RSA PRIVATE KEY-----"
-GITHUB_WEBHOOK_SECRET=your_webhook_secret
+# GitHub App
+GITHUB_APP_ID=
+GITHUB_CLIENT_ID=
+# Private key must be single-line with literal \n
+# Convert: awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' your-key.pem
+GITHUB_APP_PRIVATE_KEY=
+GITHUB_WEBHOOK_SECRET=
 
-# WorkOS User Management credentials
-WORKOS_CLIENT_ID=your_workos_client_id
-WORKOS_API_KEY=your_workos_api_key
+# WorkOS
+WORKOS_CLIENT_ID=
+WORKOS_API_KEY=
 
 # Convex
 CONVEX_URL=https://your-deployment.convex.cloud
-CONVEX_SERVICE_TOKEN=your_convex_service_token
+CONVEX_SERVICE_TOKEN=
 
-# Upstash Redis for rate limiting
-UPSTASH_REDIS_REST_URL=your_upstash_url
-UPSTASH_REDIS_REST_TOKEN=your_upstash_token
+# Neon PostgreSQL (local dev, prod uses Hyperdrive)
+DATABASE_URL=postgresql://user:pass@host/neondb?sslmode=require
+# Hyperdrive local override (wrangler dev needs this to simulate the HYPERDRIVE binding)
+CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://user:pass@host/neondb?sslmode=require
 
-# Email (Resend) configuration
-RESEND_API_KEY=your_resend_api_key
+# Upstash Redis (rate limiting)
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
+
+# Resend (email)
+RESEND_API_KEY=
 RESEND_EMAIL_FROM="Detent <noreply@detent.dev>"
 
-# Navigator (web app) base URL for invitation links
+# URLs
 NAVIGATOR_BASE_URL=http://localhost:3001
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001
 
-# Polar billing
-POLAR_ACCESS_TOKEN=your_polar_access_token
-POLAR_ORGANIZATION_ID=your_polar_org_id
-POLAR_WEBHOOK_SECRET=your_polar_webhook_secret
+# Polar (billing)
+POLAR_ACCESS_TOKEN=
+POLAR_ORGANIZATION_ID=
+POLAR_WEBHOOK_SECRET=
 
-# AI Gateway API key for AI extraction (@detent/extract)
-AI_GATEWAY_API_KEY=your_ai_gateway_api_key
+# AI Gateway
+AI_GATEWAY_API_KEY=
+
+# Sentry
+SENTRY_DSN=

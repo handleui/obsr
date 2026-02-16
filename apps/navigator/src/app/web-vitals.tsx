@@ -1,12 +1,17 @@
 "use client";
 
-import dynamic from "next/dynamic";
+import { lazy, Suspense } from "react";
 
-const BetterStackWebVitals = dynamic(
-  () => import("@logtail/next/webVitals").then((m) => m.BetterStackWebVitals),
-  { ssr: false }
+const BetterStackWebVitals = lazy(() =>
+  import("@logtail/next/webVitals").then((m) => ({
+    default: m.BetterStackWebVitals,
+  }))
 );
 
-const WebVitals = () => <BetterStackWebVitals />;
+const WebVitals = () => (
+  <Suspense fallback={null}>
+    <BetterStackWebVitals />
+  </Suspense>
+);
 
 export default WebVitals;

@@ -15,9 +15,8 @@ import {
   Sparks,
   Xmark,
 } from "iconoir-react";
-import dynamic from "next/dynamic";
 import type * as React from "react";
-import { useCallback, useEffect, useMemo } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo } from "react";
 import type { Category } from "./error-line";
 import { useFilters } from "./filter-context";
 import { type ErrorDetailData, errorIdToJobKey } from "./mock-data";
@@ -27,8 +26,8 @@ import { ShimmerText } from "./shimmer-text";
 
 const FORM_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
 
-const DiffPreview = dynamic(() => import("./diff-preview"));
-const FaultyLinesPreview = dynamic(() => import("./faulty-lines-preview"));
+const DiffPreview = lazy(() => import("./diff-preview"));
+const FaultyLinesPreview = lazy(() => import("./faulty-lines-preview"));
 
 const CATEGORY_STYLE = {
   Error: { bg: "bg-failure-bg", fg: "text-failure-fg", icon: "!" },
@@ -75,7 +74,10 @@ const HealButton = ({
   onHeal?: () => void;
 }) =>
   healing ? (
-    <Button className="pointer-events-none bg-healing-fg text-[14px] leading-[1.1] hover:bg-healing-fg">
+    <Button
+      className="pointer-events-none bg-healing-fg text-[14px] leading-[1.1] hover:bg-healing-fg"
+      type="button"
+    >
       <Sparks color="white" />
       <ShimmerText
         animation="animate-shimmer-sweep-fast"
@@ -87,7 +89,11 @@ const HealButton = ({
       </ShimmerText>
     </Button>
   ) : (
-    <Button className="text-[14px] leading-[1.1]" onClick={onHeal}>
+    <Button
+      className="text-[14px] leading-[1.1]"
+      onClick={onHeal}
+      type="button"
+    >
       <Sparks color="white" />
       Heal
     </Button>
@@ -143,7 +149,7 @@ const ErrorCardHeader = ({
 
   return (
     <div
-      className={`sticky top-10 z-[9] flex h-10 items-center justify-between border-subtle border-b has-[button[aria-expanded]:hover]:border-b-black ${healing ? "bg-[color-mix(in_srgb,var(--color-healing-bg)_40%,white)]" : "bg-white"}`}
+      className={`sticky top-10 z-[9] flex h-10 items-center justify-between border-subtle border-b has-[button[aria-expanded]:hover]:border-b-black ${healing ? "bg-healing-light" : "bg-white"}`}
     >
       <Accordion.Header className="min-w-0 flex-1">
         <ErrorCardTrigger error={error} healing={healing} style={style} />
@@ -189,16 +195,16 @@ const PreviewSectionHeader = ({ label }: { label: string }) => (
 const ErrorCardPreview = ({ error }: ErrorCardProps) => {
   if (error.status === "Fixed" && error.diff && error.filename) {
     return (
-      <>
+      <Suspense>
         <PreviewSectionHeader label="Modified Files" />
         <DiffPreview diff={error.diff} filename={error.filename} />
-      </>
+      </Suspense>
     );
   }
 
   if (error.sourceLines && error.faultyLineNumbers && error.filename) {
     return (
-      <>
+      <Suspense>
         <PreviewSectionHeader label="Source" />
         <FaultyLinesPreview
           category={error.category}
@@ -208,7 +214,7 @@ const ErrorCardPreview = ({ error }: ErrorCardProps) => {
           filename={error.filename}
           lines={error.sourceLines}
         />
-      </>
+      </Suspense>
     );
   }
 

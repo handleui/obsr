@@ -1,5 +1,5 @@
-import { createDb } from "@detent/db";
 import { getConvexClient } from "../../../db/convex";
+import { getDb } from "../../../lib/db.js";
 import { extractAndStoreErrors } from "../../../services/webhooks/error-extraction";
 import { checkAndTriggerAggregation } from "../../../services/webhooks/job-aggregation";
 import type { UpsertJobData } from "../../../services/webhooks/job-operations";
@@ -75,7 +75,7 @@ const prepareJobHandler = async (
   );
 
   const db = getConvexClient(c.env);
-  const { db: drizzleDb, pool } = createDb(c.env.DATABASE_URL);
+  const { db: drizzleDb, pool } = getDb(c.env);
   const normalizedSha = workflow_job.head_sha.toLowerCase();
   const prNumber = await lookupPrNumberFromRuns(
     drizzleDb,

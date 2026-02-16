@@ -1,6 +1,7 @@
-import { createDb, type Db, runErrorOps, runOps } from "@detent/db";
+import { type Db, runErrorOps, runOps } from "@detent/db";
 import { getConvexClient } from "../../../db/convex";
 import { getHealsByPr, triggerHeal } from "../../../db/operations/heals";
+import { getDb } from "../../../lib/db.js";
 import {
   getOrgSettings,
   type OrganizationSettings,
@@ -26,9 +27,6 @@ const DETENTSH_COMMAND_PATTERN = /@detentsh(?:\s+(.*))?/i;
 
 const MAX_USER_INSTRUCTIONS_LENGTH = 500;
 
-// SECURITY: Patterns that indicate prompt injection attempts
-// These patterns attempt to override system instructions or manipulate model behavior
-// @internal Exported for testing only
 export const PROMPT_INJECTION_PATTERNS = [
   /ignore\s+(previous|all|above|prior)\s+instructions/i,
   /disregard\s+(previous|all|above|prior)/i,
@@ -36,9 +34,9 @@ export const PROMPT_INJECTION_PATTERNS = [
   /you\s+are\s+now\s+a/i,
   /new\s+instruction[s]?:/i,
   /system\s*prompt/i,
-  /\[\[.*system.*\]\]/i, // [[system]] style delimiters
-  /```\s*(system|assistant)/i, // Code block role injection
-  /<\|.*\|>/i, // Special token patterns like <|im_end|>
+  /\[\[.*system.*\]\]/i,
+  /```\s*(system|assistant)/i,
+  /<\|.*\|>/i,
   /ASSISTANT:/i,
   /SYSTEM:/i,
   /Human:/i,
@@ -73,8 +71,6 @@ interface HealError {
   fixable?: boolean | null;
 }
 
-// SECURITY: Control character pattern for sanitization (built from char codes to avoid lint errors)
-// Matches: \x00-\x08, \x0B, \x0C, \x0E-\x1F, \x7F (excludes \t=0x09, \n=0x0A, \r=0x0D)
 const buildControlCharPattern = (): RegExp => {
   const parts = [
     "[",
@@ -93,8 +89,6 @@ const buildControlCharPattern = (): RegExp => {
 };
 const CONTROL_CHAR_PATTERN = buildControlCharPattern();
 
-// SECURITY: defense-in-depth against prompt injection; model also treats user content as data
-// @internal Exported for testing only
 export const sanitizeUserInstructions = (
   instructions: string
 ): { sanitized: string; blocked: boolean } => {
@@ -348,7 +342,7 @@ const handleHealCommand = async (
   const repo = repository.name;
 
   const convex = getConvexClient(c.env);
-  const { db: drizzleDb, pool } = createDb(c.env.DATABASE_URL);
+  const { db: drizzleDb, pool } = getDb(c.env);
 
   try {
     const projectContextResult = await loadHealProjectContext(

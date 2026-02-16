@@ -1,5 +1,6 @@
 "use client";
 
+import type * as React from "react";
 import {
   type ReactNode,
   type Ref,
@@ -26,6 +27,8 @@ interface ResizableGridProps {
 
 const clamp = (min: number, value: number, max: number) =>
   Math.min(max, Math.max(min, value));
+
+const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
 
 const CONSTRAINTS = {
   left: { min: 0, max: 400, initial: 300 },
@@ -252,49 +255,33 @@ const useDragResize = (
 
   const animateToWidths = useCallback(
     (targetLeft: number, targetRight: number, duration = 350) => {
-      if (
+      const isAlreadyAtTarget =
         widthRef.current.left === targetLeft &&
-        widthRef.current.right === targetRight
-      ) {
-        setHitboxActive({
-          left: targetLeft === 0,
-          right: targetRight === 0,
-        });
+        widthRef.current.right === targetRight;
+
+      if (isAlreadyAtTarget) {
+        setHitboxActive({ left: targetLeft === 0, right: targetRight === 0 });
         return;
       }
 
-      const ANIMATION_DURATION = duration;
       const startLeft = widthRef.current.left;
       const startRight = widthRef.current.right;
       const startTime = performance.now();
 
-      const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
-
-      const interpolateFrame = (now: number) => {
-        const progress = Math.min(1, (now - startTime) / ANIMATION_DURATION);
+      const tick = (now: number) => {
+        const progress = Math.min(1, (now - startTime) / duration);
         const ease = easeOutCubic(progress);
         widthRef.current.left = startLeft + (targetLeft - startLeft) * ease;
         widthRef.current.right = startRight + (targetRight - startRight) * ease;
         applyWidths();
-        return progress;
-      };
 
-      const finalizeAnimation = () => {
-        widthRef.current = { left: targetLeft, right: targetRight };
-        applyWidths();
-        setHitboxActive({
-          left: targetLeft === 0,
-          right: targetRight === 0,
-        });
-      };
-
-      const tick = (now: number) => {
-        const progress = interpolateFrame(now);
         if (progress < 1) {
           rafRef.current = requestAnimationFrame(tick);
           return;
         }
-        finalizeAnimation();
+        widthRef.current = { left: targetLeft, right: targetRight };
+        applyWidths();
+        setHitboxActive({ left: targetLeft === 0, right: targetRight === 0 });
       };
 
       cancelAnimationFrame(rafRef.current);

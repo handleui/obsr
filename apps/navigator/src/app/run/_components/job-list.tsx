@@ -172,6 +172,118 @@ const JOB_LABELS: Record<string, string> = {
   build: "Build",
 };
 
+const SUBTITLE_CLASS = "text-[13px] leading-[1.1]";
+
+const resolveJobSubtitle = (status: string, issueCount: number): ReactNode => {
+  if (status === "waiting") {
+    return (
+      <ShimmerText
+        animation="animate-shimmer-sweep-fast"
+        className={SUBTITLE_CLASS}
+        color="var(--color-dim)"
+        peakColor="var(--color-waiting-accent)"
+      >
+        Waiting for job to complete
+      </ShimmerText>
+    );
+  }
+  if (status === "healing") {
+    return (
+      <ShimmerText
+        animation="animate-shimmer-sweep-fast"
+        className={SUBTITLE_CLASS}
+        color="var(--color-dim)"
+        peakColor={HEAL_COLOR}
+      >
+        Healing Errors
+      </ShimmerText>
+    );
+  }
+  if (status === "failed" && issueCount > 0) {
+    return (
+      <p className={`${SUBTITLE_CLASS} text-dim`}>
+        Failed with {issueCount} issues
+      </p>
+    );
+  }
+  if (status === "successful") {
+    return <p className={`${SUBTITLE_CLASS} text-dim`}>Successful in 20s</p>;
+  }
+  return undefined;
+};
+
+const WaitingPanel = () => (
+  <EmptyPanel
+    icon={<WaitingDot size="sm" />}
+    label={
+      <TooltipRoot>
+        <TooltipTrigger
+          className="flex cursor-pointer items-center gap-1.5"
+          render={
+            // biome-ignore lint/a11y/useAnchorContent: content provided by TooltipTrigger children
+            <a
+              href="https://github.com"
+              rel="noopener noreferrer"
+              target="_blank"
+            />
+          }
+        >
+          <ShimmerText
+            animation="animate-shimmer-sweep-fast"
+            color="var(--color-muted)"
+            peakColor="var(--color-waiting-accent)"
+          >
+            Waiting for results
+          </ShimmerText>
+          <ArrowUpRight
+            className="shrink-0 text-muted"
+            height={11}
+            strokeWidth={1.5}
+            width={11}
+          />
+        </TooltipTrigger>
+        <TooltipContent>View on GitHub</TooltipContent>
+      </TooltipRoot>
+    }
+  />
+);
+
+const SuccessPanel = () => (
+  <EmptyPanel
+    icon={
+      <Check color={SUCCESS_COLOR} height={14} strokeWidth={1.2} width={14} />
+    }
+    label="All checks passed"
+  />
+);
+
+const SkippedPanel = () => (
+  <EmptyPanel icon={<MinusCircle height={14} width={14} />} label="Skipped" />
+);
+
+const NoIssuesPanel = () => (
+  <EmptyPanel icon={<MinusCircle height={14} width={14} />} label="No issues" />
+);
+
+const resolveJobPanel = (
+  status: string,
+  issues: ErrorDetailData[]
+): ReactNode => {
+  if (status === "waiting") {
+    return <WaitingPanel />;
+  }
+  if (status === "successful") {
+    return <SuccessPanel />;
+  }
+  if (status === "skipped") {
+    return <SkippedPanel />;
+  }
+  if (issues.length > 0) {
+    return <IssueTable items={issues} />;
+  }
+  return <NoIssuesPanel />;
+};
+
 const GenericJob = ({
   jobKey,
   status,
@@ -184,120 +296,12 @@ const GenericJob = ({
   const label = JOB_LABELS[jobKey] ?? jobKey;
   const icon = STATUS_ICONS[status] ?? <MinusCircle height={16} width={16} />;
 
-  const subtitle = (() => {
-    if (status === "waiting") {
-      return (
-        <ShimmerText
-          animation="animate-shimmer-sweep-fast"
-          className="text-[13px] leading-[1.1]"
-          color="var(--color-dim)"
-          peakColor="var(--color-waiting-accent)"
-        >
-          Waiting for job to complete
-        </ShimmerText>
-      );
-    }
-    if (status === "healing") {
-      return (
-        <ShimmerText
-          animation="animate-shimmer-sweep-fast"
-          className="text-[13px] leading-[1.1]"
-          color="var(--color-dim)"
-          peakColor={HEAL_COLOR}
-        >
-          Healing Errors
-        </ShimmerText>
-      );
-    }
-    if (status === "failed" && issues.length > 0) {
-      return (
-        <p className="text-[13px] text-dim leading-[1.1]">
-          Failed with {issues.length} issues
-        </p>
-      );
-    }
-    if (status === "successful") {
-      return (
-        <p className="text-[13px] text-dim leading-[1.1]">Successful in 20s</p>
-      );
-    }
-    return undefined;
-  })();
+  const subtitle = resolveJobSubtitle(status, issues.length);
 
   const trailing =
     status === "failed" || status === "healing" ? HEAL_ICON : undefined;
 
-  const panel = (() => {
-    if (status === "waiting") {
-      return (
-        <EmptyPanel
-          icon={<WaitingDot size="sm" />}
-          label={
-            <TooltipRoot>
-              <TooltipTrigger
-                className="flex cursor-pointer items-center gap-1.5"
-                render={
-                  // biome-ignore lint/a11y/useAnchorContent: content provided by TooltipTrigger children
-                  <a
-                    href="https://github.com"
-                    rel="noopener noreferrer"
-                    target="_blank"
-                  />
-                }
-              >
-                <ShimmerText
-                  animation="animate-shimmer-sweep-fast"
-                  color="var(--color-muted)"
-                  peakColor="var(--color-waiting-accent)"
-                >
-                  Waiting for results
-                </ShimmerText>
-                <ArrowUpRight
-                  className="shrink-0 text-muted"
-                  height={11}
-                  strokeWidth={1.5}
-                  width={11}
-                />
-              </TooltipTrigger>
-              <TooltipContent>View on GitHub</TooltipContent>
-            </TooltipRoot>
-          }
-        />
-      );
-    }
-    if (status === "successful") {
-      return (
-        <EmptyPanel
-          icon={
-            <Check
-              color={SUCCESS_COLOR}
-              height={14}
-              strokeWidth={1.2}
-              width={14}
-            />
-          }
-          label="All checks passed"
-        />
-      );
-    }
-    if (status === "skipped") {
-      return (
-        <EmptyPanel
-          icon={<MinusCircle height={14} width={14} />}
-          label="Skipped"
-        />
-      );
-    }
-    if (issues.length > 0) {
-      return <IssueTable items={issues} />;
-    }
-    return (
-      <EmptyPanel
-        icon={<MinusCircle height={14} width={14} />}
-        label="No issues"
-      />
-    );
-  })();
+  const panel = resolveJobPanel(status, issues);
 
   return (
     <Accordion.Item className="w-full" value={jobKey}>

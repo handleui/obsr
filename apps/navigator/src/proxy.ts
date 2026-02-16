@@ -16,11 +16,32 @@ const SYSTEM_ROUTES = new Set([
   "manifest.webmanifest",
 ]);
 
+const TRAVERSAL_PATTERNS = ["..", ".", "\0", "%2e", "%2E", "%2f", "%2F", "%00"];
+
+const hasPathTraversal = (segments: string[]): boolean =>
+  segments.some((s) => {
+    if (!s || typeof s !== "string") {
+      return true;
+    }
+    try {
+      const decoded = decodeURIComponent(s);
+      return TRAVERSAL_PATTERNS.some(
+        (p) => s === p || s.includes(p) || decoded.includes(p)
+      );
+    } catch {
+      return true;
+    }
+  });
+
 export const proxy = (request: NextRequest) => {
   const { pathname } = request.nextUrl;
-  const firstSegment = pathname.split("/")[1];
+  const segments = pathname.split("/").filter(Boolean);
+  const firstSegment = segments[0];
 
-  // Skip static assets (files with extensions)
+  if (hasPathTraversal(segments)) {
+    return NextResponse.next();
+  }
+
   if (
     pathname.includes(".") ||
     !firstSegment ||
@@ -33,7 +54,6 @@ export const proxy = (request: NextRequest) => {
     return NextResponse.next();
   }
 
-  // Rewrite /:org/:project/:run → /run/:org/:project/:run
   return NextResponse.rewrite(new URL(`/run${pathname}`, request.url));
 };
 

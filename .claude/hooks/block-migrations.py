@@ -7,9 +7,9 @@ manually edited. This hook blocks Edit/Write operations on *.sql files
 in the drizzle/ directory.
 
 To modify the schema:
-1. Edit apps/api/src/db/schema.ts
-2. Run: cd apps/api && bun run db:generate
-3. Run: cd apps/api && bun run db:migrate
+1. Edit packages/db/src/schema/*.ts
+2. Run: cd packages/db && bun run db:generate
+3. Run: cd packages/db && bun run db:migrate
 """
 import json
 import sys
@@ -23,25 +23,55 @@ except json.JSONDecodeError:
 tool_name = input_data.get("tool_name", "")
 tool_input = input_data.get("tool_input", {})
 file_path = tool_input.get("file_path", "")
+command = tool_input.get("command", "")
 
-# Block edits to Drizzle migration files
-blocked_patterns = [
-    r"apps/api/drizzle/.*\.sql$",      # Migration SQL files
-    r"apps/api/drizzle/meta/.*\.json$", # Migration metadata/snapshots
+BLOCKED_MSG = (
+    "Migration files are auto-generated and must NOT be manually edited.\n\n"
+    "To modify the database schema:\n"
+    "  1. Edit packages/db/src/schema/*.ts\n"
+    "  2. Run: cd packages/db && bun run db:generate\n"
+    "  3. Run: cd packages/db && bun run db:migrate"
+)
+
+# Patterns matching migration file paths
+migration_patterns = [
+    r"packages/db/drizzle/.*\.sql",
+    r"packages/db/drizzle/meta/.*\.json",
 ]
 
+# Block Edit/Write operations targeting migration files
 if tool_name in ["Edit", "Write"]:
-    for pattern in blocked_patterns:
+    for pattern in migration_patterns:
         if re.search(pattern, file_path):
             print(
                 f"BLOCKED: Cannot edit Drizzle migration file: {file_path}\n\n"
-                f"Migration files are auto-generated and must NOT be manually edited.\n\n"
-                f"To modify the database schema:\n"
-                f"  1. Edit apps/api/src/db/schema.ts\n"
-                f"  2. Run: cd apps/api && bun run db:generate\n"
-                f"  3. Run: cd apps/api && bun run db:migrate",
-                file=sys.stderr
+                + BLOCKED_MSG,
+                file=sys.stderr,
             )
-            sys.exit(2)  # Exit code 2 = block the operation
+            sys.exit(2)
 
-sys.exit(0)  # Allow the edit
+# Block Bash commands that write to migration files (sed, tee, cp, mv, echo/cat redirect)
+if tool_name == "Bash" and command:
+    for pattern in migration_patterns:
+        if re.search(pattern, command):
+            write_indicators = [
+                r"\bsed\b.*-i",
+                r"\btee\b",
+                r"\bcp\b",
+                r"\bmv\b",
+                r">",
+                r"\bdd\b",
+                r"\bchmod\b",
+                r"\brm\b",
+                r"\btruncate\b",
+            ]
+            for indicator in write_indicators:
+                if re.search(indicator, command):
+                    print(
+                        f"BLOCKED: Bash command would modify Drizzle migration files.\n\n"
+                        + BLOCKED_MSG,
+                        file=sys.stderr,
+                    )
+                    sys.exit(2)
+
+sys.exit(0)

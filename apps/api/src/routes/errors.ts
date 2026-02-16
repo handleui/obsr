@@ -1,8 +1,9 @@
-import { createDb, runErrorOps, runOps } from "@detent/db";
+import { type createDb, runErrorOps, runOps } from "@detent/db";
+import { scrubSecrets } from "@detent/types";
 import { Hono } from "hono";
 import { getConvexClient } from "../db/convex";
+import { getDb } from "../lib/db.js";
 import { verifyOrgAccess } from "../lib/org-access";
-import { scrubSecrets } from "../lib/scrub-secrets";
 import type { Env } from "../types/env";
 
 const COMMIT_SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
@@ -162,7 +163,6 @@ const formatRunResponse = (r: RunDoc) => ({
     : null,
 });
 
-// SECURITY: Scrub secrets from user-facing fields to prevent credential leakage
 const formatErrorResponse = (e: RunErrorDoc) => ({
   id: e.id,
   filePath: e.filePath,
@@ -216,7 +216,7 @@ app.get("/", async (c) => {
     return c.json({ error: access.error }, 403);
   }
 
-  const { db, pool } = createDb(c.env.DATABASE_URL);
+  const { db, pool } = getDb(c.env);
   try {
     const normalizedCommit = validated.commit.toLowerCase();
     const fetchResult = await fetchCommitRuns(

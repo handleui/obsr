@@ -90,6 +90,14 @@
   border-color: #e8e8e8;
 }
 
+@utility bg-subtle {
+  background-color: #e8e8e8;
+}
+
+@utility bg-healing-light {
+  background-color: color-mix(in srgb, var(--color-healing-bg) 40%, white);
+}
+
 @utility scrollbar-hidden {
   scrollbar-width: none;
   &::-webkit-scrollbar {

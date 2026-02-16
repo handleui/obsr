@@ -10,15 +10,44 @@ interface ProjectPageProps {
   }>;
 }
 
+interface NavCardProps {
+  href: string;
+  title: string;
+  description: string;
+}
+
+const NAV_CARD_CLASS =
+  "rounded-lg border border-neutral-200 p-4 transition-colors hover:border-neutral-300 hover:bg-neutral-50";
+
+const NavCard = ({ href, title, description }: NavCardProps) => (
+  <Link className={NAV_CARD_CLASS} href={href}>
+    <h2 className="font-medium text-neutral-900">{title}</h2>
+    <p className="text-neutral-500 text-sm">{description}</p>
+  </Link>
+);
+
+interface DetailRowProps {
+  label: string;
+  value: string;
+}
+
+const DetailRow = ({ label, value }: DetailRowProps) => (
+  <div className="flex">
+    <dt className="w-32 text-neutral-500">{label}</dt>
+    <dd className="text-neutral-900">{value}</dd>
+  </div>
+);
+
 const ProjectPage = async ({ params }: ProjectPageProps) => {
   const { provider, org, project } = await params;
 
-  // Uses cached fetchProject - deduplicates with layout fetch
   const data = await fetchProject(provider, org, project);
 
   if (!data) {
     notFound();
   }
+
+  const basePath = `/${encodeURIComponent(provider)}/${encodeURIComponent(org)}/${encodeURIComponent(project)}`;
 
   return (
     <div className="p-6">
@@ -28,44 +57,33 @@ const ProjectPage = async ({ params }: ProjectPageProps) => {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Link
-          className="rounded-lg border border-neutral-200 p-4 transition-colors hover:border-neutral-300 hover:bg-neutral-50"
-          href={`/${provider}/${org}/${project}/runs`}
-        >
-          <h2 className="font-medium text-neutral-900">CI Runs</h2>
-          <p className="text-neutral-500 text-sm">View CI run history</p>
-        </Link>
-
-        <Link
-          className="rounded-lg border border-neutral-200 p-4 transition-colors hover:border-neutral-300 hover:bg-neutral-50"
-          href={`/${provider}/${org}/${project}/heals`}
-        >
-          <h2 className="font-medium text-neutral-900">AI Heals</h2>
-          <p className="text-neutral-500 text-sm">View AI healing history</p>
-        </Link>
+        <NavCard
+          description="View CI run history"
+          href={`${basePath}/runs`}
+          title="CI Runs"
+        />
+        <NavCard
+          description="View AI healing history"
+          href={`${basePath}/heals`}
+          title="AI Heals"
+        />
       </div>
 
       <div className="mt-6 rounded-lg border border-neutral-200 p-4">
         <h2 className="mb-2 font-medium text-neutral-900">Project Details</h2>
         <dl className="space-y-2 text-sm">
-          <div className="flex">
-            <dt className="w-32 text-neutral-500">Default Branch</dt>
-            <dd className="text-neutral-900">
-              {data.provider_default_branch ?? "Not set"}
-            </dd>
-          </div>
-          <div className="flex">
-            <dt className="w-32 text-neutral-500">Visibility</dt>
-            <dd className="text-neutral-900">
-              {data.is_private ? "Private" : "Public"}
-            </dd>
-          </div>
-          <div className="flex">
-            <dt className="w-32 text-neutral-500">Created</dt>
-            <dd className="text-neutral-900">
-              {new Date(data.created_at).toLocaleDateString()}
-            </dd>
-          </div>
+          <DetailRow
+            label="Default Branch"
+            value={data.provider_default_branch ?? "Not set"}
+          />
+          <DetailRow
+            label="Visibility"
+            value={data.is_private ? "Private" : "Public"}
+          />
+          <DetailRow
+            label="Created"
+            value={new Date(data.created_at).toLocaleDateString()}
+          />
         </dl>
       </div>
     </div>

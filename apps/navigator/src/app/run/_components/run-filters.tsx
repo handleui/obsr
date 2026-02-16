@@ -17,6 +17,7 @@ import {
   Sparks,
   Xmark,
 } from "iconoir-react";
+import type * as React from "react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useFilters } from "./filter-context";
 
@@ -120,13 +121,21 @@ const STATUS_SECTIONS: ResolvedStatusSection[] = [
 
 const Chevron = () => <NavArrowDown height={10} strokeWidth={1.5} width={10} />;
 
-const resolveFilterLabel = (
-  selected: Set<string>,
-  total: number,
-  singular: string,
-  plural: string,
-  allItems: { value: string; label: string }[]
-): string => {
+interface FilterLabelOptions {
+  selected: Set<string>;
+  total: number;
+  singular: string;
+  plural: string;
+  allItems: { value: string; label: string }[];
+}
+
+const resolveFilterLabel = ({
+  selected,
+  total,
+  singular,
+  plural,
+  allItems,
+}: FilterLabelOptions): string => {
   if (selected.size === total) {
     return `All ${plural}`;
   }
@@ -262,7 +271,13 @@ const JobsFilter = () => {
   } = useFilters();
 
   const isDirty = selected.size !== JOBS.length;
-  const label = resolveFilterLabel(selected, JOBS.length, "Job", "Jobs", JOBS);
+  const label = resolveFilterLabel({
+    selected,
+    total: JOBS.length,
+    singular: "Job",
+    plural: "Jobs",
+    allItems: JOBS,
+  });
 
   return (
     <Popover.Root>
@@ -307,13 +322,13 @@ const StatusFilter = () => {
   } = useFilters();
 
   const isDirty = selected.size !== STATUSES.length;
-  const label = resolveFilterLabel(
+  const label = resolveFilterLabel({
     selected,
-    STATUSES.length,
-    "Status",
-    "Statuses",
-    STATUSES
-  );
+    total: STATUSES.length,
+    singular: "Status",
+    plural: "Statuses",
+    allItems: STATUSES,
+  });
   const singleSelected =
     isDirty && selected.size === 1
       ? STATUSES.find((s) => selected.has(s.value))

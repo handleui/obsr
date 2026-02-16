@@ -10,6 +10,8 @@ interface TooltipRootProps
   delay?: number;
 }
 
+const TooltipProvider = Tooltip.Provider;
+
 const TooltipRoot = ({ delay = 200, ...props }: TooltipRootProps) => (
   <Tooltip.Provider delay={delay}>
     <Tooltip.Root {...props} />
@@ -50,4 +52,4 @@ const TooltipContent = ({
   </Tooltip.Portal>
 );
 
-export { TooltipContent, TooltipRoot, TooltipTrigger };
+export { TooltipContent, TooltipProvider, TooltipRoot, TooltipTrigger };

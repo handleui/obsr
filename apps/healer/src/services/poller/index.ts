@@ -1207,9 +1207,9 @@ const markStaleHealsAsFailed = async (
 
     console.log(`[poller] Marked ${staleHeals.length} stale heals as failed`);
 
-    for (const heal of staleHeals) {
-      await updateStaleCheckRun(appEnv, convex, heal);
-    }
+    await Promise.all(
+      staleHeals.map((heal) => updateStaleCheckRun(appEnv, convex, heal))
+    );
   } catch (error) {
     console.error(
       `[poller] Error marking stale heals: ${error instanceof Error ? error.message : String(error)}`

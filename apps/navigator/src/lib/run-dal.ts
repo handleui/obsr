@@ -422,9 +422,6 @@ export const fetchPrRunData = cache(
       if (isNextRedirect(error)) {
         throw error;
       }
-      if (error instanceof Error) {
-        console.error("[run-dal] fetchPrRunData failed:", error.message);
-      }
       return null;
     }
   }

@@ -7,5 +7,5 @@ script = "bun install"
 
 [[actions]]
 name = "Develop"
-icon = "tool"
+icon = "run"
 command = "bun run dev:core"

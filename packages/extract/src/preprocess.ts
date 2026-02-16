@@ -1,7 +1,9 @@
 import { normalizeHomoglyphs } from "./homoglyphs.js";
 
+// HACK: character class for \uFE00-\uFE0F (16 variation selectors) + alternation for the rest
+// Biome flags mixed combining chars in classes, so ranges with combining marks use alternation
 const INVISIBLE_CHARS_PATTERN =
-  /\u200B|\u200C|\u200D|\u200E|\u200F|\u2028|\u2029|\u202A|\u202B|\u202C|\u202D|\u202E|\u202F|\u2060|\u2061|\u2062|\u2063|\u2064|\u2065|\u2066|\u2067|\u2068|\u2069|\u206A|\u206B|\u206C|\u206D|\u206E|\u206F|\uFEFF|\u00AD|\u034F|\u061C|\u115F|\u1160|\u17B4|\u17B5|\u180B|\u180C|\u180D|\u180E|\u3164|\uFFA0|\uFE00|\uFE01|\uFE02|\uFE03|\uFE04|\uFE05|\uFE06|\uFE07|\uFE08|\uFE09|\uFE0A|\uFE0B|\uFE0C|\uFE0D|\uFE0E|\uFE0F/g;
+  /[\uFE00-\uFE0F]|\u200B|\u200C|\u200D|\u200E|\u200F|\u2028|\u2029|\u202A|\u202B|\u202C|\u202D|\u202E|\u202F|\u2060|\u2061|\u2062|\u2063|\u2064|\u2065|\u2066|\u2067|\u2068|\u2069|\u206A|\u206B|\u206C|\u206D|\u206E|\u206F|\uFEFF|\u00AD|\u034F|\u061C|\u115F|\u1160|\u17B4|\u17B5|\u180B|\u180C|\u180D|\u180E|\u3164|\uFFA0/g;
 
 const XML_TAG_INJECTION =
   /<\s*\/?\s*(?:ci_output|system|user|assistant|human|instructions|function|tool|message|prompt|context|task)[^>]*>/;
@@ -46,11 +48,32 @@ export const sanitizeForPrompt = (content: string): string => {
   return escapeXml(result);
 };
 
-const NOISE_PATTERN =
-  /^(?:\s*$|[-=]{3,}$|\s*\d+\s+(?:passing|pending)\b|(?:npm|yarn)\s+(?:warn|warning|notice)\b|\s*at\s+(?:Object\.|Module\.|Function\.|node:|internal\/)|(?:Downloading|Installing|Resolving)\b|\s*[\^~]+\s*$)/i;
+const NOISE_SOURCES: Array<{ name: string; pattern: string }> = [
+  { name: "trailing-whitespace", pattern: "\\s*$" },
+  { name: "separator-lines", pattern: "[-=]{3,}$" },
+  { name: "test-summary", pattern: "\\s*\\d+\\s+(?:passing|pending)\\b" },
+  {
+    name: "package-warnings",
+    pattern: "(?:npm|yarn)\\s+(?:warn|warning|notice)\\b",
+  },
+  {
+    name: "internal-stack",
+    pattern: "\\s*at\\s+(?:Object\\.|Module\\.|Function\\.|node:|internal\\/)",
+  },
+  {
+    name: "download-progress",
+    pattern: "(?:Downloading|Installing|Resolving)\\b",
+  },
+  { name: "caret-underline", pattern: "\\s*[\\^~]+\\s*$" },
+];
+
+const NOISE_PATTERN = new RegExp(
+  `^(?:${NOISE_SOURCES.map((s) => s.pattern).join("|")})`,
+  "i"
+);
 
 const IMPORTANT_PATTERN =
-  /error|warning|failed|failure|exception|:\d+:\d+|line\s+\d+|^\s*>\s+\d+\s*\||FAIL|PASS|ERROR|WARN/i;
+  /error|warning|failed|failure|exception|:\d+:\d+|line\s+\d+|^\s*>\s+\d+\s*\||FAIL|PASS|ERROR|WARN|::(?:error|warning)\s/i;
 
 const EARLY_CUTOFF_MULTIPLIER = 3;
 const MIN_CONSECUTIVE_NOISE_FOR_MARKER = 3;
@@ -67,6 +90,7 @@ interface FilterResult {
   lines: string[];
   segments: LogSegment[];
   segmentsTruncated: boolean;
+  removedCount: number;
 }
 
 const PKG_MANAGER_NOISE = /^\s*(?:npm|yarn)\s+(?:warn|warning|notice)\b/i;
@@ -167,7 +191,7 @@ const finalizeSegments = (state: FilterState, totalLines: number): void => {
   );
 };
 
-const filterNoiseLines = (lines: string[]): FilterResult => {
+const filterNoiseLines = (lines: string[], lineOffset = 0): FilterResult => {
   const state: FilterState = {
     result: [],
     segments: [],
@@ -178,21 +202,25 @@ const filterNoiseLines = (lines: string[]): FilterResult => {
     inSignal: false,
   };
 
+  let removedCount = 0;
+
   for (let i = 0; i < lines.length; i++) {
-    const lineNum = i + 1;
+    const lineNum = i + 1 + lineOffset;
     const line = lines[i] as string;
     if (isSignalLine(line)) {
       handleSignalLine(state, lineNum, line);
     } else {
       handleNoiseLine(state, lineNum);
+      removedCount++;
     }
   }
 
-  finalizeSegments(state, lines.length);
+  finalizeSegments(state, lines.length + lineOffset);
   return {
     lines: state.result,
     segments: state.segments,
     segmentsTruncated: state.truncated,
+    removedCount,
   };
 };
 
@@ -200,15 +228,21 @@ export interface CompactResult {
   content: string;
   segments: LogSegment[];
   segmentsTruncated: boolean;
+  removedCount: number;
+  totalLines: number;
 }
 
 const MAX_NEWLINE_SCAN_BYTES = 500_000;
 
 const NEWLINE_CHAR_CODE = 10;
 
-const countNewlinesInSlice = (str: string, end: number): number => {
+const countNewlinesInRange = (
+  str: string,
+  start: number,
+  end: number
+): number => {
   let count = 0;
-  for (let i = 0; i < end; i++) {
+  for (let i = start; i < end; i++) {
     if (str.charCodeAt(i) === NEWLINE_CHAR_CODE) {
       count++;
     }
@@ -216,52 +250,127 @@ const countNewlinesInSlice = (str: string, end: number): number => {
   return count;
 };
 
-// Approximates newline count for large strings by sampling the first 500KB.
-// Assumes uniform newline distribution — can be 2-3x off for skewed logs
-// (e.g. dense short-line preamble followed by long output lines).
-// Acceptable since this only determines the noise segment endpoint after early cutoff.
-const countNewlines = (str: string): number => {
-  if (str.length <= MAX_NEWLINE_SCAN_BYTES) {
-    return countNewlinesInSlice(str, str.length);
+// HACK: samples first 500KB and extrapolates — can be 2-3x off for skewed logs, acceptable for noise segments
+const countNewlinesInRegion = (
+  str: string,
+  start: number,
+  length: number
+): number => {
+  const end = start + length;
+  if (length <= MAX_NEWLINE_SCAN_BYTES) {
+    return countNewlinesInRange(str, start, end);
   }
-  const sampleCount = countNewlinesInSlice(str, MAX_NEWLINE_SCAN_BYTES);
-  return Math.floor((sampleCount / MAX_NEWLINE_SCAN_BYTES) * str.length);
+  const sampleEnd = start + MAX_NEWLINE_SCAN_BYTES;
+  const sampleCount = countNewlinesInRange(str, start, sampleEnd);
+  return Math.floor((sampleCount / MAX_NEWLINE_SCAN_BYTES) * length);
+};
+
+const compactSmallContent = (content: string): CompactResult => {
+  const lines = content.split("\n");
+  const {
+    lines: result,
+    segments,
+    segmentsTruncated,
+    removedCount,
+  } = filterNoiseLines(lines);
+  return {
+    content: result.join("\n"),
+    segments,
+    segmentsTruncated,
+    removedCount,
+    totalLines: lines.length,
+  };
+};
+
+const mergeSegments = (
+  headResult: FilterResult,
+  tailResult: FilterResult,
+  headLineCount: number,
+  tailLineOffset: number
+): { segments: LogSegment[]; segmentsTruncated: boolean } => {
+  const segments: LogSegment[] = headResult.segments;
+  let segmentsTruncated =
+    headResult.segmentsTruncated || tailResult.segmentsTruncated;
+
+  if (segments.length < MAX_SEGMENTS) {
+    const omittedStart = clampLineNum(headLineCount + 1);
+    const omittedEnd = clampLineNum(tailLineOffset);
+    if (omittedStart <= omittedEnd) {
+      segments.push({ start: omittedStart, end: omittedEnd, signal: false });
+    }
+  } else {
+    segmentsTruncated = true;
+  }
+
+  for (const seg of tailResult.segments) {
+    if (segments.length >= MAX_SEGMENTS) {
+      segmentsTruncated = true;
+      break;
+    }
+    segments.push(seg);
+  }
+
+  return { segments, segmentsTruncated };
+};
+
+const compactLargeContent = (
+  content: string,
+  budget: number
+): CompactResult => {
+  const headBudget = Math.ceil(budget / 2);
+  const tailStart = content.length - Math.floor(budget / 2);
+  const omittedLength = tailStart - headBudget;
+
+  const headLines = content.slice(0, headBudget).split("\n");
+  const headResult = filterNoiseLines(headLines);
+
+  const middleLineCount = countNewlinesInRegion(
+    content,
+    headBudget,
+    omittedLength
+  );
+  const tailLineOffset = headLines.length + middleLineCount;
+
+  const tailLines = content.slice(tailStart).split("\n");
+  const tailResult = filterNoiseLines(tailLines, tailLineOffset);
+
+  const result = [
+    ...headResult.lines,
+    `[... ${omittedLength} chars omitted (lines ${headLines.length + 1}-${tailLineOffset}) ...]`,
+    ...tailResult.lines,
+  ];
+
+  const { segments, segmentsTruncated } = mergeSegments(
+    headResult,
+    tailResult,
+    headLines.length,
+    tailLineOffset
+  );
+
+  const totalLines = headLines.length + middleLineCount + tailLines.length;
+  const removedCount =
+    headResult.removedCount + middleLineCount + tailResult.removedCount;
+
+  return {
+    content: result.join("\n"),
+    segments,
+    segmentsTruncated,
+    removedCount,
+    totalLines,
+  };
 };
 
 export const compactCiOutput = (
   content: string,
   targetLength = 15_000
 ): CompactResult => {
-  const earlyCutoff = targetLength * EARLY_CUTOFF_MULTIPLIER;
-  const truncatedEarly = content.length > earlyCutoff;
-  const toProcess = truncatedEarly ? content.slice(0, earlyCutoff) : content;
+  const budget = targetLength * EARLY_CUTOFF_MULTIPLIER;
 
-  const lines = toProcess.split("\n");
-  const {
-    lines: result,
-    segments,
-    segmentsTruncated,
-  } = filterNoiseLines(lines);
-
-  if (truncatedEarly && segments.length < MAX_SEGMENTS) {
-    result.push(
-      `[early cutoff at line ${lines.length}, ${content.length - earlyCutoff} chars not processed]`
-    );
-    const totalLines = lines.length + countNewlines(content.slice(earlyCutoff));
-    if (totalLines > lines.length) {
-      const start = Math.max(1, Math.min(lines.length + 1, MAX_SEGMENT_LINES));
-      const end = Math.max(1, Math.min(totalLines, MAX_SEGMENT_LINES));
-      if (start <= end) {
-        segments.push({
-          start,
-          end,
-          signal: false,
-        });
-      }
-    }
+  if (content.length <= budget) {
+    return compactSmallContent(content);
   }
 
-  return { content: result.join("\n"), segments, segmentsTruncated };
+  return compactLargeContent(content, budget);
 };
 
 export interface TruncateResult {
@@ -287,25 +396,44 @@ export interface PrepareResult {
   truncated: boolean;
   segments: LogSegment[];
   segmentsTruncated: boolean;
+  metrics: {
+    originalLength: number;
+    afterPreprocessLength: number;
+    truncatedChars: number;
+    noiseRatio: number;
+  };
 }
 
 export const prepareForPrompt = (
   content: string,
   maxLength = 15_000
 ): PrepareResult => {
+  const originalLength = content.length;
   const {
     content: compacted,
     segments,
     segmentsTruncated,
+    removedCount,
+    totalLines,
   } = compactCiOutput(content, maxLength);
+  const afterPreprocessLength = compacted.length;
   const { content: truncated, truncated: wasTruncated } = truncateContent(
     compacted,
     maxLength
   );
+  const truncatedChars = wasTruncated ? afterPreprocessLength - maxLength : 0;
+  const noiseRatio = totalLines > 0 ? removedCount / totalLines : 0;
+
   return {
     content: sanitizeForPrompt(truncated),
     truncated: wasTruncated,
     segments,
     segmentsTruncated,
+    metrics: {
+      originalLength,
+      afterPreprocessLength,
+      truncatedChars,
+      noiseRatio,
+    },
   };
 };

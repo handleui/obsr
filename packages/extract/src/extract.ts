@@ -18,13 +18,15 @@ import {
   createSetDetectedSourceTool,
 } from "./tools.js";
 import {
+  type ExtractionMetrics,
   type ExtractionResult,
   ExtractionResultSchema,
   type ExtractionUsage,
   type ToolExtractionOptions,
 } from "./types.js";
 
-const FILTERED_ONLY_PATTERN = /^(\s*\[FILTERED\]\s*)+$/;
+// HACK: \s* only on outer boundaries (not both sides inside the group) to prevent ReDoS
+const FILTERED_ONLY_PATTERN = /^\s*(?:\[FILTERED\]\s*)+$/;
 
 const EXTRACTION_OUTPUT = Output.object({ schema: ExtractionResultSchema });
 
@@ -37,21 +39,13 @@ const resolveModel = (modelId: string, apiKey?: string) => {
 };
 
 const validateModelId = (modelName: string): string => {
-  try {
-    const modelId = normalizeModelId(modelName);
-    if (!modelId?.trim()) {
-      throw new Error(
-        `Model normalization produced invalid result. Input: ${modelName}, Output: ${modelId}`
-      );
-    }
-    return modelId;
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unknown normalization error";
+  const modelId = normalizeModelId(modelName);
+  if (!modelId?.trim()) {
     throw new Error(
-      `Invalid model ID after normalization. Original: ${modelName}. ${message}`
+      `Invalid model ID after normalization. Original: ${modelName}, got: ${modelId}`
     );
   }
+  return modelId;
 };
 
 export interface ExtractionOptions {
@@ -66,13 +60,15 @@ export interface ExtractionOptions {
 const createEmptyResult = (
   truncated: boolean,
   segmentsTruncated: boolean,
-  segments?: LogSegment[]
+  segments?: LogSegment[],
+  metrics?: ExtractionResult["metrics"]
 ): ExtractionResult => ({
   errors: [],
   detectedSource: null,
   truncated,
   segmentsTruncated,
   segments,
+  metrics,
 });
 
 interface PreparedExtraction {
@@ -83,6 +79,16 @@ interface PreparedExtraction {
   segmentsTruncated: boolean;
   segments: LogSegment[];
   abortSignal: AbortSignal;
+  metrics: ExtractionMetrics;
+  empty: false;
+}
+
+interface EmptyExtraction {
+  truncated: boolean;
+  segmentsTruncated: boolean;
+  segments: LogSegment[];
+  metrics: ExtractionMetrics;
+  empty: true;
 }
 
 const prepareExtraction = (
@@ -94,7 +100,7 @@ const prepareExtraction = (
     maxContentLength?: number;
     abortSignal?: AbortSignal;
   }
-): PreparedExtraction | null => {
+): PreparedExtraction | EmptyExtraction => {
   const modelId = validateModelId(options.model ?? DEFAULT_FAST_MODEL);
   const model = resolveModel(modelId, options.apiKey);
   const timeoutMs = options.timeout ?? DEFAULT_TIMEOUT_MS;
@@ -105,10 +111,11 @@ const prepareExtraction = (
     truncated,
     segments,
     segmentsTruncated,
+    metrics,
   } = prepareForPrompt(content, maxContentLength);
 
   if (!prepared.trim() || FILTERED_ONLY_PATTERN.test(prepared)) {
-    return null;
+    return { truncated, segmentsTruncated, segments, metrics, empty: true };
   }
 
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
@@ -124,6 +131,8 @@ const prepareExtraction = (
     segmentsTruncated,
     segments,
     abortSignal,
+    metrics,
+    empty: false,
   };
 };
 
@@ -152,66 +161,61 @@ const handleExtractionError = (error: unknown): Error => {
   );
 };
 
-const emptyResultForContent = (
-  content: string,
-  maxContentLength: number
-): ExtractionResult => {
-  const { truncated, segments, segmentsTruncated } = prepareForPrompt(
-    content,
-    maxContentLength
-  );
-  return createEmptyResult(truncated, segmentsTruncated, segments);
-};
-
-const DEFAULT_MAX_CONTENT_LENGTH = 15_000;
+const buildExtractionResult = (
+  prep: PreparedExtraction,
+  errors: CIError[],
+  detectedSource: ErrorSource | null,
+  usage?: { usage: ExtractionUsage; costUsd: number }
+): ExtractionResult => ({
+  errors,
+  detectedSource,
+  usage: usage?.usage,
+  costUsd: usage?.costUsd,
+  truncated: prep.truncated,
+  segmentsTruncated: prep.segmentsTruncated,
+  segments: prep.segments,
+  metrics: prep.metrics,
+});
 
 export const extractErrors = async (
   content: string,
   options?: ExtractionOptions
 ): Promise<ExtractionResult> => {
   const prep = prepareExtraction(content, options ?? {});
-  if (!prep) {
-    return emptyResultForContent(
-      content,
-      options?.maxContentLength ?? DEFAULT_MAX_CONTENT_LENGTH
+  if (prep.empty) {
+    return createEmptyResult(
+      prep.truncated,
+      prep.segmentsTruncated,
+      prep.segments,
+      prep.metrics
     );
   }
 
-  const {
-    model,
-    modelId,
-    prepared,
-    truncated,
-    segmentsTruncated,
-    segments,
-    abortSignal,
-  } = prep;
-
   try {
     const { output, usage } = await generateText({
-      model,
+      model: prep.model,
       output: EXTRACTION_OUTPUT,
       system: EXTRACTION_SYSTEM_PROMPT,
-      prompt: buildUserPrompt(prepared),
+      prompt: buildUserPrompt(prep.prepared),
       maxOutputTokens: options?.maxOutputTokens ?? 4096,
-      abortSignal,
+      abortSignal: prep.abortSignal,
     });
 
     if (!output) {
-      return createEmptyResult(truncated, segmentsTruncated, segments);
+      return createEmptyResult(
+        prep.truncated,
+        prep.segmentsTruncated,
+        prep.segments,
+        prep.metrics
+      );
     }
 
-    const { usage: extractionUsage, costUsd } = buildUsage(usage, modelId);
-
-    return {
-      errors: output.errors,
-      detectedSource: output.detectedSource,
-      usage: extractionUsage,
-      costUsd,
-      truncated,
-      segmentsTruncated,
-      segments,
-    };
+    return buildExtractionResult(
+      prep,
+      output.errors,
+      output.detectedSource,
+      buildUsage(usage, prep.modelId)
+    );
   } catch (error) {
     throw handleExtractionError(error);
   }
@@ -225,31 +229,24 @@ const extractErrorsWithTools = async (
   options?: ToolExtractionOptions
 ): Promise<ExtractionResult> => {
   const prep = prepareExtraction(content, options ?? {});
-  if (!prep) {
-    return emptyResultForContent(
-      content,
-      options?.maxContentLength ?? DEFAULT_MAX_CONTENT_LENGTH
+  if (prep.empty) {
+    return createEmptyResult(
+      prep.truncated,
+      prep.segmentsTruncated,
+      prep.segments,
+      prep.metrics
     );
   }
 
-  const {
-    model,
-    modelId,
-    prepared,
-    truncated,
-    segmentsTruncated,
-    segments,
-    abortSignal,
-  } = prep;
   const maxErrors = options?.maxErrors ?? 200;
   const errors: CIError[] = [];
   let detectedSource: ErrorSource | null = null;
 
   try {
     const { usage } = await generateText({
-      model,
+      model: prep.model,
       system: EXTRACTION_SYSTEM_PROMPT_TOOLS,
-      prompt: buildUserPrompt(prepared),
+      prompt: buildUserPrompt(prep.prepared),
       stopWhen: stepCountIs(maxErrors + 10),
       tools: {
         register_error: createRegisterErrorTool(async (error) => {
@@ -263,23 +260,18 @@ const extractErrorsWithTools = async (
         }),
       },
       maxOutputTokens: options?.maxOutputTokens ?? 8192,
-      abortSignal,
+      abortSignal: prep.abortSignal,
     });
 
-    const { usage: extractionUsage, costUsd } = buildUsage(usage, modelId);
-
-    return {
+    return buildExtractionResult(
+      prep,
       errors,
       detectedSource,
-      usage: extractionUsage,
-      costUsd,
-      truncated,
-      segmentsTruncated,
-      segments,
-    };
+      buildUsage(usage, prep.modelId)
+    );
   } catch (error) {
     if (errors.length > 0) {
-      return { errors, detectedSource, truncated, segmentsTruncated, segments };
+      return buildExtractionResult(prep, errors, detectedSource);
     }
     throw handleExtractionError(error);
   }

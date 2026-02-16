@@ -1,12 +1,45 @@
 import { describe, expect, it } from "vitest";
 import {
   compactCiOutput,
+  prepareForPrompt,
   sanitizeForPrompt,
   truncateContent,
 } from "./preprocess.js";
 
 const SEPARATOR_REGEX = /^---$/m;
 const EQUALS_REGEX = /^===$/m;
+const TAIL_LINE_NUM_REGEX = /\[(\d+)\] error: tail/;
+
+describe("prepareForPrompt metrics", () => {
+  it("computes originalLength correctly", () => {
+    const input = "error: something failed\nmore output here";
+    const { metrics } = prepareForPrompt(input);
+    expect(metrics.originalLength).toBe(input.length);
+    expect(metrics.afterPreprocessLength).toBeGreaterThan(0);
+    expect(metrics.truncatedChars).toBe(0);
+  });
+
+  it("computes truncatedChars when content exceeds limit", () => {
+    const input = "error: line\n".repeat(500);
+    const { metrics } = prepareForPrompt(input, 100);
+    expect(metrics.truncatedChars).toBeGreaterThan(0);
+    expect(metrics.originalLength).toBe(input.length);
+  });
+
+  it("computes noiseRatio for noisy content", () => {
+    const input =
+      "error: real problem\n\n\n\nnpm warn deprecated pkg\n\nerror: another";
+    const { metrics } = prepareForPrompt(input);
+    expect(metrics.noiseRatio).toBeGreaterThan(0);
+    expect(metrics.noiseRatio).toBeLessThan(1);
+  });
+
+  it("noiseRatio is 0 for clean content", () => {
+    const input = "error: first\nerror: second\nerror: third";
+    const { metrics } = prepareForPrompt(input);
+    expect(metrics.noiseRatio).toBe(0);
+  });
+});
 
 describe("sanitizeForPrompt", () => {
   it("filters XML-like injection tags", () => {
@@ -142,12 +175,13 @@ useful line here`;
     expect(content).toContain("[7] error: end");
   });
 
-  it("applies early cutoff for very long content", () => {
+  it("applies head+tail strategy for very long content", () => {
     const targetLength = 100;
-    const longContent = "x".repeat(targetLength * 4);
+    const longContent = `error: start\n${"x\n".repeat(200)}error: end\n`;
     const { content } = compactCiOutput(longContent, targetLength);
-    expect(content).toContain("early cutoff at line");
-    expect(content).toContain("chars not processed");
+    expect(content).toContain("error: start");
+    expect(content).toContain("error: end");
+    expect(content).toContain("chars omitted");
   });
 
   it("prefixes kept lines with original line numbers", () => {
@@ -165,6 +199,35 @@ useful line here`;
     const input = "\n\n\n\n\n";
     const { content } = compactCiOutput(input);
     expect(content).toContain("[lines 1-6 omitted]");
+  });
+
+  it("treats GitHub Actions annotations as signal", () => {
+    const input =
+      "::error file=app.ts,line=10::Something failed\nnoise line\nnoise line\nnoise line";
+    const { content } = compactCiOutput(input);
+    expect(content).toContain("::error file=app.ts");
+  });
+
+  it("preserves tail errors that were previously dropped", () => {
+    const targetLength = 100;
+    const head = "error: first problem\n";
+    const middle = "noise line\n".repeat(200);
+    const tail = "error: final problem on last line\n";
+    const { content } = compactCiOutput(head + middle + tail, targetLength);
+    expect(content).toContain("error: first problem");
+    expect(content).toContain("error: final problem");
+  });
+
+  it("tail line numbers reflect original positions", () => {
+    const targetLength = 50;
+    const head = "error: head\n";
+    const middle = "x\n".repeat(100);
+    const tail = "error: tail\n";
+    const input = head + middle + tail;
+    const { content } = compactCiOutput(input, targetLength);
+    const match = content.match(TAIL_LINE_NUM_REGEX);
+    expect(match).toBeTruthy();
+    expect(Number(match?.[1])).toBeGreaterThan(50);
   });
 });
 
@@ -204,17 +267,14 @@ describe("compactCiOutput segments", () => {
     ]);
   });
 
-  it("appends noise segment for early cutoff unprocessed tail", () => {
+  it("includes segments for both head and tail sections", () => {
     const targetLength = 100;
-    const line = "error: test line\n";
-    const fitsInCutoff = line.repeat(
-      Math.floor((targetLength * 3) / line.length)
-    );
-    const tail = "\nextra line\nextra line 2\n";
-    const input = fitsInCutoff + tail;
-    const { segments } = compactCiOutput(input, targetLength);
-    const lastSegment = segments.at(-1);
-    expect(lastSegment?.signal).toBe(false);
+    const head = "error: head error\n";
+    const middle = "x\n".repeat(200);
+    const tail = "error: tail error\n";
+    const { segments } = compactCiOutput(head + middle + tail, targetLength);
+    expect(segments.length).toBeGreaterThanOrEqual(2);
+    expect(segments[0]?.signal).toBe(true);
   });
 });
 

@@ -1,3 +1,4 @@
+import type { SharedV3ProviderOptions } from "@ai-sdk/provider";
 import type {
   JSONValue,
   LanguageModel,
@@ -7,8 +8,7 @@ import type {
 
 export type CacheTTL = "5m" | "1h";
 
-// HACK: Defined locally to avoid importing from @ai-sdk/provider which has version conflicts
-type ProviderOptions = Record<string, Record<string, JSONValue | undefined>>;
+type ProviderOptions = SharedV3ProviderOptions;
 
 interface InternalCacheControl {
   type: "ephemeral";
@@ -24,10 +24,16 @@ interface InternalAnthropicOptions {
 export type AnthropicCacheOptions = ProviderOptions;
 
 const createCacheOptions = (ttl?: CacheTTL): ProviderOptions => {
+  if (ttl && ttl !== "5m" && ttl !== "1h") {
+    throw new Error(`Invalid cache TTL: ${ttl}. Must be "5m" or "1h".`);
+  }
+
+  const cacheControl: InternalCacheControl = ttl
+    ? { type: "ephemeral", ttl }
+    : { type: "ephemeral" };
+
   const internal: InternalAnthropicOptions = {
-    anthropic: {
-      cacheControl: ttl ? { type: "ephemeral", ttl } : { type: "ephemeral" },
-    },
+    anthropic: { cacheControl },
   };
   return internal as unknown as ProviderOptions;
 };
@@ -61,7 +67,10 @@ const mergeProviderOptions = (
     return additional;
   }
 
-  if (hasAnthropicProvider(existing) && hasAnthropicProvider(additional)) {
+  const hasAnthropicInBoth =
+    hasAnthropicProvider(existing) && hasAnthropicProvider(additional);
+
+  if (hasAnthropicInBoth) {
     return {
       ...existing,
       anthropic: {
@@ -71,10 +80,7 @@ const mergeProviderOptions = (
     };
   }
 
-  return {
-    ...existing,
-    ...additional,
-  };
+  return { ...existing, ...additional };
 };
 
 export const isAnthropicModel = (model: LanguageModel): boolean => {
@@ -119,13 +125,13 @@ export const addCacheControl = ({
   }
 
   const cacheOptions = getCacheOptions(ttl);
+  const lastIndex = messages.length - 1;
 
-  return messages.map((message, index) => {
-    if (index === messages.length - 1) {
-      return addProviderOptionsToMessage(message, cacheOptions);
-    }
-    return message;
-  });
+  return messages.map((message, index) =>
+    index === lastIndex
+      ? addProviderOptionsToMessage(message, cacheOptions)
+      : message
+  );
 };
 
 export const createCacheableSystemMessage = (
@@ -149,12 +155,12 @@ export interface PrepareStepParams {
   experimental_context: unknown;
 }
 
-export const createCachePrepareStep = (
-  ttl?: CacheTTL
-): ((
-  params: PrepareStepParams
-) => { messages: ModelMessage[] } | undefined) => {
-  return ({ messages, model }) => ({
+export const createCachePrepareStep =
+  (
+    ttl?: CacheTTL
+  ): ((
+    params: PrepareStepParams
+  ) => { messages: ModelMessage[] } | undefined) =>
+  ({ messages, model }) => ({
     messages: addCacheControl({ messages, model, ttl }),
   });
-};

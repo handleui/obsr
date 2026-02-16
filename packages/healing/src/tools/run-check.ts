@@ -2,14 +2,6 @@ import type { ToolContext } from "./context.js";
 import { executeCommand, parseCommand, validateCommand } from "./execute.js";
 import { errorResult, type Tool, type ToolResult } from "./types.js";
 
-/**
- * Run check tool - re-runs the failing CI command to verify fixes.
- *
- * This tool retrieves the exact command that failed during CI and re-runs it
- * in the worktree. The command comes from the workflow YAML which is parsed
- * at runtime - security validation is still applied since workflow files
- * could be modified by malicious PRs.
- */
 export const runCheckTool: Tool = {
   name: "run_check",
   description:
@@ -20,7 +12,11 @@ export const runCheckTool: Tool = {
     required: [],
   },
 
-  execute: async (ctx: ToolContext): Promise<ToolResult> => {
+  execute: async (
+    ctx: ToolContext,
+    _input: unknown,
+    abortSignal?: AbortSignal
+  ): Promise<ToolResult> => {
     if (!ctx.failingStep) {
       return errorResult("no failing step context available");
     }
@@ -49,8 +45,6 @@ export const runCheckTool: Tool = {
       );
     }
 
-    // Security validation - always applied even for CI commands
-    // since workflow files could be modified by malicious PRs
     const validationError = validateCommand(command);
     if (validationError) {
       return errorResult(validationError);
@@ -61,6 +55,11 @@ export const runCheckTool: Tool = {
       return errorResult("empty command");
     }
 
-    return await executeCommand(ctx.worktreePath, normalized, parts);
+    return await executeCommand(
+      ctx.worktreePath,
+      normalized,
+      parts,
+      abortSignal
+    );
   },
 };

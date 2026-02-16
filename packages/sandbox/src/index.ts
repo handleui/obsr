@@ -7,6 +7,7 @@ import type {
   RunCodeOptions,
   RunCommandOptions,
   SandboxEnv,
+  SandboxHandle,
   SandboxInfo,
   SandboxOptions,
   SandboxProvider,
@@ -46,6 +47,18 @@ const truncateLogs = (logs: string): string =>
     ? `${logs.slice(0, MAX_LOG_LENGTH)}\n...[truncated]`
     : logs;
 
+const toSandboxError = (
+  error: unknown,
+  context: string,
+  userMessage: string
+): Error => {
+  const message = truncateError(
+    error instanceof Error ? error.message : String(error)
+  );
+  console.error(`[sandbox] ${context}: Failed - ${message}`);
+  return new Error(`${userMessage}: ${message}`);
+};
+
 const validatePath = (path: string, context: string): void => {
   if (path.trim() === "") {
     throw new Error(`${context}: Path is required`);
@@ -84,23 +97,26 @@ const resolvePath = (
   return resolved;
 };
 
+const isValidEnvEntry = (key: string, value: string): boolean => {
+  if (key.length === 0 || key.length > MAX_ENV_KEY_BYTES) {
+    return false;
+  }
+  if (!ENV_KEY_RE.test(key)) {
+    return false;
+  }
+  return new TextEncoder().encode(value).length <= MAX_ENV_VALUE_BYTES;
+};
+
 const sanitizeEnv = (
   envs?: Record<string, string>
 ): Record<string, string> | undefined => {
   if (!envs) {
     return undefined;
   }
-  const sanitizedEntries = Object.entries(envs).filter(([key, value]) => {
-    if (key.length === 0 || key.length > MAX_ENV_KEY_BYTES) {
-      return false;
-    }
-    if (!ENV_KEY_RE.test(key)) {
-      return false;
-    }
-    const encoded = new TextEncoder().encode(value);
-    return encoded.length <= MAX_ENV_VALUE_BYTES;
-  });
-  return sanitizedEntries.length ? Object.fromEntries(sanitizedEntries) : {};
+  const sanitized = Object.entries(envs).filter(([key, value]) =>
+    isValidEnvEntry(key, value)
+  );
+  return sanitized.length ? Object.fromEntries(sanitized) : {};
 };
 
 const validatePayloadSize = (value: string, context: string): void => {
@@ -177,7 +193,7 @@ export const createSandboxService = (env: SandboxEnv) => {
   const isAllowedTemplate = (template: string): template is AllowedTemplate =>
     allowedTemplates.has(template);
 
-  const create = async (opts?: SandboxOptions) => {
+  const create = async (opts?: SandboxOptions): Promise<SandboxHandle> => {
     const template = opts?.template ?? DEFAULT_TEMPLATE;
     const context = `create(template=${template})`;
 
@@ -202,15 +218,11 @@ export const createSandboxService = (env: SandboxEnv) => {
         console.error(`[sandbox] ${context}: Rate limit exceeded`);
         throw new Error("Sandbox rate limit exceeded. Please try again later.");
       }
-      const message = truncateError(
-        error instanceof Error ? error.message : String(error)
-      );
-      console.error(`[sandbox] ${context}: Failed - ${message}`);
-      throw new Error(`Failed to create sandbox: ${message}`);
+      throw toSandboxError(error, context, "Failed to create sandbox");
     }
   };
 
-  const connect = async (sandboxId: string) => {
+  const connect = async (sandboxId: string): Promise<SandboxHandle> => {
     const context = `connect(${sandboxId})`;
 
     if (!SANDBOX_ID_PATTERN.test(sandboxId)) {
@@ -222,11 +234,7 @@ export const createSandboxService = (env: SandboxEnv) => {
       console.log(`[sandbox] ${context}: Connected`);
       return sandbox;
     } catch (error) {
-      const message = truncateError(
-        error instanceof Error ? error.message : String(error)
-      );
-      console.error(`[sandbox] ${context}: Failed - ${message}`);
-      throw new Error(`Failed to connect to sandbox: ${message}`);
+      throw toSandboxError(error, context, "Failed to connect to sandbox");
     }
   };
 
@@ -262,11 +270,7 @@ export const createSandboxService = (env: SandboxEnv) => {
         error: execution.error?.value ?? undefined,
       };
     } catch (error) {
-      const message = truncateError(
-        error instanceof Error ? error.message : String(error)
-      );
-      console.error(`[sandbox] ${context}: Failed - ${message}`);
-      throw new Error(`Code execution failed: ${message}`);
+      throw toSandboxError(error, context, "Code execution failed");
     }
   };
 
@@ -298,11 +302,7 @@ export const createSandboxService = (env: SandboxEnv) => {
         exitCode: result.exitCode,
       };
     } catch (error) {
-      const message = truncateError(
-        error instanceof Error ? error.message : String(error)
-      );
-      console.error(`[sandbox] ${context}: Failed - ${message}`);
-      throw new Error(`Command execution failed: ${message}`);
+      throw toSandboxError(error, context, "Command execution failed");
     }
   };
 
@@ -318,12 +318,18 @@ export const createSandboxService = (env: SandboxEnv) => {
     try {
       await sbx.files.write(resolvedPath, content);
     } catch (error) {
-      const message = truncateError(
-        error instanceof Error ? error.message : String(error)
-      );
-      console.error(`[sandbox] ${context}: Failed - ${message}`);
-      throw new Error(`Failed to write file: ${message}`);
+      throw toSandboxError(error, context, "Failed to write file");
     }
+  };
+
+  const decodeFileContent = (
+    content: string | Uint8Array,
+    context: string
+  ): string => {
+    const text =
+      typeof content === "string" ? content : new TextDecoder().decode(content);
+    validatePayloadSize(text, context);
+    return text;
   };
 
   const readFile = async (
@@ -335,19 +341,9 @@ export const createSandboxService = (env: SandboxEnv) => {
 
     try {
       const content = await sbx.files.read(resolvedPath);
-      if (typeof content === "string") {
-        validatePayloadSize(content, context);
-        return content;
-      }
-      const decoded = new TextDecoder().decode(content);
-      validatePayloadSize(decoded, context);
-      return decoded;
+      return decodeFileContent(content, context);
     } catch (error) {
-      const message = truncateError(
-        error instanceof Error ? error.message : String(error)
-      );
-      console.error(`[sandbox] ${context}: Failed - ${message}`);
-      throw new Error(`Failed to read file: ${message}`);
+      throw toSandboxError(error, context, "Failed to read file");
     }
   };
 
@@ -360,11 +356,7 @@ export const createSandboxService = (env: SandboxEnv) => {
       await sbx.kill();
       console.log(`[sandbox] ${context}: Killed`);
     } catch (error) {
-      const message = truncateError(
-        error instanceof Error ? error.message : String(error)
-      );
-      console.error(`[sandbox] ${context}: Failed - ${message}`);
-      throw new Error(`Failed to kill sandbox: ${message}`);
+      throw toSandboxError(error, context, "Failed to kill sandbox");
     }
   };
 
@@ -387,11 +379,7 @@ export const createSandboxService = (env: SandboxEnv) => {
     try {
       await sbx.setTimeout(timeoutSec * 1000);
     } catch (error) {
-      const message = truncateError(
-        error instanceof Error ? error.message : String(error)
-      );
-      console.error(`[sandbox] ${context}: Failed - ${message}`);
-      throw new Error(`Failed to set timeout: ${message}`);
+      throw toSandboxError(error, context, "Failed to set timeout");
     }
   };
 
@@ -412,11 +400,7 @@ export const createSandboxService = (env: SandboxEnv) => {
     try {
       return await provider.list();
     } catch (error) {
-      const message = truncateError(
-        error instanceof Error ? error.message : String(error)
-      );
-      console.error(`[sandbox] list(): Failed - ${message}`);
-      throw new Error(`Failed to list sandboxes: ${message}`);
+      throw toSandboxError(error, "list()", "Failed to list sandboxes");
     }
   };
 
@@ -438,7 +422,6 @@ export const createSandboxService = (env: SandboxEnv) => {
 
 export type SandboxService = ReturnType<typeof createSandboxService>;
 
-// Re-export for testing - allows consumers to mock without direct @e2b/code-interpreter dependency
 export { RateLimitError, Sandbox as E2BSandbox } from "@e2b/code-interpreter";
 export { DEFAULT_TEMPLATE, DEFAULTS, TEMPLATES } from "./config.js";
 export type {

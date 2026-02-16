@@ -1,27 +1,16 @@
 import { spawn } from "node:child_process";
 import { errorResult, type ToolResult } from "./types.js";
 
-/**
- * Command execution timeout in milliseconds (5 minutes).
- */
 export const COMMAND_TIMEOUT = 5 * 60 * 1000;
 
-/**
- * Maximum output size in bytes (50KB).
- */
 export const MAX_OUTPUT = 50 * 1024;
 
-/**
- * Blocked bytes - null, newline, carriage return.
- * Prevents command injection via control characters.
- */
 export const BLOCKED_BYTES = [0x00, 0x0a, 0x0d];
 
-/**
- * Blocked patterns - always rejected regardless of source.
- * These patterns are checked after normalizing whitespace.
- */
-export const BLOCKED_PATTERNS = [
+const escapeRegExp = (s: string): string =>
+  s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const COMMAND_PATTERNS = [
   "rm -rf",
   "rm -r",
   "sudo",
@@ -36,22 +25,48 @@ export const BLOCKED_PATTERNS = [
   "scp",
   "nc ",
   "netcat",
-  "> /",
+  "eval",
+  "exec",
+];
+
+// HACK: no trailing word boundary — -c/-e can be followed directly by code (e.g. `python -c'code'`)
+const INLINE_EXEC_PATTERNS = [
+  "python -c",
+  "python3 -c",
+  "ruby -e",
+  "perl -e",
+  "node -e",
+  "node --eval",
+  "bun -e",
+];
+
+const OPERATOR_PATTERNS = [
   ">>",
+  "> ",
+  ">",
   "|",
   "&&",
   "||",
   ";",
   "$(",
   "`",
-  "eval",
-  "exec",
   "${",
 ];
 
-/**
- * Blocked base commands - never allowed.
- */
+const COMMAND_PATTERN_REGEXES = COMMAND_PATTERNS.map(
+  (p) => new RegExp(`(?:^|\\s)${escapeRegExp(p.trimEnd())}(?:\\s|$)`)
+);
+
+const INLINE_EXEC_REGEXES = INLINE_EXEC_PATTERNS.map(
+  (p) => new RegExp(`(?:^|\\s)${escapeRegExp(p.trimEnd())}`)
+);
+
+export const BLOCKED_PATTERNS = [
+  ...COMMAND_PATTERNS,
+  ...INLINE_EXEC_PATTERNS,
+  ...OPERATOR_PATTERNS,
+];
+
 export const BLOCKED_COMMANDS = new Set([
   "rm",
   "sudo",
@@ -70,11 +85,31 @@ export const BLOCKED_COMMANDS = new Set([
   "zsh",
   "fish",
   "dash",
+  "env",
+  "xargs",
+  "nohup",
+  "strace",
+  "ltrace",
+  "dd",
+  "mkfs",
+  "mount",
+  "umount",
+  "kill",
+  "killall",
+  "pkill",
+  "reboot",
+  "shutdown",
+  "poweroff",
+  "crontab",
+  "at",
+  "ncat",
+  "socat",
+  "telnet",
+  "ftp",
+  "sftp",
+  "rsync",
 ]);
 
-/**
- * Environment variables that are allowed to pass through.
- */
 export const ALLOWED_ENV_VARS = new Set([
   "PATH",
   "HOME",
@@ -102,9 +137,6 @@ export const ALLOWED_ENV_VARS = new Set([
   "GRADLE_HOME",
 ]);
 
-/**
- * Environment variable suffixes that indicate secrets.
- */
 export const BLOCKED_ENV_SUFFIXES = [
   "_KEY",
   "_TOKEN",
@@ -123,9 +155,6 @@ export const BLOCKED_ENV_SUFFIXES = [
   "_CREDENTIALS",
 ];
 
-/**
- * Result metadata for command execution.
- */
 export interface ExecuteMetadata extends Record<string, unknown> {
   exitCode: number;
   timedOut: boolean;
@@ -133,40 +162,38 @@ export interface ExecuteMetadata extends Record<string, unknown> {
 
 const WHITESPACE_REGEX = /\s+/;
 
-/**
- * Normalizes whitespace in a command string.
- */
 export const normalizeCommand = (cmd: string): string =>
   cmd.split(WHITESPACE_REGEX).join(" ");
 
-/**
- * Extracts the base command name from a path.
- * e.g., "/usr/bin/rm" -> "rm", "rm" -> "rm"
- */
 export const extractBaseCommand = (cmd: string): string => {
   const lastSlash = cmd.lastIndexOf("/");
   return lastSlash >= 0 ? cmd.slice(lastSlash + 1) : cmd;
 };
 
-/**
- * Checks if a command contains blocked bytes.
- */
+const BLOCKED_BYTES_SET = new Set(BLOCKED_BYTES);
+
 export const hasBlockedBytes = (cmd: string): boolean => {
-  for (const char of cmd) {
-    const code = char.charCodeAt(0);
-    if (BLOCKED_BYTES.includes(code)) {
+  for (let i = 0; i < cmd.length; i++) {
+    const code = cmd.charCodeAt(i);
+    if (BLOCKED_BYTES_SET.has(code) || code > 127) {
       return true;
     }
   }
   return false;
 };
 
-/**
- * Checks if a command contains blocked patterns.
- * Returns the matched pattern if blocked, null otherwise.
- */
 export const hasBlockedPattern = (normalizedCmd: string): string | null => {
-  for (const pattern of BLOCKED_PATTERNS) {
+  for (let i = 0; i < COMMAND_PATTERNS.length; i++) {
+    if ((COMMAND_PATTERN_REGEXES[i] as RegExp).test(normalizedCmd)) {
+      return COMMAND_PATTERNS[i] as string;
+    }
+  }
+  for (let i = 0; i < INLINE_EXEC_PATTERNS.length; i++) {
+    if ((INLINE_EXEC_REGEXES[i] as RegExp).test(normalizedCmd)) {
+      return INLINE_EXEC_PATTERNS[i] as string;
+    }
+  }
+  for (const pattern of OPERATOR_PATTERNS) {
     if (normalizedCmd.includes(pattern)) {
       return pattern;
     }
@@ -174,12 +201,18 @@ export const hasBlockedPattern = (normalizedCmd: string): string | null => {
   return null;
 };
 
-/**
- * Creates a filtered environment for command execution.
- * Only allows known-safe environment variables and blocks
- * any variables with secret-indicating suffixes.
- */
+// HACK: cached — process.env is stable during a heal session, no need to rebuild per command
+let cachedSafeEnv: Record<string, string> | null = null;
+
+export const resetSafeEnvCache = (): void => {
+  cachedSafeEnv = null;
+};
+
 export const createSafeEnv = (): Record<string, string> => {
+  if (cachedSafeEnv) {
+    return cachedSafeEnv;
+  }
+
   const env: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(process.env)) {
@@ -201,13 +234,10 @@ export const createSafeEnv = (): Record<string, string> => {
     }
   }
 
+  cachedSafeEnv = env;
   return env;
 };
 
-/**
- * Validates a command for security issues.
- * Returns an error message if blocked, null if safe.
- */
 export const validateCommand = (command: string): string | null => {
   if (hasBlockedBytes(command)) {
     return "command contains invalid characters";
@@ -232,9 +262,6 @@ export const validateCommand = (command: string): string | null => {
   return null;
 };
 
-/**
- * Parses a command string into normalized form and parts.
- */
 export const parseCommand = (
   command: string
 ): { normalized: string; parts: string[] } => {
@@ -243,19 +270,68 @@ export const parseCommand = (
   return { normalized, parts };
 };
 
-/**
- * Executes a command and returns the result.
- */
+const truncateOutput = (buffer: string): string =>
+  buffer.length > MAX_OUTPUT
+    ? `${buffer.slice(0, MAX_OUTPUT)}\n... (truncated)`
+    : buffer;
+
+const buildExecuteResult = (
+  content: string,
+  isError: boolean,
+  exitCode: number,
+  timedOut: boolean
+): ToolResult => ({
+  content,
+  isError,
+  metadata: { exitCode, timedOut } as ExecuteMetadata,
+});
+
+const formatHeader = (fullCmd: string, startTime: number): string =>
+  `$ ${fullCmd}\n(completed in ${Date.now() - startTime}ms)\n\n`;
+
+const resolveClose = (
+  code: number | null,
+  timedOut: boolean,
+  stdout: string,
+  stderr: string,
+  fullCmd: string,
+  startTime: number
+): ToolResult => {
+  const header = formatHeader(fullCmd, startTime);
+  const output = stdout + stderr;
+
+  if (timedOut) {
+    return buildExecuteResult(
+      `${header}TIMEOUT: exceeded 5 minutes\n`,
+      true,
+      -1,
+      true
+    );
+  }
+
+  const exitCode = code ?? 0;
+  if (exitCode !== 0) {
+    return buildExecuteResult(
+      `${header}Exit code: ${exitCode}\n\n${output}`,
+      true,
+      exitCode,
+      false
+    );
+  }
+
+  return buildExecuteResult(`${header}${output}`, false, 0, false);
+};
+
 export const executeCommand = (
   cwd: string,
   fullCmd: string,
-  parts: string[]
+  parts: string[],
+  abortSignal?: AbortSignal
 ): Promise<ToolResult> => {
   const startTime = Date.now();
   let stdout = "";
   let stderr = "";
   let timedOut = false;
-  let exitCode = 0;
 
   const [command, ...args] = parts;
 
@@ -263,11 +339,16 @@ export const executeCommand = (
     return Promise.resolve(errorResult("empty command"));
   }
 
+  if (abortSignal?.aborted) {
+    return Promise.resolve(errorResult("command aborted before execution"));
+  }
+
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd,
       env: createSafeEnv(),
       timeout: COMMAND_TIMEOUT,
+      signal: abortSignal,
     });
 
     const timeoutId = setTimeout(() => {
@@ -276,65 +357,24 @@ export const executeCommand = (
     }, COMMAND_TIMEOUT);
 
     child.stdout.on("data", (data: Buffer) => {
-      stdout += data.toString();
-      if (stdout.length > MAX_OUTPUT) {
-        stdout = `${stdout.slice(0, MAX_OUTPUT)}\n... (truncated)`;
-      }
+      stdout = truncateOutput(stdout + data.toString());
     });
 
     child.stderr.on("data", (data: Buffer) => {
-      stderr += data.toString();
-      if (stderr.length > MAX_OUTPUT) {
-        stderr = `${stderr.slice(0, MAX_OUTPUT)}\n... (truncated)`;
-      }
+      stderr = truncateOutput(stderr + data.toString());
     });
 
     child.on("close", (code: number | null) => {
       clearTimeout(timeoutId);
-      exitCode = code ?? 0;
-      const duration = Date.now() - startTime;
-
-      let result = `$ ${fullCmd}\n(completed in ${duration}ms)\n\n`;
-      const output = stdout + stderr;
-
-      if (timedOut) {
-        result += "TIMEOUT: exceeded 5 minutes\n";
-        resolve({
-          content: result,
-          isError: true,
-          metadata: { exitCode: -1, timedOut: true } as ExecuteMetadata,
-        });
-        return;
-      }
-
-      if (exitCode !== 0) {
-        result += `Exit code: ${exitCode}\n\n`;
-        result += output;
-        resolve({
-          content: result,
-          isError: true,
-          metadata: { exitCode, timedOut: false } as ExecuteMetadata,
-        });
-        return;
-      }
-
-      result += output;
-      resolve({
-        content: result,
-        isError: false,
-        metadata: { exitCode: 0, timedOut: false } as ExecuteMetadata,
-      });
+      resolve(resolveClose(code, timedOut, stdout, stderr, fullCmd, startTime));
     });
 
     child.on("error", (err: Error) => {
       clearTimeout(timeoutId);
-      const duration = Date.now() - startTime;
-      const result = `$ ${fullCmd}\n(completed in ${duration}ms)\n\nError: ${err.message}\n`;
-      resolve({
-        content: result,
-        isError: true,
-        metadata: { exitCode: -1, timedOut: false } as ExecuteMetadata,
-      });
+      const header = formatHeader(fullCmd, startTime);
+      resolve(
+        buildExecuteResult(`${header}Error: ${err.message}\n`, true, -1, false)
+      );
     });
   });
 };

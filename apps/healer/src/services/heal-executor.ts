@@ -28,8 +28,9 @@ const MAX_REMAINING_MONTHLY_USD = 10_000;
 
 const SAFE_STRING_PATTERN = /^[a-zA-Z0-9_\-./]+$/;
 
+// SECURITY: Token portion restricted to [a-zA-Z0-9_-] to prevent shell injection via $() or backticks in git clone
 const GITHUB_REPO_URL_PATTERN =
-  /^https:\/\/(x-access-token:[^@]+@)?github\.com\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+\.git$/;
+  /^https:\/\/(x-access-token:[a-zA-Z0-9_-]+@)?github\.com\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+\.git$/;
 
 const ALLOWED_HEAL_MODELS = new Set([DEFAULT_FAST_MODEL, DEFAULT_SMART_MODEL]);
 
@@ -73,6 +74,12 @@ interface HealResponse {
     inputTokens: number;
     outputTokens: number;
     finalMessage: string;
+    commandLog?: Array<{
+      tool: string;
+      durationMs: number;
+      isError: boolean;
+      timestamp: number;
+    }>;
   };
   error?: string;
 }
@@ -128,8 +135,9 @@ const installDependencies = async (
   });
 
   if (result.exitCode !== 0) {
-    console.warn(
-      `[heal-executor] Dependency install exited with ${result.exitCode}: ${result.stderr}`
+    const safeStderr = sanitizeForLogging(result.stderr?.slice(0, 500) ?? "");
+    throw new Error(
+      `Dependency install failed (exit ${result.exitCode}): ${safeStderr}`
     );
   }
 };
@@ -180,6 +188,25 @@ const sanitizeForLogging = (value: string): string => {
   return value;
 };
 
+const cleanupSandbox = async (sandbox: SandboxHandle): Promise<void> => {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await sandbox.kill();
+      return;
+    } catch (killError) {
+      console.error(
+        `[heal-executor] sandbox.kill() attempt ${attempt + 1} failed: ${killError instanceof Error ? killError.message : String(killError)}`
+      );
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+  }
+  console.error(
+    `[heal-executor] Failed to kill sandbox ${sandbox.sandboxId} after 3 attempts`
+  );
+};
+
 const buildFailureResponse = (model: string, error: string): HealResponse => ({
   success: false,
   patch: null,
@@ -195,20 +222,160 @@ const buildFailureResponse = (model: string, error: string): HealResponse => ({
   error,
 });
 
-export const executeHeal = async (
-  appEnv: Env,
-  rawRequest: unknown
+const cloneRepo = async (
+  sandbox: SandboxHandle,
+  request: HealRequest,
+  worktreePath: string
+): Promise<void> => {
+  console.log(
+    `[heal-executor] Sandbox ${sandbox.sandboxId} created, cloning repo`
+  );
+
+  // HACK: Shell injection prevented by SAFE_STRING_PATTERN and GITHUB_REPO_URL_PATTERN regex validation above
+  const cloneCmd = `git clone --depth 1 --branch ${request.branch} ${request.repoUrl} ${worktreePath}`;
+  const cloneResult = await sandbox.commands.run(cloneCmd, {
+    timeoutMs: CLONE_TIMEOUT_MS,
+  });
+
+  if (cloneResult.exitCode !== 0) {
+    throw new Error(`Clone failed: ${sanitizeForLogging(cloneResult.stderr)}`);
+  }
+};
+
+const tryDisableNetwork = async (sandbox: SandboxHandle): Promise<void> => {
+  if (!sandbox.disableNetwork) {
+    return;
+  }
+
+  try {
+    await sandbox.disableNetwork();
+    console.log("[heal-executor] Network disabled for sandbox");
+  } catch {
+    console.warn(
+      "[heal-executor] Could not disable network (provider may not support it)"
+    );
+  }
+};
+
+const runHealLoop = async (
+  sandbox: SandboxHandle,
+  request: HealRequest,
+  worktreePath: string
 ): Promise<HealResponse> => {
-  let resolvedModel = DEFAULT_SMART_MODEL;
+  const toolContext = createSandboxToolContext({
+    sandbox,
+    worktreePath,
+    repoRoot: worktreePath,
+    runId: request.healId,
+  });
+
+  const registry = createToolRegistry(toolContext);
+  registry.registerAll(createSandboxTools(sandbox));
+
+  const resolvedModel = resolveModel(request);
+  const config = createConfig(
+    resolvedModel,
+    10,
+    request.budgetPerRunUSD ?? 1.0,
+    request.remainingMonthlyUSD ?? -1
+  );
+
+  const loop = new HealLoop(registry, config);
+
+  console.log("[heal-executor] Starting heal loop");
+  const healResult: HealResult = await loop.run(
+    SYSTEM_PROMPT,
+    request.userPrompt
+  );
+
+  console.log(
+    `[heal-executor] Heal loop completed: success=${healResult.success}, iterations=${healResult.iterations}`
+  );
+
+  let patch: string | null = null;
+  let filesChanged: string[] = [];
+
+  if (healResult.success) {
+    [patch, filesChanged] = await Promise.all([
+      extractPatch(sandbox, worktreePath),
+      extractFilesChanged(sandbox, worktreePath),
+    ]);
+    console.log(
+      `[heal-executor] Extracted patch with ${filesChanged.length} files changed`
+    );
+  }
+
+  return {
+    success: healResult.success,
+    patch,
+    filesChanged,
+    result: {
+      model: resolvedModel,
+      iterations: healResult.iterations,
+      costUSD: healResult.costUSD,
+      inputTokens: healResult.inputTokens,
+      outputTokens: healResult.outputTokens,
+      finalMessage: healResult.finalMessage,
+      commandLog: healResult.commandLog,
+    },
+  };
+};
+
+const parseHealRequest = (rawRequest: unknown): HealRequest | HealResponse => {
   const parseResult = healRequestSchema.safeParse(rawRequest);
   if (!parseResult.success) {
     const errors = parseResult.error.errors
       .map((e) => `${e.path.join(".")}: ${e.message}`)
       .join("; ");
-    return buildFailureResponse(resolvedModel, `Invalid request: ${errors}`);
+    return buildFailureResponse(
+      DEFAULT_SMART_MODEL,
+      `Invalid request: ${errors}`
+    );
+  }
+  return parseResult.data;
+};
+
+const isFailureResponse = (
+  value: HealRequest | HealResponse
+): value is HealResponse => "success" in value;
+
+const resolveModel = (request: HealRequest): string =>
+  request.model ?? DEFAULT_SMART_MODEL;
+
+const prepareSandbox = async (
+  sandbox: SandboxHandle,
+  request: HealRequest,
+  worktreePath: string
+): Promise<HealResponse | null> => {
+  await cloneRepo(sandbox, request, worktreePath);
+
+  console.log("[heal-executor] Repo cloned, installing dependencies");
+
+  try {
+    await installDependencies(sandbox, worktreePath);
+  } catch (installError) {
+    const reason =
+      installError instanceof Error
+        ? installError.message
+        : String(installError);
+    console.error(`[heal-executor] ${reason}`);
+    return buildFailureResponse(resolveModel(request), reason);
   }
 
-  const request = parseResult.data;
+  await tryDisableNetwork(sandbox);
+  return null;
+};
+
+export const executeHeal = async (
+  appEnv: Env,
+  rawRequest: unknown
+): Promise<HealResponse> => {
+  const requestOrError = parseHealRequest(rawRequest);
+  if (isFailureResponse(requestOrError)) {
+    return requestOrError;
+  }
+
+  const request = requestOrError;
   let sandbox: SandboxHandle | null = null;
   const sandboxService = createSandboxService(appEnv);
   const worktreePath = `${sandboxService.rootPath}/repo`;
@@ -222,96 +389,25 @@ export const executeHeal = async (
       metadata: { healId: request.healId },
     });
 
-    console.log(
-      `[heal-executor] Sandbox ${sandbox.sandboxId} created, cloning repo`
-    );
-
-    // HACK: Shell injection prevented by SAFE_STRING_PATTERN and GITHUB_REPO_URL_PATTERN regex validation above
-    const cloneCmd = `git clone --depth 1 --branch ${request.branch} ${request.repoUrl} ${worktreePath}`;
-    const cloneResult = await sandbox.commands.run(cloneCmd, {
-      timeoutMs: CLONE_TIMEOUT_MS,
-    });
-
-    if (cloneResult.exitCode !== 0) {
-      throw new Error(
-        `Clone failed: ${sanitizeForLogging(cloneResult.stderr)}`
-      );
+    const prepError = await prepareSandbox(sandbox, request, worktreePath);
+    if (prepError) {
+      return prepError;
     }
 
-    console.log("[heal-executor] Repo cloned, installing dependencies");
-    await installDependencies(sandbox, worktreePath);
-
-    const toolContext = createSandboxToolContext({
-      sandbox,
-      worktreePath,
-      repoRoot: worktreePath,
-      runId: request.healId,
-    });
-
-    const registry = createToolRegistry(toolContext);
-    registry.registerAll(createSandboxTools(sandbox));
-
-    resolvedModel = request.model ?? DEFAULT_SMART_MODEL;
-    const config = createConfig(
-      resolvedModel,
-      10,
-      request.budgetPerRunUSD ?? 1.0,
-      request.remainingMonthlyUSD ?? -1
-    );
-
-    const loop = new HealLoop(registry, config);
-
-    console.log("[heal-executor] Starting heal loop");
-    const healResult: HealResult = await loop.run(
-      SYSTEM_PROMPT,
-      request.userPrompt
-    );
-
-    console.log(
-      `[heal-executor] Heal loop completed: success=${healResult.success}, iterations=${healResult.iterations}`
-    );
-
-    let patch: string | null = null;
-    let filesChanged: string[] = [];
-
-    if (healResult.success) {
-      [patch, filesChanged] = await Promise.all([
-        extractPatch(sandbox, worktreePath),
-        extractFilesChanged(sandbox, worktreePath),
-      ]);
-      console.log(
-        `[heal-executor] Extracted patch with ${filesChanged.length} files changed`
-      );
-    }
-
-    return {
-      success: healResult.success,
-      patch,
-      filesChanged,
-      result: {
-        model: resolvedModel,
-        iterations: healResult.iterations,
-        costUSD: healResult.costUSD,
-        inputTokens: healResult.inputTokens,
-        outputTokens: healResult.outputTokens,
-        finalMessage: healResult.finalMessage,
-      },
-    };
+    return await runHealLoop(sandbox, request, worktreePath);
   } catch (error) {
     const rawMessage = error instanceof Error ? error.message : String(error);
     const safeMessage = sanitizeForLogging(rawMessage);
     console.error(`[heal-executor] Error: ${safeMessage}`);
-    return buildFailureResponse(resolvedModel, safeMessage);
+    return buildFailureResponse(resolveModel(request), safeMessage);
   } finally {
     if (sandbox) {
-      try {
-        console.log(`[heal-executor] Killing sandbox ${sandbox.sandboxId}`);
-        await sandbox.kill();
-      } catch (killError) {
+      // HACK: fire-and-forget — sandbox auto-expires via E2B timeout, no need to block the response
+      cleanupSandbox(sandbox).catch((err) => {
         console.error(
-          `[heal-executor] Failed to kill sandbox: ${killError instanceof Error ? killError.message : String(killError)}`
+          `[heal-executor] Background sandbox cleanup failed: ${err instanceof Error ? err.message : String(err)}`
         );
-      }
+      });
     }
   }
 };

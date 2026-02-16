@@ -28,7 +28,12 @@ export {
 export { globTool } from "./glob.js";
 export { grepTool } from "./grep.js";
 export { readFileTool } from "./read-file.js";
-export { createToolRegistry, ToolRegistry } from "./registry.js";
+export type { CommandLogEntry } from "./registry.js";
+export {
+  createToolRegistry,
+  DEFAULT_TOOL_LIMITS,
+  ToolRegistry,
+} from "./registry.js";
 export { runCheckTool } from "./run-check.js";
 export { runCommandTool } from "./run-command.js";
 export type { Tool, ToolResult } from "./types.js";
@@ -42,9 +47,6 @@ import { runCheckTool } from "./run-check.js";
 import { runCommandTool } from "./run-command.js";
 import type { Tool } from "./types.js";
 
-/**
- * Returns all built-in tools.
- */
 export const getAllTools = (): Tool[] => [
   readFileTool,
   editFileTool,

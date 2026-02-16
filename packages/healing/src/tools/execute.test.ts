@@ -11,6 +11,7 @@ import {
   hasBlockedPattern,
   normalizeCommand,
   parseCommand,
+  resetSafeEnvCache,
   validateCommand,
 } from "./execute.js";
 
@@ -141,6 +142,18 @@ describe("hasBlockedBytes", () => {
     expect(hasBlockedBytes("echo hello world")).toBe(false);
   });
 
+  test("rejects non-breaking space (\\u00A0)", () => {
+    expect(hasBlockedBytes("go\u00A0build")).toBe(true);
+  });
+
+  test("rejects Cyrillic characters", () => {
+    expect(hasBlockedBytes("g\u043Ebuild")).toBe(true);
+  });
+
+  test("rejects fullwidth characters", () => {
+    expect(hasBlockedBytes("\uFF52\uFF4D file")).toBe(true);
+  });
+
   test("verifies BLOCKED_BYTES constant contains expected values", () => {
     expect(BLOCKED_BYTES).toContain(0x00);
     expect(BLOCKED_BYTES).toContain(0x0a);
@@ -240,7 +253,15 @@ describe("hasBlockedPattern", () => {
     });
 
     test("blocks redirect to absolute path", () => {
-      expect(hasBlockedPattern("echo data > /etc/passwd")).toBe("> /");
+      expect(hasBlockedPattern("echo data > /etc/passwd")).toBe("> ");
+    });
+
+    test("blocks redirect to relative path", () => {
+      expect(hasBlockedPattern("echo data > file.txt")).toBe("> ");
+    });
+
+    test("blocks redirect without space", () => {
+      expect(hasBlockedPattern("echo data >file.txt")).toBe(">");
     });
 
     test("blocks append redirect", () => {
@@ -290,6 +311,40 @@ describe("hasBlockedPattern", () => {
     });
   });
 
+  describe("inline code execution", () => {
+    test("blocks python -c", () => {
+      expect(hasBlockedPattern("python -c 'code'")).toBe("python -c");
+    });
+
+    test("blocks python -c without trailing space", () => {
+      expect(hasBlockedPattern("python -c'code'")).toBe("python -c");
+    });
+
+    test("blocks python3 -c", () => {
+      expect(hasBlockedPattern("python3 -c 'code'")).toBe("python3 -c");
+    });
+
+    test("blocks ruby -e", () => {
+      expect(hasBlockedPattern("ruby -e 'code'")).toBe("ruby -e");
+    });
+
+    test("blocks perl -e", () => {
+      expect(hasBlockedPattern("perl -e 'code'")).toBe("perl -e");
+    });
+
+    test("blocks node -e", () => {
+      expect(hasBlockedPattern("node -e 'code'")).toBe("node -e");
+    });
+
+    test("blocks node --eval", () => {
+      expect(hasBlockedPattern("node --eval 'code'")).toBe("node --eval");
+    });
+
+    test("blocks bun -e", () => {
+      expect(hasBlockedPattern("bun -e 'code'")).toBe("bun -e");
+    });
+  });
+
   test("verifies all expected patterns are in BLOCKED_PATTERNS", () => {
     const expectedPatterns = [
       "rm -rf",
@@ -306,8 +361,16 @@ describe("hasBlockedPattern", () => {
       "scp",
       "nc ",
       "netcat",
-      "> /",
+      "python -c",
+      "python3 -c",
+      "ruby -e",
+      "perl -e",
+      "node -e",
+      "node --eval",
+      "bun -e",
       ">>",
+      "> ",
+      ">",
       "|",
       "&&",
       "||",
@@ -322,12 +385,13 @@ describe("hasBlockedPattern", () => {
     for (const pattern of expectedPatterns) {
       expect(BLOCKED_PATTERNS).toContain(pattern);
     }
-    expect(BLOCKED_PATTERNS).toHaveLength(25);
+    expect(BLOCKED_PATTERNS).toHaveLength(33);
   });
 });
 
 describe("createSafeEnv", () => {
   const withEnv = <T>(vars: Record<string, string>, fn: () => T): T => {
+    resetSafeEnvCache();
     const saved: Record<string, string | undefined> = {};
     for (const key of Object.keys(vars)) {
       saved[key] = process.env[key];
@@ -343,6 +407,7 @@ describe("createSafeEnv", () => {
           process.env[key] = value;
         }
       }
+      resetSafeEnvCache();
     }
   };
 
@@ -660,6 +725,38 @@ describe("validateCommand", () => {
       const result = validateCommand("./scripts/rm file.txt");
       expect(result).toBe('blocked command: "rm"');
     });
+
+    test("rejects env command (bypass vector)", () => {
+      const result = validateCommand("env rm file.txt");
+      expect(result).toBe('blocked command: "env"');
+    });
+
+    test("rejects xargs command", () => {
+      const result = validateCommand("xargs rm");
+      expect(result).toBe('blocked command: "xargs"');
+    });
+  });
+
+  describe("inline code execution check", () => {
+    test("rejects python -c inline code", () => {
+      const result = validateCommand("python -c 'import os'");
+      expect(result).toBe('blocked pattern: "python -c"');
+    });
+
+    test("rejects python -c without space after flag", () => {
+      const result = validateCommand("python -c'import os'");
+      expect(result).toBe('blocked pattern: "python -c"');
+    });
+
+    test("rejects node -e inline code", () => {
+      const result = validateCommand("node -e 'console.log(1)'");
+      expect(result).toBe('blocked pattern: "node -e"');
+    });
+
+    test("rejects node --eval inline code", () => {
+      const result = validateCommand("node --eval 'console.log(1)'");
+      expect(result).toBe('blocked pattern: "node --eval"');
+    });
   });
 
   describe("empty command check (fourth)", () => {
@@ -742,12 +839,35 @@ describe("validateCommand", () => {
       "zsh",
       "fish",
       "dash",
+      "env",
+      "xargs",
+      "nohup",
+      "strace",
+      "ltrace",
+      "dd",
+      "mkfs",
+      "mount",
+      "umount",
+      "kill",
+      "killall",
+      "pkill",
+      "reboot",
+      "shutdown",
+      "poweroff",
+      "crontab",
+      "at",
+      "ncat",
+      "socat",
+      "telnet",
+      "ftp",
+      "sftp",
+      "rsync",
     ];
 
     for (const cmd of expectedCommands) {
       expect(BLOCKED_COMMANDS.has(cmd)).toBe(true);
     }
-    expect(BLOCKED_COMMANDS.size).toBe(17);
+    expect(BLOCKED_COMMANDS.size).toBe(40);
   });
 });
 

@@ -36,21 +36,7 @@ export const create = mutation({
     updatedAt: v.number(),
   },
   handler: async (ctx, args) => {
-    return await ctx.db.insert("organizationMembers", {
-      organizationId: args.organizationId,
-      userId: args.userId,
-      role: args.role,
-      providerUserId: args.providerUserId,
-      providerUsername: args.providerUsername,
-      providerLinkedAt: args.providerLinkedAt,
-      providerVerifiedAt: args.providerVerifiedAt,
-      membershipSource: args.membershipSource,
-      removedAt: args.removedAt,
-      removalReason: args.removalReason,
-      removedBy: args.removedBy,
-      createdAt: args.createdAt,
-      updatedAt: args.updatedAt,
-    });
+    return await ctx.db.insert("organizationMembers", args);
   },
 });
 
@@ -143,9 +129,33 @@ export const listByOrgProviderUser = query({
           .eq("organizationId", args.organizationId)
           .eq("providerUserId", args.providerUserId)
       )
-      .collect();
+      .take(10);
   },
 });
+
+const collectOrgMembers = async (
+  ctx: { db: MutationCtx["db"] },
+  organizationId: Id<"organizations">,
+  includeRemoved: boolean | null | undefined,
+  limit: number
+): Promise<Record<string, unknown>[]> => {
+  const results: Record<string, unknown>[] = [];
+  const membersQuery = ctx.db
+    .query("organizationMembers")
+    .withIndex("by_org_user", (q) => q.eq("organizationId", organizationId));
+
+  for await (const member of membersQuery) {
+    if (!includeRemoved && member.removedAt) {
+      continue;
+    }
+    results.push(member);
+    if (results.length >= limit) {
+      break;
+    }
+  }
+
+  return results;
+};
 
 export const listByOrg = query({
   args: {
@@ -155,24 +165,12 @@ export const listByOrg = query({
   },
   handler: async (ctx, args) => {
     const limit = clampLimit(args.limit, 1, 500, 200);
-    const results: Record<string, unknown>[] = [];
-    const query = ctx.db
-      .query("organizationMembers")
-      .withIndex("by_org_user", (q) =>
-        q.eq("organizationId", args.organizationId)
-      );
-
-    for await (const member of query) {
-      if (!args.includeRemoved && member.removedAt) {
-        continue;
-      }
-      results.push(member);
-      if (results.length >= limit) {
-        break;
-      }
-    }
-
-    return results;
+    return await collectOrgMembers(
+      ctx,
+      args.organizationId,
+      args.includeRemoved,
+      limit
+    );
   },
 });
 
@@ -184,24 +182,12 @@ export const listByOrgAll = query({
   },
   handler: async (ctx, args) => {
     const limit = clampLimit(args.limit, 1, 5000, 1000);
-    const results: Record<string, unknown>[] = [];
-    const query = ctx.db
-      .query("organizationMembers")
-      .withIndex("by_org_user", (q) =>
-        q.eq("organizationId", args.organizationId)
-      );
-
-    for await (const member of query) {
-      if (!args.includeRemoved && member.removedAt) {
-        continue;
-      }
-      results.push(member);
-      if (results.length >= limit) {
-        break;
-      }
-    }
-
-    return results;
+    return await collectOrgMembers(
+      ctx,
+      args.organizationId,
+      args.includeRemoved,
+      limit
+    );
   },
 });
 
@@ -249,7 +235,7 @@ export const listByOrgRole = query({
       .withIndex("by_org_role", (q) =>
         q.eq("organizationId", args.organizationId).eq("role", args.role)
       )
-      .collect();
+      .take(500);
   },
 });
 
@@ -261,7 +247,7 @@ export const listByProviderUserId = query({
       .withIndex("by_provider_user_id", (q) =>
         q.eq("providerUserId", args.providerUserId)
       )
-      .collect();
+      .take(50);
   },
 });
 
@@ -286,25 +272,42 @@ export const update = mutation({
       return null;
     }
 
-    await ctx.db.patch(
-      member._id,
-      buildPatch({
-        role: args.role,
-        providerUserId: args.providerUserId,
-        providerUsername: args.providerUsername,
-        providerLinkedAt: args.providerLinkedAt,
-        providerVerifiedAt: args.providerVerifiedAt,
-        membershipSource: args.membershipSource,
-        removedAt: args.removedAt,
-        removalReason: args.removalReason,
-        removedBy: args.removedBy,
-        updatedAt: args.updatedAt,
-      })
-    );
+    const { id: _, ...patch } = args;
+    await ctx.db.patch(member._id, buildPatch(patch));
 
     return String(member._id);
   },
 });
+
+const isElevatedRole = (role: string): boolean =>
+  role === "owner" || role === "admin";
+
+const countActiveMemberStats = async (
+  ctx: MutationCtx,
+  organizationId: Id<"organizations">,
+  trackElevated: boolean
+): Promise<{ activeCount: number; elevatedCount: number }> => {
+  let activeCount = 0;
+  let elevatedCount = 0;
+  const members = ctx.db
+    .query("organizationMembers")
+    .withIndex("by_org_user", (q) => q.eq("organizationId", organizationId));
+
+  for await (const entry of members) {
+    if (entry.removedAt) {
+      continue;
+    }
+    activeCount += 1;
+    if (trackElevated && isElevatedRole(entry.role)) {
+      elevatedCount += 1;
+    }
+    if (activeCount > 1 && (!trackElevated || elevatedCount > 1)) {
+      break;
+    }
+  }
+
+  return { activeCount, elevatedCount };
+};
 
 export const leaveOrganization = mutation({
   args: {
@@ -324,27 +327,12 @@ export const leaveOrganization = mutation({
       return { success: true, message: "No membership record to remove" };
     }
 
-    const needsElevated = member.role === "owner" || member.role === "admin";
-    let activeCount = 0;
-    let elevatedCount = 0;
-    const members = ctx.db
-      .query("organizationMembers")
-      .withIndex("by_org_user", (q) =>
-        q.eq("organizationId", args.organizationId)
-      );
-
-    for await (const entry of members) {
-      if (entry.removedAt) {
-        continue;
-      }
-      activeCount += 1;
-      if (needsElevated && (entry.role === "owner" || entry.role === "admin")) {
-        elevatedCount += 1;
-      }
-      if (activeCount > 1 && (!needsElevated || elevatedCount > 1)) {
-        break;
-      }
-    }
+    const needsElevated = isElevatedRole(member.role);
+    const { activeCount, elevatedCount } = await countActiveMemberStats(
+      ctx,
+      args.organizationId,
+      needsElevated
+    );
 
     if (activeCount === 1) {
       return {
@@ -413,7 +401,7 @@ const countActiveElevatedMembers = async (
     if (member.removedAt) {
       continue;
     }
-    if (member.role === "owner" || member.role === "admin") {
+    if (isElevatedRole(member.role)) {
       elevatedCount += 1;
       if (elevatedCount > 1) {
         break;

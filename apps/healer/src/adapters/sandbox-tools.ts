@@ -66,10 +66,27 @@ interface PathValidation {
   error?: ToolResult;
 }
 
+// SECURITY: Reject shell metacharacters in paths to prevent injection even if quoting is bypassed
+const SHELL_META_CHARS = /[`$\\!#&|;(){}<>*?~\n\r]/;
+
 const validateSandboxPath = (
   worktreePath: string,
   relPath: string
 ): PathValidation => {
+  if (relPath.includes("\0")) {
+    return {
+      valid: false,
+      error: errorResult("path contains null byte"),
+    };
+  }
+
+  if (SHELL_META_CHARS.test(relPath)) {
+    return {
+      valid: false,
+      error: errorResult("path contains invalid characters"),
+    };
+  }
+
   const cleanPath = relPath.replace(LEADING_DOT_SLASH_REGEX, "");
 
   if (cleanPath.startsWith("/")) {
@@ -123,15 +140,63 @@ const validateReadParams = (
   return null;
 };
 
-const getValidatedPath = (
+const resolveSandboxSymlinks = async (
+  sandbox: SandboxHandle,
+  absPath: string,
+  worktreePath: string,
+  relPath: string
+): Promise<ToolResult | null> => {
+  try {
+    const escapedPath = absPath.replace(/'/g, "'\\''");
+    const result = await sandbox.commands.run(
+      `timeout 0.5 readlink -f '${escapedPath}'`,
+      { timeoutMs: 5000 }
+    );
+    if (result.exitCode !== 0) {
+      return null;
+    }
+    const resolvedPath = result.stdout.trim();
+    if (resolvedPath !== "" && !resolvedPath.startsWith(worktreePath)) {
+      return errorResult(`symlink escapes worktree: ${relPath}`);
+    }
+  } catch {
+    // HACK: readlink may fail for non-existent paths during write ops
+  }
+  return null;
+};
+
+const getValidatedPathAsync = async (
+  sandbox: SandboxHandle,
   ctx: ToolContext,
   filePath: string
-): ToolResult | string => {
+): Promise<ToolResult | string> => {
   const validation = validateSandboxPath(ctx.worktreePath, filePath);
   if (!(validation.valid && validation.absPath)) {
     return validation.error ?? errorResult("invalid path");
   }
+
+  const symlinkError = await resolveSandboxSymlinks(
+    sandbox,
+    validation.absPath,
+    ctx.worktreePath,
+    filePath
+  );
+  if (symlinkError) {
+    return symlinkError;
+  }
+
   return validation.absPath;
+};
+
+const getSearchPathAsync = async (
+  sandbox: SandboxHandle,
+  ctx: ToolContext,
+  searchDir?: string
+): Promise<ToolResult | string> => {
+  if (!searchDir) {
+    return ctx.worktreePath;
+  }
+  return await getValidatedPathAsync(sandbox, ctx, searchDir);
 };
 
 const checkFileExists = async (
@@ -220,7 +285,7 @@ export const createSandboxReadFileTool = (sandbox: SandboxHandle): Tool => ({
       return paramsError;
     }
 
-    const absPathOrError = getValidatedPath(ctx, filePath);
+    const absPathOrError = await getValidatedPathAsync(sandbox, ctx, filePath);
     if (typeof absPathOrError !== "string") {
       return absPathOrError;
     }
@@ -354,7 +419,11 @@ export const createSandboxEditFileTool = (sandbox: SandboxHandle): Tool => ({
       return inputError;
     }
 
-    const absPathOrError = getValidatedPath(ctx, filePath);
+    if (typeof newString === "string" && newString.includes("\0")) {
+      return errorResult("new_string contains null byte");
+    }
+
+    const absPathOrError = await getValidatedPathAsync(sandbox, ctx, filePath);
     if (typeof absPathOrError !== "string") {
       return absPathOrError;
     }
@@ -403,16 +472,6 @@ export const createSandboxEditFileTool = (sandbox: SandboxHandle): Tool => ({
   },
 });
 
-const getSearchPath = (
-  ctx: ToolContext,
-  searchDir?: string
-): ToolResult | string => {
-  if (!searchDir) {
-    return ctx.worktreePath;
-  }
-  return getValidatedPath(ctx, searchDir);
-};
-
 const formatGlobOutput = (files: string[], pattern: string): string => {
   if (files.length === 0) {
     return `no files match pattern: ${pattern}`;
@@ -456,23 +515,21 @@ export const createSandboxGlobTool = (sandbox: SandboxHandle): Tool => ({
       return patternError;
     }
 
-    // SECURITY: Block patterns with potentially dangerous characters
     if (hasBlockedBytes(pattern)) {
       return errorResult("pattern contains invalid characters");
     }
 
-    const searchPathOrError = getSearchPath(ctx, searchDir);
+    const searchPathOrError = await getSearchPathAsync(sandbox, ctx, searchDir);
     if (typeof searchPathOrError !== "string") {
       return searchPathOrError;
     }
 
     try {
-      // SECURITY: Use single quotes and escape embedded single quotes to prevent command injection
-      // Double quotes allow command substitution via $() and backticks
       const escapedPattern = pattern
         .replace(/\*\*/g, "*")
         .replace(/'/g, "'\\''");
-      const findCmd = `find ${searchPathOrError} -type f -name '${escapedPattern}' 2>/dev/null | head -${MAX_GLOB_RESULTS + 1}`;
+      const escapedSearchPath = searchPathOrError.replace(/'/g, "'\\''");
+      const findCmd = `find '${escapedSearchPath}' -type f -name '${escapedPattern}' 2>/dev/null | head -${MAX_GLOB_RESULTS + 1}`;
       const result = await sandbox.commands.run(findCmd, {
         cwd: searchPathOrError,
         timeoutMs: 30_000,
@@ -578,12 +635,11 @@ export const createSandboxGrepTool = (sandbox: SandboxHandle): Tool => ({
       return patternError;
     }
 
-    // SECURITY: Block patterns with null bytes or newlines that could bypass shell escaping
     if (hasBlockedBytes(pattern)) {
       return errorResult("pattern contains invalid characters");
     }
 
-    const searchPathOrError = getSearchPath(ctx, searchDir);
+    const searchPathOrError = await getSearchPathAsync(sandbox, ctx, searchDir);
     if (typeof searchPathOrError !== "string") {
       return searchPathOrError;
     }
@@ -594,9 +650,9 @@ export const createSandboxGrepTool = (sandbox: SandboxHandle): Tool => ({
     }
 
     try {
-      // SECURITY: Single-quote escaping prevents command substitution; hasBlockedBytes prevents newline bypass
       const escapedPattern = pattern.replace(/'/g, "'\\''");
-      const grepCmd = `grep -rn ${includeArgOrError} -m ${MAX_GREP_MATCHES} -E '${escapedPattern}' ${searchPathOrError} 2>/dev/null | head -c ${MAX_GREP_OUTPUT}`;
+      const escapedSearchPath = searchPathOrError.replace(/'/g, "'\\''");
+      const grepCmd = `grep -rn ${includeArgOrError} -m ${MAX_GREP_MATCHES} -E '${escapedPattern}' '${escapedSearchPath}' 2>/dev/null | head -c ${MAX_GREP_OUTPUT}`;
 
       const result = await sandbox.commands.run(grepCmd, {
         cwd: ctx.worktreePath,
@@ -720,7 +776,7 @@ const isCommandAllowed = async (
       try {
         await ctx.commandPersister(fullCmd);
       } catch {
-        // Ignore persistence errors
+        // HACK: best-effort persist — approval still granted even if storage fails
       }
     }
 
@@ -814,6 +870,31 @@ const validateAndNormalizeCommand = (
   return { normalizedCmd, parts };
 };
 
+const executeSandboxCommand = async (
+  sandbox: SandboxHandle,
+  normalizedCmd: string,
+  worktreePath: string,
+  abortSignal?: AbortSignal
+): Promise<ToolResult> => {
+  if (abortSignal?.aborted) {
+    return errorResult("operation aborted");
+  }
+
+  const startTime = Date.now();
+
+  try {
+    const result = await sandbox.commands.run(normalizedCmd, {
+      cwd: worktreePath,
+      timeoutMs: COMMAND_TIMEOUT_MS,
+    });
+
+    return formatCommandOutput(normalizedCmd, Date.now() - startTime, result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return formatCommandError(normalizedCmd, Date.now() - startTime, message);
+  }
+};
+
 export const createSandboxRunCommandTool = (sandbox: SandboxHandle): Tool => ({
   name: "run_command",
   description:
@@ -825,7 +906,11 @@ export const createSandboxRunCommandTool = (sandbox: SandboxHandle): Tool => ({
     )
     .build(),
 
-  execute: async (ctx: ToolContext, input: unknown): Promise<ToolResult> => {
+  execute: async (
+    ctx: ToolContext,
+    input: unknown,
+    abortSignal?: AbortSignal
+  ): Promise<ToolResult> => {
     const { command } = input as { command: string };
 
     const validationResult = validateAndNormalizeCommand(command);
@@ -840,45 +925,14 @@ export const createSandboxRunCommandTool = (sandbox: SandboxHandle): Tool => ({
       return errorResult(`command not approved: ${normalizedCmd}`);
     }
 
-    const startTime = Date.now();
-
-    try {
-      const result = await sandbox.commands.run(normalizedCmd, {
-        cwd: ctx.worktreePath,
-        timeoutMs: COMMAND_TIMEOUT_MS,
-      });
-
-      return formatCommandOutput(normalizedCmd, Date.now() - startTime, result);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return formatCommandError(normalizedCmd, Date.now() - startTime, message);
-    }
+    return executeSandboxCommand(
+      sandbox,
+      normalizedCmd,
+      ctx.worktreePath,
+      abortSignal
+    );
   },
 });
-
-const validateCommandSecurity = (command: string): string | null => {
-  if (hasBlockedBytes(command)) {
-    return "command contains invalid characters";
-  }
-
-  const normalizedCmd = normalizeCommand(command);
-  const blockedPattern = hasBlockedPattern(normalizedCmd);
-  if (blockedPattern) {
-    return `blocked pattern: "${blockedPattern}"`;
-  }
-
-  const parts = normalizedCmd.split(" ").filter(Boolean);
-  if (parts.length === 0 || parts[0] === undefined) {
-    return "empty command";
-  }
-
-  const baseCmd = extractBaseCommand(parts[0]);
-  if (BLOCKED_COMMANDS.has(baseCmd)) {
-    return `blocked command: "${baseCmd}"`;
-  }
-
-  return null;
-};
 
 const getFailingStepCommand = (ctx: ToolContext): ToolResult | string => {
   if (!ctx.failingStep) {
@@ -922,31 +976,27 @@ export const createSandboxRunCheckTool = (sandbox: SandboxHandle): Tool => ({
     required: [],
   },
 
-  execute: async (ctx: ToolContext): Promise<ToolResult> => {
+  execute: async (
+    ctx: ToolContext,
+    _input: unknown,
+    abortSignal?: AbortSignal
+  ): Promise<ToolResult> => {
     const commandOrError = getFailingStepCommand(ctx);
     if (typeof commandOrError !== "string") {
       return commandOrError;
     }
 
-    const validationError = validateCommandSecurity(commandOrError);
-    if (validationError) {
-      return errorResult(validationError);
+    const validationResult = validateAndNormalizeCommand(commandOrError);
+    if ("content" in validationResult) {
+      return validationResult;
     }
 
-    const normalizedCmd = normalizeCommand(commandOrError);
-    const startTime = Date.now();
-
-    try {
-      const result = await sandbox.commands.run(normalizedCmd, {
-        cwd: ctx.worktreePath,
-        timeoutMs: COMMAND_TIMEOUT_MS,
-      });
-
-      return formatCommandOutput(normalizedCmd, Date.now() - startTime, result);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return formatCommandError(normalizedCmd, Date.now() - startTime, message);
-    }
+    return await executeSandboxCommand(
+      sandbox,
+      validationResult.normalizedCmd,
+      ctx.worktreePath,
+      abortSignal
+    );
   },
 });
 

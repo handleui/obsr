@@ -9,6 +9,13 @@ export interface ExtractionUsage {
   totalTokens: number;
 }
 
+export interface ExtractionMetrics {
+  originalLength: number;
+  afterPreprocessLength: number;
+  truncatedChars: number;
+  noiseRatio: number;
+}
+
 export interface ExtractionResult {
   errors: CIError[];
   detectedSource: ErrorSource | null;
@@ -17,6 +24,7 @@ export interface ExtractionResult {
   truncated: boolean;
   segmentsTruncated: boolean;
   segments?: LogSegment[];
+  metrics?: ExtractionMetrics;
 }
 
 const LogSegmentSchema = z.object({
@@ -28,6 +36,7 @@ const LogSegmentSchema = z.object({
 export const ExtractionResultSchema = z.object({
   errors: z
     .array(CIErrorSchemaWithValidation)
+    .max(100)
     .describe("All extracted errors and warnings"),
   detectedSource: ErrorSourceSchema.nullable().describe(
     "The primary tool that produced the output, if identifiable"

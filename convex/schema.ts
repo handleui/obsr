@@ -189,6 +189,20 @@ export default defineSchema({
         patchApplied: v.optional(nullableBoolean),
         verificationPassed: v.optional(nullableBoolean),
         toolCalls: v.optional(nullableNumber),
+        commandLog: v.optional(
+          v.array(
+            v.object({
+              tool: v.string(),
+              durationMs: v.number(),
+              isError: v.boolean(),
+              timestamp: v.number(),
+              step: v.number(),
+              command: v.optional(v.string()),
+              exitCode: v.optional(v.number()),
+              outputBytes: v.optional(v.number()),
+            })
+          )
+        ),
       })
     ),
     costUsd: v.optional(nullableNumber),

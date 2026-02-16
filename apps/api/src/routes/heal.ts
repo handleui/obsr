@@ -299,6 +299,49 @@ app.get("/:id", async (c) => {
   });
 });
 
+const pushHealToGitHub = async (
+  c: Context<{ Bindings: Env }>,
+  heal: HealRecord,
+  inputs: {
+    filesChanged: Array<{ path: string; content: string | null }>;
+    owner: string;
+    repo: string;
+    installationId: string;
+    prNumber: number;
+  }
+) => {
+  const { filesChanged, owner, repo, installationId, prNumber } = inputs;
+
+  const github = createGitHubService(c.env);
+  const token = await github.getInstallationToken(
+    Number.parseInt(installationId, 10)
+  );
+
+  const prInfo = await github.getPullRequestInfo(token, owner, repo, prNumber);
+  if (!prInfo) {
+    return c.json({ error: "PR not found" }, 404);
+  }
+
+  const baseSha = await getBranchHead(token, owner, repo, prInfo.headBranch);
+  const commitMessage =
+    heal.commitMessage ??
+    generateAutofixCommitMessage(
+      heal.autofixSource ?? null,
+      heal.errorIds?.length ?? 0
+    );
+
+  return await pushHealCommit({
+    token,
+    owner,
+    repo,
+    branch: prInfo.headBranch,
+    baseSha,
+    filesChanged,
+    commitMessage,
+    verifyBaseSha: true,
+  });
+};
+
 app.post("/:id/apply", async (c) => {
   const auth = c.get("auth");
   const { id } = c.req.param();
@@ -321,68 +364,40 @@ app.post("/:id/apply", async (c) => {
     }
 
     const { heal, project, organization } = contextResult;
+
+    if (heal.appliedAt) {
+      return c.json({
+        success: true,
+        sha: heal.appliedCommitSha,
+        alreadyApplied: true,
+      });
+    }
+
     const inputs = getApplyInputs(c, heal, project, organization);
     if (inputs instanceof Response) {
       return inputs;
     }
 
-    const { filesChanged, owner, repo, installationId, prNumber } = inputs;
-
-    const github = createGitHubService(c.env);
-    const token = await github.getInstallationToken(
-      Number.parseInt(installationId, 10)
-    );
-
-    const prInfo = await github.getPullRequestInfo(
-      token,
-      owner,
-      repo,
-      prNumber
-    );
-    if (!prInfo) {
-      return c.json({ error: "PR not found" }, 404);
+    const pushResult = await pushHealToGitHub(c, heal, inputs);
+    if (pushResult instanceof Response) {
+      return pushResult;
     }
 
-    const baseSha = await getBranchHead(token, owner, repo, prInfo.headBranch);
-
-    const commitMessage =
-      heal.commitMessage ??
-      generateAutofixCommitMessage(
-        heal.autofixSource ?? null,
-        heal.errorIds?.length ?? 0
-      );
-
-    const result = await pushHealCommit({
-      token,
-      owner,
-      repo,
-      branch: prInfo.headBranch,
-      baseSha,
-      filesChanged,
-      commitMessage,
-      verifyBaseSha: true,
-    });
-
-    await applyHeal(c.env, id, result.sha);
+    await applyHeal(c.env, id, pushResult.sha);
 
     console.log(
-      `[heal] Applied heal ${id} with commit SHA ${result.sha} to ${owner}/${repo}#${heal.prNumber}`
+      `[heal] Applied heal ${id} to ${inputs.owner}/${inputs.repo}#${heal.prNumber}`
     );
 
     return c.json({
       success: true,
       message: "Heal applied",
-      commitSha: result.sha,
-      commitUrl: result.url,
+      commitSha: pushResult.sha,
+      commitUrl: pushResult.url,
     });
   } catch (error) {
     console.error(`[heal] Failed to apply heal ${id}:`, error);
-    return c.json(
-      {
-        error: "Failed to apply heal",
-      },
-      500
-    );
+    return c.json({ error: "Failed to apply heal" }, 500);
   }
 });
 
@@ -420,8 +435,11 @@ app.post("/:id/reject", async (c) => {
     return result;
   }
 
-  if (heal.status === "applied") {
-    return c.json({ error: "Cannot reject an already applied heal" }, 400);
+  if (heal.status !== "completed") {
+    return c.json(
+      { error: `Cannot reject heal with status: ${heal.status}` },
+      400
+    );
   }
 
   await rejectHeal(c.env, id, auth.userId, body.reason);
@@ -468,20 +486,18 @@ app.post("/:id/trigger", async (c) => {
   return c.json({ success: true, status: "pending" });
 });
 
-app.post("/trigger", async (c) => {
-  const auth = c.get("auth");
+interface TriggerBody {
+  projectId?: string;
+  prNumber?: number;
+  type?: string;
+}
 
-  let body: {
-    projectId?: string;
-    prNumber?: number;
-    type?: string;
-  };
+const parseTriggerBody = async (
+  c: Context<{ Bindings: Env }>
+): Promise<TriggerBody | Response> => {
+  let body: TriggerBody;
   try {
-    body = await c.req.json<{
-      projectId?: string;
-      prNumber?: number;
-      type?: string;
-    }>();
+    body = await c.req.json<TriggerBody>();
   } catch {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
@@ -489,7 +505,6 @@ app.post("/trigger", async (c) => {
   if (!body.projectId) {
     return c.json({ error: "projectId is required" }, 400);
   }
-
   if (!body.prNumber) {
     return c.json({ error: "prNumber is required" }, 400);
   }
@@ -508,50 +523,72 @@ app.post("/trigger", async (c) => {
     return c.json({ error: "type must be 'autofix' or 'heal'" }, 400);
   }
 
-  const accessResult = await verifyProjectAccess(
-    c,
-    auth.userId,
-    body.projectId
-  );
+  return { ...body, type };
+};
+
+const loadFixableErrors = async (
+  c: Context<{ Bindings: Env }>,
+  db: ReturnType<typeof createDb>["db"],
+  projectId: string,
+  prNumber: number
+) => {
+  const run = await runOps.getLatestByProjectPr(db, projectId, prNumber);
+  if (!run) {
+    return c.json({ error: "No runs found for this PR" }, 404);
+  }
+
+  const runErrors = await runErrorOps.listByRunId(db, run.id, 1000);
+  const fixableErrors = runErrors.filter((e) => e.fixable);
+
+  if (fixableErrors.length === 0) {
+    return c.json({ error: "No fixable errors found for this PR" }, 400);
+  }
+
+  return { run, fixableErrors };
+};
+
+app.post("/trigger", async (c) => {
+  const auth = c.get("auth");
+
+  const body = await parseTriggerBody(c);
+  if (body instanceof Response) {
+    return body;
+  }
+
+  const projectId = body.projectId as string;
+  const prNumber = body.prNumber as number;
+  const type = body.type as string;
+
+  const accessResult = await verifyProjectAccess(c, auth.userId, projectId);
   if (accessResult instanceof Response) {
     return accessResult;
   }
 
   const { project, organization } = accessResult;
-  const orgSettings = getOrgSettings(organization.settings);
+  const installationId = organization.providerInstallationId;
+  if (!installationId) {
+    return c.json(
+      { error: "No GitHub installation found for organization" },
+      400
+    );
+  }
 
   const { db, pool } = getDb(c.env);
   try {
-    const run = await runOps.getLatestByProjectPr(
-      db,
-      body.projectId,
-      body.prNumber
-    );
-    if (!run) {
-      return c.json({ error: "No runs found for this PR" }, 404);
+    const errorResult = await loadFixableErrors(c, db, projectId, prNumber);
+    if (errorResult instanceof Response) {
+      return errorResult;
     }
 
-    const fetchedRunErrors = await runErrorOps.listByRunId(db, run.id, 1000);
-    const fixableErrors = fetchedRunErrors.filter((error) => error.fixable);
-
-    if (fixableErrors.length === 0) {
-      return c.json({ error: "No fixable errors found for this PR" }, 400);
-    }
-
-    const installationId = organization.providerInstallationId;
-    if (!installationId) {
-      return c.json(
-        { error: "No GitHub installation found for organization" },
-        400
-      );
-    }
+    const { run, fixableErrors } = errorResult;
+    const orgSettings = getOrgSettings(organization.settings);
 
     const orchestrationResult = await orchestrateHeals({
       env: c.env,
-      projectId: body.projectId,
+      projectId,
       runId: run.id,
       commitSha: run.commitSha ?? "",
-      prNumber: body.prNumber,
+      prNumber,
       branch: run.headBranch ?? "main",
       repoFullName: project.providerRepoFullName,
       installationId: Number.parseInt(installationId, 10),
@@ -567,8 +604,8 @@ app.post("/trigger", async (c) => {
     return c.json({
       success: true,
       message: `Manual ${type} trigger queued`,
-      projectId: body.projectId,
-      prNumber: body.prNumber,
+      projectId,
+      prNumber,
       healsCreated: orchestrationResult.healsCreated,
       healIds: orchestrationResult.healIds,
       autofixes: orchestrationResult.autofixes,

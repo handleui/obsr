@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3000",
+    "dev": "portless detent next dev",
     "build": "next build",
     "start": "next start --port 3000",
     "check-types": "tsc --noEmit",

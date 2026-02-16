@@ -70,6 +70,7 @@
       "dependencies": {
         "@detent/git": "*",
         "@detent/healing": "*",
+        "@detent/sdk": "*",
         "@detent/sentry": "workspace:*",
         "@detent/types": "*",
         "@handleui/shimmer": "^0.1.0",

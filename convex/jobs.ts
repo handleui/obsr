@@ -175,25 +175,7 @@ export const upsertByRepoJob = mutation({
 
     await ctx.db.patch(
       existing._id,
-      buildPatch({
-        runId: args.data.runId,
-        repository: args.data.repository,
-        commitSha: args.data.commitSha,
-        prNumber: args.data.prNumber,
-        name: args.data.name,
-        workflowName: args.data.workflowName,
-        status: args.data.status,
-        conclusion: args.data.conclusion,
-        hasDetent: args.data.hasDetent,
-        errorCount: args.data.errorCount,
-        htmlUrl: args.data.htmlUrl,
-        runnerName: args.data.runnerName,
-        headBranch: args.data.headBranch,
-        queuedAt: args.data.queuedAt,
-        startedAt: args.data.startedAt,
-        completedAt: args.data.completedAt,
-        updatedAt: now,
-      })
+      buildPatch({ ...args.data, updatedAt: now })
     );
 
     return String(existing._id);
@@ -216,7 +198,7 @@ export const markDetentByRepoCommitName = mutation({
           .eq("commitSha", args.commitSha)
           .eq("name", args.name)
       )
-      .collect();
+      .take(10);
 
     if (jobs.length === 0) {
       return 0;
@@ -264,29 +246,8 @@ export const update = mutation({
       return null;
     }
 
-    await ctx.db.patch(
-      job._id,
-      buildPatch({
-        providerJobId: args.providerJobId,
-        runId: args.runId,
-        repository: args.repository,
-        commitSha: args.commitSha,
-        prNumber: args.prNumber,
-        name: args.name,
-        workflowName: args.workflowName,
-        status: args.status,
-        conclusion: args.conclusion,
-        hasDetent: args.hasDetent,
-        errorCount: args.errorCount,
-        htmlUrl: args.htmlUrl,
-        runnerName: args.runnerName,
-        headBranch: args.headBranch,
-        queuedAt: args.queuedAt,
-        startedAt: args.startedAt,
-        completedAt: args.completedAt,
-        updatedAt: args.updatedAt,
-      })
-    );
+    const { id: _, ...patch } = args;
+    await ctx.db.patch(job._id, buildPatch(patch));
 
     return String(job._id);
   },

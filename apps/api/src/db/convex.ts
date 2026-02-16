@@ -9,6 +9,19 @@ const securedFunctions = new Set([
   "api_keys:updateLastUsedAt",
   "api_keys:update",
   "api_keys:remove",
+  "heals:create",
+  "heals:get",
+  "heals:getByPr",
+  "heals:getByProjectStatus",
+  "heals:getActiveByProject",
+  "heals:getByRunId",
+  "heals:getPending",
+  "heals:updateStatus",
+  "heals:apply",
+  "heals:reject",
+  "heals:trigger",
+  "heals:setCheckRunId",
+  "heals:markStaleAsFailed",
   "organizations:create",
   "organizations:getById",
   "organizations:getBySlug",
@@ -46,50 +59,47 @@ const withServiceToken = (
   serviceToken,
 });
 
+type ConvexMethod = (
+  name: string,
+  args?: Record<string, unknown>
+) => Promise<unknown>;
+
+const wrapWithServiceToken =
+  (baseFn: ConvexMethod, serviceToken: string): ConvexMethod =>
+  (name: string, args?: Record<string, unknown>) => {
+    if (!securedFunctions.has(name)) {
+      return baseFn(name, args);
+    }
+    return baseFn(
+      name,
+      withServiceToken(
+        args as Record<string, unknown> | undefined,
+        serviceToken
+      )
+    );
+  };
+
 export const getConvexClient = (env: Env): ConvexHttpClient => {
   const url = env.CONVEX_URL;
   if (!url) {
     throw new Error("CONVEX_URL is required");
   }
+
   const client = new ConvexHttpClient(url);
   const serviceToken = env.CONVEX_SERVICE_TOKEN;
   if (!serviceToken) {
     return client;
   }
 
-  const baseQuery = client.query.bind(client) as unknown as (
-    name: string,
-    args?: Record<string, unknown>
-  ) => Promise<unknown>;
-  client.query = ((name: string, args?: Record<string, unknown>) => {
-    if (!securedFunctions.has(name)) {
-      return baseQuery(name, args);
-    }
-    return baseQuery(
-      name,
-      withServiceToken(
-        args as Record<string, unknown> | undefined,
-        serviceToken
-      )
-    );
-  }) as unknown as ConvexHttpClient["query"];
+  client.query = wrapWithServiceToken(
+    client.query.bind(client) as unknown as ConvexMethod,
+    serviceToken
+  ) as unknown as ConvexHttpClient["query"];
 
-  const baseMutation = client.mutation.bind(client) as unknown as (
-    name: string,
-    args?: Record<string, unknown>
-  ) => Promise<unknown>;
-  client.mutation = ((name: string, args?: Record<string, unknown>) => {
-    if (!securedFunctions.has(name)) {
-      return baseMutation(name, args);
-    }
-    return baseMutation(
-      name,
-      withServiceToken(
-        args as Record<string, unknown> | undefined,
-        serviceToken
-      )
-    );
-  }) as unknown as ConvexHttpClient["mutation"];
+  client.mutation = wrapWithServiceToken(
+    client.mutation.bind(client) as unknown as ConvexMethod,
+    serviceToken
+  ) as unknown as ConvexHttpClient["mutation"];
 
   return client;
 };

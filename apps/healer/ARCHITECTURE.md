@@ -117,6 +117,8 @@ The Healer is a standalone Railway-deployed service that executes AI-powered hea
 
 ## E2B Sandbox Management
 
+> **Provider status**: Vercel is the primary sandbox provider. E2B is maintained for enterprise tier and will not receive new features.
+
 ### Configuration
 
 | Parameter | Value | Purpose |

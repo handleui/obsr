@@ -1,12 +1,16 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { mutation, query } from "./_generated/server";
+import type { DatabaseWriter } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
+import { requireServiceAuth } from "./service_auth";
 import {
   buildPatch,
   nullableBoolean,
   nullableNumber,
   nullableString,
 } from "./validators";
+
+const serviceToken = v.optional(v.string());
 
 const healStatus = v.union(
   v.literal("found"),
@@ -34,6 +38,17 @@ const filesChangedWithContent = v.array(
   })
 );
 
+// HACK: pending → completed is intentional — autofix is deterministic (GitHub Action), skips running
+const VALID_STATUS_TRANSITIONS: Record<string, Set<string>> = {
+  found: new Set(["pending", "failed"]),
+  pending: new Set(["running", "completed", "failed"]),
+  running: new Set(["completed", "failed"]),
+  completed: new Set(["applied", "rejected"]),
+  applied: new Set(),
+  rejected: new Set(),
+  failed: new Set(),
+};
+
 const MAX_COMMIT_LENGTH = 64;
 const MAX_SOURCE_LENGTH = 64;
 const MAX_COMMAND_LENGTH = 500;
@@ -46,6 +61,8 @@ const MAX_REJECTED_BY_LENGTH = 255;
 const MAX_FILE_PATH_LENGTH = 2048;
 const MAX_CONVEX_DOC_BYTES = 900_000;
 const MAX_PENDING_LIMIT = 100;
+const MAX_ERROR_IDS = 500;
+const MAX_FILES_CHANGED = 500;
 
 const getHealById = async (
   ctx: {
@@ -86,8 +103,10 @@ const sanitizeFilesChangedWithContent = (
     .filter((file) => file.path.length > 0);
 };
 
+const textEncoder = new TextEncoder();
+
 const getByteLength = (value: string): number => {
-  return new TextEncoder().encode(value).length;
+  return textEncoder.encode(value).length;
 };
 
 const estimateFilesChangedWithContentSize = (
@@ -117,8 +136,91 @@ const assertPayloadSize = (
   }
 };
 
+const validateCreateArgs = (args: {
+  prNumber?: number | null;
+  errorIds?: string[];
+  signatureIds?: string[];
+  filesChanged?: string[];
+  filesChangedWithContent?: Array<{ path: string; content: string | null }>;
+}) => {
+  if (args.prNumber != null && args.prNumber <= 0) {
+    throw new Error("Invalid prNumber");
+  }
+  if (args.errorIds && args.errorIds.length > MAX_ERROR_IDS) {
+    throw new Error("Too many errorIds");
+  }
+  if (args.signatureIds && args.signatureIds.length > MAX_ERROR_IDS) {
+    throw new Error("Too many signatureIds");
+  }
+  if (args.filesChanged && args.filesChanged.length > MAX_FILES_CHANGED) {
+    throw new Error("Too many filesChanged");
+  }
+  if (
+    args.filesChangedWithContent &&
+    args.filesChangedWithContent.length > MAX_FILES_CHANGED
+  ) {
+    throw new Error("Too many filesChangedWithContent");
+  }
+};
+
+const buildSanitizedCreatePatch = (
+  args: Record<string, unknown>,
+  sanitizedPatch: string | undefined,
+  sanitizedFiles: Array<{ path: string; content: string | null }> | undefined
+) =>
+  buildPatch({
+    runId: args.runId as string | undefined,
+    commitSha: truncateString(args.commitSha as string, MAX_COMMIT_LENGTH),
+    prNumber: args.prNumber as number | undefined,
+    checkRunId: truncateString(args.checkRunId as string, MAX_COMMIT_LENGTH),
+    errorIds: args.errorIds as string[] | undefined,
+    signatureIds: args.signatureIds as string[] | undefined,
+    patch: sanitizedPatch,
+    commitMessage: truncateString(
+      args.commitMessage as string,
+      MAX_COMMIT_MESSAGE_LENGTH
+    ),
+    filesChanged: args.filesChanged as string[] | undefined,
+    filesChangedWithContent: sanitizedFiles,
+    autofixSource: truncateString(
+      args.autofixSource as string,
+      MAX_SOURCE_LENGTH
+    ),
+    autofixCommand: truncateString(
+      args.autofixCommand as string,
+      MAX_COMMAND_LENGTH
+    ),
+    userInstructions: truncateString(
+      args.userInstructions as string,
+      MAX_USER_INSTRUCTIONS_LENGTH
+    ),
+    healResult: args.healResult as Record<string, unknown> | undefined,
+    costUsd: args.costUsd as number | undefined,
+    inputTokens: args.inputTokens as number | undefined,
+    outputTokens: args.outputTokens as number | undefined,
+    appliedAt: args.appliedAt as number | undefined,
+    appliedCommitSha: truncateString(
+      args.appliedCommitSha as string,
+      MAX_COMMIT_LENGTH
+    ),
+    rejectedAt: args.rejectedAt as number | undefined,
+    rejectedBy: truncateString(
+      args.rejectedBy as string,
+      MAX_REJECTED_BY_LENGTH
+    ),
+    rejectionReason: truncateString(
+      args.rejectionReason as string,
+      MAX_REJECTION_REASON_LENGTH
+    ),
+    failedReason: truncateString(
+      args.failedReason as string,
+      MAX_FAILED_REASON_LENGTH
+    ),
+  });
+
 export const create = mutation({
   args: {
+    serviceToken,
     type: healType,
     status: v.optional(healStatus),
     projectId: v.id("projects"),
@@ -147,9 +249,8 @@ export const create = mutation({
     failedReason: v.optional(nullableString),
   },
   handler: async (ctx, args) => {
-    if (args.prNumber != null && args.prNumber <= 0) {
-      throw new Error("Invalid prNumber");
-    }
+    await requireServiceAuth(ctx, args);
+    validateCreateArgs(args);
 
     const sanitizedPatch = truncateString(args.patch, MAX_PATCH_LENGTH);
     const sanitizedFiles = sanitizeFilesChangedWithContent(
@@ -163,46 +264,7 @@ export const create = mutation({
       status: args.status ?? "pending",
       projectId: args.projectId,
       updatedAt: now,
-      ...buildPatch({
-        runId: args.runId,
-        commitSha: truncateString(args.commitSha, MAX_COMMIT_LENGTH),
-        prNumber: args.prNumber,
-        checkRunId: truncateString(args.checkRunId, MAX_COMMIT_LENGTH),
-        errorIds: args.errorIds,
-        signatureIds: args.signatureIds,
-        patch: sanitizedPatch,
-        commitMessage: truncateString(
-          args.commitMessage,
-          MAX_COMMIT_MESSAGE_LENGTH
-        ),
-        filesChanged: args.filesChanged,
-        filesChangedWithContent: sanitizedFiles,
-        autofixSource: truncateString(args.autofixSource, MAX_SOURCE_LENGTH),
-        autofixCommand: truncateString(args.autofixCommand, MAX_COMMAND_LENGTH),
-        userInstructions: truncateString(
-          args.userInstructions,
-          MAX_USER_INSTRUCTIONS_LENGTH
-        ),
-        healResult: args.healResult,
-        costUsd: args.costUsd,
-        inputTokens: args.inputTokens,
-        outputTokens: args.outputTokens,
-        appliedAt: args.appliedAt,
-        appliedCommitSha: truncateString(
-          args.appliedCommitSha,
-          MAX_COMMIT_LENGTH
-        ),
-        rejectedAt: args.rejectedAt,
-        rejectedBy: truncateString(args.rejectedBy, MAX_REJECTED_BY_LENGTH),
-        rejectionReason: truncateString(
-          args.rejectionReason,
-          MAX_REJECTION_REASON_LENGTH
-        ),
-        failedReason: truncateString(
-          args.failedReason,
-          MAX_FAILED_REASON_LENGTH
-        ),
-      }),
+      ...buildSanitizedCreatePatch(args, sanitizedPatch, sanitizedFiles),
     };
 
     return await ctx.db.insert("heals", document);
@@ -210,41 +272,45 @@ export const create = mutation({
 });
 
 export const get = query({
-  args: { id: v.id("heals") },
+  args: { id: v.id("heals"), serviceToken },
   handler: async (ctx, args) => {
+    await requireServiceAuth(ctx, args);
     return await getHealById(ctx, args.id);
   },
 });
 
 export const getByPr = query({
-  args: { projectId: v.id("projects"), prNumber: v.number() },
+  args: { projectId: v.id("projects"), prNumber: v.number(), serviceToken },
   handler: async (ctx, args) => {
+    await requireServiceAuth(ctx, args);
     return await ctx.db
       .query("heals")
       .withIndex("by_project_pr", (q) =>
         q.eq("projectId", args.projectId).eq("prNumber", args.prNumber)
       )
       .order("desc")
-      .collect();
+      .take(50);
   },
 });
 
 export const getByProjectStatus = query({
-  args: { projectId: v.id("projects"), status: healStatus },
+  args: { projectId: v.id("projects"), status: healStatus, serviceToken },
   handler: async (ctx, args) => {
+    await requireServiceAuth(ctx, args);
     return await ctx.db
       .query("heals")
       .withIndex("by_project_status", (q) =>
         q.eq("projectId", args.projectId).eq("status", args.status)
       )
       .order("desc")
-      .collect();
+      .take(100);
   },
 });
 
 export const getActiveByProject = query({
-  args: { projectId: v.id("projects") },
+  args: { projectId: v.id("projects"), serviceToken },
   handler: async (ctx, args) => {
+    await requireServiceAuth(ctx, args);
     const activeStatuses = [
       "found",
       "pending",
@@ -259,7 +325,7 @@ export const getActiveByProject = query({
             q.eq("projectId", args.projectId).eq("status", status)
           )
           .order("desc")
-          .collect()
+          .take(25)
       )
     );
     return results.flat();
@@ -267,39 +333,88 @@ export const getActiveByProject = query({
 });
 
 export const getByRunId = query({
-  args: { runId: v.string() },
+  args: { runId: v.string(), serviceToken },
   handler: async (ctx, args) => {
+    await requireServiceAuth(ctx, args);
     return await ctx.db
       .query("heals")
       .withIndex("by_run", (q) => q.eq("runId", args.runId))
       .order("desc")
-      .collect();
+      .take(10);
   },
 });
 
 export const getPending = query({
-  args: { type: v.optional(healType), limit: v.optional(nullableNumber) },
+  args: {
+    type: v.optional(healType),
+    limit: v.optional(nullableNumber),
+    serviceToken,
+  },
   handler: async (ctx, args) => {
+    await requireServiceAuth(ctx, args);
     const limit = Math.min(Math.max(args.limit ?? 25, 1), MAX_PENDING_LIMIT);
-    const target = Math.max(limit * 3, limit);
-    const results = await ctx.db
+
+    const { type } = args;
+    if (type) {
+      return await ctx.db
+        .query("heals")
+        .withIndex("by_status_type_updated_at", (q) =>
+          q.eq("status", "pending").eq("type", type)
+        )
+        .order("asc")
+        .take(limit);
+    }
+
+    return await ctx.db
       .query("heals")
       .withIndex("by_status", (q) => q.eq("status", "pending"))
       .order("asc")
-      .take(target);
-
-    const filtered = args.type
-      ? results.filter((heal) => heal.type === args.type)
-      : results;
-
-    return filtered.slice(0, limit);
+      .take(limit);
   },
 });
 
+const buildStatusUpdatePatch = (args: {
+  status: string;
+  patch?: string | null;
+  commitMessage?: string | null;
+  filesChanged?: string[];
+  filesChangedWithContent?: Array<{ path: string; content: string | null }>;
+  healResult?: Record<string, unknown>;
+  costUsd?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  failedReason?: string | null;
+}) => {
+  const sanitizedPatch = truncateString(args.patch, MAX_PATCH_LENGTH);
+  const sanitizedFiles = sanitizeFilesChangedWithContent(
+    args.filesChangedWithContent
+  );
+  assertPayloadSize(sanitizedPatch, sanitizedFiles);
+
+  return buildPatch({
+    status: args.status,
+    patch: sanitizedPatch,
+    commitMessage: truncateString(
+      args.commitMessage,
+      MAX_COMMIT_MESSAGE_LENGTH
+    ),
+    filesChanged: args.filesChanged,
+    filesChangedWithContent: sanitizedFiles,
+    healResult: args.healResult,
+    costUsd: args.costUsd,
+    inputTokens: args.inputTokens,
+    outputTokens: args.outputTokens,
+    failedReason: truncateString(args.failedReason, MAX_FAILED_REASON_LENGTH),
+    updatedAt: Date.now(),
+  });
+};
+
 export const updateStatus = mutation({
   args: {
+    serviceToken,
     id: v.id("heals"),
     status: healStatus,
+    expectedStatus: v.optional(healStatus),
     patch: v.optional(nullableString),
     commitMessage: v.optional(nullableString),
     filesChanged: v.optional(v.array(v.string())),
@@ -311,45 +426,36 @@ export const updateStatus = mutation({
     failedReason: v.optional(nullableString),
   },
   handler: async (ctx, args) => {
-    const heal = await getHealById(ctx, args.id);
+    await requireServiceAuth(ctx, args);
 
+    const heal = await getHealById(ctx, args.id);
     if (!heal) {
       return null;
     }
+    if (args.expectedStatus && heal.status !== args.expectedStatus) {
+      return null;
+    }
+    const allowed = VALID_STATUS_TRANSITIONS[heal.status];
+    if (!allowed?.has(args.status)) {
+      return null;
+    }
 
-    const now = Date.now();
-    const sanitizedPatch = truncateString(args.patch, MAX_PATCH_LENGTH);
-    const sanitizedFiles = sanitizeFilesChangedWithContent(
-      args.filesChangedWithContent
-    );
-    assertPayloadSize(sanitizedPatch, sanitizedFiles);
-    const patch = buildPatch({
-      status: args.status,
-      patch: sanitizedPatch,
-      commitMessage: truncateString(
-        args.commitMessage,
-        MAX_COMMIT_MESSAGE_LENGTH
-      ),
-      filesChanged: args.filesChanged,
-      filesChangedWithContent: sanitizedFiles,
-      healResult: args.healResult,
-      costUsd: args.costUsd,
-      inputTokens: args.inputTokens,
-      outputTokens: args.outputTokens,
-      failedReason: truncateString(args.failedReason, MAX_FAILED_REASON_LENGTH),
-      updatedAt: now,
-    });
-
+    const patch = buildStatusUpdatePatch(args);
     await ctx.db.patch(heal._id, patch);
     return String(heal._id);
   },
 });
 
 export const apply = mutation({
-  args: { id: v.id("heals"), appliedCommitSha: v.string() },
+  args: { id: v.id("heals"), appliedCommitSha: v.string(), serviceToken },
   handler: async (ctx, args) => {
+    await requireServiceAuth(ctx, args);
+
     const heal = await getHealById(ctx, args.id);
     if (!heal) {
+      return null;
+    }
+    if (heal.status !== "completed") {
       return null;
     }
     const now = Date.now();
@@ -367,13 +473,19 @@ export const apply = mutation({
 
 export const reject = mutation({
   args: {
+    serviceToken,
     id: v.id("heals"),
     rejectedBy: v.string(),
     reason: v.optional(nullableString),
   },
   handler: async (ctx, args) => {
+    await requireServiceAuth(ctx, args);
+
     const heal = await getHealById(ctx, args.id);
     if (!heal) {
+      return null;
+    }
+    if (heal.status !== "completed") {
       return null;
     }
     const now = Date.now();
@@ -391,8 +503,10 @@ export const reject = mutation({
 });
 
 export const trigger = mutation({
-  args: { id: v.id("heals") },
+  args: { id: v.id("heals"), serviceToken },
   handler: async (ctx, args) => {
+    await requireServiceAuth(ctx, args);
+
     const heal = await getHealById(ctx, args.id);
     if (!heal) {
       return false;
@@ -406,8 +520,10 @@ export const trigger = mutation({
 });
 
 export const setCheckRunId = mutation({
-  args: { id: v.id("heals"), checkRunId: v.string() },
+  args: { id: v.id("heals"), checkRunId: v.string(), serviceToken },
   handler: async (ctx, args) => {
+    await requireServiceAuth(ctx, args);
+
     const heal = await getHealById(ctx, args.id);
     if (!heal) {
       return null;
@@ -421,62 +537,97 @@ export const setCheckRunId = mutation({
   },
 });
 
+interface DrainStaleOpts {
+  status: "pending" | "running";
+  healType: "heal" | "autofix";
+  cutoff: number;
+  now: number;
+  reason: string;
+  batchSize: number;
+  budget: number;
+}
+
+interface StaleHealEntry {
+  _id: Id<"heals">;
+  projectId: Id<"projects">;
+  checkRunId?: string;
+}
+
+const drainStaleHeals = async (
+  db: DatabaseWriter,
+  opts: DrainStaleOpts
+): Promise<StaleHealEntry[]> => {
+  const results: StaleHealEntry[] = [];
+
+  while (results.length < opts.budget) {
+    const take = Math.min(opts.batchSize, opts.budget - results.length);
+    const candidates = await db
+      .query("heals")
+      .withIndex("by_status_type_updated_at", (q) =>
+        q
+          .eq("status", opts.status)
+          .eq("type", opts.healType)
+          .lt("updatedAt", opts.cutoff)
+      )
+      .order("asc")
+      .take(take);
+
+    if (candidates.length === 0) {
+      break;
+    }
+
+    for (const heal of candidates) {
+      await db.patch(heal._id, {
+        status: "failed",
+        failedReason: opts.reason,
+        updatedAt: opts.now,
+      });
+      results.push({
+        _id: heal._id,
+        projectId: heal.projectId,
+        checkRunId: heal.checkRunId ?? undefined,
+      });
+    }
+  }
+
+  return results;
+};
+
+const STALE_STATUSES: Array<"pending" | "running"> = ["pending", "running"];
+const STALE_BATCH_SIZE = 200;
+const STALE_MAX_PATCHES = 500;
+
 export const markStaleAsFailed = mutation({
   args: {
+    serviceToken,
     timeoutMinutes: v.number(),
     healType,
     failedReason: v.optional(nullableString),
   },
   handler: async (ctx, args) => {
-    const cutoff = Date.now() - args.timeoutMinutes * 60 * 1000;
-    const statuses: Array<"pending" | "running"> = ["pending", "running"];
-    const batchSize = 200;
-    const stale: Array<{
-      _id: Id<"heals">;
-      projectId: Id<"projects">;
-      checkRunId?: string;
-    }> = [];
+    await requireServiceAuth(ctx, args);
 
+    const now = Date.now();
+    const cutoff = now - args.timeoutMinutes * 60 * 1000;
     const reason =
       truncateString(args.failedReason, MAX_FAILED_REASON_LENGTH) ??
       "Heal timed out";
-    const now = Date.now();
 
-    for (const status of statuses) {
-      while (true) {
-        const candidates = await ctx.db
-          .query("heals")
-          .withIndex("by_status_type_updated_at", (q) =>
-            q
-              .eq("status", status)
-              .eq("type", args.healType)
-              .lt("updatedAt", cutoff)
-          )
-          .order("asc")
-          .take(batchSize);
-
-        if (candidates.length === 0) {
-          break;
-        }
-
-        for (const heal of candidates) {
-          stale.push({
-            _id: heal._id,
-            projectId: heal.projectId,
-            checkRunId: heal.checkRunId ?? undefined,
-          });
-
-          await ctx.db.patch(heal._id, {
-            status: "failed",
-            failedReason: reason,
-            updatedAt: now,
-          });
-        }
+    const stale: StaleHealEntry[] = [];
+    for (const status of STALE_STATUSES) {
+      if (stale.length >= STALE_MAX_PATCHES) {
+        break;
       }
-    }
-
-    if (stale.length === 0) {
-      return [];
+      const entries = await drainStaleHeals(ctx.db, {
+        status,
+        healType: args.healType,
+        cutoff,
+        now,
+        reason,
+        batchSize: STALE_BATCH_SIZE,
+        budget: STALE_MAX_PATCHES - stale.length,
+      });
+      stale.push(...entries);
     }
 
     return stale.map((entry) => ({
@@ -484,5 +635,44 @@ export const markStaleAsFailed = mutation({
       projectId: entry.projectId,
       checkRunId: entry.checkRunId,
     }));
+  },
+});
+
+const TIMEOUT_REASONS: Record<string, string> = {
+  autofix: "Autofix timed out",
+  heal: "Heal timed out",
+};
+
+const CLEANUP_HEAL_TYPES = ["heal", "autofix"] as const;
+const CLEANUP_TIMEOUT_MS = 30 * 60 * 1000;
+
+const CLEANUP_COMBINATIONS = CLEANUP_HEAL_TYPES.flatMap((healType) =>
+  STALE_STATUSES.map((status) => ({ healType, status }))
+);
+
+export const cleanupStaleHeals = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const cutoff = now - CLEANUP_TIMEOUT_MS;
+    let totalCleaned = 0;
+
+    for (const { healType, status } of CLEANUP_COMBINATIONS) {
+      if (totalCleaned >= STALE_MAX_PATCHES) {
+        break;
+      }
+      const entries = await drainStaleHeals(ctx.db, {
+        status,
+        healType,
+        cutoff,
+        now,
+        reason: TIMEOUT_REASONS[healType],
+        batchSize: STALE_BATCH_SIZE,
+        budget: STALE_MAX_PATCHES - totalCleaned,
+      });
+      totalCleaned += entries.length;
+    }
+
+    return totalCleaned;
   },
 });

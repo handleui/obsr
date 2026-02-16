@@ -88,6 +88,7 @@ export interface SandboxHandle {
   kill: () => Promise<void>;
   setTimeout: (timeoutMs: number) => Promise<void>;
   isRunning: () => Promise<boolean>;
+  disableNetwork?: () => Promise<void>;
 }
 
 export interface SandboxProvider {

@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { CommandApprovalDecision, ToolContext } from "./context.js";
 import { runCommandTool } from "./run-command.js";
 
-// Mock executeCommand at module level
-const mockExecuteCommand = vi.fn();
+const { mockExecuteCommand } = vi.hoisted(() => ({
+  mockExecuteCommand: vi.fn(),
+}));
 
-vi.mock("./execute.js", () => ({
+vi.mock("./execute.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./execute.js")>()),
   executeCommand: mockExecuteCommand,
 }));
 
@@ -51,7 +53,8 @@ describe("run_command", () => {
         expect(mockExecuteCommand).toHaveBeenCalledWith(
           expect.any(String),
           command,
-          expectedParts
+          expectedParts,
+          undefined
         );
       });
 
@@ -80,7 +83,8 @@ describe("run_command", () => {
         expect(mockExecuteCommand).toHaveBeenCalledWith(
           expect.any(String),
           command,
-          expectedParts
+          expectedParts,
+          undefined
         );
       });
 
@@ -109,7 +113,8 @@ describe("run_command", () => {
         expect(mockExecuteCommand).toHaveBeenCalledWith(
           expect.any(String),
           command,
-          expectedParts
+          expectedParts,
+          undefined
         );
       });
 
@@ -136,7 +141,8 @@ describe("run_command", () => {
         expect(mockExecuteCommand).toHaveBeenCalledWith(
           expect.any(String),
           command,
-          expectedParts
+          expectedParts,
+          undefined
         );
       });
 
@@ -163,7 +169,8 @@ describe("run_command", () => {
         expect(mockExecuteCommand).toHaveBeenCalledWith(
           expect.any(String),
           command,
-          expectedParts
+          expectedParts,
+          undefined
         );
       });
 
@@ -191,7 +198,8 @@ describe("run_command", () => {
         expect(mockExecuteCommand).toHaveBeenCalledWith(
           expect.any(String),
           command,
-          expectedParts
+          expectedParts,
+          undefined
         );
       });
 
@@ -221,7 +229,8 @@ describe("run_command", () => {
         expect(mockExecuteCommand).toHaveBeenCalledWith(
           expect.any(String),
           command,
-          expectedParts
+          expectedParts,
+          undefined
         );
       });
 
@@ -265,7 +274,8 @@ describe("run_command", () => {
         expect(mockExecuteCommand).toHaveBeenCalledWith(
           expect.any(String),
           command,
-          expectedParts
+          expectedParts,
+          undefined
         );
       });
 
@@ -304,7 +314,8 @@ describe("run_command", () => {
         expect(mockExecuteCommand).toHaveBeenCalledWith(
           expect.any(String),
           command,
-          expectedParts
+          expectedParts,
+          undefined
         );
       });
 
@@ -358,7 +369,8 @@ describe("run_command", () => {
         expect(mockExecuteCommand).toHaveBeenCalledWith(
           expect.any(String),
           command,
-          expectedParts
+          expectedParts,
+          undefined
         );
       });
 
@@ -401,7 +413,8 @@ describe("run_command", () => {
         expect(mockExecuteCommand).toHaveBeenCalledWith(
           expect.any(String),
           command,
-          expectedParts
+          expectedParts,
+          undefined
         );
       });
 
@@ -712,16 +725,15 @@ describe("run_command", () => {
       const commandPersister = vi
         .fn()
         .mockRejectedValue(new Error("Failed to save"));
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {
-        // Suppress error logging in tests
-      });
+      const consoleSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
 
       const ctx = createContext({ commandApprover, commandPersister });
       const result = await runCommandTool.execute(ctx, {
         command: "make build",
       });
 
-      // Command should still execute even if persister fails
       expect(result.isError).toBe(false);
       expect(consoleSpy).toHaveBeenCalledWith(
         "warning: failed to save command:",
@@ -739,9 +751,7 @@ describe("run_command", () => {
       const commandPersister = vi
         .fn()
         .mockRejectedValue(new Error("Failed to save"));
-      vi.spyOn(console, "error").mockImplementation(() => {
-        // Suppress error logging in tests
-      });
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
 
       const ctx = createContext({ commandApprover, commandPersister });
       await runCommandTool.execute(ctx, { command: "make build" });
@@ -905,7 +915,7 @@ describe("run_command", () => {
         ["scp file user@host:", "scp"],
         ["nc -l 8080", "nc "],
         ["netcat server", "netcat"],
-        ["echo > /etc/passwd", "> /"],
+        ["echo > /etc/passwd", "> "],
         ["echo >> file", ">>"],
         ["ls | grep foo", "|"],
         ["cmd1 && cmd2", "&&"],
@@ -914,7 +924,7 @@ describe("run_command", () => {
         ["echo `whoami`", "`"],
         ["eval $cmd", "eval"],
         ["exec /bin/sh", "exec"],
-        // Note: ${PATH} pattern - use string concatenation to avoid lint error
+        // HACK: ${PATH} pattern tested separately to avoid biome lint error
       ])("rejects command with pattern %s -> %s", async (command, pattern) => {
         const result = await runCommandTool.execute(createContext(), {
           command,
@@ -943,7 +953,6 @@ describe("run_command", () => {
         });
 
         expect(result.isError).toBe(true);
-        // | is checked before || in BLOCKED_PATTERNS
         expect(result.content).toBe('blocked pattern: "|"');
         expect(mockExecuteCommand).not.toHaveBeenCalled();
       });
@@ -1001,13 +1010,11 @@ describe("run_command", () => {
 
       const ctx = createContext({ commandApprover });
 
-      // First call - should ask approver
       await runCommandTool.execute(ctx, { command: "make build" });
       expect(commandApprover).toHaveBeenCalledTimes(1);
 
-      // Second call - should use approvedCommands set
       await runCommandTool.execute(ctx, { command: "make build" });
-      expect(commandApprover).toHaveBeenCalledTimes(1); // Still 1, not called again
+      expect(commandApprover).toHaveBeenCalledTimes(1);
     });
 
     test("subsequent calls use deniedCommands set", async () => {
@@ -1017,13 +1024,11 @@ describe("run_command", () => {
 
       const ctx = createContext({ commandApprover });
 
-      // First call - should ask approver
       await runCommandTool.execute(ctx, { command: "make build" });
       expect(commandApprover).toHaveBeenCalledTimes(1);
 
-      // Second call - should use deniedCommands set
       await runCommandTool.execute(ctx, { command: "make build" });
-      expect(commandApprover).toHaveBeenCalledTimes(1); // Still 1, not called again
+      expect(commandApprover).toHaveBeenCalledTimes(1);
     });
 
     test("different commands are tracked separately", async () => {
@@ -1055,7 +1060,8 @@ describe("run_command", () => {
       expect(mockExecuteCommand).toHaveBeenCalledWith(
         expect.any(String),
         "make build",
-        ["make", "build"]
+        ["make", "build"],
+        undefined
       );
     });
 
@@ -1071,7 +1077,8 @@ describe("run_command", () => {
       expect(mockExecuteCommand).toHaveBeenCalledWith(
         expect.any(String),
         "make build",
-        ["make", "build"]
+        ["make", "build"],
+        undefined
       );
     });
 
@@ -1087,19 +1094,16 @@ describe("run_command", () => {
     });
 
     test("handles leading and trailing whitespace", async () => {
-      // normalizeCommand splits on whitespace and joins with single space
-      // This preserves leading/trailing spaces in the normalized form
       const result = await runCommandTool.execute(createContext(), {
         command: "  go test ./...  ",
       });
 
       expect(result.isError).toBe(false);
-      // The normalization results in " go test ./... " with leading/trailing spaces
-      // but split().filter(Boolean) removes empty strings from the parts array
       expect(mockExecuteCommand).toHaveBeenCalledWith(
         expect.any(String),
         " go test ./... ",
-        ["go", "test", "./..."]
+        ["go", "test", "./..."],
+        undefined
       );
     });
   });

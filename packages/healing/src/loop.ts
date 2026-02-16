@@ -35,6 +35,8 @@ const KEY_PARAM_NAMES: Record<string, string> = {
   run_command: "command",
 };
 
+const MAX_KEY_PARAM_LENGTH = 50;
+
 const extractKeyParam = (
   toolName: string,
   input: Record<string, unknown>
@@ -49,10 +51,9 @@ const extractKeyParam = (
     return "";
   }
 
-  if (value.length > 50) {
-    return `${value.slice(0, 47)}...`;
-  }
-  return value;
+  return value.length > MAX_KEY_PARAM_LENGTH
+    ? `${value.slice(0, MAX_KEY_PARAM_LENGTH - 3)}...`
+    : value;
 };
 
 const createInitialResult = (): HealResult => ({
@@ -76,67 +77,31 @@ const getUsageFromResult = (result: HealResult): TokenUsage => ({
   cacheReadInputTokens: result.cacheReadInputTokens,
 });
 
-interface StepUsage {
-  inputTokens?: number;
-  outputTokens?: number;
-  inputTokenDetails?: {
-    cacheReadTokens?: number;
-    cacheWriteTokens?: number;
-  };
-}
-
-const calculateStepsCost = (
-  steps: Array<{ usage?: StepUsage }>,
+const calculateAccumulatedCost = (
+  accumulated: AccumulatedUsage,
   modelName: string
-): number => {
-  const totalUsage = steps.reduce(
-    (acc, step) => ({
-      inputTokens: acc.inputTokens + (step.usage?.inputTokens ?? 0),
-      outputTokens: acc.outputTokens + (step.usage?.outputTokens ?? 0),
-      cacheCreationInputTokens:
-        acc.cacheCreationInputTokens +
-        (step.usage?.inputTokenDetails?.cacheWriteTokens ?? 0),
-      cacheReadInputTokens:
-        acc.cacheReadInputTokens +
-        (step.usage?.inputTokenDetails?.cacheReadTokens ?? 0),
-    }),
-    {
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheCreationInputTokens: 0,
-      cacheReadInputTokens: 0,
-    }
-  );
-  return calculateCost(modelName, totalUsage);
-};
-
-const createBudgetStopCondition = (
-  config: HealConfig,
-  modelName: string
-): (({ steps }: { steps: Array<{ usage?: StepUsage }> }) => boolean) => {
-  return ({ steps }) => {
-    const costUSD = calculateStepsCost(steps, modelName);
-
-    if (config.budgetPerRunUSD > 0 && costUSD > config.budgetPerRunUSD) {
-      return true;
-    }
-
-    if (
-      config.remainingMonthlyUSD >= 0 &&
-      costUSD > config.remainingMonthlyUSD
-    ) {
-      return true;
-    }
-
-    return false;
-  };
-};
+): number =>
+  calculateCost(modelName, {
+    inputTokens: accumulated.inputTokens,
+    outputTokens: accumulated.outputTokens,
+    cacheCreationInputTokens: accumulated.cacheCreationInputTokens,
+    cacheReadInputTokens: accumulated.cacheReadInputTokens,
+  });
 
 const checkBudgetLimits = (
   config: HealConfig,
   result: HealResult,
   startTime: number
 ): HealResult | null => {
+  if (!Number.isFinite(result.costUSD) || result.costUSD < 0) {
+    return {
+      ...result,
+      budgetExceeded: true,
+      budgetExceededReason: "invalid-cost",
+      duration: Date.now() - startTime,
+    };
+  }
+
   if (config.budgetPerRunUSD > 0 && result.costUSD > config.budgetPerRunUSD) {
     return {
       ...result,
@@ -262,6 +227,10 @@ const classifyError = (
     return "TIMEOUT";
   }
 
+  if (error instanceof Error && error.name === "AbortError") {
+    return "TIMEOUT";
+  }
+
   const status = getErrorStatus(error);
   if (status !== undefined) {
     const statusType = classifyByStatusCode(status);
@@ -288,6 +257,18 @@ const classifyError = (
   return "UNKNOWN";
 };
 
+const formatWithTool = (
+  label: string,
+  iterationInfo: string,
+  safeError: string,
+  lastTool: string | null
+): string => {
+  if (lastTool) {
+    return `[${lastTool}] ${label} at ${iterationInfo}: ${safeError}`;
+  }
+  return `${label} at ${iterationInfo}: ${safeError}`;
+};
+
 const formatErrorMessage = (
   errorType: HealErrorType,
   rawError: string,
@@ -297,44 +278,38 @@ const formatErrorMessage = (
   const safeError = redactSensitiveData(rawError);
 
   switch (errorType) {
-    case "TIMEOUT":
-      if (execCtx.lastTool) {
-        return `[${execCtx.lastTool}] Timeout exceeded at ${iterationInfo}`;
-      }
-      return `Timeout exceeded at ${iterationInfo}`;
-
+    case "TIMEOUT": {
+      const base = `Timeout exceeded at ${iterationInfo}`;
+      return execCtx.lastTool ? `[${execCtx.lastTool}] ${base}` : base;
+    }
     case "RATE_LIMIT":
       return `Rate limited at ${iterationInfo}: ${safeError}`;
-
     case "OVERLOADED":
       return `API overloaded at ${iterationInfo}: ${safeError}`;
-
     case "AUTH_ERROR":
       return `Authentication failed at ${iterationInfo}: ${safeError}`;
-
-    case "TOOL_ERROR":
-      if (execCtx.lastTool) {
-        const toolInput = execCtx.lastToolInput
-          ? ` on ${execCtx.lastToolInput}`
-          : "";
-        return `[${execCtx.lastTool}] Tool execution failed at ${iterationInfo}: ${safeError}${toolInput}`;
-      }
-      return `Tool execution failed at ${iterationInfo}: ${safeError}`;
-
+    case "TOOL_ERROR": {
+      const toolInput = execCtx.lastToolInput
+        ? ` on ${execCtx.lastToolInput}`
+        : "";
+      return `${formatWithTool("Tool execution failed", iterationInfo, safeError, execCtx.lastTool)}${toolInput}`;
+    }
     case "API_ERROR":
       return `API error at ${iterationInfo}: ${safeError}`;
-
     case "VALIDATION_ERROR":
-      if (execCtx.lastTool) {
-        return `[${execCtx.lastTool}] Validation error at ${iterationInfo}: ${safeError}`;
-      }
-      return `Validation error at ${iterationInfo}: ${safeError}`;
-
+      return formatWithTool(
+        "Validation error",
+        iterationInfo,
+        safeError,
+        execCtx.lastTool
+      );
     default:
-      if (execCtx.lastTool) {
-        return `[${execCtx.lastTool}] Error at ${iterationInfo}: ${safeError}`;
-      }
-      return `Error at ${iterationInfo}: ${safeError}`;
+      return formatWithTool(
+        "Error",
+        iterationInfo,
+        safeError,
+        execCtx.lastTool
+      );
   }
 };
 
@@ -357,6 +332,93 @@ const buildErrorContext = (
   },
   rawError: redactSensitiveData(rawError),
 });
+
+const MAX_REPAIR_INPUT_SIZE = 1_000_000;
+
+interface AccumulatedUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+}
+
+const createEmptyAccumulator = (): AccumulatedUsage => ({
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheCreationInputTokens: 0,
+  cacheReadInputTokens: 0,
+});
+
+const isBudgetExceeded = (costUSD: number, config: HealConfig): boolean =>
+  (config.budgetPerRunUSD > 0 && costUSD > config.budgetPerRunUSD) ||
+  (config.remainingMonthlyUSD >= 0 && costUSD > config.remainingMonthlyUSD);
+
+const accumulateUsage = (
+  accumulated: AccumulatedUsage,
+  usage: {
+    inputTokens?: number;
+    outputTokens?: number;
+    inputTokenDetails?: {
+      cacheWriteTokens?: number;
+      cacheReadTokens?: number;
+    };
+  }
+): void => {
+  accumulated.inputTokens += usage.inputTokens ?? 0;
+  accumulated.outputTokens += usage.outputTokens ?? 0;
+  accumulated.cacheCreationInputTokens +=
+    usage.inputTokenDetails?.cacheWriteTokens ?? 0;
+  accumulated.cacheReadInputTokens +=
+    usage.inputTokenDetails?.cacheReadTokens ?? 0;
+};
+
+interface SdkToolCall {
+  type: "tool-call";
+  toolCallId: string;
+  toolName: string;
+  input: string;
+  providerExecuted?: boolean;
+}
+
+const repairToolCall = ({
+  toolCall,
+}: {
+  toolCall: SdkToolCall;
+}): Promise<SdkToolCall | null> => {
+  if (typeof toolCall.input !== "string") {
+    return Promise.resolve(null);
+  }
+  if (toolCall.input.length > MAX_REPAIR_INPUT_SIZE) {
+    return Promise.resolve(null);
+  }
+
+  const cleaned = toolCall.input
+    .replace(/,\s*}/g, "}")
+    .replace(/,\s*]/g, "]")
+    .replace(/'/g, '"');
+
+  try {
+    JSON.parse(cleaned);
+    return Promise.resolve({ ...toolCall, input: cleaned });
+  } catch {
+    return Promise.resolve(null);
+  }
+};
+
+interface UsageInput {
+  inputTokens?: number;
+  outputTokens?: number;
+  inputTokenDetails?: {
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+}
+
+interface StepEvent {
+  toolCalls?: Array<{ toolName: string }>;
+  finishReason: string;
+  usage?: UsageInput;
+}
 
 export class HealLoop {
   private readonly registry: ToolRegistry;
@@ -381,30 +443,11 @@ export class HealLoop {
     const result = createInitialResult();
     const modelName = normalizeModelId(this.config.model);
     const abortController = new AbortController();
-    const timeoutId = setTimeout(
-      () => abortController.abort(),
-      this.config.timeout
-    );
 
-    this.execCtx.iteration = 1;
-    this.execCtx.lastTool = null;
-    this.execCtx.lastToolInput = null;
+    this.resetExecCtx();
 
     try {
-      this.registry.setToolCallListener(
-        (toolName: string, input: Record<string, unknown>) => {
-          this.execCtx.lastTool = toolName;
-          this.execCtx.lastToolInput = extractKeyParam(toolName, input) || null;
-          if (this.verboseWriter) {
-            this.logToolCall(toolName, input);
-          }
-        }
-      );
-
-      const budgetStopCondition = createBudgetStopCondition(
-        this.config,
-        modelName
-      );
+      this.registry.setToolCallListener(this.handleToolCall);
 
       const response = await generateText({
         model: modelName,
@@ -415,91 +458,163 @@ export class HealLoop {
         maxOutputTokens: MAX_TOKENS_PER_RESPONSE,
         maxRetries: 5,
         tools: this.registry.toAiTools(),
-        stopWhen: [stepCountIs(MAX_ITERATIONS), budgetStopCondition],
+        stopWhen: stepCountIs(MAX_ITERATIONS),
+        // HACK: 120s per step — generous limit for tool-heavy iterations (clone, install, build)
+        timeout: { totalMs: this.config.timeout, stepMs: 120_000 },
         abortSignal: abortController.signal,
         prepareStep: createCachePrepareStep(),
+        onStepFinish: this.createStepHandler(modelName, abortController),
+        experimental_repairToolCall: repairToolCall,
+        experimental_include: { requestBody: false },
       });
 
-      this.updateTokenUsage(result, response.usage ?? {}, modelName);
-      result.iterations = response.steps?.length ?? 1;
-      this.execCtx.iteration = result.iterations;
-      result.toolCalls =
-        response.steps?.flatMap((step) => step.toolCalls ?? []).length ?? 0;
-      result.finalMessage = response.text ?? "";
-      result.duration = Date.now() - startTime;
-
-      const budgetExceeded = checkBudgetLimits(this.config, result, startTime);
-      if (budgetExceeded) {
-        return {
-          ...budgetExceeded,
-          finalMessage: result.finalMessage,
-        };
-      }
-
-      const hitStepLimit = result.iterations >= MAX_ITERATIONS;
-      if (hitStepLimit) {
-        result.finalMessage =
-          result.finalMessage ||
-          `Max iterations (${MAX_ITERATIONS}) reached without completion`;
-        return result;
-      }
-
-      return { ...result, success: true };
+      return this.finalizeSuccess(result, response, modelName, startTime);
     } catch (error) {
-      result.duration = Date.now() - startTime;
-      result.costUSD = calculateCost(modelName, getUsageFromResult(result));
-
-      const rawError =
-        error instanceof Error ? error.message : "Unknown error occurred";
-
-      const errorType = classifyError(
+      return this.finalizeError(
+        result,
         error,
-        abortController.signal.aborted,
-        this.execCtx.lastTool
+        modelName,
+        abortController,
+        startTime
       );
-
-      result.errorContext = buildErrorContext(
-        errorType,
-        rawError,
-        this.execCtx,
-        result
-      );
-
-      result.finalMessage = formatErrorMessage(
-        errorType,
-        rawError,
-        this.execCtx
-      );
-
-      return result;
     } finally {
-      clearTimeout(timeoutId);
       this.registry.setToolCallListener(null);
     }
   };
 
-  private readonly updateTokenUsage = (
+  private readonly resetExecCtx = (): void => {
+    this.execCtx.iteration = 1;
+    this.execCtx.lastTool = null;
+    this.execCtx.lastToolInput = null;
+    this.registry.currentStep = 1;
+  };
+
+  private readonly handleToolCall = (
+    toolName: string,
+    input: Record<string, unknown>
+  ): void => {
+    this.execCtx.lastTool = toolName;
+    this.execCtx.lastToolInput = extractKeyParam(toolName, input) || null;
+    this.logToolCall(toolName, input);
+  };
+
+  private readonly createStepHandler = (
+    modelName: string,
+    abortController: AbortController
+  ) => {
+    const accumulated = createEmptyAccumulator();
+    let stepStart = Date.now();
+
+    return ({ toolCalls, finishReason, usage }: StepEvent): void => {
+      const stepDurationMs = Date.now() - stepStart;
+
+      if (usage) {
+        accumulateUsage(accumulated, usage);
+      }
+      this.logStepProgress(toolCalls, finishReason, stepDurationMs);
+      this.execCtx.iteration++;
+      this.registry.currentStep = this.execCtx.iteration;
+
+      const costUSD = calculateAccumulatedCost(accumulated, modelName);
+      if (
+        !Number.isFinite(costUSD) ||
+        costUSD < 0 ||
+        isBudgetExceeded(costUSD, this.config)
+      ) {
+        abortController.abort();
+      }
+
+      stepStart = Date.now();
+    };
+  };
+
+  private readonly finalizeSuccess = (
     result: HealResult,
-    usage: {
-      inputTokens?: number;
-      outputTokens?: number;
-      inputTokenDetails?: {
-        cacheReadTokens?: number;
-        cacheWriteTokens?: number;
-      };
+    response: {
+      totalUsage: UsageInput;
+      steps: Array<{ toolCalls: unknown[] }>;
+      text: string;
     },
+    modelName: string,
+    startTime: number
+  ): HealResult => {
+    this.applyTokenUsage(result, response.totalUsage, modelName);
+    result.iterations = response.steps.length;
+    this.execCtx.iteration = result.iterations;
+    this.registry.currentStep = result.iterations;
+    result.toolCalls = response.steps.flatMap((step) => step.toolCalls).length;
+    result.finalMessage = response.text;
+    result.duration = Date.now() - startTime;
+    result.commandLog = this.registry.auditLog;
+
+    const budgetExceeded = checkBudgetLimits(this.config, result, startTime);
+    if (budgetExceeded) {
+      return { ...budgetExceeded, finalMessage: result.finalMessage };
+    }
+
+    if (result.iterations >= MAX_ITERATIONS) {
+      result.finalMessage =
+        result.finalMessage ||
+        `Max iterations (${MAX_ITERATIONS}) reached without completion`;
+      return result;
+    }
+
+    return { ...result, success: true };
+  };
+
+  private readonly finalizeError = (
+    result: HealResult,
+    error: unknown,
+    modelName: string,
+    abortController: AbortController,
+    startTime: number
+  ): HealResult => {
+    result.duration = Date.now() - startTime;
+    result.costUSD = calculateCost(modelName, getUsageFromResult(result));
+
+    const rawError =
+      error instanceof Error ? error.message : "Unknown error occurred";
+    const errorType = classifyError(
+      error,
+      abortController.signal.aborted,
+      this.execCtx.lastTool
+    );
+
+    result.errorContext = buildErrorContext(
+      errorType,
+      rawError,
+      this.execCtx,
+      result
+    );
+    result.finalMessage = formatErrorMessage(errorType, rawError, this.execCtx);
+    return result;
+  };
+
+  private readonly applyTokenUsage = (
+    result: HealResult,
+    usage: UsageInput,
     modelName: string
   ): void => {
-    const inputTokens = usage.inputTokens ?? 0;
-    const outputTokens = usage.outputTokens ?? 0;
-    const cacheReadTokens = usage.inputTokenDetails?.cacheReadTokens ?? 0;
-    const cacheWriteTokens = usage.inputTokenDetails?.cacheWriteTokens ?? 0;
-
-    result.inputTokens = inputTokens;
-    result.outputTokens = outputTokens;
-    result.cacheCreationInputTokens = cacheWriteTokens;
-    result.cacheReadInputTokens = cacheReadTokens;
+    result.inputTokens = usage.inputTokens ?? 0;
+    result.outputTokens = usage.outputTokens ?? 0;
+    result.cacheCreationInputTokens =
+      usage.inputTokenDetails?.cacheWriteTokens ?? 0;
+    result.cacheReadInputTokens = usage.inputTokenDetails?.cacheReadTokens ?? 0;
     result.costUSD = calculateCost(modelName, getUsageFromResult(result));
+  };
+
+  private readonly logStepProgress = (
+    toolCalls: Array<{ toolName: string }> | undefined,
+    finishReason: string,
+    stepDurationMs: number
+  ): void => {
+    if (!this.verboseWriter) {
+      return;
+    }
+    const tools = toolCalls?.map((tc) => tc.toolName).join(", ") || "none";
+    this.verboseWriter(
+      `  step ${this.execCtx.iteration}: tools=[${tools}] reason=${finishReason} duration=${stepDurationMs}ms\n`
+    );
   };
 
   private readonly logToolCall = (
@@ -509,13 +624,11 @@ export class HealLoop {
     if (!this.verboseWriter) {
       return;
     }
-
     const keyParam = extractKeyParam(toolName, input);
-    if (keyParam) {
-      this.verboseWriter(`  -> ${toolName}: ${keyParam}\n`);
-    } else {
-      this.verboseWriter(`  -> ${toolName}\n`);
-    }
+    const message = keyParam
+      ? `  -> ${toolName}: ${keyParam}\n`
+      : `  -> ${toolName}\n`;
+    this.verboseWriter(message);
   };
 }
 
@@ -524,11 +637,22 @@ export const createConfig = (
   timeoutMins: number,
   budgetPerRunUSD: number,
   remainingMonthlyUSD: number
-): HealConfig => ({
-  timeout: timeoutMins > 0 ? timeoutMins * 60_000 : DEFAULT_CONFIG.timeout,
-  model: model || DEFAULT_CONFIG.model,
-  budgetPerRunUSD:
-    budgetPerRunUSD >= 0 ? budgetPerRunUSD : DEFAULT_CONFIG.budgetPerRunUSD,
-  remainingMonthlyUSD,
-  verbose: false,
-});
+): HealConfig => {
+  const hasNonFinite = !(
+    Number.isFinite(timeoutMins) &&
+    Number.isFinite(budgetPerRunUSD) &&
+    Number.isFinite(remainingMonthlyUSD)
+  );
+  if (hasNonFinite) {
+    throw new Error("Config values must be finite numbers");
+  }
+
+  return {
+    timeout: timeoutMins > 0 ? timeoutMins * 60_000 : DEFAULT_CONFIG.timeout,
+    model: model || DEFAULT_CONFIG.model,
+    budgetPerRunUSD:
+      budgetPerRunUSD >= 0 ? budgetPerRunUSD : DEFAULT_CONFIG.budgetPerRunUSD,
+    remainingMonthlyUSD,
+    verbose: false,
+  };
+};

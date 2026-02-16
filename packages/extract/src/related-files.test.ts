@@ -18,7 +18,6 @@ Error: Something went wrong
     const result = extractRelatedFiles(stackTrace, "/app/src/main.ts");
     expect(result).toContain("/app/src/utils/helper.ts");
     expect(result).toContain("/app/src/config/index.ts");
-    // Internal node modules should not be included
     expect(result.some((p) => p.includes("node:"))).toBe(false);
   });
 
@@ -44,7 +43,6 @@ Error: Module not found
 `;
     const result = extractRelatedFiles(stackTrace);
     expect(result).toContain("/app/src/loader.ts");
-    // node_modules paths should be excluded
     expect(result.some((p) => p.includes("node_modules"))).toBe(false);
   });
 
@@ -65,7 +63,6 @@ Error: Module not found
     at fn3 (/app/src/utils.ts:30:7)
 `;
     const result = extractRelatedFiles(stackTrace);
-    // Should have only one entry for the same file
     const utilsCount = result.filter((p) => p.includes("utils.ts")).length;
     expect(utilsCount).toBe(1);
   });
@@ -91,6 +88,35 @@ main.main()
     const result = extractRelatedFiles(stackTrace);
     expect(result).toContain("/app/cmd/server/main.go");
     expect(result).toContain("/app/cmd/server/handler.go");
+  });
+
+  test("extracts Windows absolute paths", () => {
+    const stackTrace = `Error: Something went wrong
+    at Object.<anonymous> (C:\\Users\\project\\src\\helper.ts:10:5)
+    at Module._compile (node:internal/modules/cjs/loader:1376:14)`;
+    const result = extractRelatedFiles(stackTrace);
+    expect(result).toContain("C:/Users/project/src/helper.ts");
+  });
+
+  test("excludes Windows node_modules paths", () => {
+    const stackTrace = `    at resolve (C:\\Users\\project\\node_modules\\pkg\\index.js:10:5)
+    at loadModule (C:\\Users\\project\\src\\loader.ts:15:3)`;
+    const result = extractRelatedFiles(stackTrace);
+    expect(result).toContain("C:/Users/project/src/loader.ts");
+    expect(result.every((p) => !p.includes("node_modules"))).toBe(true);
+  });
+
+  test("extracts file paths from GitHub Actions annotations", () => {
+    const stackTrace =
+      "::error file=src/components/Button.tsx,line=42,col=5::Type error";
+    const result = extractRelatedFiles(stackTrace);
+    expect(result).toContain("src/components/Button.tsx");
+  });
+
+  test("extracts file paths from GitHub Actions warnings", () => {
+    const stackTrace = "::warning file=lib/utils.ts,line=10::Deprecated API";
+    const result = extractRelatedFiles(stackTrace);
+    expect(result).toContain("lib/utils.ts");
   });
 
   describe("path traversal protection", () => {

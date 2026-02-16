@@ -27,18 +27,8 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     await requireServiceAuth(ctx, args);
-    return await ctx.db.insert("projects", {
-      organizationId: args.organizationId,
-      handle: args.handle,
-      providerRepoId: args.providerRepoId,
-      providerRepoName: args.providerRepoName,
-      providerRepoFullName: args.providerRepoFullName,
-      providerDefaultBranch: args.providerDefaultBranch,
-      isPrivate: args.isPrivate,
-      removedAt: args.removedAt,
-      createdAt: args.createdAt,
-      updatedAt: args.updatedAt,
-    });
+    const { serviceToken: _, ...data } = args;
+    return await ctx.db.insert("projects", data);
   },
 });
 
@@ -204,19 +194,8 @@ export const update = mutation({
       return null;
     }
 
-    await ctx.db.patch(
-      project._id,
-      buildPatch({
-        handle: args.handle,
-        providerRepoId: args.providerRepoId,
-        providerRepoName: args.providerRepoName,
-        providerRepoFullName: args.providerRepoFullName,
-        providerDefaultBranch: args.providerDefaultBranch,
-        isPrivate: args.isPrivate,
-        removedAt: args.removedAt,
-        updatedAt: args.updatedAt,
-      })
-    );
+    const { id: _, serviceToken: _s, ...patch } = args;
+    await ctx.db.patch(project._id, buildPatch(patch));
 
     return String(project._id);
   },
@@ -263,6 +242,28 @@ const repoSnapshot = v.object({
   isPrivate: v.boolean(),
 });
 
+interface RepoSnapshot {
+  id: string;
+  name: string;
+  fullName: string;
+  defaultBranch?: string | null;
+  isPrivate: boolean;
+}
+
+const needsProjectUpdate = (
+  project: {
+    providerRepoName: string;
+    providerRepoFullName: string;
+    providerDefaultBranch?: string | null;
+    isPrivate: boolean;
+  },
+  repo: RepoSnapshot
+): boolean =>
+  project.providerRepoName !== repo.name ||
+  project.providerRepoFullName !== repo.fullName ||
+  project.providerDefaultBranch !== repo.defaultBranch ||
+  project.isPrivate !== repo.isPrivate;
+
 export const syncFromGitHub = mutation({
   args: {
     organizationId: v.id("organizations"),
@@ -278,7 +279,7 @@ export const syncFromGitHub = mutation({
     const existing = await ctx.db
       .query("projects")
       .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
-      .collect();
+      .take(5000);
 
     const existingByRepoId = new Map(
       existing.map((project) => [project.providerRepoId, project])
@@ -308,14 +309,7 @@ export const syncFromGitHub = mutation({
         continue;
       }
 
-      const wasRemoved = Boolean(project.removedAt);
-      const needsUpdate =
-        project.providerRepoName !== repo.name ||
-        project.providerRepoFullName !== repo.fullName ||
-        project.providerDefaultBranch !== repo.defaultBranch ||
-        project.isPrivate !== repo.isPrivate;
-
-      if (wasRemoved || needsUpdate) {
+      if (project.removedAt || needsProjectUpdate(project, repo)) {
         await ctx.db.patch(project._id, {
           providerRepoName: repo.name,
           providerRepoFullName: repo.fullName,
@@ -330,16 +324,14 @@ export const syncFromGitHub = mutation({
 
     if (syncRemoved) {
       for (const project of existing) {
-        if (project.removedAt) {
+        if (project.removedAt || repoIds.has(project.providerRepoId)) {
           continue;
         }
-        if (!repoIds.has(project.providerRepoId)) {
-          await ctx.db.patch(project._id, {
-            removedAt: now,
-            updatedAt: now,
-          });
-          removed += 1;
-        }
+        await ctx.db.patch(project._id, {
+          removedAt: now,
+          updatedAt: now,
+        });
+        removed += 1;
       }
     }
 
@@ -359,7 +351,7 @@ export const clearRemovedByOrg = mutation({
     const projects = await ctx.db
       .query("projects")
       .withIndex("by_org", (q) => q.eq("organizationId", args.organizationId))
-      .collect();
+      .take(5000);
 
     let updated = 0;
     for (const project of projects) {

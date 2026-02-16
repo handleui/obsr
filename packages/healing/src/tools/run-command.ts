@@ -20,10 +20,6 @@ import {
   type ToolResult,
 } from "./types.js";
 
-/**
- * Safe commands that are always allowed without prompting.
- * Map of base command to allowed subcommands (null = any subcommand OK).
- */
 const SAFE_COMMANDS: Record<string, string[] | null> = {
   go: ["build", "test", "fmt", "vet", "mod", "generate", "install", "run"],
   "golangci-lint": ["run"],
@@ -53,9 +49,6 @@ const SAFE_COMMANDS: Record<string, string[] | null> = {
   biome: ["check", "format", "lint"],
 };
 
-/**
- * Safe npx/bunx commands that are always allowed.
- */
 const SAFE_NPX_COMMANDS = new Set([
   "eslint",
   "prettier",
@@ -69,16 +62,10 @@ const SAFE_NPX_COMMANDS = new Set([
   "nx",
 ]);
 
-/**
- * Input schema for run_command.
- */
 interface RunCommandInput {
   command: string;
 }
 
-/**
- * Checks if command is in the built-in safe list.
- */
 const isSafeCommand = (baseCmd: string, subCmd: string): boolean => {
   const actualBase = extractBaseCommand(baseCmd);
   const allowedSubs = SAFE_COMMANDS[actualBase];
@@ -97,63 +84,110 @@ const isSafeCommand = (baseCmd: string, subCmd: string): boolean => {
   return allowedSubs.includes(subCmd);
 };
 
-/**
- * Checks if a command is allowed to run.
- */
-const isAllowed = async (
+const isPreApproved = (
   ctx: ToolContext,
   fullCmd: string,
   parts: string[]
-): Promise<boolean> => {
+): boolean | null => {
   const baseCmd = parts[0];
   const subCmd = parts[1] ?? "";
 
   if (baseCmd === undefined) {
     return false;
   }
-
   if (isSafeCommand(baseCmd, subCmd)) {
     return true;
   }
-
   if (ctx.commandChecker?.(fullCmd)) {
     return true;
   }
-
   if (isCommandApproved(ctx, fullCmd)) {
     return true;
   }
-
   if (isCommandDenied(ctx, fullCmd)) {
     return false;
   }
-
-  if (ctx.commandApprover) {
-    const decision = await ctx.commandApprover(fullCmd);
-
-    if (decision === "deny" || decision === "never") {
-      denyCommand(ctx, fullCmd);
-      return false;
-    }
-
-    if (decision === "always" && ctx.commandPersister) {
-      try {
-        await ctx.commandPersister(fullCmd);
-      } catch (err) {
-        console.error("warning: failed to save command:", err);
-      }
-    }
-
-    approveCommand(ctx, fullCmd);
-    return true;
-  }
-
-  return false;
+  return null;
 };
 
-/**
- * Run command tool - executes commands with safety checks.
- */
+const persistApproval = async (
+  ctx: ToolContext,
+  fullCmd: string
+): Promise<void> => {
+  if (!ctx.commandPersister) {
+    return;
+  }
+  try {
+    await ctx.commandPersister(fullCmd);
+  } catch (err) {
+    console.error("warning: failed to save command:", err);
+  }
+};
+
+const resolveApproval = async (
+  ctx: ToolContext,
+  fullCmd: string
+): Promise<boolean> => {
+  if (!ctx.commandApprover) {
+    return false;
+  }
+
+  const decision = await ctx.commandApprover(fullCmd);
+
+  if (decision === "deny" || decision === "never") {
+    denyCommand(ctx, fullCmd);
+    return false;
+  }
+
+  if (decision === "always") {
+    await persistApproval(ctx, fullCmd);
+  }
+
+  approveCommand(ctx, fullCmd);
+  return true;
+};
+
+const isAllowed = (
+  ctx: ToolContext,
+  fullCmd: string,
+  parts: string[]
+): Promise<boolean> | boolean => {
+  const preApproved = isPreApproved(ctx, fullCmd, parts);
+  if (preApproved !== null) {
+    return preApproved;
+  }
+  return resolveApproval(ctx, fullCmd);
+};
+
+const validateRunCommand = (
+  command: string
+): { normalizedCmd: string; parts: string[] } | ToolResult => {
+  if (!command) {
+    return errorResult("command is required");
+  }
+  if (hasBlockedBytes(command)) {
+    return errorResult("command contains invalid characters");
+  }
+
+  const normalizedCmd = normalizeCommand(command);
+  const blockedPattern = hasBlockedPattern(normalizedCmd);
+  if (blockedPattern) {
+    return errorResult(`blocked pattern: "${blockedPattern}"`);
+  }
+
+  const parts = normalizedCmd.split(" ").filter(Boolean);
+  if (parts.length === 0 || parts[0] === undefined) {
+    return errorResult("empty command");
+  }
+
+  const baseCmd = extractBaseCommand(parts[0]);
+  if (BLOCKED_COMMANDS.has(baseCmd)) {
+    return errorResult(`blocked command: "${baseCmd}"`);
+  }
+
+  return { normalizedCmd, parts };
+};
+
 export const runCommandTool: Tool = {
   name: "run_command",
   description:
@@ -165,39 +199,24 @@ export const runCommandTool: Tool = {
     )
     .build(),
 
-  execute: async (ctx: ToolContext, input: unknown): Promise<ToolResult> => {
+  execute: async (
+    ctx: ToolContext,
+    input: unknown,
+    abortSignal?: AbortSignal
+  ): Promise<ToolResult> => {
     const { command } = input as RunCommandInput;
+    const validated = validateRunCommand(command);
 
-    if (!command) {
-      return errorResult("command is required");
+    if ("isError" in validated) {
+      return validated;
     }
 
-    if (hasBlockedBytes(command)) {
-      return errorResult("command contains invalid characters");
-    }
-
-    const normalizedCmd = normalizeCommand(command);
-
-    const blockedPattern = hasBlockedPattern(normalizedCmd);
-    if (blockedPattern) {
-      return errorResult(`blocked pattern: "${blockedPattern}"`);
-    }
-
-    const parts = normalizedCmd.split(" ").filter(Boolean);
-    if (parts.length === 0 || parts[0] === undefined) {
-      return errorResult("empty command");
-    }
-
-    const baseCmd = extractBaseCommand(parts[0]);
-    if (BLOCKED_COMMANDS.has(baseCmd)) {
-      return errorResult(`blocked command: "${baseCmd}"`);
-    }
-
+    const { normalizedCmd, parts } = validated;
     const allowed = await isAllowed(ctx, normalizedCmd, parts);
     if (!allowed) {
       return errorResult(`command not approved: ${normalizedCmd}`);
     }
 
-    return executeCommand(ctx.worktreePath, normalizedCmd, parts);
+    return executeCommand(ctx.worktreePath, normalizedCmd, parts, abortSignal);
   },
 };

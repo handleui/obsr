@@ -50,28 +50,8 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     await requireServiceAuth(ctx, args);
-    return await ctx.db.insert("organizations", {
-      name: args.name,
-      slug: args.slug,
-      enterpriseId: args.enterpriseId,
-      provider: args.provider,
-      providerAccountId: args.providerAccountId,
-      providerAccountLogin: args.providerAccountLogin,
-      providerAccountType: args.providerAccountType,
-      providerAvatarUrl: args.providerAvatarUrl,
-      providerInstallationId: args.providerInstallationId,
-      providerAccessTokenEncrypted: args.providerAccessTokenEncrypted,
-      providerAccessTokenExpiresAt: args.providerAccessTokenExpiresAt,
-      providerWebhookSecret: args.providerWebhookSecret,
-      installerGithubId: args.installerGithubId,
-      suspendedAt: args.suspendedAt,
-      deletedAt: args.deletedAt,
-      lastSyncedAt: args.lastSyncedAt,
-      settings: args.settings,
-      polarCustomerId: args.polarCustomerId,
-      createdAt: args.createdAt,
-      updatedAt: args.updatedAt,
-    });
+    const { serviceToken: _, ...data } = args;
+    return await ctx.db.insert("organizations", data);
   },
 });
 
@@ -141,10 +121,7 @@ export const listByProviderAccountIds = query({
           q.eq("provider", args.provider).eq("providerAccountId", accountId)
         )
         .first();
-      if (!org) {
-        continue;
-      }
-      if (!args.includeDeleted && org.deletedAt) {
+      if (!org || (!args.includeDeleted && org.deletedAt)) {
         continue;
       }
       results.push(org);
@@ -162,7 +139,7 @@ export const listByInstallerGithubId = query({
       .withIndex("by_installer_github", (q) =>
         q.eq("installerGithubId", args.installerGithubId)
       )
-      .collect();
+      .take(100);
   },
 });
 
@@ -175,7 +152,7 @@ export const listByEnterprise = query({
       .withIndex("by_enterprise", (q) =>
         q.eq("enterpriseId", args.enterpriseId)
       )
-      .collect();
+      .take(500);
   },
 });
 
@@ -188,7 +165,7 @@ export const listByProviderInstallationId = query({
       .withIndex("by_provider_installation", (q) =>
         q.eq("providerInstallationId", args.providerInstallationId)
       )
-      .collect();
+      .take(10);
   },
 });
 
@@ -206,7 +183,7 @@ export const listActiveGithub = query({
   handler: async (ctx, args) => {
     await requireServiceAuth(ctx, args);
     const limit = clampLimit(args.limit, 1, 5000, 500);
-    const all = await ctx.db.query("organizations").collect();
+    const all = await ctx.db.query("organizations").take(5000);
     const filtered = all.filter(
       (org) =>
         org.provider === "github" &&
@@ -251,30 +228,8 @@ export const update = mutation({
       return null;
     }
 
-    await ctx.db.patch(
-      organization._id,
-      buildPatch({
-        name: args.name,
-        slug: args.slug,
-        enterpriseId: args.enterpriseId,
-        provider: args.provider,
-        providerAccountId: args.providerAccountId,
-        providerAccountLogin: args.providerAccountLogin,
-        providerAccountType: args.providerAccountType,
-        providerAvatarUrl: args.providerAvatarUrl,
-        providerInstallationId: args.providerInstallationId,
-        providerAccessTokenEncrypted: args.providerAccessTokenEncrypted,
-        providerAccessTokenExpiresAt: args.providerAccessTokenExpiresAt,
-        providerWebhookSecret: args.providerWebhookSecret,
-        installerGithubId: args.installerGithubId,
-        suspendedAt: args.suspendedAt,
-        deletedAt: args.deletedAt,
-        lastSyncedAt: args.lastSyncedAt,
-        settings: args.settings,
-        polarCustomerId: args.polarCustomerId,
-        updatedAt: args.updatedAt,
-      })
-    );
+    const { id: _, serviceToken: _s, ...patch } = args;
+    await ctx.db.patch(organization._id, buildPatch(patch));
 
     return String(organization._id);
   },

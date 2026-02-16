@@ -38,6 +38,7 @@ export {
   createSetDetectedSourceTool,
 } from "./tools.js";
 export {
+  type ExtractionMetrics,
   type ExtractionResult,
   ExtractionResultSchema,
   type ExtractionUsage,

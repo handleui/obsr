@@ -1,4 +1,4 @@
-import { runErrorOps, runOps } from "@detent/db";
+import { type createDb, runErrorOps, runOps } from "@detent/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { getConvexClient } from "../db/convex";

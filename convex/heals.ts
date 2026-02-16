@@ -38,6 +38,7 @@ const filesChangedWithContent = v.array(
   })
 );
 
+// HACK: pending → completed is intentional — autofix is deterministic (GitHub Action), skips running
 const VALID_STATUS_TRANSITIONS: Record<string, Set<string>> = {
   found: new Set(["pending", "failed"]),
   pending: new Set(["running", "completed", "failed"]),

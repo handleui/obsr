@@ -142,16 +142,32 @@ describe("hasBlockedBytes", () => {
     expect(hasBlockedBytes("echo hello world")).toBe(false);
   });
 
+  test("passes accented characters in file paths", () => {
+    expect(hasBlockedBytes("cat données.txt")).toBe(false);
+  });
+
+  test("passes Cyrillic characters", () => {
+    expect(hasBlockedBytes("g\u043Ebuild")).toBe(false);
+  });
+
+  test("passes fullwidth characters", () => {
+    expect(hasBlockedBytes("\uFF52\uFF4D file")).toBe(false);
+  });
+
   test("rejects non-breaking space (\\u00A0)", () => {
     expect(hasBlockedBytes("go\u00A0build")).toBe(true);
   });
 
-  test("rejects Cyrillic characters", () => {
-    expect(hasBlockedBytes("g\u043Ebuild")).toBe(true);
+  test("rejects zero-width space (\\u200B)", () => {
+    expect(hasBlockedBytes("go\u200Bbuild")).toBe(true);
   });
 
-  test("rejects fullwidth characters", () => {
-    expect(hasBlockedBytes("\uFF52\uFF4D file")).toBe(true);
+  test("rejects bidi override (\\u202E)", () => {
+    expect(hasBlockedBytes("cmd\u202Earg")).toBe(true);
+  });
+
+  test("rejects C1 control character (\\x80)", () => {
+    expect(hasBlockedBytes("cmd\x80arg")).toBe(true);
   });
 
   test("verifies BLOCKED_BYTES constant contains expected values", () => {

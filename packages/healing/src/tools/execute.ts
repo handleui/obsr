@@ -170,12 +170,27 @@ export const extractBaseCommand = (cmd: string): string => {
   return lastSlash >= 0 ? cmd.slice(lastSlash + 1) : cmd;
 };
 
-const BLOCKED_BYTES_SET = new Set(BLOCKED_BYTES);
+const isBlockedCodePoint = (code: number): boolean =>
+  // C0 controls except tab (0x09)
+  (code < 0x20 && code !== 0x09) ||
+  // DEL + C1 controls
+  (code >= 0x7f && code <= 0x9f) ||
+  // Invisible/formatting Unicode (spaces, zero-width, bidi controls)
+  code === 0xa0 ||
+  code === 0xad ||
+  code === 0x16_80 ||
+  (code >= 0x20_00 && code <= 0x20_0f) ||
+  (code >= 0x20_28 && code <= 0x20_2f) ||
+  (code >= 0x20_5f && code <= 0x20_64) ||
+  (code >= 0x20_66 && code <= 0x20_6f) ||
+  code === 0x30_00 ||
+  code === 0xfe_ff ||
+  (code >= 0xff_f9 && code <= 0xff_fb);
 
 export const hasBlockedBytes = (cmd: string): boolean => {
   for (let i = 0; i < cmd.length; i++) {
     const code = cmd.charCodeAt(i);
-    if (BLOCKED_BYTES_SET.has(code) || code > 127) {
+    if (isBlockedCodePoint(code)) {
       return true;
     }
   }

@@ -1,38 +1,56 @@
 import { NextResponse } from "next/server";
+import { gitlab } from "@/flags";
 import {
   createSecureCookieOptions,
   generateOAuthState,
+  getOAuthRedirectUri,
   getWorkOSClientId,
   isValidReturnUrl,
 } from "@/lib/auth";
 import { AUTH_DURATIONS, COOKIE_NAMES } from "@/lib/constants";
 import { workos } from "@/lib/workos";
 
-/**
- * OAuth initiation endpoint - generates state, sets cookie, redirects to GitHub
- * Cookies can only be set in Route Handlers or Server Actions, not Server Components
- */
-export const GET = async (request: Request) => {
-  const url = new URL(request.url);
-  const returnTo = url.searchParams.get("returnTo");
+type WorkOSProvider = "GitHubOAuth" | "GitLabOAuth";
 
-  // Generate cryptographically secure state for CSRF protection
-  const state = generateOAuthState();
+const PROVIDER_MAP: Record<string, WorkOSProvider> = {
+  github: "GitHubOAuth",
+  gitlab: "GitLabOAuth",
+};
 
-  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/auth/callback`;
+const resolveProvider = async (
+  provider: string,
+  requestUrl: string
+): Promise<WorkOSProvider | NextResponse> => {
+  const workosProvider = PROVIDER_MAP[provider.toLowerCase()];
+  if (!workosProvider) {
+    return NextResponse.redirect(
+      new URL("/login?error=invalid_provider", requestUrl)
+    );
+  }
 
-  // Build the GitHub OAuth URL via WorkOS (async - must await!)
-  const authorizationUrl = await workos.userManagement.getAuthorizationUrl({
-    provider: "GitHubOAuth",
+  if (workosProvider === "GitLabOAuth" && !(await gitlab())) {
+    return NextResponse.redirect(
+      new URL("/login?error=gitlab_not_available", requestUrl)
+    );
+  }
+
+  return workosProvider;
+};
+
+const buildOAuthResponse = (
+  workosProvider: WorkOSProvider,
+  state: string,
+  returnTo: string | null
+) => {
+  const authorizationUrl = workos.userManagement.getAuthorizationUrl({
+    provider: workosProvider,
     clientId: getWorkOSClientId(),
-    redirectUri,
+    redirectUri: getOAuthRedirectUri(),
     state,
   });
 
-  // Redirect to GitHub with state cookie set
   const response = NextResponse.redirect(authorizationUrl);
 
-  // Set state cookie for CSRF verification on callback
   response.cookies.set(
     createSecureCookieOptions({
       name: COOKIE_NAMES.oauthState,
@@ -41,7 +59,6 @@ export const GET = async (request: Request) => {
     })
   );
 
-  // Store returnTo URL only if it's a valid relative path (prevents open redirect)
   if (isValidReturnUrl(returnTo)) {
     response.cookies.set(
       createSecureCookieOptions({
@@ -53,4 +70,25 @@ export const GET = async (request: Request) => {
   }
 
   return response;
+};
+
+export const GET = async (request: Request) => {
+  const url = new URL(request.url);
+  const returnTo = url.searchParams.get("returnTo");
+  const provider = url.searchParams.get("provider") || "github";
+
+  try {
+    const resolved = await resolveProvider(provider, request.url);
+    if (resolved instanceof NextResponse) {
+      return resolved;
+    }
+
+    const state = generateOAuthState();
+    return buildOAuthResponse(resolved, state, returnTo);
+  } catch (error) {
+    console.error("OAuth initiation failed:", error);
+    return NextResponse.redirect(
+      new URL("/login?error=auth_init_failed", request.url)
+    );
+  }
 };

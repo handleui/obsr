@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 
 import type { Db } from "../client.js";
 import { usageEvents } from "../schema/index.js";
@@ -86,4 +86,48 @@ export const markPolarIngestedBatch = async (
     .update(usageEvents)
     .set({ polarIngested: true })
     .where(inArray(usageEvents.id, ids));
+};
+
+export interface CostBreakdown {
+  totalCost: number;
+  aiCost: number;
+  sandboxCost: number;
+  eventCount: number;
+}
+
+export const aggregateCostByOrg = async (
+  db: Db,
+  organizationId: string
+): Promise<CostBreakdown> => {
+  const rows = await db
+    .select({
+      eventName: usageEvents.eventName,
+      totalCost:
+        sql<string>`COALESCE(SUM((${usageEvents.metadata}->>'costUSD')::numeric), 0)`.as(
+          "total_cost"
+        ),
+      cnt: sql<string>`COUNT(*)`.as("cnt"),
+    })
+    .from(usageEvents)
+    .where(eq(usageEvents.organizationId, organizationId))
+    .groupBy(usageEvents.eventName);
+
+  let totalCost = 0;
+  let aiCost = 0;
+  let sandboxCost = 0;
+  let eventCount = 0;
+
+  for (const row of rows) {
+    const cost = Number(row.totalCost) || 0;
+    const count = Number(row.cnt) || 0;
+    totalCost += cost;
+    eventCount += count;
+    if (row.eventName === "ai") {
+      aiCost = cost;
+    } else if (row.eventName === "sandbox") {
+      sandboxCost = cost;
+    }
+  }
+
+  return { totalCost, aiCost, sandboxCost, eventCount };
 };

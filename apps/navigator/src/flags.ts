@@ -17,15 +17,18 @@ const identify = dedupe(async (): Promise<Entities> => {
   return { user: { id: user.id } };
 });
 
-const adapter = vercelAdapter<boolean, Entities>();
+const adapter = process.env.FLAGS
+  ? vercelAdapter<boolean, Entities>()
+  : undefined;
 
 const createFlag = (key: string) =>
   flag<boolean, Entities>({
     key,
     defaultValue: false,
     identify,
-    adapter,
+    ...(adapter ? { adapter } : { decide: () => false }),
   });
 
 export const showNewDashboard = createFlag("show-new-dashboard");
 export const healingV2 = createFlag("healing-v2");
+export const gitlab = createFlag("gitlab");

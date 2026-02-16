@@ -1,16 +1,17 @@
-import { createDb, runOps, storeJobReport } from "@detent/db";
+import { type createDb, runOps, storeJobReport } from "@detent/db";
 import { extractErrors, type LogSegment } from "@detent/extract";
 import { generateFingerprints } from "@detent/lore";
 import type { CIError, HealCreateStatus } from "@detent/types";
+import { scrubSecrets } from "@detent/types";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK is designed for namespace import
 import * as Sentry from "@sentry/cloudflare";
 import { getConvexClient } from "../../db/convex";
 import { createHeal, getHealsByPr } from "../../db/operations/heals";
+import { getDb } from "../../lib/db.js";
 import {
   getOrgSettings,
   type OrganizationSettings,
 } from "../../lib/org-settings";
-import { scrubSecrets } from "../../lib/scrub-secrets";
 import type { Env } from "../../types/env";
 import { hasAutofix } from "../autofix/registry";
 import { canRunHeal } from "../billing";
@@ -73,15 +74,9 @@ const LOG_PREFIX = "[error-extraction]";
 const EXTRACTION_TIMEOUT_MS = 60_000;
 const LOCK_TTL_SECONDS = 300;
 const MAX_HEALS_PER_EXTRACTION = 10;
-// Retry budget: worst-case wall time ~187s (3 × 60s extraction timeout + 7s delays).
-// Runs via waitUntil so it won't block the webhook response.
 const RETRY_DELAYS_MS = [2000, 5000];
 const MAX_R2_LOG_BYTES = 50 * 1024 * 1024;
 
-// prepareForPrompt (in @detent/extract) truncates to maxContentLength * 3 before
-// doing any work. Default maxContentLength is 15_000 → early cutoff at 45_000 chars.
-// Scrubbing the full 50MB log when only ≤45KB will be used wastes CPU on 15+ regex
-// passes over data that gets thrown away. Pre-slice to this boundary before scrubbing.
 const EXTRACTION_CONTENT_LIMIT = 15_000;
 const EARLY_CUTOFF_MULTIPLIER = 3;
 const SCRUB_PRE_SLICE = EXTRACTION_CONTENT_LIMIT * EARLY_CUTOFF_MULTIPLIER;
@@ -200,11 +195,9 @@ const acquireLock = async (
     return false;
   }
 
-  // Write-then-verify: use a unique lockId to detect races with other workers
   const lockId = crypto.randomUUID();
   await kv.put(lockKey, lockId, { expirationTtl: LOCK_TTL_SECONDS });
 
-  // Read back without cache to verify we own the lock
   const verification = await kv.get(lockKey);
   if (verification !== lockId) {
     return false;
@@ -780,14 +773,12 @@ export const extractAndStoreErrors = async (
     return;
   }
 
-  // Pre-slice before scrubbing: prepareForPrompt will discard everything past
-  // SCRUB_PRE_SLICE anyway, so running 15+ regex passes over the full 50MB is waste.
   const [extraction, logR2Key] = await Promise.all([
     runExtraction(env, scrubSecrets(logs.slice(0, SCRUB_PRE_SLICE)), ctx),
     storeLogsInR2(env, project.organizationId, ctx, logs),
   ]);
 
-  const { db: sqlDb, pool } = createDb(env.DATABASE_URL);
+  const { db: sqlDb, pool } = getDb(env);
   try {
     const pipeline: ExtractionPipelineContext = {
       sqlDb,

@@ -1,12 +1,8 @@
-import {
-  createDb,
-  runOps,
-  type UsageMetadata,
-  usageEventOps,
-} from "@detent/db";
+import { runOps, type UsageMetadata, usageEventOps } from "@detent/db";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK official pattern
 import * as Sentry from "@sentry/cloudflare";
 import { getConvexClient } from "../db/convex";
+import { getDb } from "../lib/db.js";
 import type { Env } from "../types/env";
 import {
   createPolarClient,
@@ -134,37 +130,31 @@ export const recordUsage = async (
     return;
   }
 
-  const { db, pool } = createDb(env.DATABASE_URL);
-  let event: Awaited<ReturnType<typeof usageEventOps.create>>;
+  const { db, pool } = getDb(env);
   try {
-    event = await usageEventOps.create(db, {
+    const event = await usageEventOps.create(db, {
       organizationId: orgId,
       eventName: usage.type,
       metadata: buildLocalMetadata(usage, runId),
       polarIngested: false,
       createdAt: Date.now(),
     });
-  } catch (error) {
-    await pool.end();
-    throw error;
-  }
 
-  const polar = createPolarClient(env);
-  retryPolarIngestion(() =>
-    ingestUsageEvents(polar, [
-      {
-        name: POLAR_EVENT_NAME,
-        externalCustomerId: orgId,
-        metadata: buildPolarMetadata(usage),
-      },
-    ])
-  )
-    .then(async () => {
+    const polar = createPolarClient(env);
+    try {
+      await retryPolarIngestion(() =>
+        ingestUsageEvents(polar, [
+          {
+            name: POLAR_EVENT_NAME,
+            externalCustomerId: orgId,
+            metadata: buildPolarMetadata(usage),
+          },
+        ])
+      );
       await usageEventOps.update(db, event.id, {
         polarIngested: true,
       });
-    })
-    .catch((error) => {
+    } catch (error) {
       const errorType =
         error instanceof Error ? error.constructor.name : "UnknownError";
       console.error(
@@ -195,10 +185,10 @@ export const recordUsage = async (
         });
         Sentry.captureException(error);
       });
-    })
-    .finally(async () => {
-      await pool.end();
-    });
+    }
+  } finally {
+    await pool.end();
+  }
 };
 
 export const recordAIUsage = (
@@ -299,26 +289,14 @@ export const getCreditUsageSummary = async (
   env: Env,
   orgId: string
 ): Promise<CreditUsageSummary> => {
-  const { db, pool } = createDb(env.DATABASE_URL);
+  const { db, pool } = getDb(env);
   try {
-    const events = await usageEventOps.listByOrgSince(db, orgId, 0, 2000);
+    const [costBreakdown, recentEvents] = await Promise.all([
+      usageEventOps.aggregateCostByOrg(db, orgId),
+      usageEventOps.listByOrg(db, orgId, RECENT_EVENTS_LIMIT),
+    ]);
 
-    let totalCost = 0;
-    let aiCost = 0;
-    let sandboxCost = 0;
-
-    for (const event of events) {
-      const metadata = (event.metadata as Record<string, unknown>) ?? {};
-      const cost = typeof metadata.costUSD === "number" ? metadata.costUSD : 0;
-      totalCost += cost;
-      if (event.eventName === "ai") {
-        aiCost += cost;
-      } else if (event.eventName === "sandbox") {
-        sandboxCost += cost;
-      }
-    }
-
-    const recentEvents = events.slice(0, RECENT_EVENTS_LIMIT);
+    const { totalCost, aiCost, sandboxCost, eventCount } = costBreakdown;
 
     return {
       totalCostUSD: totalCost,
@@ -332,7 +310,7 @@ export const getCreditUsageSummary = async (
           percentage: totalCost > 0 ? (sandboxCost / totalCost) * 100 : 0,
         },
       },
-      eventCount: events.length,
+      eventCount,
       recentEvents: recentEvents.map((e) => ({
         id: e.id,
         eventName: e.eventName,
@@ -373,7 +351,7 @@ export const retryFailedPolarIngestions = async (
   env: Env,
   limit = BATCH_SIZE
 ): Promise<{ processed: number; succeeded: number; failed: number }> => {
-  const { db, pool } = createDb(env.DATABASE_URL);
+  const { db, pool } = getDb(env);
 
   try {
     const failedEvents = await usageEventOps.listByPolarIngested(
@@ -470,7 +448,7 @@ export const getUsageSummary = async (
   orgId: string
 ): Promise<UsageSummary> => {
   const convex = getConvexClient(env);
-  const { db, pool } = createDb(env.DATABASE_URL);
+  const { db, pool } = getDb(env);
   try {
     const periodStart = new Date();
     periodStart.setDate(periodStart.getDate() - DEFAULT_PERIOD_DAYS);

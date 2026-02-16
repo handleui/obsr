@@ -12,15 +12,17 @@
     "dev": "tsc --watch",
     "check-types": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.0.0",
-    "drizzle-orm": "^0.44.0"
+    "drizzle-orm": "^0.44.0",
+    "pg": "^8.16.0"
   },
   "devDependencies": {
     "@detent/typescript-config": "*",
+    "@types/pg": "^8.11.0",
     "drizzle-kit": "^0.31.0",
     "typescript": "^5.9.3"
   }

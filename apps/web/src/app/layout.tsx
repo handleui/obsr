@@ -16,23 +16,30 @@ const neueMontreal = localFont({
   display: "swap",
 });
 
+const fontVariables = [
+  neueMontreal.variable,
+  GeistPixelSquare.variable,
+  GeistPixelGrid.variable,
+  GeistPixelCircle.variable,
+  GeistPixelTriangle.variable,
+  GeistPixelLine.variable,
+].join(" ");
+
 export const metadata: Metadata = {
   title: "Detent",
   description: "Self-healing CI/CD platform",
 };
 
-export default function RootLayout({
+const RootLayout = ({
   children,
 }: Readonly<{
   children: React.ReactNode;
-}>) {
-  return (
-    <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${neueMontreal.variable} ${GeistPixelSquare.variable} ${GeistPixelGrid.variable} ${GeistPixelCircle.variable} ${GeistPixelTriangle.variable} ${GeistPixelLine.variable} antialiased`}
-      >
-        <RootProvider>{children}</RootProvider>
-      </body>
-    </html>
-  );
-}
+}>) => (
+  <html lang="en" suppressHydrationWarning>
+    <body className={`${fontVariables} antialiased`}>
+      <RootProvider>{children}</RootProvider>
+    </body>
+  </html>
+);
+
+export default RootLayout;

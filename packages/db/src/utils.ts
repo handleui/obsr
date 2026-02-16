@@ -30,3 +30,13 @@ export const commonFilesMergeSql = (filePath: string | undefined) => {
     END
   `;
 };
+
+export const commonFilesMergeFromExcludedSql = () => sql`
+  CASE
+    WHEN excluded.common_files IS NULL THEN ${errorOccurrences.commonFiles}
+    WHEN ${errorOccurrences.commonFiles} IS NULL THEN excluded.common_files
+    WHEN ${errorOccurrences.commonFiles} @> excluded.common_files THEN ${errorOccurrences.commonFiles}
+    WHEN jsonb_array_length(${errorOccurrences.commonFiles}) >= ${MAX_COMMON_FILES} THEN ${errorOccurrences.commonFiles}
+    ELSE ${errorOccurrences.commonFiles} || excluded.common_files
+  END
+`;

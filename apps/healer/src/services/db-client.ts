@@ -1,11 +1,6 @@
-import { createDb, type Db } from "@detent/db";
-import type { Pool } from "@neondatabase/serverless";
-import { neonConfig } from "@neondatabase/serverless";
-import ws from "ws";
+import { createDb } from "@detent/db";
 
-neonConfig.webSocketConstructor = ws;
-
-export const createDbClient = (databaseUrl: string): { db: Db; pool: Pool } => {
-  const { db, pool } = createDb(databaseUrl);
-  return { db, pool };
-};
+export const createDbClient = (
+  databaseUrl: string
+): ReturnType<typeof createDb> =>
+  createDb(databaseUrl, { context: "persistent" });

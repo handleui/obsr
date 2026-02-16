@@ -6,7 +6,7 @@ import {
   runErrors,
 } from "../schema/errors.js";
 import { runs } from "../schema/runs.js";
-import { commonFilesMergeSql } from "../utils.js";
+import { commonFilesMergeFromExcludedSql } from "../utils.js";
 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -43,19 +43,19 @@ interface ValidatedLogManifest {
   truncated: boolean;
 }
 
+const isInLineRange = (n: number) =>
+  Number.isInteger(n) && n >= 1 && n <= MAX_SEGMENT_LINE_NUMBER;
+
 const isValidSegment = (seg: LogSegment): boolean => {
-  const hasValidTypes =
-    typeof seg.start === "number" &&
-    typeof seg.end === "number" &&
-    typeof seg.signal === "boolean";
-  if (!hasValidTypes) {
+  if (typeof seg.start !== "number" || typeof seg.end !== "number") {
     return false;
   }
-  if (!(Number.isInteger(seg.start) && Number.isInteger(seg.end))) {
+  if (typeof seg.signal !== "boolean") {
     return false;
   }
-  const inRange = (n: number) => n >= 1 && n <= MAX_SEGMENT_LINE_NUMBER;
-  return inRange(seg.start) && inRange(seg.end) && seg.start <= seg.end;
+  return (
+    isInLineRange(seg.start) && isInLineRange(seg.end) && seg.start <= seg.end
+  );
 };
 
 export const validateLogManifest = (
@@ -339,22 +339,20 @@ const upsertOccurrences = async (
     return;
   }
 
-  for (const row of rows) {
-    const { filePath, ...insertRow } = row;
-    await tx
-      .insert(errorOccurrences)
-      .values(insertRow)
-      .onConflictDoUpdate({
-        target: [errorOccurrences.signatureId, errorOccurrences.projectId],
-        set: {
-          occurrenceCount: sql`${errorOccurrences.occurrenceCount} + 1`,
-          runCount: sql`${errorOccurrences.runCount} + 1`,
-          lastSeenCommit: commitSha ?? sql`${errorOccurrences.lastSeenCommit}`,
-          lastSeenAt: now,
-          commonFiles: commonFilesMergeSql(filePath),
-        },
-      });
-  }
+  const insertRows = rows.map(({ filePath: _fp, ...rest }) => rest);
+  await tx
+    .insert(errorOccurrences)
+    .values(insertRows)
+    .onConflictDoUpdate({
+      target: [errorOccurrences.signatureId, errorOccurrences.projectId],
+      set: {
+        occurrenceCount: sql`${errorOccurrences.occurrenceCount} + 1`,
+        runCount: sql`${errorOccurrences.runCount} + 1`,
+        lastSeenCommit: commitSha ?? sql`${errorOccurrences.lastSeenCommit}`,
+        lastSeenAt: now,
+        commonFiles: commonFilesMergeFromExcludedSql(),
+      },
+    });
 };
 
 const capErrors = (errors: ErrorPayload[]) => {

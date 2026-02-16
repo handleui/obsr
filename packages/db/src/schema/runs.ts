@@ -60,5 +60,6 @@ export const runs = pgTable(
       table.runId,
       table.runAttempt
     ),
+    index("runs_pr_number_received_idx").on(table.prNumber, table.receivedAt),
   ]
 );

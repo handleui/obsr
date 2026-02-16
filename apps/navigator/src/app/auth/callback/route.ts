@@ -259,9 +259,13 @@ const handler = async (request: BetterStackRequest) => {
   const error = url.searchParams.get("error");
   const errorDescription = url.searchParams.get("error_description");
 
-  // Check for OAuth errors from WorkOS
+  // Check for OAuth errors from WorkOS/GitHub
+  // Common errors: access_denied (user cancelled), server_error, temporarily_unavailable
   if (error) {
-    log.error("OAuth callback error", { error, errorDescription });
+    log.error("OAuth callback error from provider", {
+      error,
+      errorDescription,
+    });
     return NextResponse.redirect(
       new URL(
         `/login?error=${encodeURIComponent(error)}&message=${encodeURIComponent(errorDescription || "")}`,
@@ -280,15 +284,20 @@ const handler = async (request: BetterStackRequest) => {
     );
   }
 
-  if (!code) {
-    log.warn("OAuth callback: missing code");
+  // Validate authorization code parameter
+  if (!code || typeof code !== "string" || code.trim().length === 0) {
+    log.warn("OAuth callback: missing or invalid code parameter");
     return NextResponse.redirect(new URL("/login?error=no_code", request.url));
   }
 
   try {
     const shouldSealSession = isSealedSessionsEnabled();
+
+    // Build auth options - WorkOS SDK handles code exchange and token validation
     const authOptions = buildAuthOptions(code, shouldSealSession);
 
+    // Exchange authorization code for user session
+    // WorkOS validates the code and returns user info + optional sealed session
     const authResponse = await workos.userManagement.authenticateWithCode(
       authOptions as Parameters<
         typeof workos.userManagement.authenticateWithCode

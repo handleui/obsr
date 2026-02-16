@@ -619,30 +619,33 @@ export const redactionPatterns: readonly RedactionPattern[] = [
   /**
    * Generic API keys (long alphanumeric strings)
    * @example "abcdef123456789012345678901234567890"
+   * Length capped at 256 to prevent ReDoS
    */
   {
     name: "generic_api_key",
-    pattern: /\b[A-Za-z0-9_-]{32,}\b/g,
+    pattern: /\b[A-Za-z0-9_-]{32,256}\b/g,
     replacement: "[API_KEY]",
   },
 
   /**
    * Generic long hex strings (often secrets or hashes)
    * @example "0123456789abcdef0123456789abcdef"
+   * Length capped at 256 to prevent ReDoS
    */
   {
     name: "hex_string",
-    pattern: /\b[a-fA-F0-9]{32,}\b/g,
+    pattern: /\b[a-fA-F0-9]{32,256}\b/g,
     replacement: "[HEX_STRING]",
   },
 
   /**
    * Base64 encoded strings with padding (likely secrets)
    * @example "SGVsbG8gV29ybGQhIFRoaXMgaXMgYSBzZWNyZXQ="
+   * Length capped at 2048 to prevent ReDoS
    */
   {
     name: "base64_string",
-    pattern: /\b[A-Za-z0-9+/]{40,}={1,2}\b/g,
+    pattern: /\b[A-Za-z0-9+/]{40,2048}={1,2}\b/g,
     replacement: "[BASE64_STRING]",
   },
 ];
@@ -757,4 +760,128 @@ export const sanitizeForTelemetry = (pattern: string): string => {
   );
 
   return result;
+};
+
+// SECURITY: All unbounded patterns capped at reasonable limits to prevent ReDoS
+const TOKEN_PATTERNS = [
+  /gh[porsu]_[A-Za-z0-9_]{36,255}/g,
+  /github_pat_[A-Za-z0-9_]{22,255}/g,
+  /Bearer\s+[A-Za-z0-9._\-/+=]{20,512}/gi,
+  /eyJ[A-Za-z0-9_-]{10,2048}\.eyJ[A-Za-z0-9_-]{10,2048}\.[A-Za-z0-9_-]{10,2048}/g,
+  /(?:AKIA|ASIA)[A-Z0-9]{16}/g,
+  /npm_[A-Za-z0-9]{36,255}/g,
+  /sk-(?:proj-|admin-|svcacct-)?[A-Za-z0-9_-]{32,255}/g,
+  /vercel_[A-Za-z0-9_]{32,255}/gi,
+  /dtk_[A-Za-z0-9_-]{32}/g,
+  /(?:glpat-[A-Za-z0-9_-]{20,255}|[spr]k_(?:live|test)_[A-Za-z0-9]{20,255}|sk-ant-(?:api03-|admin-)[A-Za-z0-9_-]{32,255}|ya29\.[A-Za-z0-9_-]{20,255}|AIza[A-Za-z0-9_-]{35}|xox[baprs]-[A-Za-z0-9-]{10,255}|re_[A-Za-z0-9_]{32,255}|sbp_[A-Za-z0-9]{20,255}|SG\.[A-Za-z0-9_-]{20,255}\.[A-Za-z0-9_-]{20,255})/g,
+  /(?:[MN][A-Za-z0-9]{23,255}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,255}|[?&]sig=[A-Za-z0-9%+/=]{20,512}|(?:SK|AC)[0-9a-fA-F]{32}|hv[sbp]\.[A-Za-z0-9_-]{20,255}|dp\.[a-z]{2,4}\.[A-Za-z0-9]{20,255}|dapi[a-f0-9]{32}|shp(?:at|ca|pa|ss)_[A-Fa-f0-9]{32,255}|glsa_[A-Za-z0-9_]{32,255}|CONFLUENT_[A-Za-z0-9]{16,255})/g,
+  /-----BEGIN\s+(?:RSA\s+)?(?:PRIVATE|EC)\s+KEY-----[\s\S]{1,16384}?-----END\s+(?:RSA\s+)?(?:PRIVATE|EC)\s+KEY-----/g,
+  /(?<=[=:]\s*['"]?)[A-Za-z0-9+/]{40,512}={0,2}(?=['"]?\s*(?:[,}\]\n\r]|$))/g,
+];
+
+const ENV_VAR_PATTERN =
+  /\b(?:API_?KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH|PRIVATE_?KEY|ACCESS_?KEY|SIGNING_?KEY|ENCRYPTION_?KEY|MASTER_?KEY|PASSPHRASE|DSN|CLIENT_?SECRET|WEBHOOK_?SECRET|DATABASE_?URL|SMTP_?PASSWORD|REDIS_?PASSWORD|MONGO_?URI|SESSION_?SECRET|APP_?SECRET)\w{0,64}\s{0,8}[=:]\s{0,8}['"]?[^\s'"]{8,512}['"]?/gi;
+
+const CONNECTION_STRING_PATTERN =
+  /(?:postgres(?:ql)?|mysql|rediss?|mongodb(?:\+srv)?|amqps?|nats|kafka|cockroachdb):\/\/[^:]{1,256}:[^@]{1,256}@[^\s"']{1,1024}/gi;
+
+const ENV_VAR_SEPARATOR_PATTERN = /[=:]/;
+
+const SCRUB_UNIX_HOME_PATH_PATTERN = /\/home\/([^/\s]+)/g;
+const SCRUB_MACOS_HOME_PATH_PATTERN = /\/Users\/([^/\s]+)/g;
+const SCRUB_WINDOWS_HOME_PATH_PATTERN = /C:\\Users\\([^\\\s]+)/gi;
+const SCRUB_ROOT_PATH_PATTERN = /\/root(?=\/)/g;
+
+const MAX_SCRUB_LENGTH = 5 * 1024 * 1024;
+
+const redactEnvVar = (match: string): string => {
+  const eqIndex = match.search(ENV_VAR_SEPARATOR_PATTERN);
+  if (eqIndex !== -1) {
+    return `${match.slice(0, eqIndex + 1)}[REDACTED]`;
+  }
+  return "[REDACTED]";
+};
+
+const redactConnectionString = (match: string): string => {
+  const atIndex = match.lastIndexOf("@");
+  const protocolEnd = match.indexOf("://") + 3;
+  if (atIndex !== -1 && protocolEnd > 3) {
+    return `${match.slice(0, protocolEnd)}[REDACTED]@${match.slice(atIndex + 1)}`;
+  }
+  return "[REDACTED]";
+};
+
+const scrubSecretsCache = new Map<string, string>();
+const CACHE_MAX_SIZE = 1000;
+
+export const scrubSecrets = (value: string): string => {
+  if (value.length === 0) {
+    return value;
+  }
+
+  const cached = scrubSecretsCache.get(value);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const wasTruncated = value.length > MAX_SCRUB_LENGTH;
+  let result = wasTruncated ? value.slice(0, MAX_SCRUB_LENGTH) : value;
+
+  for (const pattern of TOKEN_PATTERNS) {
+    pattern.lastIndex = 0;
+    result = result.replace(pattern, "[REDACTED]");
+  }
+
+  ENV_VAR_PATTERN.lastIndex = 0;
+  result = result.replace(ENV_VAR_PATTERN, redactEnvVar);
+  CONNECTION_STRING_PATTERN.lastIndex = 0;
+  result = result.replace(CONNECTION_STRING_PATTERN, redactConnectionString);
+
+  if (wasTruncated) {
+    result += `\n[SCRUB_TRUNCATED — content beyond ${MAX_SCRUB_LENGTH / 1024 / 1024}MB was dropped unscrubbed]`;
+  }
+
+  if (scrubSecretsCache.size >= CACHE_MAX_SIZE) {
+    const firstKey = scrubSecretsCache.keys().next().value as string;
+    scrubSecretsCache.delete(firstKey);
+  }
+  scrubSecretsCache.set(value, result);
+
+  return result;
+};
+
+export interface DiagnosticLike {
+  message: string;
+  stack_trace?: string;
+  hints?: string[];
+}
+
+export const scrubDiagnostic = <T extends DiagnosticLike>(
+  diagnostic: T
+): T => ({
+  ...diagnostic,
+  message: scrubSecrets(diagnostic.message),
+  stack_trace: diagnostic.stack_trace
+    ? scrubSecrets(diagnostic.stack_trace)
+    : undefined,
+  hints: diagnostic.hints?.map(scrubSecrets),
+});
+
+export const scrubFilePath = (
+  filePath: string | undefined
+): string | undefined => {
+  if (!filePath) {
+    return filePath;
+  }
+
+  SCRUB_UNIX_HOME_PATH_PATTERN.lastIndex = 0;
+  SCRUB_MACOS_HOME_PATH_PATTERN.lastIndex = 0;
+  SCRUB_WINDOWS_HOME_PATH_PATTERN.lastIndex = 0;
+  SCRUB_ROOT_PATH_PATTERN.lastIndex = 0;
+
+  return filePath
+    .replace(SCRUB_UNIX_HOME_PATH_PATTERN, "/home/[USER]")
+    .replace(SCRUB_MACOS_HOME_PATH_PATTERN, "/Users/[USER]")
+    .replace(SCRUB_WINDOWS_HOME_PATH_PATTERN, "C:\\Users\\[USER]")
+    .replace(SCRUB_ROOT_PATH_PATTERN, "/[ROOT]");
 };

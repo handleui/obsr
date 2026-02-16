@@ -22,6 +22,8 @@ const mockUsageEventOps = {
   create: vi.fn(),
   update: vi.fn(),
   listByOrgSince: vi.fn(),
+  listByOrg: vi.fn(),
+  aggregateCostByOrg: vi.fn(),
   listByPolarIngested: vi.fn(),
   markPolarIngestedBatch: vi.fn(),
 };
@@ -424,7 +426,13 @@ describe("billing service", () => {
       const { getCreditUsageSummary } = await getBilling();
       const env = createBillingEnv();
 
-      mockUsageEventOps.listByOrgSince.mockResolvedValue([]);
+      mockUsageEventOps.aggregateCostByOrg.mockResolvedValue({
+        totalCost: 0,
+        aiCost: 0,
+        sandboxCost: 0,
+        eventCount: 0,
+      });
+      mockUsageEventOps.listByOrg.mockResolvedValue([]);
 
       const result = await getCreditUsageSummary(env, "org-123");
 
@@ -437,7 +445,13 @@ describe("billing service", () => {
       const { getCreditUsageSummary } = await getBilling();
       const env = createBillingEnv();
 
-      mockUsageEventOps.listByOrgSince.mockResolvedValue([
+      mockUsageEventOps.aggregateCostByOrg.mockResolvedValue({
+        totalCost: 1.0,
+        aiCost: 0.75,
+        sandboxCost: 0.25,
+        eventCount: 2,
+      });
+      mockUsageEventOps.listByOrg.mockResolvedValue([
         {
           id: "event-1",
           eventName: "ai",
@@ -464,7 +478,13 @@ describe("billing service", () => {
       const { getCreditUsageSummary } = await getBilling();
       const env = createBillingEnv();
 
-      mockUsageEventOps.listByOrgSince.mockResolvedValue([]);
+      mockUsageEventOps.aggregateCostByOrg.mockResolvedValue({
+        totalCost: 0,
+        aiCost: 0,
+        sandboxCost: 0,
+        eventCount: 0,
+      });
+      mockUsageEventOps.listByOrg.mockResolvedValue([]);
 
       const result = await getCreditUsageSummary(env, "org-123");
 

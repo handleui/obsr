@@ -45,6 +45,19 @@ export const getWorkOSClientId = () => {
 };
 
 /**
+ * Get the OAuth callback redirect URI
+ * Must match the redirect URI configured in WorkOS dashboard
+ * In production, must use HTTPS and match exactly
+ */
+export const getOAuthRedirectUri = () => {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl) {
+    throw new Error("NEXT_PUBLIC_APP_URL is not set");
+  }
+  return `${appUrl}/auth/callback`;
+};
+
+/**
  * Common cookie options for auth-related cookies
  */
 export interface CookieOptions {
@@ -57,15 +70,27 @@ export const createSecureCookieOptions = ({
   name,
   value,
   maxAge,
-}: CookieOptions) => ({
-  name,
-  value,
-  httpOnly: true,
-  path: "/",
-  secure: process.env.NODE_ENV === "production",
-  sameSite: "lax" as const,
-  maxAge,
-});
+}: CookieOptions) => {
+  const isProduction = process.env.NODE_ENV === "production";
+
+  return {
+    name,
+    value,
+    httpOnly: true,
+    path: "/",
+    // Secure cookies in production (HTTPS only)
+    secure: isProduction,
+    // Lax provides CSRF protection while allowing normal navigation
+    // Strict would break OAuth flows where users navigate from external sites
+    sameSite: "lax" as const,
+    maxAge,
+    // Set cookie domain in production for subdomain sharing if configured
+    ...(isProduction &&
+      process.env.NEXT_PUBLIC_COOKIE_DOMAIN && {
+        domain: process.env.NEXT_PUBLIC_COOKIE_DOMAIN,
+      }),
+  };
+};
 
 export interface WorkOSUser {
   id: string;
@@ -240,6 +265,10 @@ export const maskEmail = (email: string): string => {
   return `${local[0]}***@${domain}`;
 };
 
+// Regex for blocking control characters in URLs (defined at top level for performance)
+// biome-ignore lint/suspicious/noControlCharactersInRegex: Intentionally blocking control chars for security
+const CONTROL_CHAR_REGEX = /[\u0000-\u001f\u007f]/;
+
 /**
  * Validate returnTo URL to prevent open redirect vulnerabilities
  *
@@ -247,6 +276,7 @@ export const maskEmail = (email: string): string => {
  * - Must start with a single "/" (relative path)
  * - Must NOT start with "//" (protocol-relative URL → open redirect)
  * - Must NOT contain ":" before first "/" (blocks http:, https:, javascript:, etc.)
+ * - Must NOT contain null bytes or control characters
  *
  * This is a type guard that narrows the type to `string` when returning `true`.
  *
@@ -264,6 +294,11 @@ export const isValidReturnUrl = (
     return false;
   }
 
+  // Block null bytes and control characters (security hardening)
+  if (CONTROL_CHAR_REGEX.test(url)) {
+    return false;
+  }
+
   // Must start with exactly one forward slash (relative path)
   if (!url.startsWith("/")) {
     return false;
@@ -271,6 +306,11 @@ export const isValidReturnUrl = (
 
   // Block protocol-relative URLs (//evil.com)
   if (url.startsWith("//")) {
+    return false;
+  }
+
+  // Block backslash (Windows-style path or obfuscation attempt)
+  if (url.includes("\\")) {
     return false;
   }
 

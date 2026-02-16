@@ -5,93 +5,91 @@ Self-healing CI/CD platform. Runs CI locally, uses AI to fix errors before pushi
 ## Commands
 
 ```bash
-# Build & Test
 bun run build              # Build all (Turborepo)
 bun run lint               # Check issues
 bun run fix                # Auto-fix with Biome
 bun run check-types        # TypeScript validation
-
-# CLI (local dev)
-bun run dt <command>       # Use local build (not ./dist/dt)
-
-# CLI (production)
-dt <command>               # Global install
-detent <command>           # Alias
+bun run dt <command>       # CLI local dev (never use ./dist/dt)
 ```
 
 ## Tech Stack
 
-- **Runtime**: Bun, Node.js 22
+- **Runtime**: Bun, Node >=18
 - **Monorepo**: Turborepo
 - **API**: Hono on Cloudflare Workers
-- **Database**: Convex (serverless backend), schema at `convex/schema.ts`
+- **Database**: Neon Postgres (Drizzle) + Convex (realtime)
+- **DB Access**: Hyperdrive (Workers), direct Neon URL (Healer/Navigator), Convex service token
 - **Web**: Next.js 16, React 19, Tailwind CSS
 - **CLI**: TypeScript, Citty, Ink
 - **Auth**: WorkOS, JWT (Jose)
-- **AI**: Codex 5.2 via Vercel AI Gateway
+- **AI**: Claude Haiku (fast) + GPT-5.2-Codex (smart) via Vercel AI Gateway — routing logic in `packages/ai`
 - **Sandboxes**: E2B (fresh per heal)
-- **Linting**: Biome via Ultracite (handles all style rules automatically)
+- **Linting**: Biome via Ultracite
+- **Icons**: `iconoir-react` — browse at [iconoir.com](https://iconoir.com). Do NOT grep `node_modules`.
 
 ## Project Structure
 
 ```
 apps/
-├── api/       # Cloudflare Workers API (Hono)
-├── healer/    # AI healing service (Railway)
-├── cli/       # Command-line interface
-├── navigator/ # Auth portal (Next.js)
-├── web/       # Landing page (Next.js)
-└── docs/      # Documentation
+├── api/            # Cloudflare Workers API (Hono)
+├── healer/         # AI healing service (Railway)
+├── cli/            # Command-line interface
+├── navigator/      # Dashboard + auth (Next.js)
+└── web/            # Landing page (Next.js)
 
 packages/
-├── parser/    # CI log parsing
-├── healing/   # AI error fixing
-├── git/       # Git operations
-└── ui/        # Shared React components
+├── ai/             # AI model routing & providers
+├── autofix/        # Deterministic autofix logic
+├── code-storage/   # Heal file persistence
+├── db/             # Drizzle schema, client, migrations
+├── extract/        # CI log parsing & error extraction
+├── git/            # Git operations
+├── healing/        # AI error fixing orchestration
+├── lore/           # Knowledge base
+├── mcp/            # MCP server
+├── sandbox/        # E2B sandbox management
+├── sdk/            # Public SDK
+├── sentry/         # Sentry integration
+├── types/          # Shared TypeScript types
+├── ui/             # Shared React components
+└── typescript-config/
 ```
 
 ## Database
 
-Source of truth: `convex/schema.ts`
+Dual-DB: Neon Postgres (non-realtime) + Convex (realtime).
 
-1. Edit `convex/schema.ts`
-2. Edit corresponding mutation/query files in `convex/`
-3. Deploy via `npx convex deploy` (schema changes apply automatically)
-4. Commit schema and mutation files together
+- **Neon**: Schema in `packages/db/src/schema/` → `drizzle-kit generate` → `drizzle-kit migrate`
+- **Convex**: Schema at `convex/schema.ts` → edit mutations/queries → `npx convex deploy`
 
-## Boundaries
+## Rules
 
-# Never use background agents (run_in_background: true). Always use foreground subagents that block/yield until completion.
-
-### Always Do
-- When answering questions involving external documentation, APIs, or specifications, prefer using Nia MCP tools to retrieve and verify information before responding. Use reasoning first to determine whether external grounding is necessary.
-- Run `bun run fix` before committing
+- IMPORTANT: Never use background agents (`run_in_background: true`). Always use foreground subagents.
+- IMPORTANT: Use Nia MCP tools for any external code/docs research. Prefer `tracer`, `nia_package_search_hybrid`, and `nia_research` (no indexing needed) before falling back to `nia index`. Check `manage_resource(action='list')` before indexing.
+- Run `bun run fix` before every commit
 - Use `bun run dt x` for local CLI testing
-- Edit `convex/schema.ts` then deploy for DB changes
+- Never edit Convex `_generated/` files
+- Never create markdown summary files when closing tasks
 
 ### Ask First
+
 - Database schema changes affecting production
-- Changes to auth flow or token handling
-- Modifications to webhook handlers
+- Auth flow or token handling changes
+- Webhook handler modifications
 
-### Never Do
-- Edit Convex `_generated/` files directly
-- Run `./dist/dt` directly (use `bun run dt` instead)
-- Commit without running `bun run fix`
-- Create markdown files when closing tasks (no summaries or reports needed)
+## Style
 
-## Style (Project-Specific Only)
-
-Biome handles all standard linting. These are project-specific deviations:
+Biome/Ultracite handles standard linting. Project-specific only:
 
 - **Files**: kebab-case (`user-profile.tsx`)
 - **Types**: Interfaces over type aliases; import with `type` keyword
 - **Functions**: Arrow functions only
 - **Comments**: None unless critical; prefix hacks with `// HACK: reason`
+- **Tailwind**: Read `globals.css` / design tokens first. Use semantic project-defined utility classes — no hardcoded values.
 
 ## Git
 
-- Conventional commits, semver, make descriptions brief
+- Conventional commits, brief descriptions
 
 ## Plan Mode
 
@@ -100,13 +98,18 @@ Biome handles all standard linting. These are project-specific deviations:
 
 ## Production
 
-- **URL**: `detent.sh`
+- **App**: `detent.sh`
 - **API**: `backend.detent.sh`
-- **Auth**: `navigator.detent.sh`
+- **Dashboard**: `navigator.detent.sh`
+
+## Navigator Proxy
+
+- `apps/navigator/src/proxy.ts` is the Next.js middleware (Turbopack auto-detects it)
+- Rewrites `/:org/:project/:run` → `/run/:org/:project/:run` for dashboard routes
+- Real routes use provider prefixes: `gh/` (GitHub) or `gl/` (GitLab) — e.g. `/gh/detentsh/detent/159`
+- Demo page uses `/handleui/detent/159` (no provider prefix) — rendered by `/run` page via proxy rewrite
 
 ## Healing Architecture
 
-- **Autofix (deterministic)**: Runs in GitHub Action, no sandbox
-- **AI Healing (agentic)**: Separate Healer service on Railway
-- **Sandbox**: Fresh E2B sandbox per heal (not persistent)
-- **Flow**: API stores heal → Healer runs in E2B → patches to API → user reviews
+- **Autofix** (deterministic): GitHub Action, no sandbox
+- **AI Healing** (agentic): Healer on Railway → E2B sandbox → patches to API → user reviews

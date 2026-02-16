@@ -95,6 +95,7 @@ const securedMutations = new Set<SecuredMutationRef>([
   api.projects.syncFromGitHub,
   api.projects.clearRemovedByOrg,
   api.projects.softDeleteByRepoIds,
+  api.projects.softDeleteByOrgRepoIds,
 ]);
 
 interface ConvexClientConfig {

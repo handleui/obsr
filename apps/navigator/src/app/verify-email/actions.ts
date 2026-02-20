@@ -9,13 +9,13 @@ import {
   getAndClearReturnTo,
   getPendingVerification,
   getWorkOSClientId,
-  sanitizeReturnUrl,
 } from "@/lib/auth";
 import {
   AUTH_DURATIONS,
   COOKIE_NAMES,
   VERIFICATION_CODE_LENGTH,
 } from "@/lib/constants";
+import { sanitizeReturnUrl } from "@/lib/return-url";
 import { workos } from "@/lib/workos";
 
 export interface VerifyState {

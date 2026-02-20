@@ -99,7 +99,7 @@ export const ingestUsageEvents = async (
 
   await polar.events.ingest({
     events: events.map((e) => ({
-      eventName: e.eventName,
+      name: e.eventName,
       externalCustomerId: e.externalCustomerId,
       properties: e.properties,
       occurredAt: e.occurredAt,

@@ -1,14 +1,12 @@
+"use client";
+
 import Link from "next/link";
-import { isValidReturnUrl } from "@/lib/auth";
+import { useSearchParams } from "next/navigation";
+import { isValidReturnUrl } from "@/lib/return-url";
 
-interface UnauthorizedProps {
-  searchParams: Promise<{
-    returnTo?: string;
-  }>;
-}
-
-const UnauthorizedPage = async ({ searchParams }: UnauthorizedProps) => {
-  const { returnTo } = await searchParams;
+const UnauthorizedPage = () => {
+  const searchParams = useSearchParams();
+  const returnTo = searchParams?.get("returnTo") ?? null;
   const safeReturnTo = isValidReturnUrl(returnTo) ? returnTo : null;
   const loginUrl = safeReturnTo
     ? `/login?returnTo=${encodeURIComponent(safeReturnTo)}`

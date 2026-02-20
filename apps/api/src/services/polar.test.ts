@@ -181,13 +181,15 @@ describe("polar service", () => {
 
       await ingestUsageEvents(mockPolar, [
         {
-          name: "ci_run",
+          eventName: "ci_run",
           externalCustomerId: "detent-org-123",
-          metadata: { duration: 120 },
+          properties: { duration: 120 },
+          occurredAt: new Date("2024-01-01T00:00:00.000Z"),
         },
         {
-          name: "healing_attempt",
+          eventName: "healing_attempt",
           externalCustomerId: "detent-org-456",
+          occurredAt: new Date("2024-01-01T00:00:00.000Z"),
         },
       ]);
 
@@ -196,12 +198,14 @@ describe("polar service", () => {
           {
             name: "ci_run",
             externalCustomerId: "detent-org-123",
-            metadata: { duration: 120 },
+            properties: { duration: 120 },
+            occurredAt: expect.any(Date),
           },
           {
             name: "healing_attempt",
             externalCustomerId: "detent-org-456",
-            metadata: undefined,
+            properties: undefined,
+            occurredAt: expect.any(Date),
           },
         ],
       });

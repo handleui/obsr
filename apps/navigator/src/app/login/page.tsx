@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { gitlab } from "@/flags";
-import { getUser, isValidReturnUrl, sanitizeReturnUrl } from "@/lib/auth";
+import { getUser } from "@/lib/auth";
+import { isValidReturnUrl, sanitizeReturnUrl } from "@/lib/return-url";
 import { LoginPageClient } from "./login-page";
 
 interface LoginPageProps {

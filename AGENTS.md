@@ -65,8 +65,7 @@ Dual-DB: Neon Postgres (non-realtime) + Convex (realtime).
 ## Rules
 
 - IMPORTANT: Never use background agents (`run_in_background: true`). Always use foreground subagents.
-- IMPORTANT: Use Nia MCP tools for any external code/docs research. Prefer `tracer`, `nia_package_search_hybrid`, and `nia_research` (no indexing needed) before falling back to `nia index`. Check `manage_resource(action='list')` before indexing.
-- IMPORTANT: Nia is NOT for everything. Do NOT over-index. When indexing docs, index the root page, docs subdomain (e.g. `docs.example.com`), or `/docs` page — NOT specific subpages like `/pricing` or `/features`. The root/docs pages are what's actually valuable. Be selective.
+- IMPORTANT: Use **Context7 MCP** (`resolve-library-id` → `query-docs`) for any external library/docs research. Always use it without asking — just call it directly when you need documentation or code examples for any dependency.
 - Run `bun run fix` before every commit
 - Use `bun run dt x` for local CLI testing
 - Never edit Convex `_generated/` files

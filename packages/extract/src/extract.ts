@@ -171,6 +171,7 @@ const buildExtractionResult = (
   detectedSource,
   usage: usage?.usage,
   costUsd: usage?.costUsd,
+  model: prep.modelId,
   truncated: prep.truncated,
   segmentsTruncated: prep.segmentsTruncated,
   segments: prep.segments,

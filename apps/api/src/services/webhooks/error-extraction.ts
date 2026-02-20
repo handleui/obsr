@@ -1,3 +1,4 @@
+import { DEFAULT_FAST_MODEL } from "@detent/ai";
 import { type createDb, runOps, storeJobReport } from "@detent/db";
 import { extractErrors, type LogSegment } from "@detent/extract";
 import { type ErrorFingerprints, generateFingerprints } from "@detent/lore";
@@ -14,7 +15,7 @@ import {
 } from "../../lib/org-settings";
 import type { Env } from "../../types/env";
 import { hasAutofix } from "../autofix/registry";
-import { canRunHeal } from "../billing";
+import { canRunHeal, recordAIUsage } from "../billing";
 import { createGitHubService } from "../github";
 import { buildSignatureInputs, ciErrorToRow } from "./db-operations";
 import type { DbClient } from "./types";
@@ -787,6 +788,29 @@ export const extractAndStoreErrors = async (
     runExtraction(env, scrubSecrets(logs.slice(0, SCRUB_PRE_SLICE)), ctx),
     storeLogsInR2(env, project.organizationId, ctx, logs),
   ]);
+
+  if (
+    extraction.status === "success" &&
+    extraction.usage &&
+    extraction.costUsd != null
+  ) {
+    recordAIUsage(
+      env,
+      project.organizationId,
+      undefined,
+      {
+        model: extraction.model ?? DEFAULT_FAST_MODEL,
+        inputTokens: extraction.usage.inputTokens,
+        outputTokens: extraction.usage.outputTokens,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        costUSD: extraction.costUsd,
+      },
+      false
+    ).catch((err) => {
+      console.error(`${LOG_PREFIX} Failed to record extraction usage:`, err);
+    });
+  }
 
   const { db: sqlDb, pool } = getDb(env);
   try {

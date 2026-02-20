@@ -10,7 +10,9 @@ type TransactionEvent = Parameters<
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
+import { apiKeyRateLimitMiddleware } from "./middleware/api-key-rate-limit";
 import { authMiddleware } from "./middleware/auth";
+import { combinedAuthMiddleware } from "./middleware/combined-auth";
 import { rateLimitMiddleware } from "./middleware/rate-limit";
 import { sentryContextMiddleware } from "./middleware/sentry-context";
 import apiKeysRoutes from "./routes/api-keys";
@@ -95,11 +97,23 @@ app.route("/webhooks", webhookRoutes);
 app.route("/webhooks/polar", polarWebhookRoutes);
 app.route("/v1/heal/autofix-result", autofixResultRoutes);
 
+// External API: accepts both JWT and API key auth (for SDK/CI consumers)
+const externalApi = new Hono<{ Bindings: Env }>();
+externalApi.use("*", combinedAuthMiddleware);
+externalApi.use("*", (c, next) => {
+  if (c.get("apiKeyAuth")) {
+    return apiKeyRateLimitMiddleware(c, next);
+  }
+  return rateLimitMiddleware(c, next);
+});
+externalApi.route("/errors", errorsRoutes);
+app.route("/v1", externalApi);
+
+// Internal API: JWT only
 const api = new Hono<{ Bindings: Env }>();
 api.use("*", authMiddleware);
 api.use("*", rateLimitMiddleware);
 api.route("/auth", authRoutes);
-api.route("/errors", errorsRoutes);
 api.route("/heal", healRoutes);
 api.route("/projects", projectsRoutes);
 api.route("/organization-members", organizationMembersRoutes);

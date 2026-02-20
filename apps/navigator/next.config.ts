@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
   reactCompiler: true,
   transpilePackages: ["@detent/sentry"],
   experimental: {
+    authInterrupts: true,
     optimizePackageImports: ["iconoir-react"],
   },
 };

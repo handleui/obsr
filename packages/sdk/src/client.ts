@@ -1,4 +1,5 @@
 import { DetentApiError, DetentAuthError, DetentNetworkError } from "./errors.js";
+import { ApiKeysResource } from "./resources/api-keys.js";
 import { AuthResource } from "./resources/auth.js";
 import { ErrorsResource } from "./resources/errors.js";
 import { HealsResource } from "./resources/heals.js";
@@ -56,6 +57,7 @@ export class DetentClient {
   readonly #timeout: number;
   readonly #baseHeaders: Record<string, string>;
 
+  readonly apiKeys: ApiKeysResource;
   readonly auth: AuthResource;
   readonly projects: ProjectsResource;
   readonly errors: ErrorsResource;
@@ -80,6 +82,7 @@ export class DetentClient {
       this.#baseHeaders["X-Detent-Token"] = this.#auth.token;
     }
 
+    this.apiKeys = new ApiKeysResource(this);
     this.auth = new AuthResource(this);
     this.projects = new ProjectsResource(this);
     this.errors = new ErrorsResource(this);

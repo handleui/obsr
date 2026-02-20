@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import type { Db } from "../client.js";
 import { runErrors } from "../schema/index.js";
@@ -45,6 +45,25 @@ export const listBySignature = (
     .select()
     .from(runErrors)
     .where(eq(runErrors.signatureId, signatureId))
+    .limit(take);
+};
+
+export const listByRunIds = (
+  db: Db,
+  runIds: string[],
+  limit?: number | null
+) => {
+  if (runIds.length === 0) {
+    return Promise.resolve([]);
+  }
+  if (runIds.length === 1) {
+    return listByRunId(db, runIds[0] as string, limit);
+  }
+  const take = clampLimit(limit, 1, 5000, 1000);
+  return db
+    .select()
+    .from(runErrors)
+    .where(inArray(runErrors.runId, runIds))
     .limit(take);
 };
 

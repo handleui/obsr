@@ -169,6 +169,11 @@ export interface ErrorInfo {
   fixable: boolean;
   relatedFiles: string[] | null;
   workflowJob: string | null;
+  workflowStep: string | null;
+  workflowAction: string | null;
+  logLineStart: number | null;
+  logLineEnd: number | null;
+  createdAt: string;
 }
 
 export interface ErrorsResponse {
@@ -344,4 +349,29 @@ export interface WebhookPayload {
   timestamp: string;
   organization_id: string;
   data: WebhookHealData;
+}
+
+export interface ApiKey {
+  id: string;
+  key_prefix: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface CreateApiKeyResponse {
+  id: string;
+  key: string;
+  key_prefix: string;
+  name: string;
+  created_at: string;
+}
+
+export interface ListApiKeysResponse {
+  api_keys: ApiKey[];
+}
+
+export interface RevokeApiKeyResponse {
+  success: boolean;
+  deleted_id: string;
 }

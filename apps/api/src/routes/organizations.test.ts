@@ -232,7 +232,7 @@ describe("organizations - GET /:organizationId/github-app", () => {
     expect(res.status).toBe(200);
     expect(json.app_installed).toBe(false);
     expect(json.github_app_install_url).toBe(
-      "https://github.com/apps/detent/installations/new?target_id=12345"
+      "https://github.com/apps/detent-app/installations/new?target_id=12345"
     );
     expect(json.github_app_manage_url).toBeNull();
     expect(json.github_app_disconnect_url).toBeNull();

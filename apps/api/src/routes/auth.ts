@@ -1507,7 +1507,7 @@ app.get("/install-url", (c) => {
     return c.json({ error: "target_id must be a numeric value" }, 400);
   }
 
-  const appName = "detent";
+  const appName = "detent-app";
   const url = `https://github.com/apps/${appName}/installations/new?target_id=${targetId}`;
 
   return c.json({ url });

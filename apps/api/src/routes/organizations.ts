@@ -60,7 +60,7 @@ interface GitHubAppPermissionState {
   membersReadEnabled: boolean | null;
 }
 
-const GITHUB_APP_NAME = "detent";
+const GITHUB_APP_NAME = "detent-app";
 
 const getGitHubAppInstallUrl = (providerAccountId: string): string =>
   `https://github.com/apps/${GITHUB_APP_NAME}/installations/new?target_id=${providerAccountId}`;

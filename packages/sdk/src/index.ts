@@ -3,6 +3,7 @@ export * from "./errors.js";
 export * from "./types.js";
 export { sanitizeCredentials, CREDENTIAL_PATTERNS } from "./utils/sanitize.js";
 
+export { ApiKeysResource } from "./resources/api-keys.js";
 export { AuthResource } from "./resources/auth.js";
 export { ErrorsResource } from "./resources/errors.js";
 export { HealsResource } from "./resources/heals.js";

@@ -21,6 +21,7 @@ export interface ExtractionResult {
   detectedSource: ErrorSource | null;
   usage?: ExtractionUsage;
   costUsd?: number;
+  model?: string;
   truncated: boolean;
   segmentsTruncated: boolean;
   segments?: LogSegment[];

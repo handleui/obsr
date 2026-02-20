@@ -8,9 +8,10 @@ import type { Env } from "../types/env.js";
 // ============================================================================
 
 interface UsageEvent {
-  name: string;
+  eventName: string;
   externalCustomerId: string;
-  metadata?: Record<string, string | number | boolean>;
+  properties?: Record<string, string | number | boolean>;
+  occurredAt: Date;
 }
 
 interface PolarCustomer {
@@ -98,9 +99,10 @@ export const ingestUsageEvents = async (
 
   await polar.events.ingest({
     events: events.map((e) => ({
-      name: e.name,
+      name: e.eventName,
       externalCustomerId: e.externalCustomerId,
-      metadata: e.metadata,
+      properties: e.properties,
+      occurredAt: e.occurredAt,
     })),
   });
 };

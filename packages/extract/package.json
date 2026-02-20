@@ -10,7 +10,6 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
     "check-types": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

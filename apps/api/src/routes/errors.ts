@@ -1,6 +1,6 @@
 import { type createDb, runErrorOps, runOps } from "@detent/db";
 import { scrubSecrets } from "@detent/types";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { getConvexClient } from "../db/convex";
 import { getDb } from "../lib/db.js";
 import { verifyOrgAccess } from "../lib/org-access";
@@ -32,6 +32,35 @@ interface OrganizationDoc {
   suspendedAt?: number;
   deletedAt?: number;
 }
+
+const verifyProjectOrgAccess = async (
+  c: Context<{ Bindings: Env }>,
+  projectOrgId: string
+): Promise<{ error: string; status: 403 } | null> => {
+  const apiKeyAuth = c.get("apiKeyAuth");
+  if (apiKeyAuth) {
+    if (projectOrgId !== apiKeyAuth.organizationId) {
+      return { error: "Access denied", status: 403 };
+    }
+    return null;
+  }
+
+  const auth = c.get("auth");
+  const convex = getConvexClient(c.env);
+  const organization = (await convex.query("organizations:getById", {
+    id: projectOrgId,
+  })) as OrganizationDoc | null;
+  if (!organization) {
+    // Generic 403 to avoid revealing whether the org exists
+    return { error: "Access denied", status: 403 };
+  }
+  const access = await verifyOrgAccess(auth.userId, organization, c.env);
+  if (!access.allowed) {
+    // Generic message — do not forward access.error (may leak membership details)
+    return { error: "Access denied", status: 403 };
+  }
+  return null;
+};
 
 interface RunDoc {
   id: string;
@@ -68,6 +97,11 @@ interface RunErrorDoc {
   fixable?: boolean | null;
   relatedFiles?: string[] | null;
   workflowJob?: string | null;
+  workflowStep?: string | null;
+  workflowAction?: string | null;
+  logLineStart?: number | null;
+  logLineEnd?: number | null;
+  createdAt: number;
 }
 
 const validateCommitQuery = (
@@ -186,11 +220,15 @@ const formatErrorResponse = (e: RunErrorDoc) => ({
     : null,
   fixable: e.fixable ?? false,
   relatedFiles: e.relatedFiles ?? null,
-  workflowJob: e.workflowJob,
+  workflowJob: e.workflowJob ? scrubSecrets(e.workflowJob) : null,
+  workflowStep: e.workflowStep ? scrubSecrets(e.workflowStep) : null,
+  workflowAction: e.workflowAction ? scrubSecrets(e.workflowAction) : null,
+  logLineStart: e.logLineStart ?? null,
+  logLineEnd: e.logLineEnd ?? null,
+  createdAt: new Date(e.createdAt).toISOString(),
 });
 
 app.get("/", async (c) => {
-  const auth = c.get("auth");
   const commitParam = c.req.query("commit");
   const repository = c.req.query("repository");
 
@@ -208,17 +246,9 @@ app.get("/", async (c) => {
     return c.json({ error: "Repository not found or not linked" }, 404);
   }
 
-  const organization = (await convex.query("organizations:getById", {
-    id: project.organizationId,
-  })) as OrganizationDoc | null;
-
-  if (!organization) {
-    return c.json({ error: "Organization not found" }, 404);
-  }
-
-  const access = await verifyOrgAccess(auth.userId, organization, c.env);
-  if (!access.allowed) {
-    return c.json({ error: access.error }, 403);
+  const accessError = await verifyProjectOrgAccess(c, project.organizationId);
+  if (accessError) {
+    return c.json({ error: accessError.error }, accessError.status);
   }
 
   const { db, pool } = getDb(c.env);
@@ -260,10 +290,11 @@ app.get("/", async (c) => {
       fetchResult.runs.find((r) => r.commitSha)?.commitSha ?? normalizedCommit;
     const latestRuns = deduplicateRunsByLatestAttempt(fetchResult.runs);
 
-    const errorsByRun = await Promise.all(
-      latestRuns.map((r) => runErrorOps.listByRunId(db, r.id, 1000))
-    );
-    const errors = errorsByRun.flat() as RunErrorDoc[];
+    const errors = (await runErrorOps.listByRunIds(
+      db,
+      latestRuns.map((r) => r.id),
+      5000
+    )) as RunErrorDoc[];
 
     return c.json({
       commit: fullCommitSha,
@@ -277,7 +308,6 @@ app.get("/", async (c) => {
 });
 
 app.get("/pr", async (c) => {
-  const auth = c.get("auth");
   const projectId = c.req.query("projectId");
   const prNumberStr = c.req.query("prNumber");
 
@@ -303,17 +333,9 @@ app.get("/pr", async (c) => {
     return c.json({ error: "Project not found" }, 404);
   }
 
-  const organization = (await convex.query("organizations:getById", {
-    id: project.organizationId,
-  })) as OrganizationDoc | null;
-
-  if (!organization) {
-    return c.json({ error: "Organization not found" }, 404);
-  }
-
-  const access = await verifyOrgAccess(auth.userId, organization, c.env);
-  if (!access.allowed) {
-    return c.json({ error: access.error }, 403);
+  const accessError = await verifyProjectOrgAccess(c, project.organizationId);
+  if (accessError) {
+    return c.json({ error: accessError.error }, accessError.status);
   }
 
   const { db, pool } = getDb(c.env);

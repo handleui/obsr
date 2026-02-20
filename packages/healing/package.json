@@ -15,7 +15,6 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
     "check-types": "tsc --noEmit",
     "eval": "bun run src/eval/run.ts",
     "eval:live": "EVAL_MODE=live bun run src/eval/run.ts"

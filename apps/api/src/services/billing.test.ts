@@ -254,13 +254,14 @@ describe("billing service", () => {
         expect.anything(),
         expect.arrayContaining([
           expect.objectContaining({
-            name: "usage", // Unified event name
+            eventName: "usage",
             externalCustomerId: "org-123",
-            metadata: {
+            occurredAt: expect.any(Date),
+            properties: {
               type: "ai",
               cost_usd: 0.05,
               model: "claude-3",
-              tokens: 1500, // inputTokens + outputTokens
+              tokens: 1500,
             },
           }),
         ])
@@ -290,9 +291,10 @@ describe("billing service", () => {
         expect.anything(),
         expect.arrayContaining([
           expect.objectContaining({
-            name: "usage",
+            eventName: "usage",
             externalCustomerId: "org-123",
-            metadata: {
+            occurredAt: expect.any(Date),
+            properties: {
               type: "sandbox",
               cost_usd: 0.2,
               duration_minutes: 10,
@@ -526,12 +528,14 @@ describe("billing service", () => {
             outputTokens: 50,
             costUSD: 0.01,
           },
+          createdAt: Date.now(),
         },
         {
           id: "event-2",
           organizationId: "org-A",
           eventName: "sandbox",
           metadata: { durationMinutes: 5, costUSD: 0.05 },
+          createdAt: Date.now(),
         },
         {
           id: "event-3",
@@ -543,6 +547,7 @@ describe("billing service", () => {
             outputTokens: 100,
             costUSD: 0.02,
           },
+          createdAt: Date.now(),
         },
       ]);
 
@@ -584,6 +589,7 @@ describe("billing service", () => {
             outputTokens: 50,
             costUSD: 0.01,
           },
+          createdAt: Date.now(),
         },
         {
           id: "event-2",
@@ -595,6 +601,7 @@ describe("billing service", () => {
             outputTokens: 100,
             costUSD: 0.02,
           },
+          createdAt: Date.now(),
         },
       ]);
 
@@ -628,6 +635,7 @@ describe("billing service", () => {
             outputTokens: 500,
             costUSD: 0.05,
           },
+          createdAt: Date.now(),
         },
       ]);
 
@@ -635,9 +643,10 @@ describe("billing service", () => {
 
       expect(mockIngestUsageEvents).toHaveBeenCalledWith(expect.anything(), [
         {
-          name: "usage",
+          eventName: "usage",
           externalCustomerId: "org-A",
-          metadata: {
+          occurredAt: expect.any(Date),
+          properties: {
             type: "ai",
             cost_usd: 0.05,
             model: "claude-sonnet-4-20250514",
@@ -660,6 +669,7 @@ describe("billing service", () => {
             durationMinutes: 10,
             costUSD: 0.2,
           },
+          createdAt: Date.now(),
         },
       ]);
 
@@ -667,9 +677,10 @@ describe("billing service", () => {
 
       expect(mockIngestUsageEvents).toHaveBeenCalledWith(expect.anything(), [
         {
-          name: "usage",
+          eventName: "usage",
           externalCustomerId: "org-A",
-          metadata: {
+          occurredAt: expect.any(Date),
+          properties: {
             type: "sandbox",
             cost_usd: 0.2,
             duration_minutes: 10,
@@ -688,6 +699,7 @@ describe("billing service", () => {
           organizationId: "org-A",
           eventName: "ai",
           metadata: { costUSD: 0.01 }, // Missing model, inputTokens, outputTokens
+          createdAt: Date.now(),
         },
       ]);
 
@@ -695,7 +707,10 @@ describe("billing service", () => {
 
       expect(mockIngestUsageEvents).toHaveBeenCalledWith(expect.anything(), [
         expect.objectContaining({
-          metadata: {
+          eventName: "usage",
+          externalCustomerId: "org-A",
+          occurredAt: expect.any(Date),
+          properties: {
             type: "ai",
             cost_usd: 0.01,
             model: "unknown",

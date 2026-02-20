@@ -1,7 +1,12 @@
+import { DEFAULT_FAST_MODEL } from "@detent/ai";
 import { type createDb, runOps, storeJobReport } from "@detent/db";
-import { extractErrors, type LogSegment } from "@detent/extract";
+import {
+  type ExtractionUsage,
+  extractErrors,
+  type LogSegment,
+} from "@detent/extract";
 import { type ErrorFingerprints, generateFingerprints } from "@detent/lore";
-import type { CIError, HealCreateStatus } from "@detent/types";
+import type { CIError, ErrorSource, HealCreateStatus } from "@detent/types";
 import { scrubSecrets } from "@detent/types";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK is designed for namespace import
 import * as Sentry from "@sentry/cloudflare";
@@ -14,7 +19,7 @@ import {
 } from "../../lib/org-settings";
 import type { Env } from "../../types/env";
 import { hasAutofix } from "../autofix/registry";
-import { canRunHeal } from "../billing";
+import { canRunHeal, recordAIUsage } from "../billing";
 import { createGitHubService } from "../github";
 import { buildSignatureInputs, ciErrorToRow } from "./db-operations";
 import type { DbClient } from "./types";
@@ -68,6 +73,10 @@ interface JobExtractionResult {
   segmentsTruncated: boolean;
   status: ExtractionStatus;
   segments?: LogSegment[];
+  detectedSource: ErrorSource | null;
+  usage?: ExtractionUsage;
+  costUsd?: number;
+  model?: string;
 }
 
 const LOG_PREFIX = "[error-extraction]";
@@ -269,7 +278,13 @@ const logExtractionExhausted = (
       attempts: RETRY_DELAYS_MS.length + 1,
     })
   );
-  return { errors: [], truncated: false, segmentsTruncated: false, status };
+  return {
+    errors: [],
+    truncated: false,
+    segmentsTruncated: false,
+    status,
+    detectedSource: null,
+  };
 };
 
 const runExtraction = async (
@@ -296,6 +311,10 @@ const runExtraction = async (
         segmentsTruncated: result.segmentsTruncated ?? false,
         status: "success",
         segments: result.segments,
+        detectedSource: result.detectedSource,
+        usage: result.usage,
+        costUsd: result.costUsd,
+        model: result.model,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -311,6 +330,7 @@ const runExtraction = async (
           truncated: false,
           segmentsTruncated: false,
           status: "failed",
+          detectedSource: null,
         };
       }
 
@@ -787,6 +807,29 @@ export const extractAndStoreErrors = async (
     runExtraction(env, scrubSecrets(logs.slice(0, SCRUB_PRE_SLICE)), ctx),
     storeLogsInR2(env, project.organizationId, ctx, logs),
   ]);
+
+  if (
+    extraction.status === "success" &&
+    extraction.usage &&
+    extraction.costUsd != null
+  ) {
+    recordAIUsage(
+      env,
+      project.organizationId,
+      undefined,
+      {
+        model: extraction.model ?? DEFAULT_FAST_MODEL,
+        inputTokens: extraction.usage.inputTokens,
+        outputTokens: extraction.usage.outputTokens,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        costUSD: extraction.costUsd,
+      },
+      false
+    ).catch((err) => {
+      console.error(`${LOG_PREFIX} Failed to record extraction usage:`, err);
+    });
+  }
 
   const { db: sqlDb, pool } = getDb(env);
   try {

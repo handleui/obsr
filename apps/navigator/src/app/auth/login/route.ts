@@ -5,9 +5,9 @@ import {
   generateOAuthState,
   getOAuthRedirectUri,
   getWorkOSClientId,
-  isValidReturnUrl,
 } from "@/lib/auth";
 import { AUTH_DURATIONS, COOKIE_NAMES } from "@/lib/constants";
+import { isValidReturnUrl } from "@/lib/return-url";
 import { workos } from "@/lib/workos";
 
 type WorkOSProvider = "GitHubOAuth" | "GitLabOAuth";

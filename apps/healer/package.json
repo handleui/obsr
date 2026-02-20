@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "dev": "bun run --watch src/index.ts",
+    "dev": "portless healer bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
     "start": "bun run dist/index.js",
     "queue:smoke": "bun run src/queue-smoke.ts",

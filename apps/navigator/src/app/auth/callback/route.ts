@@ -8,11 +8,11 @@ import {
   getAndClearReturnTo,
   getWorkOSClientId,
   getWorkOSCookiePassword,
-  sanitizeReturnUrl,
   verifyAndClearOAuthState,
 } from "@/lib/auth";
 import { AUTH_DURATIONS, COOKIE_NAMES } from "@/lib/constants";
 import { type BetterStackRequest, withLogging } from "@/lib/logger";
+import { sanitizeReturnUrl } from "@/lib/return-url";
 import { workos } from "@/lib/workos";
 
 /**

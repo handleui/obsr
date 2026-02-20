@@ -145,9 +145,10 @@ export const recordUsage = async (
       await retryPolarIngestion(() =>
         ingestUsageEvents(polar, [
           {
-            name: POLAR_EVENT_NAME,
+            eventName: POLAR_EVENT_NAME,
             externalCustomerId: orgId,
-            metadata: buildPolarMetadata(usage),
+            properties: buildPolarMetadata(usage),
+            occurredAt: new Date(),
           },
         ])
       );
@@ -374,6 +375,7 @@ export const retryFailedPolarIngestions = async (
         id: string;
         eventName: string;
         metadata: Record<string, unknown>;
+        createdAt: number;
       }>
     >();
     for (const event of failedEvents) {
@@ -382,6 +384,7 @@ export const retryFailedPolarIngestions = async (
         id: event.id,
         eventName: event.eventName,
         metadata: (event.metadata as Record<string, unknown>) ?? {},
+        createdAt: event.createdAt,
       });
       eventsByOrg.set(event.organizationId, orgEvents);
     }
@@ -392,9 +395,10 @@ export const retryFailedPolarIngestions = async (
           ingestUsageEvents(
             polar,
             events.map((e) => ({
-              name: POLAR_EVENT_NAME,
+              eventName: POLAR_EVENT_NAME,
               externalCustomerId: orgId,
-              metadata: buildRetryPolarMetadata(e.eventName, e.metadata),
+              properties: buildRetryPolarMetadata(e.eventName, e.metadata),
+              occurredAt: new Date(e.createdAt),
             }))
           )
         );

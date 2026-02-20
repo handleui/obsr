@@ -111,51 +111,58 @@ export const dispatchWebhookEvent = async (
   event: WebhookEventType,
   healData: WebhookHealData
 ): Promise<void> => {
-  const webhooks = (await convex.query("webhooks:listActiveByOrg", {
-    organizationId,
-  })) as WebhookRecord[];
+  try {
+    const webhooks = (await convex.query("webhooks:listActiveByOrg", {
+      organizationId,
+    })) as WebhookRecord[];
 
-  if (!webhooks || webhooks.length === 0) {
-    return;
+    if (!webhooks || webhooks.length === 0) {
+      return;
+    }
+
+    const matching = webhooks.filter((w) => w.events.includes(event));
+    if (matching.length === 0) {
+      return;
+    }
+
+    const payload: WebhookPayload = {
+      id: crypto.randomUUID(),
+      event,
+      timestamp: new Date().toISOString(),
+      organization_id: organizationId,
+      data: truncatePatch(healData),
+    };
+
+    // Stringify once, reuse across all webhooks and retries
+    const body = JSON.stringify(payload);
+
+    await Promise.allSettled(
+      matching.map(async (webhook) => {
+        try {
+          const secret = await decryptToken(
+            webhook.secretEncrypted,
+            encryptionKey
+          );
+          const signingKey = await importSigningKey(secret);
+          await deliverWithRetries(
+            webhook.url,
+            body,
+            signingKey,
+            payload.event,
+            payload.id
+          );
+        } catch (error) {
+          console.error(
+            `[webhook] Dispatch error for webhook ${webhook._id}:`,
+            error instanceof Error ? error.message : "Unknown error"
+          );
+        }
+      })
+    );
+  } catch (error) {
+    console.error(
+      "[webhook] Failed to dispatch webhook event:",
+      error instanceof Error ? error.message : "Unknown error"
+    );
   }
-
-  const matching = webhooks.filter((w) => w.events.includes(event));
-  if (matching.length === 0) {
-    return;
-  }
-
-  const payload: WebhookPayload = {
-    id: crypto.randomUUID(),
-    event,
-    timestamp: new Date().toISOString(),
-    organization_id: organizationId,
-    data: truncatePatch(healData),
-  };
-
-  // Stringify once, reuse across all webhooks and retries
-  const body = JSON.stringify(payload);
-
-  await Promise.allSettled(
-    matching.map(async (webhook) => {
-      try {
-        const secret = await decryptToken(
-          webhook.secretEncrypted,
-          encryptionKey
-        );
-        const signingKey = await importSigningKey(secret);
-        await deliverWithRetries(
-          webhook.url,
-          body,
-          signingKey,
-          payload.event,
-          payload.id
-        );
-      } catch (error) {
-        console.error(
-          `[webhook] Dispatch error for webhook ${webhook._id}:`,
-          error instanceof Error ? error.message : "Unknown error"
-        );
-      }
-    })
-  );
 };

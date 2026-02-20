@@ -100,22 +100,23 @@ const escapeMarkdownLinkText = (text: string): string => {
 
 // Format UTC timestamp in ISO-like format (internationally unambiguous)
 // Format: "Jan 12, 15:30" - uses short month name + 24h time
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
 const formatTimestamp = (date: Date): string => {
-  const months = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-  const month = months[date.getUTCMonth()];
+  const month = MONTHS[date.getUTCMonth()];
   const day = date.getUTCDate();
   const hours = date.getUTCHours().toString().padStart(2, "0");
   const minutes = date.getUTCMinutes().toString().padStart(2, "0");
@@ -495,6 +496,39 @@ const mapSeverityToAnnotationLevel = (
   }
 };
 
+const PRIORITY_SOURCES = new Set([
+  "typescript",
+  "eslint",
+  "biome",
+  "rust",
+  "go",
+  "python",
+]);
+
+const KNOWN_SOURCE_NAMES = new Map([
+  ["typescript", "TypeScript"],
+  ["eslint", "ESLint"],
+  ["biome", "Biome"],
+  ["go-test", "Go Test"],
+  ["go", "Go"],
+  ["rust", "Rust"],
+  ["python", "Python"],
+  ["docker", "Docker"],
+  ["nodejs", "Node.js"],
+]);
+
+const SOURCE_BADGES = new Map([
+  ["typescript", "TS"],
+  ["eslint", "ESLint"],
+  ["biome", "Biome"],
+  ["go-test", "Go"],
+  ["go", "Go"],
+  ["rust", "Rust"],
+  ["python", "Py"],
+  ["docker", "Docker"],
+  ["nodejs", "Node"],
+]);
+
 // Priority scoring for errors - higher = more actionable, should appear first
 // Returns numeric score (higher = more important)
 const calculateErrorPriority = (error: CIError): number => {
@@ -540,16 +574,7 @@ const calculateErrorPriority = (error: CIError): number => {
     score += 10;
   }
 
-  // Source-based priority (well-known tools get boost)
-  const knownSources = [
-    "typescript",
-    "eslint",
-    "biome",
-    "rust",
-    "go",
-    "python",
-  ];
-  if (error.source && knownSources.includes(error.source.toLowerCase())) {
+  if (error.source && PRIORITY_SOURCES.has(error.source.toLowerCase())) {
     score += 10;
   }
 
@@ -631,19 +656,7 @@ const capitalizeSource = (source: string): string => {
   if (!source) {
     return source;
   }
-  // Handle known sources with preferred casing
-  const knownSources: Record<string, string> = {
-    typescript: "TypeScript",
-    eslint: "ESLint",
-    biome: "Biome",
-    "go-test": "Go Test",
-    go: "Go",
-    rust: "Rust",
-    python: "Python",
-    docker: "Docker",
-    nodejs: "Node.js",
-  };
-  return knownSources[source.toLowerCase()] ?? source;
+  return KNOWN_SOURCE_NAMES.get(source.toLowerCase()) ?? source;
 };
 
 // Get short source badge for inline display (e.g., "TS", "Biome")
@@ -651,18 +664,7 @@ const getSourceBadge = (source?: string): string => {
   if (!source) {
     return "";
   }
-  const badges: Record<string, string> = {
-    typescript: "TS",
-    eslint: "ESLint",
-    biome: "Biome",
-    "go-test": "Go",
-    go: "Go",
-    rust: "Rust",
-    python: "Py",
-    docker: "Docker",
-    nodejs: "Node",
-  };
-  return badges[source.toLowerCase()] ?? source;
+  return SOURCE_BADGES.get(source.toLowerCase()) ?? source;
 };
 
 // Generate GitHub blob URL for a file (URL-encodes the path)

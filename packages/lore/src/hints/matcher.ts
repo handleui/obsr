@@ -111,23 +111,17 @@ export const enrichErrorsWithHints = <
   return matches.map(({ error, hints: loreHints }) => {
     const existingHints = error.hints;
 
-    // Fast path: no lore hints to add
     if (loreHints.length === 0) {
-      // Return with guaranteed hints array (may be empty)
       if (existingHints && existingHints.length > 0) {
-        // Existing hints, no lore hints - create new mutable array
         return { ...error, hints: [...existingHints] };
       }
-      // No existing hints, no lore hints - normalize undefined to empty array for consistent return type
-      return { ...error, hints: [] as string[] };
+      return error as T & { hints: string[] };
     }
 
-    // Has lore hints - create new combined array
     if (existingHints && existingHints.length > 0) {
       return { ...error, hints: [...existingHints, ...loreHints] };
     }
 
-    // Only lore hints - use them directly (already a new array from matchHints)
     return { ...error, hints: loreHints };
   });
 };

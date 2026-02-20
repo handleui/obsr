@@ -57,24 +57,21 @@ const collectFilesWithTimes = async (
   matches: string[],
   searchPath: string
 ): Promise<FileWithTime[]> => {
-  const filesWithTime: FileWithTime[] = [];
-
-  for (const match of matches) {
-    const fullPath = join(searchPath, match);
-    try {
-      const fileStat = await stat(fullPath);
-      if (fileStat.isFile()) {
-        filesWithTime.push({
-          path: match,
-          modTime: fileStat.mtimeMs,
-        });
+  const results = await Promise.all(
+    matches.map(async (match): Promise<FileWithTime | null> => {
+      const fullPath = join(searchPath, match);
+      try {
+        const fileStat = await stat(fullPath);
+        if (fileStat.isFile()) {
+          return { path: match, modTime: fileStat.mtimeMs };
+        }
+      } catch {
+        // Skip files we can't stat
       }
-    } catch {
-      // Skip files we can't stat
-    }
-  }
-
-  return filesWithTime;
+      return null;
+    })
+  );
+  return results.filter((r): r is FileWithTime => r !== null);
 };
 
 /**

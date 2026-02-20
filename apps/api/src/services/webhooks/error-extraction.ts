@@ -1,6 +1,6 @@
 import { type createDb, runOps, storeJobReport } from "@detent/db";
 import { extractErrors, type LogSegment } from "@detent/extract";
-import { generateFingerprints } from "@detent/lore";
+import { type ErrorFingerprints, generateFingerprints } from "@detent/lore";
 import type { CIError, HealCreateStatus } from "@detent/types";
 import { scrubSecrets } from "@detent/types";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK is designed for namespace import
@@ -340,6 +340,10 @@ interface StoreErrorsOptions {
   logR2Key?: string | null;
   logManifest?: LogSegment[];
   logManifestTruncated?: boolean;
+  precomputedFingerprints?: Array<{
+    error: CIError;
+    fingerprints: ErrorFingerprints;
+  }>;
 }
 
 const MAX_ERRORS_PER_JOB = 500;
@@ -350,10 +354,12 @@ const buildJobReportPayload = (
 ) => {
   const { ctx, project, errors, prNumber, conclusion, totalLogLines } = options;
   const cappedErrors = errors.slice(0, MAX_ERRORS_PER_JOB);
-  const errorsWithFingerprints = cappedErrors.map((e) => ({
-    error: e,
-    fingerprints: generateFingerprints(e),
-  }));
+  const errorsWithFingerprints =
+    options.precomputedFingerprints ??
+    cappedErrors.map((e) => ({
+      error: e,
+      fingerprints: generateFingerprints(e),
+    }));
   const errorRows = errorsWithFingerprints.map(
     ({ error: e, fingerprints }) => ({
       ...ciErrorToRow(e, runRecordId, ctx.jobName, {
@@ -687,6 +693,10 @@ const storeAndHealErrors = async (
   );
 
   const cappedErrors = extraction.errors.slice(0, MAX_ERRORS_PER_JOB);
+  const errorsWithFingerprints = cappedErrors.map((e) => ({
+    error: e,
+    fingerprints: generateFingerprints(e),
+  }));
 
   const runRecordId = await storeErrors({
     db: pipeline.sqlDb,
@@ -701,6 +711,7 @@ const storeAndHealErrors = async (
     logR2Key: pipeline.logR2Key,
     logManifest: extraction.segments,
     logManifestTruncated: extraction.segmentsTruncated,
+    precomputedFingerprints: errorsWithFingerprints,
   });
   if (!runRecordId) {
     return;
@@ -711,10 +722,9 @@ const storeAndHealErrors = async (
   );
 
   const convex = getConvexClient(env);
-  const runErrors = cappedErrors.map((e) => {
-    const fingerprints = generateFingerprints(e);
-    return toRunError(e, ctx.jobName, fingerprints.lore);
-  });
+  const runErrors = errorsWithFingerprints.map(({ error: e, fingerprints }) =>
+    toRunError(e, ctx.jobName, fingerprints.lore)
+  );
 
   try {
     await createHealsForErrors({

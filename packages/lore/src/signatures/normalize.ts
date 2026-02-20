@@ -43,33 +43,32 @@ const IP_ADDRESSES = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
 // Home directory paths (contains username)
 const HOME_PATHS = /(?:\/Users\/|\/home\/|C:\\Users\\)[\w.-]+/gi;
 
+const replaceSensitiveData = (input: string): string =>
+  input
+    .replace(API_KEYS, "<secret>")
+    .replace(JWT_TOKENS, "<token>")
+    .replace(AWS_KEYS, "<aws-key>")
+    .replace(CONTEXTUAL_HEX, "<hex>")
+    .replace(HEX_TOKENS, "<hex>")
+    .replace(EMAIL_ADDRESSES, "<email>")
+    .replace(IP_ADDRESSES, "<ip>")
+    .replace(HOME_PATHS, "<home>");
+
 /** Normalize a message for lore fingerprinting */
 export const normalizeForLore = (message: string): string => {
   // SECURITY: Truncate input BEFORE regex processing to prevent ReDoS
   const truncatedInput = message.slice(0, MAX_INPUT_LENGTH);
 
-  return (
-    truncatedInput
-      // Sanitize sensitive data first (before other transformations)
-      .replace(API_KEYS, "<secret>")
-      .replace(JWT_TOKENS, "<token>")
-      .replace(AWS_KEYS, "<aws-key>")
-      .replace(CONTEXTUAL_HEX, "<hex>")
-      .replace(HEX_TOKENS, "<hex>")
-      .replace(EMAIL_ADDRESSES, "<email>")
-      .replace(IP_ADDRESSES, "<ip>")
-      .replace(HOME_PATHS, "<home>")
-      // Then normalize for fingerprinting
-      .replace(QUOTED_STRINGS, "<string>")
-      .replace(SCOPED_PACKAGES, "<module>")
-      .replace(RELATIVE_IMPORTS, "<module>")
-      .replace(UNIX_PATHS, "<path>")
-      .replace(WINDOWS_PATHS, "<path>")
-      .replace(NUMBERS_NOT_IN_CODES, "<n>")
-      .replace(WHITESPACE, " ")
-      .trim()
-      .slice(0, 500)
-  );
+  return replaceSensitiveData(truncatedInput)
+    .replace(QUOTED_STRINGS, "<string>")
+    .replace(SCOPED_PACKAGES, "<module>")
+    .replace(RELATIVE_IMPORTS, "<module>")
+    .replace(UNIX_PATHS, "<path>")
+    .replace(WINDOWS_PATHS, "<path>")
+    .replace(NUMBERS_NOT_IN_CODES, "<n>")
+    .replace(WHITESPACE, " ")
+    .trim()
+    .slice(0, 500);
 };
 
 /**
@@ -79,17 +78,7 @@ export const normalizeForLore = (message: string): string => {
  */
 export const sanitizeSensitiveData = (message: string): string => {
   // SECURITY: Truncate input first
-  const truncatedInput = message.slice(0, MAX_INPUT_LENGTH);
-
-  return truncatedInput
-    .replace(API_KEYS, "<secret>")
-    .replace(JWT_TOKENS, "<token>")
-    .replace(AWS_KEYS, "<aws-key>")
-    .replace(CONTEXTUAL_HEX, "<hex>")
-    .replace(HEX_TOKENS, "<hex>")
-    .replace(EMAIL_ADDRESSES, "<email>")
-    .replace(IP_ADDRESSES, "<ip>")
-    .replace(HOME_PATHS, "<home>");
+  return replaceSensitiveData(message.slice(0, MAX_INPUT_LENGTH));
 };
 
 // Maximum file path length before processing

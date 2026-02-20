@@ -38,6 +38,7 @@ type SecuredMutationRef = FunctionReference<
  *   - convex/organization_members.ts
  *   - convex/projects.ts
  *   - convex/heals.ts
+ *   - convex/webhooks.ts
  */
 const securedQueries = new Set<SecuredQueryRef>([
   api.api_keys.getById,
@@ -68,6 +69,9 @@ const securedQueries = new Set<SecuredQueryRef>([
   api.projects.getByRepoFullName,
   api.projects.getByRepoId,
   api.projects.listByRepoIds,
+  api.webhooks.getById,
+  api.webhooks.listByOrg,
+  api.webhooks.listActiveByOrg,
 ]);
 
 /**
@@ -96,6 +100,9 @@ const securedMutations = new Set<SecuredMutationRef>([
   api.projects.clearRemovedByOrg,
   api.projects.softDeleteByRepoIds,
   api.projects.softDeleteByOrgRepoIds,
+  api.webhooks.create,
+  api.webhooks.update,
+  api.webhooks.remove,
 ]);
 
 interface ConvexClientConfig {

@@ -14,6 +14,7 @@ import {
 import { getDb } from "../lib/db.js";
 import { verifyOrgAccess } from "../lib/org-access";
 import { getOrgSettings } from "../lib/org-settings";
+import { dispatchWebhookEvent } from "../lib/webhook-dispatch";
 import { generateAutofixCommitMessage } from "../services/autofix/commit-message";
 import { orchestrateHeals } from "../services/autofix/orchestrator";
 import { canRunHeal } from "../services/billing";
@@ -385,6 +386,28 @@ app.post("/:id/apply", async (c) => {
 
     await applyHeal(c.env, id, pushResult.sha);
 
+    if (c.env.ENCRYPTION_KEY) {
+      c.executionCtx.waitUntil(
+        dispatchWebhookEvent(
+          convex,
+          c.env.ENCRYPTION_KEY,
+          organization._id,
+          "heal.applied",
+          {
+            heal_id: id,
+            type: heal.type,
+            status: "applied",
+            project_id: heal.projectId,
+            pr_number: heal.prNumber ?? null,
+            commit_sha: heal.commitSha ?? null,
+            applied_commit_sha: pushResult.sha ?? null,
+            patch: heal.patch ?? null,
+            files_changed: heal.filesChanged ?? null,
+          }
+        )
+      );
+    }
+
     console.log(
       `[heal] Applied heal ${id} to ${inputs.owner}/${inputs.repo}#${heal.prNumber}`
     );
@@ -444,6 +467,26 @@ app.post("/:id/reject", async (c) => {
 
   await rejectHeal(c.env, id, auth.userId, body.reason);
 
+  if (c.env.ENCRYPTION_KEY) {
+    const convex = getConvexClient(c.env);
+    c.executionCtx.waitUntil(
+      dispatchWebhookEvent(
+        convex,
+        c.env.ENCRYPTION_KEY,
+        result.organization._id,
+        "heal.rejected",
+        {
+          heal_id: id,
+          type: heal.type,
+          status: "rejected",
+          project_id: heal.projectId,
+          pr_number: heal.prNumber ?? null,
+          commit_sha: heal.commitSha ?? null,
+        }
+      )
+    );
+  }
+
   return c.json({ success: true, message: "Heal rejected" });
 });
 
@@ -482,6 +525,26 @@ app.post("/:id/trigger", async (c) => {
   }
 
   await triggerHeal(c.env, id);
+
+  if (c.env.ENCRYPTION_KEY) {
+    const convex = getConvexClient(c.env);
+    c.executionCtx.waitUntil(
+      dispatchWebhookEvent(
+        convex,
+        c.env.ENCRYPTION_KEY,
+        result.organization._id,
+        "heal.pending",
+        {
+          heal_id: id,
+          type: heal.type,
+          status: "pending",
+          project_id: heal.projectId,
+          pr_number: heal.prNumber ?? null,
+          commit_sha: heal.commitSha ?? null,
+        }
+      )
+    );
+  }
 
   return c.json({ success: true, status: "pending" });
 });

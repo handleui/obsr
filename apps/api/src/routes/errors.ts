@@ -15,6 +15,7 @@ const app = new Hono<{ Bindings: Env }>();
 interface ProjectDoc {
   _id: string;
   organizationId: string;
+  providerRepoFullName?: string;
   removedAt?: number;
 }
 
@@ -64,6 +65,8 @@ interface RunErrorDoc {
     errorLine: number;
     language: string;
   } | null;
+  fixable?: boolean | null;
+  relatedFiles?: string[] | null;
   workflowJob?: string | null;
 }
 
@@ -173,7 +176,7 @@ const formatErrorResponse = (e: RunErrorDoc) => ({
   severity: e.severity,
   source: e.source,
   ruleId: e.ruleId,
-  hints: e.hints?.map(scrubSecrets),
+  hints: e.hints ? e.hints.map(scrubSecrets) : null,
   stackTrace: e.stackTrace ? scrubSecrets(e.stackTrace) : null,
   codeSnippet: e.codeSnippet
     ? {
@@ -181,6 +184,8 @@ const formatErrorResponse = (e: RunErrorDoc) => ({
         lines: e.codeSnippet.lines.map(scrubSecrets),
       }
     : null,
+  fixable: e.fixable ?? false,
+  relatedFiles: e.relatedFiles ?? null,
   workflowJob: e.workflowJob,
 });
 
@@ -264,6 +269,79 @@ app.get("/", async (c) => {
       commit: fullCommitSha,
       repository: validated.repository,
       runs: latestRuns.map(formatRunResponse),
+      errors: errors.map(formatErrorResponse),
+    });
+  } finally {
+    c.executionCtx.waitUntil(pool.end());
+  }
+});
+
+app.get("/pr", async (c) => {
+  const auth = c.get("auth");
+  const projectId = c.req.query("projectId");
+  const prNumberStr = c.req.query("prNumber");
+
+  if (!projectId) {
+    return c.json({ error: "projectId query parameter is required" }, 400);
+  }
+
+  if (!prNumberStr) {
+    return c.json({ error: "prNumber query parameter is required" }, 400);
+  }
+
+  const prNumber = Number.parseInt(prNumberStr, 10);
+  if (Number.isNaN(prNumber) || prNumber <= 0 || prNumber > 2_147_483_647) {
+    return c.json({ error: "prNumber must be a positive integer" }, 400);
+  }
+
+  const convex = getConvexClient(c.env);
+  const project = (await convex.query("projects:getById", {
+    id: projectId,
+  })) as ProjectDoc | null;
+
+  if (!project || project.removedAt) {
+    return c.json({ error: "Project not found" }, 404);
+  }
+
+  const organization = (await convex.query("organizations:getById", {
+    id: project.organizationId,
+  })) as OrganizationDoc | null;
+
+  if (!organization) {
+    return c.json({ error: "Organization not found" }, 404);
+  }
+
+  const access = await verifyOrgAccess(auth.userId, organization, c.env);
+  if (!access.allowed) {
+    return c.json({ error: access.error }, 403);
+  }
+
+  const { db, pool } = getDb(c.env);
+  try {
+    const run = await runOps.getLatestByProjectPr(db, projectId, prNumber);
+    if (!run) {
+      return c.json(
+        {
+          commit: null,
+          repository: project.providerRepoFullName ?? null,
+          runs: [],
+          errors: [],
+        },
+        200
+      );
+    }
+
+    const runDoc = run as RunDoc;
+    const errors = (await runErrorOps.listByRunId(
+      db,
+      run.id,
+      1000
+    )) as RunErrorDoc[];
+
+    return c.json({
+      commit: runDoc.commitSha ?? null,
+      repository: runDoc.repository,
+      runs: [formatRunResponse(runDoc)],
       errors: errors.map(formatErrorResponse),
     });
   } finally {

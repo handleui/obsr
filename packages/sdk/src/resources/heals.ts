@@ -20,27 +20,37 @@ export class HealsResource {
     this.#client = client;
   }
 
-  /** List heals for a project */
-  async list(projectId: string): Promise<HealsResponse> {
+  /** List heals for a project PR */
+  async list(projectId: string, prNumber: number): Promise<HealsResponse> {
+    // Validate parameters
+    if (!projectId || projectId.trim() === "") {
+      throw new Error("Project ID must be a non-empty string");
+    }
+    if (!Number.isInteger(prNumber) || prNumber <= 0) {
+      throw new Error("PR number must be a positive integer");
+    }
+
+    return this.#client.request<HealsResponse>(
+      `/v1/heal?projectId=${encodeURIComponent(projectId)}&prNumber=${prNumber}`
+    );
+  }
+
+  /** Get pending heals for a project */
+  async pending(projectId: string): Promise<HealsResponse> {
     // Validate parameter
-    if (!projectId || typeof projectId !== "string" || projectId.trim() === "") {
+    if (!projectId || projectId.trim() === "") {
       throw new Error("Project ID must be a non-empty string");
     }
 
     return this.#client.request<HealsResponse>(
-      `/v1/heal?project_id=${encodeURIComponent(projectId)}`
+      `/v1/heal/pending?projectId=${encodeURIComponent(projectId)}`
     );
-  }
-
-  /** Get pending heals */
-  async pending(): Promise<HealsResponse> {
-    return this.#client.request<HealsResponse>("/v1/heal/pending");
   }
 
   /** Get heal details by ID */
   async get(healId: string): Promise<HealDetailsResponse> {
     // Validate parameter
-    if (!healId || typeof healId !== "string" || healId.trim() === "") {
+    if (!healId || healId.trim() === "") {
       throw new Error("Heal ID must be a non-empty string");
     }
 
@@ -49,26 +59,30 @@ export class HealsResource {
     );
   }
 
-  /** Trigger healing for specific errors */
-  async trigger(errorIds: string[]): Promise<TriggerHealResponse> {
-    // Validate parameter
-    if (!Array.isArray(errorIds) || errorIds.length === 0) {
-      throw new Error("Error IDs must be a non-empty array");
+  /** Trigger healing for a PR */
+  async trigger(
+    projectId: string,
+    prNumber: number,
+    type?: "autofix" | "heal"
+  ): Promise<TriggerHealResponse> {
+    // Validate parameters
+    if (!projectId || projectId.trim() === "") {
+      throw new Error("Project ID must be a non-empty string");
     }
-    if (!errorIds.every((id) => typeof id === "string" && id.trim() !== "")) {
-      throw new Error("All error IDs must be non-empty strings");
+    if (!Number.isInteger(prNumber) || prNumber <= 0) {
+      throw new Error("PR number must be a positive integer");
     }
 
     return this.#client.request<TriggerHealResponse>("/v1/heal/trigger", {
       method: "POST",
-      body: { error_ids: errorIds },
+      body: { projectId, prNumber, type: type ?? "autofix" },
     });
   }
 
   /** Trigger healing for a specific heal ID */
   async triggerById(healId: string): Promise<TriggerHealResponse> {
     // Validate parameter
-    if (!healId || typeof healId !== "string" || healId.trim() === "") {
+    if (!healId || healId.trim() === "") {
       throw new Error("Heal ID must be a non-empty string");
     }
 
@@ -81,7 +95,7 @@ export class HealsResource {
   /** Apply a completed heal to the PR */
   async apply(healId: string): Promise<ApplyHealResponse> {
     // Validate parameter
-    if (!healId || typeof healId !== "string" || healId.trim() === "") {
+    if (!healId || healId.trim() === "") {
       throw new Error("Heal ID must be a non-empty string");
     }
 
@@ -94,13 +108,11 @@ export class HealsResource {
   /** Reject a heal */
   async reject(healId: string, reason?: string): Promise<RejectHealResponse> {
     // Validate parameters
-    if (!healId || typeof healId !== "string" || healId.trim() === "") {
+    if (!healId || healId.trim() === "") {
       throw new Error("Heal ID must be a non-empty string");
     }
-    if (reason !== undefined && reason !== null) {
-      if (typeof reason !== "string" || reason.trim() === "") {
-        throw new Error("Reason must be a non-empty string if provided");
-      }
+    if (reason !== undefined && reason.trim() === "") {
+      throw new Error("Reason must be a non-empty string if provided");
     }
 
     return this.#client.request<RejectHealResponse>(

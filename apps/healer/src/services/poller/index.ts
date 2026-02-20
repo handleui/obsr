@@ -9,6 +9,7 @@ import { createConvexClient } from "../convex-client.js";
 import { createDbClient } from "../db-client.js";
 import { getInstallationToken } from "../github/token.js";
 import { executeHeal } from "../heal-executor.js";
+import { dispatchWebhookEvent } from "../webhook-dispatch.js";
 
 const MAX_PATCH_LENGTH = 1_000_000;
 
@@ -867,6 +868,7 @@ interface HandleHealOutcomeParams {
   convex: ConvexClient;
   appEnv: Env;
   heal: HealRow;
+  organizationId: string;
   installationId: number | null;
   repoFullName: string | null;
   newCheckRunId: string | undefined;
@@ -876,8 +878,15 @@ const handleHealSuccess = async (
   params: HandleHealOutcomeParams,
   result: HealResultData
 ): Promise<void> => {
-  const { convex, appEnv, heal, installationId, repoFullName, newCheckRunId } =
-    params;
+  const {
+    convex,
+    appEnv,
+    heal,
+    organizationId,
+    installationId,
+    repoFullName,
+    newCheckRunId,
+  } = params;
 
   await markHealCompleted(convex, heal.id, {
     patch: result.patch,
@@ -885,6 +894,24 @@ const handleHealSuccess = async (
     result: result.result,
   });
   console.log(`[poller] Heal ${heal.id} completed successfully`);
+
+  dispatchWebhookEvent(
+    convex,
+    appEnv.ENCRYPTION_KEY,
+    organizationId,
+    "heal.completed",
+    {
+      heal_id: heal.id,
+      type: heal.type as "autofix" | "heal",
+      status: "completed",
+      project_id: heal.projectId,
+      pr_number: heal.prNumber ?? null,
+      commit_sha: heal.commitSha ?? null,
+      patch: result.patch ?? null,
+      files_changed: result.filesChanged ?? null,
+      cost_usd: result.result.costUSD,
+    }
+  ).catch((err) => console.error("[webhook] Dispatch error:", err));
 
   await notifyHealCompletion({
     appEnv,
@@ -909,11 +936,40 @@ const handleHealFailure = async (
   params: HandleHealOutcomeParams,
   errorMessage: string
 ): Promise<void> => {
-  const { convex, appEnv, heal, installationId, repoFullName, newCheckRunId } =
-    params;
+  const {
+    convex,
+    appEnv,
+    heal,
+    organizationId,
+    installationId,
+    repoFullName,
+    newCheckRunId,
+  } = params;
 
   await markHealFailed(convex, heal.id, errorMessage);
   console.log(`[poller] Heal ${heal.id} failed: ${errorMessage}`);
+
+  if (organizationId) {
+    dispatchWebhookEvent(
+      convex,
+      appEnv.ENCRYPTION_KEY,
+      organizationId,
+      "heal.failed",
+      {
+        heal_id: heal.id,
+        type: heal.type as "autofix" | "heal",
+        status: "failed",
+        project_id: heal.projectId,
+        pr_number: heal.prNumber ?? null,
+        commit_sha: heal.commitSha ?? null,
+        failed_reason: errorMessage,
+      }
+    ).catch((err) => console.error("[webhook] Dispatch error:", err));
+  } else {
+    console.warn(
+      `[webhook] Skipping heal.failed dispatch for ${heal.id}: no organizationId`
+    );
+  }
 
   await notifyHealCompletion({
     appEnv,
@@ -942,6 +998,22 @@ const runHealPipeline = async (
   }
 
   const ctx = await resolveHealContext(convex, db, heal, appEnv);
+
+  dispatchWebhookEvent(
+    convex,
+    appEnv.ENCRYPTION_KEY,
+    ctx.project.organizationId,
+    "heal.running",
+    {
+      heal_id: heal.id,
+      type: heal.type as "autofix" | "heal",
+      status: "running",
+      project_id: heal.projectId,
+      pr_number: heal.prNumber ?? null,
+      commit_sha: heal.commitSha ?? null,
+    }
+  ).catch((err) => console.error("[webhook] Dispatch error:", err));
+
   const healModel = selectModelForErrors(ctx.errors);
   console.log(`[poller] Model: ${healModel} for ${ctx.errors.length} errors`);
 
@@ -967,6 +1039,7 @@ const runHealPipeline = async (
     convex,
     appEnv,
     heal,
+    organizationId: ctx.project.organizationId,
     installationId: ctx.installationId,
     repoFullName: ctx.project.providerRepoFullName,
     newCheckRunId,
@@ -999,6 +1072,7 @@ const processHeal = async (
         convex,
         appEnv,
         heal,
+        organizationId: "",
         installationId: null,
         repoFullName: null,
         newCheckRunId: undefined,

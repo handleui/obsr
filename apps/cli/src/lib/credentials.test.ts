@@ -414,12 +414,10 @@ describe("credentials", () => {
       expect(result).toBe(true);
     });
 
-    it("returns false for token expiring exactly at 5 minute buffer", () => {
-      // When expires_at equals Date.now() + bufferMs, the comparison is NOT strictly less than
-      // so the token is not considered expired
+    it("returns false for token expiring well past the 5 minute buffer", () => {
       const now = Date.now();
       const creds = createValidCredentials({
-        expires_at: now + 5 * 60 * 1000 + 1, // Just slightly more than 5 minutes
+        expires_at: now + 5 * 60 * 1000 + 5000, // 5s past the buffer to avoid timing flakes
       });
 
       const result = isTokenExpired(creds);

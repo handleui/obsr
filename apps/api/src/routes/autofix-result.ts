@@ -5,6 +5,7 @@
  * Authenticated via API key (X-Detent-Token header).
  */
 
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { getConvexClient } from "../db/convex";
 import {
@@ -14,6 +15,7 @@ import {
   updateHealStatus,
 } from "../db/operations/heals";
 import { getOrgSettings, type OrganizationSettings } from "../lib/org-settings";
+import { dispatchWebhookEvent } from "../lib/webhook-dispatch";
 import { apiKeyAuthMiddleware } from "../middleware/api-key-auth";
 import { apiKeyRateLimitMiddleware } from "../middleware/api-key-rate-limit";
 import { generateAutofixCommitMessage } from "../services/autofix/commit-message";
@@ -506,6 +508,54 @@ const processSingleResult = async (
 };
 
 // ============================================================================
+// Webhook Dispatch Helper
+// ============================================================================
+
+const AUTOFIX_EVENT_MAP: Record<
+  string,
+  "heal.completed" | "heal.applied" | "heal.failed" | undefined
+> = {
+  completed: "heal.completed",
+  applied: "heal.applied",
+  failed: "heal.failed",
+};
+
+const dispatchAutofixWebhooks = (
+  c: Context<{ Bindings: Env }>,
+  convex: ReturnType<typeof getConvexClient>,
+  organizationId: string,
+  projectId: string,
+  prNumber: number,
+  processed: ProcessedResult[]
+) => {
+  const encryptionKey = c.env.ENCRYPTION_KEY;
+  if (!encryptionKey) {
+    return;
+  }
+
+  for (const p of processed) {
+    const event = AUTOFIX_EVENT_MAP[p.status];
+    if (!(event && p.healId)) {
+      continue;
+    }
+
+    c.executionCtx.waitUntil(
+      dispatchWebhookEvent(convex, encryptionKey, organizationId, event, {
+        heal_id: p.healId,
+        type: "autofix",
+        status: p.status,
+        project_id: projectId,
+        pr_number: prNumber,
+        commit_sha: p.commitSha ?? null,
+        applied_commit_sha:
+          p.status === "applied" ? (p.commitSha ?? null) : null,
+        failed_reason: p.status === "failed" ? (p.error ?? null) : null,
+      })
+    );
+  }
+};
+
+// ============================================================================
 // Route
 // ============================================================================
 
@@ -618,6 +668,15 @@ app.post("/", async (c) => {
       );
       processed.push(processedResult);
     }
+
+    dispatchAutofixWebhooks(
+      c,
+      convex,
+      organizationId,
+      projectId,
+      prNumber,
+      processed
+    );
 
     return c.json({ success: true, received: processed.length, processed });
   } catch (error) {

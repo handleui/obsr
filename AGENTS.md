@@ -97,6 +97,13 @@ Biome/Ultracite handles standard linting. Project-specific only:
 - Extremely concise plans. Sacrifice grammar for brevity.
 - End with unresolved questions if any.
 
+## Local Dev (portless)
+
+- **Navigator**: `http://navigator.localhost:1355`
+- **Web**: `http://detent.localhost:1355`
+- **API**: `http://detent-backend.localhost:1355`
+- **Healer**: `http://healer.localhost:1355`
+
 ## Production
 
 - **App**: `detent.sh`

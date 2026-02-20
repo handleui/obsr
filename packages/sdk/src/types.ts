@@ -1,6 +1,14 @@
-export type AuthConfig =
-  | { type: "apiKey"; token: string }
-  | { type: "jwt"; token: string };
+export interface AuthConfigApiKey {
+  type: "apiKey";
+  token: string;
+}
+
+export interface AuthConfigJwt {
+  type: "jwt";
+  token: string;
+}
+
+export type AuthConfig = AuthConfigApiKey | AuthConfigJwt;
 
 export interface DetentConfig {
   baseUrl?: string;
@@ -90,6 +98,10 @@ export interface ProjectDetailsResponse extends Project {
 
 export type MemberRole = "owner" | "admin" | "member" | "visitor";
 
+export type InvitationRole = "admin" | "member" | "visitor";
+
+export type InvitationStatus = "pending" | "accepted" | "expired" | "revoked";
+
 export interface OrganizationMember {
   user_id: string;
   role: MemberRole;
@@ -134,6 +146,13 @@ export interface RunInfo {
   completedAt: string | null;
 }
 
+export interface CodeSnippet {
+  lines: string[];
+  startLine: number;
+  errorLine: number;
+  language: string;
+}
+
 export interface ErrorInfo {
   id: string;
   filePath: string | null;
@@ -144,7 +163,11 @@ export interface ErrorInfo {
   severity: string | null;
   source: string | null;
   ruleId: string | null;
-  hint: string | null;
+  hints: string[] | null;
+  stackTrace: string | null;
+  codeSnippet: CodeSnippet | null;
+  fixable: boolean;
+  relatedFiles: string[] | null;
   workflowJob: string | null;
 }
 
@@ -155,8 +178,6 @@ export interface ErrorsResponse {
   errors: ErrorInfo[];
 }
 
-export type InvitationRole = "admin" | "member" | "visitor";
-export type InvitationStatus = "pending" | "accepted" | "expired" | "revoked";
 
 export interface Invitation {
   id: string;
@@ -186,8 +207,9 @@ export interface RevokeInvitationResponse {
 }
 
 export type HealStatus =
+  | "found"
   | "pending"
-  | "in_progress"
+  | "running"
   | "completed"
   | "failed"
   | "rejected"
@@ -195,33 +217,131 @@ export type HealStatus =
 
 export interface Heal {
   id: string;
-  project_id: string;
-  pr_number: number;
+  type: string;
   status: HealStatus;
-  error_ids: string[];
-  patch?: string;
-  created_at: string;
-  updated_at: string;
+  commitSha: string | null;
+  prNumber: number | null;
+  errorIds: string[];
+  signatureIds: string[] | null;
+  patch: string | null;
+  commitMessage: string | null;
+  filesChanged: string[] | null;
+  autofixSource: string | null;
+  autofixCommand: string | null;
+  healResult: unknown | null;
+  costUsd: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  appliedAt: string | null;
+  appliedCommitSha: string | null;
+  rejectedAt: string | null;
+  rejectedBy: string | null;
+  rejectionReason: string | null;
+  failedReason: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface HealsResponse {
   heals: Heal[];
 }
 
-export interface HealDetailsResponse extends Heal {
-  errors: ErrorInfo[];
+export interface HealDetailsResponse {
+  heal: Heal & {
+    runId: string | null;
+    projectId: string;
+  };
 }
 
 export interface TriggerHealResponse {
-  heal_id: string;
-  status: HealStatus;
+  success: boolean;
+  message: string;
+  projectId: string;
+  prNumber: number;
+  healsCreated: number;
+  healIds: string[];
+  autofixes: unknown[];
 }
 
 export interface ApplyHealResponse {
   success: boolean;
-  commit_sha?: string;
+  commitSha?: string;
+  commitUrl?: string;
+  alreadyApplied?: boolean;
 }
 
 export interface RejectHealResponse {
   success: boolean;
+  message: string;
+}
+
+export type WebhookEventType =
+  | "heal.pending"
+  | "heal.running"
+  | "heal.completed"
+  | "heal.applied"
+  | "heal.rejected"
+  | "heal.failed";
+
+export interface Webhook {
+  id: string;
+  url: string;
+  name: string;
+  events: WebhookEventType[];
+  secret_prefix: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateWebhookRequest {
+  url: string;
+  name: string;
+  events: WebhookEventType[];
+}
+
+export interface CreateWebhookResponse extends Webhook {
+  secret: string;
+}
+
+export interface UpdateWebhookRequest {
+  url?: string;
+  name?: string;
+  events?: WebhookEventType[];
+  active?: boolean;
+}
+
+export interface WebhooksResponse {
+  webhooks: Webhook[];
+}
+
+export interface WebhookResponse {
+  webhook: Webhook;
+}
+
+export interface DeleteWebhookResponse {
+  success: boolean;
+  deleted_id: string;
+}
+
+export interface WebhookHealData {
+  heal_id: string;
+  type: "autofix" | "heal";
+  status: string;
+  project_id: string;
+  pr_number: number | null;
+  commit_sha: string | null;
+  patch?: string | null;
+  files_changed?: string[] | null;
+  applied_commit_sha?: string | null;
+  failed_reason?: string | null;
+  cost_usd?: number | null;
+}
+
+export interface WebhookPayload {
+  id: string;
+  event: WebhookEventType;
+  timestamp: string;
+  organization_id: string;
+  data: WebhookHealData;
 }

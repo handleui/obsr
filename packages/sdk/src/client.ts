@@ -6,6 +6,7 @@ import { InvitationsResource } from "./resources/invitations.js";
 import { MembersResource } from "./resources/members.js";
 import { OrganizationsResource } from "./resources/organizations.js";
 import { ProjectsResource } from "./resources/projects.js";
+import { WebhooksResource } from "./resources/webhooks.js";
 import type { AuthConfig, DetentConfig } from "./types.js";
 import { sanitizeCredentials } from "./utils/sanitize.js";
 
@@ -40,7 +41,7 @@ const validateAuth = (auth: AuthConfig): void => {
 };
 
 interface RequestOptions {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   headers?: Record<string, string>;
 }
@@ -62,6 +63,7 @@ export class DetentClient {
   readonly organizations: OrganizationsResource;
   readonly members: MembersResource;
   readonly invitations: InvitationsResource;
+  readonly webhooks: WebhooksResource;
 
   constructor(config: DetentConfig) {
     const baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
@@ -85,6 +87,7 @@ export class DetentClient {
     this.organizations = new OrganizationsResource(this);
     this.members = new MembersResource(this);
     this.invitations = new InvitationsResource(this);
+    this.webhooks = new WebhooksResource(this);
   }
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {

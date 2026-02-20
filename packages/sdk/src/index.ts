@@ -13,3 +13,8 @@ export {
   type OrganizationStatusResponse,
 } from "./resources/organizations.js";
 export { ProjectsResource } from "./resources/projects.js";
+export { WebhooksResource } from "./resources/webhooks.js";
+export {
+  verifyWebhookSignature,
+  type VerifyWebhookOptions,
+} from "./utils/verify-webhook.js";

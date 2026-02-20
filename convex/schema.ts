@@ -50,6 +50,15 @@ const jobConclusion = v.union(
   v.literal("startup_failure")
 );
 
+const webhookEvent = v.union(
+  v.literal("heal.pending"),
+  v.literal("heal.running"),
+  v.literal("heal.completed"),
+  v.literal("heal.applied"),
+  v.literal("heal.rejected"),
+  v.literal("heal.failed")
+);
+
 const organizationSettings = v.object({
   enableInlineAnnotations: v.optional(nullableBoolean),
   enablePrComments: v.optional(nullableBoolean),
@@ -272,6 +281,20 @@ export default defineSchema({
   })
     .index("by_org", ["organizationId"])
     .index("by_key_hash", ["keyHash"]),
+
+  webhooks: defineTable({
+    organizationId: v.id("organizations"),
+    url: v.string(),
+    name: v.string(),
+    events: v.array(webhookEvent),
+    secretEncrypted: v.string(),
+    secretPrefix: v.string(),
+    active: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_org", ["organizationId"])
+    .index("by_org_active", ["organizationId", "active"]),
 
   prComments: defineTable({
     repository: v.string(),

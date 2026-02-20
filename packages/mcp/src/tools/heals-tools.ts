@@ -10,13 +10,15 @@ export const registerHealsTools = (server: McpServer, client: DetentClient) => {
     "detent_list_heals",
     {
       description:
-        "List AI healing attempts for a project. Returns heals with status, associated errors, and patches.",
+        "List AI healing attempts for a project PR. Returns heals with status, associated errors, and patches.",
       inputSchema: {
         project_id: z.string().describe("Project ID"),
+        pr_number: z.number().int().positive().describe("PR number"),
       },
     },
-    wrapHandler<{ project_id: string }>(async ({ project_id }) =>
-      client.heals.list(project_id)
+    wrapHandler<{ project_id: string; pr_number: number }>(
+      async ({ project_id, pr_number }) =>
+        client.heals.list(project_id, pr_number)
     )
   );
 
@@ -38,13 +40,22 @@ export const registerHealsTools = (server: McpServer, client: DetentClient) => {
     "detent_trigger_heal",
     {
       description:
-        "Trigger AI healing for specific CI errors. The healing process will analyze the errors and generate a fix patch.",
+        "Trigger AI healing for a PR. The healing process will analyze fixable errors and generate fix patches.",
       inputSchema: {
-        error_ids: z.array(z.string()).describe("Error IDs to heal"),
+        project_id: z.string().describe("Project ID"),
+        pr_number: z.number().int().positive().describe("PR number"),
+        type: z
+          .enum(["autofix", "heal"])
+          .optional()
+          .describe("Heal type (default: autofix)"),
       },
     },
-    wrapHandler<{ error_ids: string[] }>(async ({ error_ids }) =>
-      client.heals.trigger(error_ids)
+    wrapHandler<{
+      project_id: string;
+      pr_number: number;
+      type?: "autofix" | "heal";
+    }>(async ({ project_id, pr_number, type }) =>
+      client.heals.trigger(project_id, pr_number, type)
     )
   );
 

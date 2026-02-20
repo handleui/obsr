@@ -23,6 +23,7 @@
     "@detent/sentry": "workspace:*",
     "@detent/sandbox": "*",
     "@detent/types": "*",
+    "@detent/webhook-dispatch": "*",
     "@hono/zod-openapi": "^1.2.0",
     "@polar-sh/sdk": "^0.42.2",
     "@react-email/components": "^0.0.34",

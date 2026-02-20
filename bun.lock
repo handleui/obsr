@@ -32,6 +32,7 @@
         "@detent/sandbox": "*",
         "@detent/sentry": "workspace:*",
         "@detent/types": "*",
+        "@detent/webhook-dispatch": "*",
         "@hono/zod-openapi": "^1.2.0",
         "@polar-sh/sdk": "^0.42.2",
         "@react-email/components": "^0.0.34",
@@ -112,6 +113,7 @@
         "@detent/healing": "*",
         "@detent/sandbox": "*",
         "@detent/types": "*",
+        "@detent/webhook-dispatch": "*",
         "convex": "^1.31.7",
         "hono": "^4.7.4",
         "jose": "^6.0.10",
@@ -403,6 +405,14 @@
         "typescript": "^5.9.3",
       },
     },
+    "packages/webhook-dispatch": {
+      "name": "@detent/webhook-dispatch",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@detent/typescript-config": "*",
+        "typescript": "^5.9.3",
+      },
+    },
   },
   "trustedDependencies": [
     "sharp",
@@ -559,6 +569,8 @@
     "@detent/ui": ["@detent/ui@workspace:packages/ui"],
 
     "@detent/web": ["@detent/web@workspace:apps/web"],
+
+    "@detent/webhook-dispatch": ["@detent/webhook-dispatch@workspace:packages/webhook-dispatch"],
 
     "@drizzle-team/brocli": ["@drizzle-team/brocli@0.10.2", "", {}, "sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w=="],
 

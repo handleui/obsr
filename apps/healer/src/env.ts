@@ -21,6 +21,8 @@ export interface Env {
   GITHUB_API_INITIAL_DELAY_MS: number;
   /** GitHub API retry config - backoff multiplier for subsequent retries (default: 2) */
   GITHUB_API_BACKOFF_MULTIPLIER: number;
+  /** Base64-encoded AES-GCM key for decrypting webhook secrets */
+  ENCRYPTION_KEY: string;
 }
 
 const validateRequired = (name: string, value: string | undefined): string => {
@@ -106,6 +108,10 @@ const loadEnv = (): Env => {
     ),
     NAVIGATOR_BASE_URL:
       process.env.NAVIGATOR_BASE_URL ?? "https://navigator.detent.sh",
+    ENCRYPTION_KEY: validateRequired(
+      "ENCRYPTION_KEY",
+      process.env.ENCRYPTION_KEY
+    ),
   };
 };
 

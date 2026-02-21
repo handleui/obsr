@@ -1,5 +1,6 @@
 import { createGateway } from "@ai-sdk/gateway";
 import {
+  createCachePrepareStep,
   DEFAULT_FAST_MODEL,
   DEFAULT_TIMEOUT_MS,
   estimateCost,
@@ -29,6 +30,10 @@ import {
 const FILTERED_ONLY_PATTERN = /^\s*(?:\[FILTERED\]\s*)+$/;
 
 const EXTRACTION_OUTPUT = Output.object({ schema: ExtractionResultSchema });
+
+// Re-use a single prepareStep callback so the system prompt is cached across
+// extractions that hit the same Anthropic endpoint within the 5-minute window.
+const CACHE_PREPARE_STEP = createCachePrepareStep();
 
 const resolveModel = (modelId: string, apiKey?: string) => {
   if (!apiKey) {
@@ -200,6 +205,7 @@ export const extractErrors = async (
       prompt: buildUserPrompt(prep.prepared),
       maxOutputTokens: options?.maxOutputTokens ?? 4096,
       abortSignal: prep.abortSignal,
+      prepareStep: CACHE_PREPARE_STEP,
     });
 
     if (!output) {

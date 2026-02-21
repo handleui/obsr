@@ -621,10 +621,11 @@ const storeLogsInR2 = async (
   ctx: ExtractionContext,
   logs: string
 ): Promise<string | null> => {
-  const logBytes = new Blob([logs]).size;
-  if (logBytes > MAX_R2_LOG_BYTES) {
+  // CI logs are overwhelmingly ASCII, so string length ≈ byte length.
+  // Avoid allocating a Blob just for the size check.
+  if (logs.length > MAX_R2_LOG_BYTES) {
     console.warn(
-      `${LOG_PREFIX} ${ctx.logCtx}: Log too large for R2 (${(logBytes / 1024 / 1024).toFixed(1)} MB), skipping storage`
+      `${LOG_PREFIX} ${ctx.logCtx}: Log too large for R2 (${(logs.length / 1024 / 1024).toFixed(1)} MB), skipping storage`
     );
     return null;
   }
@@ -803,9 +804,13 @@ export const extractAndStoreErrors = async (
     return;
   }
 
-  const [extraction, logR2Key] = await Promise.all([
+  // Parallelize: extraction, R2 storage, line counting, and PR lookup all run concurrently
+  const { db: sqlDb, pool } = getDb(env);
+  const [extraction, logR2Key, totalLogLines, prNumber] = await Promise.all([
     runExtraction(env, scrubSecrets(logs.slice(0, SCRUB_PRE_SLICE)), ctx),
     storeLogsInR2(env, project.organizationId, ctx, logs),
+    Promise.resolve(countLines(logs)),
+    findPrNumber(sqlDb, ctx.repository, ctx.commitSha),
   ]);
 
   if (
@@ -831,7 +836,6 @@ export const extractAndStoreErrors = async (
     });
   }
 
-  const { db: sqlDb, pool } = getDb(env);
   try {
     const pipeline: ExtractionPipelineContext = {
       sqlDb,
@@ -840,8 +844,8 @@ export const extractAndStoreErrors = async (
       project,
       extraction,
       logR2Key,
-      totalLogLines: countLines(logs),
-      prNumber: await findPrNumber(sqlDb, ctx.repository, ctx.commitSha),
+      totalLogLines,
+      prNumber,
       conclusion: sanitizeField(
         payload.workflow_job.conclusion ?? "failure",
         50

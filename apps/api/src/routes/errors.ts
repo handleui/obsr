@@ -175,12 +175,14 @@ const validateCommitAmbiguity = (
 };
 
 const deduplicateRunsByLatestAttempt = (commitRuns: RunDoc[]): RunDoc[] => {
-  const sortedRuns = [...commitRuns].sort(
-    (a, b) => b.runAttempt - a.runAttempt
-  );
+  // Single pass: keep the run with the highest attempt per runId (avoids sort)
   const latestRunsMap = new Map<string, RunDoc>();
-  for (const run of sortedRuns) {
-    if (run.runId && !latestRunsMap.has(run.runId)) {
+  for (const run of commitRuns) {
+    if (!run.runId) {
+      continue;
+    }
+    const existing = latestRunsMap.get(run.runId);
+    if (!existing || run.runAttempt > existing.runAttempt) {
       latestRunsMap.set(run.runId, run);
     }
   }
@@ -200,6 +202,10 @@ const formatRunResponse = (r: RunDoc) => ({
     : null,
 });
 
+// Only call scrubSecrets on non-empty strings to avoid unnecessary work
+const scrubField = (value: string | null | undefined): string | null =>
+  value ? scrubSecrets(value) : null;
+
 const formatErrorResponse = (e: RunErrorDoc) => ({
   id: e.id,
   filePath: e.filePath,
@@ -211,7 +217,7 @@ const formatErrorResponse = (e: RunErrorDoc) => ({
   source: e.source,
   ruleId: e.ruleId,
   hints: e.hints ? e.hints.map(scrubSecrets) : null,
-  stackTrace: e.stackTrace ? scrubSecrets(e.stackTrace) : null,
+  stackTrace: scrubField(e.stackTrace),
   codeSnippet: e.codeSnippet
     ? {
         ...e.codeSnippet,
@@ -220,9 +226,9 @@ const formatErrorResponse = (e: RunErrorDoc) => ({
     : null,
   fixable: e.fixable ?? false,
   relatedFiles: e.relatedFiles ?? null,
-  workflowJob: e.workflowJob ? scrubSecrets(e.workflowJob) : null,
-  workflowStep: e.workflowStep ? scrubSecrets(e.workflowStep) : null,
-  workflowAction: e.workflowAction ? scrubSecrets(e.workflowAction) : null,
+  workflowJob: scrubField(e.workflowJob),
+  workflowStep: scrubField(e.workflowStep),
+  workflowAction: scrubField(e.workflowAction),
   logLineStart: e.logLineStart ?? null,
   logLineEnd: e.logLineEnd ?? null,
   createdAt: new Date(e.createdAt).toISOString(),
@@ -296,6 +302,9 @@ app.get("/", async (c) => {
       5000
     )) as RunErrorDoc[];
 
+    // Short cache for SDK consumers — errors are immutable once stored,
+    // but new runs may appear, so keep TTL low
+    c.header("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
     return c.json({
       commit: fullCommitSha,
       repository: validated.repository,
@@ -360,6 +369,7 @@ app.get("/pr", async (c) => {
       1000
     )) as RunErrorDoc[];
 
+    c.header("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
     return c.json({
       commit: runDoc.commitSha ?? null,
       repository: runDoc.repository,

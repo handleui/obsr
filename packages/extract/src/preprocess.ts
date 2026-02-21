@@ -111,8 +111,11 @@ const PKG_MANAGER_NOISE = /^\s*(?:npm|yarn)\s+(?:warn|warning|notice)\b/i;
 const isSignalLine = (line: string): boolean => {
   // Fast path: most CI error lines contain diagnostic keywords — check first
   if (IMPORTANT_PATTERN.test(line)) {
-    // Even if it matches noise, signal wins unless it's just a package manager warning
-    return !PKG_MANAGER_NOISE.test(line);
+    // Even if it matches noise, signal wins unless it's a package manager warning that is also noise
+    if (PKG_MANAGER_NOISE.test(line) && NOISE_PATTERN.test(line)) {
+      return false;
+    }
+    return true;
   }
   // No diagnostic keywords — check if it matches noise patterns
   return !NOISE_PATTERN.test(line);

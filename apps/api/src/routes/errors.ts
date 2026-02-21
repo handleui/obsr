@@ -304,7 +304,7 @@ app.get("/", async (c) => {
 
     // Short cache for SDK consumers — errors are immutable once stored,
     // but new runs may appear, so keep TTL low
-    c.header("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
+    c.header("Cache-Control", "private, max-age=30, stale-while-revalidate=60");
     return c.json({
       commit: fullCommitSha,
       repository: validated.repository,
@@ -369,7 +369,7 @@ app.get("/pr", async (c) => {
       1000
     )) as RunErrorDoc[];
 
-    c.header("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
+    c.header("Cache-Control", "private, max-age=30, stale-while-revalidate=60");
     return c.json({
       commit: runDoc.commitSha ?? null,
       repository: runDoc.repository,

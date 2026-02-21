@@ -806,37 +806,37 @@ export const extractAndStoreErrors = async (
 
   // Parallelize: extraction, R2 storage, line counting, and PR lookup all run concurrently
   const { db: sqlDb, pool } = getDb(env);
-  const [extraction, logR2Key, totalLogLines, prNumber] = await Promise.all([
-    runExtraction(env, scrubSecrets(logs.slice(0, SCRUB_PRE_SLICE)), ctx),
-    storeLogsInR2(env, project.organizationId, ctx, logs),
-    Promise.resolve(countLines(logs)),
-    findPrNumber(sqlDb, ctx.repository, ctx.commitSha),
-  ]);
-
-  if (
-    extraction.status === "success" &&
-    extraction.usage &&
-    extraction.costUsd != null
-  ) {
-    recordAIUsage(
-      env,
-      project.organizationId,
-      undefined,
-      {
-        model: extraction.model ?? DEFAULT_FAST_MODEL,
-        inputTokens: extraction.usage.inputTokens,
-        outputTokens: extraction.usage.outputTokens,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
-        costUSD: extraction.costUsd,
-      },
-      false
-    ).catch((err) => {
-      console.error(`${LOG_PREFIX} Failed to record extraction usage:`, err);
-    });
-  }
-
   try {
+    const [extraction, logR2Key, totalLogLines, prNumber] = await Promise.all([
+      runExtraction(env, scrubSecrets(logs.slice(0, SCRUB_PRE_SLICE)), ctx),
+      storeLogsInR2(env, project.organizationId, ctx, logs),
+      Promise.resolve(countLines(logs)),
+      findPrNumber(sqlDb, ctx.repository, ctx.commitSha),
+    ]);
+
+    if (
+      extraction.status === "success" &&
+      extraction.usage &&
+      extraction.costUsd != null
+    ) {
+      recordAIUsage(
+        env,
+        project.organizationId,
+        undefined,
+        {
+          model: extraction.model ?? DEFAULT_FAST_MODEL,
+          inputTokens: extraction.usage.inputTokens,
+          outputTokens: extraction.usage.outputTokens,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+          costUSD: extraction.costUsd,
+        },
+        false
+      ).catch((err) => {
+        console.error(`${LOG_PREFIX} Failed to record extraction usage:`, err);
+      });
+    }
+
     const pipeline: ExtractionPipelineContext = {
       sqlDb,
       env,

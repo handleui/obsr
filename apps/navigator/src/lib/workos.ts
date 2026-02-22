@@ -36,11 +36,14 @@ const getWorkOSClientIdForInit = () => {
   return clientId;
 };
 
-/**
- * WorkOS client instance
- * clientId is required for sealed session methods (loadSealedSession, refreshAndSealSessionData)
- * Initialization validates credentials and fails fast if misconfigured
- */
-export const workos = new WorkOS(getWorkOSApiKey(), {
-  clientId: getWorkOSClientIdForInit(),
-});
+// HACK: Lazy-init to avoid throwing at module evaluation during Next.js SSG build
+let _workos: WorkOS | undefined;
+
+export const getWorkOS = () => {
+  if (!_workos) {
+    _workos = new WorkOS(getWorkOSApiKey(), {
+      clientId: getWorkOSClientIdForInit(),
+    });
+  }
+  return _workos;
+};

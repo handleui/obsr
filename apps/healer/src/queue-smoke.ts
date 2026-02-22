@@ -1,86 +1,16 @@
 import { type Db, runErrorOps, runOps } from "@detent/db";
 import { ConvexHttpClient } from "convex/browser";
 import type { FunctionReference } from "convex/server";
+import {
+  type ConvexMethod,
+  wrapWithServiceToken,
+} from "./services/convex-client.js";
 import { createDbClient } from "./services/db-client.js";
 
-const securedFunctions = new Set([
-  "api_keys:create",
-  "api_keys:getById",
-  "api_keys:getByKeyHash",
-  "api_keys:listByOrg",
-  "api_keys:updateLastUsedAt",
-  "api_keys:update",
-  "api_keys:remove",
-  "heals:create",
-  "heals:get",
-  "heals:getByPr",
-  "heals:getByProjectStatus",
-  "heals:getActiveByProject",
-  "heals:getByRunId",
-  "heals:getPending",
-  "heals:updateStatus",
-  "heals:apply",
-  "heals:reject",
-  "heals:trigger",
-  "heals:setCheckRunId",
-  "heals:markStaleAsFailed",
-  "organizations:create",
-  "organizations:getById",
-  "organizations:getBySlug",
-  "organizations:getByProviderAccount",
-  "organizations:getByProviderAccountLogin",
-  "organizations:listByProviderAccountIds",
-  "organizations:listByInstallerGithubId",
-  "organizations:listByEnterprise",
-  "organizations:listByProviderInstallationId",
-  "organizations:list",
-  "organizations:listActiveGithub",
-  "organizations:update",
-  "projects:create",
-  "projects:getById",
-  "projects:listByOrg",
-  "projects:countByOrg",
-  "projects:getByOrgHandle",
-  "projects:getByOrgRepo",
-  "projects:getByRepoFullName",
-  "projects:getByRepoId",
-  "projects:listByRepoIds",
-  "projects:update",
-  "projects:reactivate",
-  "projects:syncFromGitHub",
-  "projects:clearRemovedByOrg",
-  "projects:softDeleteByRepoIds",
-]);
+const MAX_RUN_FETCH_LIMIT = 200;
+const MAX_ERROR_FETCH_LIMIT = 1000;
 
-const withServiceToken = (
-  args: Record<string, unknown> | undefined,
-  serviceToken: string
-): Record<string, unknown> => ({
-  ...(args ?? {}),
-  serviceToken,
-});
-
-type ConvexMethod = (
-  name: string,
-  args?: Record<string, unknown>
-) => Promise<unknown>;
-
-const wrapWithServiceToken =
-  (baseFn: ConvexMethod, serviceToken: string): ConvexMethod =>
-  (name: string, args?: Record<string, unknown>) => {
-    if (!securedFunctions.has(name)) {
-      return baseFn(name, args);
-    }
-    return baseFn(
-      name,
-      withServiceToken(
-        args as Record<string, unknown> | undefined,
-        serviceToken
-      )
-    );
-  };
-
-const createConvexClient = (
+const createHttpConvexClient = (
   url: string,
   serviceToken: string
 ): ConvexHttpClient => {
@@ -132,18 +62,36 @@ const parseNumber = (
   return parsed;
 };
 
+const mapRun = (run: {
+  id: string;
+  projectId?: string | null;
+  commitSha?: string | null;
+  prNumber?: number | null;
+  receivedAt?: number | null;
+}): RunRow => ({
+  id: run.id,
+  projectId: run.projectId ?? null,
+  commitSha: run.commitSha ?? null,
+  prNumber: run.prNumber ?? null,
+  receivedAt: run.receivedAt ?? null,
+});
+
 const fetchRunById = async (db: Db, runId: string): Promise<RunRow | null> => {
   const run = await runOps.getById(db, runId);
-  if (!run) {
-    return null;
-  }
-  return {
-    id: run.id,
-    projectId: run.projectId ?? null,
-    commitSha: run.commitSha ?? null,
-    prNumber: run.prNumber ?? null,
-    receivedAt: run.receivedAt ?? null,
-  };
+  return run ? mapRun(run) : null;
+};
+
+const fetchRunErrors = async (
+  db: Db,
+  runId: string
+): Promise<RunErrorRow[]> => {
+  const rows = await runErrorOps.listByRunId(db, runId, MAX_ERROR_FETCH_LIMIT);
+
+  return rows.map((row) => ({
+    id: row.id,
+    signatureId: row.signatureId ?? null,
+    fixable: row.fixable === true,
+  }));
 };
 
 const fetchLatestFixableRun = async (
@@ -153,19 +101,13 @@ const fetchLatestFixableRun = async (
 ): Promise<RunRow | null> => {
   let rows: Awaited<ReturnType<typeof runOps.listByProject>> = [];
   if (projectId) {
-    rows = await runOps.listByProject(db, projectId, 200);
+    rows = await runOps.listByProject(db, projectId, MAX_RUN_FETCH_LIMIT);
   } else if (prNumber) {
-    rows = await runOps.listByPrNumber(db, prNumber, 200);
+    rows = await runOps.listByPrNumber(db, prNumber, MAX_RUN_FETCH_LIMIT);
   }
 
   const sorted = rows
-    .map((run) => ({
-      id: run.id,
-      projectId: run.projectId ?? null,
-      commitSha: run.commitSha ?? null,
-      prNumber: run.prNumber ?? null,
-      receivedAt: run.receivedAt ?? null,
-    }))
+    .map(mapRun)
     .sort((a, b) => (b.receivedAt ?? 0) - (a.receivedAt ?? 0));
 
   for (const run of sorted) {
@@ -179,19 +121,6 @@ const fetchLatestFixableRun = async (
   }
 
   return null;
-};
-
-const fetchRunErrors = async (
-  db: Db,
-  runId: string
-): Promise<RunErrorRow[]> => {
-  const rows = await runErrorOps.listByRunId(db, runId, 1000);
-
-  return rows.map((row) => ({
-    id: row.id,
-    signatureId: row.signatureId ?? null,
-    fixable: row.fixable === true,
-  }));
 };
 
 const ensureProjectExists = async (
@@ -267,7 +196,10 @@ const resolveFixableRun = async (
 
 const main = async (): Promise<void> => {
   const smokeEnv = loadSmokeEnv();
-  const convex = createConvexClient(smokeEnv.convexUrl, smokeEnv.serviceToken);
+  const convex = createHttpConvexClient(
+    smokeEnv.convexUrl,
+    smokeEnv.serviceToken
+  );
   const { db, pool } = createDbClient(smokeEnv.databaseUrl);
 
   try {

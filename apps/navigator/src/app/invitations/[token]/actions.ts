@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { getWorkOSCookiePassword } from "@/lib/auth";
 import { API_BASE_URL, COOKIE_NAMES } from "@/lib/constants";
 import { isValidTokenFormat } from "@/lib/validation";
-import { workos } from "@/lib/workos";
+import { getWorkOS } from "@/lib/workos";
 
 export interface AcceptState {
   success: boolean;
@@ -93,7 +93,7 @@ const getAccessToken = async (): Promise<string | null> => {
 
   try {
     const cookiePassword = getWorkOSCookiePassword();
-    const session = workos.userManagement.loadSealedSession({
+    const session = getWorkOS().userManagement.loadSealedSession({
       sessionData: sealedSession,
       cookiePassword,
     });

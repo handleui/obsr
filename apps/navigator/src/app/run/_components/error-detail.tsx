@@ -344,6 +344,27 @@ const ErrorDetailHeader = ({
   </div>
 );
 
+const ErrorCardWithHeal = ({
+  error,
+  index,
+  onHeal,
+}: {
+  error: ErrorDetailData;
+  index: number;
+  onHeal?: (id: string) => void;
+}) => {
+  const handleHeal = useCallback(() => onHeal?.(error.id), [error.id, onHeal]);
+
+  return (
+    <div>
+      {index > 0 && (
+        <div className="-mt-px h-7 border-subtle border-y bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,var(--color-subtle)_4px,var(--color-subtle)_5px)]" />
+      )}
+      <ErrorCard error={error} onHeal={onHeal ? handleHeal : undefined} />
+    </div>
+  );
+};
+
 const ErrorCardList = ({
   errors,
   onHeal,
@@ -353,15 +374,12 @@ const ErrorCardList = ({
 }) => (
   <div className="flex flex-col">
     {errors.map((error, i) => (
-      <div key={error.id}>
-        {i > 0 && (
-          <div className="-mt-px h-7 border-subtle border-y bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,#e8e8e8_4px,#e8e8e8_5px)]" />
-        )}
-        <ErrorCard
-          error={error}
-          onHeal={onHeal ? () => onHeal(error.id) : undefined}
-        />
-      </div>
+      <ErrorCardWithHeal
+        error={error}
+        index={i}
+        key={error.id}
+        onHeal={onHeal}
+      />
     ))}
   </div>
 );

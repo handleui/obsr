@@ -11,40 +11,18 @@
  * - PUT requests cost 5 points each toward secondary limits
  */
 
+import { GITHUB_API } from "../services/github/validation";
+import { sleep } from "./async";
 import { encryptSecretForGitHub } from "./github-crypto";
 
-const GITHUB_API = "https://api.github.com";
-
-/**
- * Concurrency, timeout and retry configuration
- * - MAX_CONCURRENT: Stay well under GitHub's 100 concurrent request limit
- * - TIMEOUT_MS: Prevent hanging requests in waitUntil context
- * - MAX_RETRIES: Handle transient failures with exponential backoff
- */
 const MAX_CONCURRENT = 10;
-const TIMEOUT_MS = 15_000; // 15 seconds per request
+const TIMEOUT_MS = 15_000;
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY_MS = 1000;
 
-/**
- * GitHub name validation pattern (org names, repo names).
- * GitHub org/repo names: alphanumeric, hyphens, underscores, dots.
- * Cannot start with dot or hyphen, max 100 chars.
- */
 const GITHUB_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
-
-/**
- * Pattern to extract status code from GitHub API error messages
- */
 const GITHUB_API_ERROR_STATUS_PATTERN = /GitHub API error: (\d+)/;
 
-/**
- * Validate a GitHub organization or repository name.
- * Prevents URL injection attacks by ensuring names don't contain
- * path traversal sequences or URL-special characters.
- *
- * Logs detailed error reason for debugging while returning generic error to clients.
- */
 const validateGitHubName = (name: string, fieldName: string): void => {
   if (!name || name.length === 0) {
     console.warn(
@@ -77,17 +55,10 @@ const validateGitHubName = (name: string, fieldName: string): void => {
   }
 };
 
-/**
- * Sanitize error messages to prevent information leakage.
- * Removes potentially sensitive details from GitHub API errors.
- */
 const sanitizeErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
-    // Check if it's a GitHub API error with sensitive info
     const msg = error.message;
-    // Remove any tokens, keys, or detailed API responses
     if (msg.includes("GitHub API error:")) {
-      // Extract just the status code, not the full response
       const statusMatch = msg.match(GITHUB_API_ERROR_STATUS_PATTERN);
       if (statusMatch) {
         return `GitHub API error: ${statusMatch[1]}`;
@@ -115,7 +86,6 @@ const createGitHubApiError = (
 ): GitHubApiError => {
   const error = new Error(message) as GitHubApiError;
   error.status = status;
-  // Retry on rate limits (403/429), server errors (5xx), and network issues
   error.isRetryable =
     status === undefined ||
     status === 403 ||
@@ -124,9 +94,6 @@ const createGitHubApiError = (
   return error;
 };
 
-/**
- * Fetch with timeout - prevents hanging requests in waitUntil context
- */
 const fetchWithTimeout = async (
   url: string,
   options: RequestInit,
@@ -146,31 +113,12 @@ const fetchWithTimeout = async (
   }
 };
 
-/**
- * Sleep utility for exponential backoff
- */
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * Calculate retry delay with exponential backoff and jitter
- *
- * NOTE: Uses Math.random() for jitter which makes tests non-deterministic.
- * This is an acceptable trade-off because:
- * 1. Jitter is only used for rate limit avoidance (non-critical timing)
- * 2. The retry logic is well-tested via integration tests
- * 3. Injecting a random source adds complexity for minimal benefit
- */
 const getRetryDelay = (attempt: number): number => {
   const baseDelay = INITIAL_RETRY_DELAY_MS * 2 ** attempt;
-  // Add 0-25% jitter to prevent thundering herd
   const jitter = Math.random() * 0.25 * baseDelay;
   return Math.min(baseDelay + jitter, 10_000); // Cap at 10 seconds
 };
 
-/**
- * Calculate wait time from rate limit response headers
- */
 const getRateLimitWaitMs = (
   response: Response,
   defaultWaitMs: number
@@ -187,9 +135,6 @@ const getRateLimitWaitMs = (
   return defaultWaitMs;
 };
 
-/**
- * Execute a fetch request with timeout and proper headers
- */
 const executeGitHubFetch = async (
   url: string,
   token: string,
@@ -428,7 +373,7 @@ export const getRepoPublicKey = (
  * GitHub secret name validation pattern.
  * Secret names: alphanumeric and underscores only, must start with letter.
  */
-const SECRET_NAME_PATTERN = /^[A-Z][A-Z0-9_]*$/;
+export const SECRET_NAME_PATTERN = /^[A-Z][A-Z0-9_]*$/;
 
 /**
  * Validate a GitHub secret name.

@@ -148,24 +148,24 @@ const ErrorContent = ({
   );
 };
 
-export default function ErrorPage({
+const ErrorPage = ({
   error,
   reset,
 }: {
   error: Error & { digest?: string };
   reset: () => void;
-}) {
-  return (
-    <Suspense
-      fallback={
-        <div className="flex min-h-screen flex-col items-center justify-center p-8">
-          <h1 className="font-bold text-2xl text-red-500">
-            Something went wrong
-          </h1>
-        </div>
-      }
-    >
-      <ErrorContent error={error} reset={reset} />
-    </Suspense>
-  );
-}
+}) => (
+  <Suspense
+    fallback={
+      <div className="flex min-h-screen flex-col items-center justify-center p-8">
+        <h1 className="font-bold text-2xl text-red-500">
+          Something went wrong
+        </h1>
+      </div>
+    }
+  >
+    <ErrorContent error={error} reset={reset} />
+  </Suspense>
+);
+
+export default ErrorPage;

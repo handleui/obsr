@@ -26,9 +26,6 @@ const isValidInput = (input: unknown): input is ReadFileInput =>
   input !== null &&
   typeof (input as ReadFileInput).path === "string";
 
-/**
- * Validates input parameters for reading a file.
- */
 const validateReadParams = (
   offset: number,
   limit: number
@@ -48,9 +45,6 @@ const validateReadParams = (
   return null;
 };
 
-/**
- * Validates that the file exists and is readable.
- */
 const validateFileAccess = async (
   absPath: string,
   filePath: string
@@ -69,9 +63,6 @@ const validateFileAccess = async (
   return null;
 };
 
-/**
- * Reads lines from a file with offset and limit.
- */
 const readLinesFromFile = async (
   absPath: string,
   offset: number,
@@ -115,9 +106,6 @@ const readLinesFromFile = async (
   return { lines, lineNum, truncated };
 };
 
-/**
- * Read file tool - reads source code from files in the worktree.
- */
 export const readFileTool: Tool = {
   name: "read_file",
   description:

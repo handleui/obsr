@@ -9,13 +9,13 @@ import { useEffect } from "react";
  * Follows Sentry's recommended minimal pattern - error capture happens here,
  * detailed logging should be handled at the source of the error.
  */
-export default function GlobalError({
+const GlobalError = ({
   error,
   reset,
 }: {
   error: Error & { digest?: string };
   reset: () => void;
-}) {
+}) => {
   useEffect(() => {
     captureException(error, {
       tags: {
@@ -74,4 +74,6 @@ export default function GlobalError({
       </body>
     </html>
   );
-}
+};
+
+export default GlobalError;

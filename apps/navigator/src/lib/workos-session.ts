@@ -3,7 +3,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { getWorkOSCookiePassword } from "./auth";
 import { COOKIE_NAMES } from "./constants";
-import { workos } from "./workos";
+import { getWorkOS } from "./workos";
 
 export const getWorkOSAccessToken = async (): Promise<string | null> => {
   const cookieStore = await cookies();
@@ -15,7 +15,7 @@ export const getWorkOSAccessToken = async (): Promise<string | null> => {
 
   try {
     const cookiePassword = getWorkOSCookiePassword();
-    const session = workos.userManagement.loadSealedSession({
+    const session = getWorkOS().userManagement.loadSealedSession({
       sessionData: sealedSession,
       cookiePassword,
     });

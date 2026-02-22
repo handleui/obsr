@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { type GitHubOAuthTokens, getWorkOSCookiePassword } from "@/lib/auth";
 import { COOKIE_NAMES } from "@/lib/constants";
-import { workos } from "@/lib/workos";
+import { getWorkOS } from "@/lib/workos";
 
 /**
  * Check if sealed sessions are enabled (required for CLI auth)
@@ -104,7 +104,7 @@ export const GET = async (request: Request) => {
 
   try {
     const cookiePassword = getWorkOSCookiePassword();
-    const session = workos.userManagement.loadSealedSession({
+    const session = getWorkOS().userManagement.loadSealedSession({
       sessionData: sealedSession,
       cookiePassword,
     });

@@ -12,7 +12,11 @@ import { Hono } from "hono";
 import { getConvexClient } from "../db/convex";
 import { generateApiKey, hashApiKey } from "../lib/crypto";
 import { encryptSecretForGitHub } from "../lib/github-crypto";
-import { getOrgPublicKey, putOrgSecret } from "../lib/github-secrets-helper";
+import {
+  getOrgPublicKey,
+  putOrgSecret,
+  SECRET_NAME_PATTERN,
+} from "../lib/github-secrets-helper";
 import {
   githubOrgAccessMiddleware,
   type OrgAccessContext,
@@ -20,9 +24,6 @@ import {
 } from "../middleware/github-org-access";
 import { createGitHubService } from "../services/github";
 import type { Env } from "../types/env";
-
-// GitHub secret names must be uppercase with underscores only, starting with a letter
-const SECRET_NAME_PATTERN = /^[A-Z][A-Z0-9_]*$/;
 
 /**
  * Classify error for HTTP response.

@@ -22,9 +22,6 @@ const isValidInput = (input: unknown): input is EditFileInput =>
   typeof (input as EditFileInput).old_string === "string" &&
   typeof (input as EditFileInput).new_string === "string";
 
-/**
- * Counts occurrences of a substring in a string.
- */
 const countOccurrences = (text: string, search: string): number => {
   let count = 0;
   let pos = 0;
@@ -37,9 +34,6 @@ const countOccurrences = (text: string, search: string): number => {
   return count;
 };
 
-/**
- * Counts lines in a string.
- */
 const countLines = (text: string): number => {
   if (text === "") {
     return 0;
@@ -47,9 +41,6 @@ const countLines = (text: string): number => {
   return text.split("\n").length;
 };
 
-/**
- * Edit file tool - applies targeted edits to files.
- */
 export const editFileTool: Tool = {
   name: "edit_file",
   description:

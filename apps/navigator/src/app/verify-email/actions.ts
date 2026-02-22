@@ -16,7 +16,7 @@ import {
   VERIFICATION_CODE_LENGTH,
 } from "@/lib/constants";
 import { sanitizeReturnUrl } from "@/lib/return-url";
-import { workos } from "@/lib/workos";
+import { getWorkOS } from "@/lib/workos";
 
 export interface VerifyState {
   error: string | null;
@@ -121,7 +121,7 @@ export const verifyEmailCode = async (
 
   try {
     const { user } =
-      await workos.userManagement.authenticateWithEmailVerification({
+      await getWorkOS().userManagement.authenticateWithEmailVerification({
         clientId: getWorkOSClientId(),
         code,
         pendingAuthenticationToken: pending.pendingAuthenticationToken,
@@ -180,7 +180,7 @@ export const resendVerificationEmail = async (
   try {
     // WorkOS sendVerificationEmail requires userId, not email
     // We need to look up the user by email first
-    const users = await workos.userManagement.listUsers({
+    const users = await getWorkOS().userManagement.listUsers({
       email: pending.email,
     });
 
@@ -192,7 +192,7 @@ export const resendVerificationEmail = async (
       };
     }
 
-    await workos.userManagement.sendVerificationEmail({
+    await getWorkOS().userManagement.sendVerificationEmail({
       userId: user.id,
     });
 

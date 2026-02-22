@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { getConvexClient } from "../db/convex";
+import { validateHandle } from "../lib/validation";
 import type { Env } from "../types/env";
 
 const PROVIDER_MAP = {
@@ -56,24 +57,6 @@ const validateProviderLogin = (
     }
   }
 
-  return { valid: true };
-};
-
-// Project handles are derived from GitHub/GitLab repo names
-// Allows alphanumeric, hyphens, underscores, and dots (must start with alphanumeric)
-const HANDLE_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
-
-const validateHandle = (handle: string): { valid: boolean; error?: string } => {
-  if (!handle || typeof handle !== "string") {
-    return { valid: false, error: "Project handle is required" };
-  }
-  const trimmed = handle.trim().toLowerCase();
-  if (trimmed.length === 0 || trimmed.length > 100) {
-    return { valid: false, error: "Project handle must be 1-100 characters" };
-  }
-  if (!HANDLE_PATTERN.test(trimmed)) {
-    return { valid: false, error: "Invalid project handle format" };
-  }
   return { valid: true };
 };
 

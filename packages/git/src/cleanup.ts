@@ -82,10 +82,6 @@ const cleanOrphanedTempDirs = (repoRoot: string): number => {
   return removed;
 };
 
-/**
- * Checks if a clone directory belongs to the given repository.
- * For shallow clones, we check .git/config for the file:// origin URL.
- */
 const isCloneForRepo = (clonePath: string, repoRoot: string): boolean => {
   const configPath = join(clonePath, ".git", "config");
 

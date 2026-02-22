@@ -27,9 +27,6 @@ const isValidInput = (input: unknown): input is GlobInput =>
   input !== null &&
   typeof (input as GlobInput).pattern === "string";
 
-/**
- * Validates the search directory and returns the search path.
- */
 const resolveSearchPath = (
   ctx: ToolContext,
   searchDir: string | undefined
@@ -50,9 +47,6 @@ const resolveSearchPath = (
   return { searchPath: validation.absPath, displayPath: searchDir };
 };
 
-/**
- * Collects file modification times for matched files.
- */
 const collectFilesWithTimes = async (
   matches: string[],
   searchPath: string
@@ -74,9 +68,6 @@ const collectFilesWithTimes = async (
   return results.filter((r): r is FileWithTime => r !== null);
 };
 
-/**
- * Glob tool - finds files matching glob patterns.
- */
 export const globTool: Tool = {
   name: "glob",
   description:

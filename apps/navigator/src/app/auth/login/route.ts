@@ -8,7 +8,7 @@ import {
 } from "@/lib/auth";
 import { AUTH_DURATIONS, COOKIE_NAMES } from "@/lib/constants";
 import { isValidReturnUrl } from "@/lib/return-url";
-import { workos } from "@/lib/workos";
+import { getWorkOS } from "@/lib/workos";
 
 type WorkOSProvider = "GitHubOAuth" | "GitLabOAuth";
 
@@ -42,7 +42,7 @@ const buildOAuthResponse = (
   state: string,
   returnTo: string | null
 ) => {
-  const authorizationUrl = workos.userManagement.getAuthorizationUrl({
+  const authorizationUrl = getWorkOS().userManagement.getAuthorizationUrl({
     provider: workosProvider,
     clientId: getWorkOSClientId(),
     redirectUri: getOAuthRedirectUri(),

@@ -1,7 +1,7 @@
 import { ConvexClient } from "convex/browser";
 import { env } from "../env.js";
 
-const securedFunctions = new Set([
+export const SECURED_FUNCTIONS = new Set([
   "api_keys:create",
   "api_keys:getById",
   "api_keys:getByKeyHash",
@@ -56,6 +56,11 @@ const securedFunctions = new Set([
   "projects:softDeleteByRepoIds",
 ]);
 
+export type ConvexMethod = (
+  name: string,
+  args?: Record<string, unknown>
+) => Promise<unknown>;
+
 const withServiceToken = (
   args: Record<string, unknown> | undefined,
   serviceToken: string
@@ -64,15 +69,10 @@ const withServiceToken = (
   serviceToken,
 });
 
-type ConvexMethod = (
-  name: string,
-  args?: Record<string, unknown>
-) => Promise<unknown>;
-
-const wrapWithServiceToken =
+export const wrapWithServiceToken =
   (baseFn: ConvexMethod, serviceToken: string): ConvexMethod =>
   (name: string, args?: Record<string, unknown>) => {
-    if (!securedFunctions.has(name)) {
+    if (!SECURED_FUNCTIONS.has(name)) {
       return baseFn(name, args);
     }
     return baseFn(

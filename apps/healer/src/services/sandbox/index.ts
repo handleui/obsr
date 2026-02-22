@@ -9,9 +9,4 @@ export type {
   SandboxService,
 } from "@detent/sandbox";
 // biome-ignore lint/performance/noBarrelFile: re-export sandbox API
-export {
-  createSandboxService,
-  DEFAULT_TEMPLATE,
-  DEFAULTS,
-  TEMPLATES,
-} from "@detent/sandbox";
+export { createSandboxService, DEFAULTS, TEMPLATES } from "@detent/sandbox";

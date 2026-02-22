@@ -32,6 +32,14 @@ const validateRequired = (name: string, value: string | undefined): string => {
   return value;
 };
 
+const parseIntWithDefault = (
+  envVar: string | undefined,
+  fallback: number
+): number => {
+  const parsed = Number.parseInt(envVar ?? String(fallback), 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
+};
+
 const loadEnv = (): Env => {
   const sandboxProvider =
     process.env.SANDBOX_PROVIDER?.toLowerCase() ?? "vercel";
@@ -53,39 +61,27 @@ const loadEnv = (): Env => {
     );
   }
 
-  const maxConcurrentHeals = Number.parseInt(
-    process.env.MAX_CONCURRENT_HEALS ?? "20",
-    10
-  );
-
-  const githubApiMaxRetries = Number.parseInt(
-    process.env.GITHUB_API_MAX_RETRIES ?? "2",
-    10
-  );
-  const githubApiInitialDelayMs = Number.parseInt(
-    process.env.GITHUB_API_INITIAL_DELAY_MS ?? "1000",
-    10
-  );
-  const githubApiBackoffMultiplier = Number.parseInt(
-    process.env.GITHUB_API_BACKOFF_MULTIPLIER ?? "2",
-    10
+  const maxConcurrentHeals = parseIntWithDefault(
+    process.env.MAX_CONCURRENT_HEALS,
+    20
   );
 
   return {
     PORT: process.env.PORT ?? "8080",
     MAX_CONCURRENT_HEALS:
-      Number.isNaN(maxConcurrentHeals) || maxConcurrentHeals < 1
-        ? 20
-        : Math.min(maxConcurrentHeals, 100),
-    GITHUB_API_MAX_RETRIES: Number.isNaN(githubApiMaxRetries)
-      ? 2
-      : githubApiMaxRetries,
-    GITHUB_API_INITIAL_DELAY_MS: Number.isNaN(githubApiInitialDelayMs)
-      ? 1000
-      : githubApiInitialDelayMs,
-    GITHUB_API_BACKOFF_MULTIPLIER: Number.isNaN(githubApiBackoffMultiplier)
-      ? 2
-      : githubApiBackoffMultiplier,
+      maxConcurrentHeals < 1 ? 20 : Math.min(maxConcurrentHeals, 100),
+    GITHUB_API_MAX_RETRIES: parseIntWithDefault(
+      process.env.GITHUB_API_MAX_RETRIES,
+      2
+    ),
+    GITHUB_API_INITIAL_DELAY_MS: parseIntWithDefault(
+      process.env.GITHUB_API_INITIAL_DELAY_MS,
+      1000
+    ),
+    GITHUB_API_BACKOFF_MULTIPLIER: parseIntWithDefault(
+      process.env.GITHUB_API_BACKOFF_MULTIPLIER,
+      2
+    ),
     SANDBOX_PROVIDER: sandboxProvider,
     E2B_API_KEY: e2bApiKey,
     VERCEL_TOKEN: vercelToken,

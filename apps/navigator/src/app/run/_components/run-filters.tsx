@@ -206,7 +206,7 @@ const SectionLabel = ({ children }: { children: ReactNode }) => (
   </p>
 );
 
-const PopupDivider = () => <div className="my-1 h-px bg-[#e8e8e8]" />;
+const PopupDivider = () => <div className="my-1 h-px bg-subtle" />;
 
 const CommitFilter = () => {
   const [value, setValue] = useState("latest");

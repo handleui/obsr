@@ -135,8 +135,6 @@ export const execGit = async (
         );
       }
 
-      const _stdout =
-        typeof execError.stdout === "string" ? execError.stdout.trim() : "";
       const stderr =
         typeof execError.stderr === "string" ? execError.stderr.trim() : "";
 

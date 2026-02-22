@@ -1,18 +1,12 @@
 import type { ErrorCategory, ExtractedError } from "@detent/types";
 import { INTERNAL_FRAME_PATTERNS, MAX_STACK_TRACE_LINES } from "./system.js";
 
-/**
- * Default values for error formatting.
- */
 const DEFAULT_CATEGORY = "unknown";
 const DEFAULT_COLUMN = 1;
 const MISSING_VALUE = "-";
 const DEFAULT_PRIORITY = 999;
 const MAX_STACK_TRACE_BYTES = 50 * 1024;
 
-/**
- * Category priority map. Lower number = higher priority.
- */
 const CATEGORY_PRIORITY: Record<ErrorCategory, number> = {
   compile: 1,
   "type-check": 2,
@@ -28,10 +22,6 @@ const CATEGORY_PRIORITY: Record<ErrorCategory, number> = {
   unknown: 12,
 };
 
-/**
- * Categories that benefit from stack traces.
- * Stack traces improve accuracy from 31% to 80-90% for these categories.
- */
 const CATEGORIES_NEEDING_STACK_TRACE = new Set<ErrorCategory>([
   "compile",
   "test",
@@ -39,15 +29,9 @@ const CATEGORIES_NEEDING_STACK_TRACE = new Set<ErrorCategory>([
   "unknown",
 ]);
 
-/**
- * Gets the priority for a category.
- */
 export const getCategoryPriority = (category: ErrorCategory): number =>
   CATEGORY_PRIORITY[category] ?? DEFAULT_PRIORITY;
 
-/**
- * Escapes prompt string to prevent injection.
- */
 const escapePromptString = (s: string): string => {
   let result = s.replaceAll("`", "'").replaceAll("\r", "");
   while (result.includes("\n\n\n")) {
@@ -56,21 +40,12 @@ const escapePromptString = (s: string): string => {
   return result;
 };
 
-/**
- * Checks if a stack frame is an internal/framework frame.
- */
 const isInternalFrame = (line: string): boolean =>
   INTERNAL_FRAME_PATTERNS.some((pattern) => line.includes(pattern));
 
-/**
- * Filters stack trace lines to remove internal frames.
- */
 const filterStackTraceLines = (lines: string[]): string[] =>
   lines.filter((line) => !isInternalFrame(line) && line.trim() !== "");
 
-/**
- * Formats a stack trace for inclusion in a prompt.
- */
 export const formatStackTrace = (error: ExtractedError): string => {
   if (!error.stackTrace) {
     return "";
@@ -111,9 +86,6 @@ export const formatStackTrace = (error: ExtractedError): string => {
   return parts.join("\n");
 };
 
-/**
- * Formats a single error with full diagnostic context.
- */
 export const formatError = (error: ExtractedError): string => {
   const parts: string[] = [];
 
@@ -152,9 +124,6 @@ export const formatError = (error: ExtractedError): string => {
   return parts.join("\n");
 };
 
-/**
- * Prioritizes errors by category, then file, then line number.
- */
 export const prioritizeErrors = (
   errors: ExtractedError[]
 ): ExtractedError[] => {
@@ -185,9 +154,6 @@ export const prioritizeErrors = (
   return sorted;
 };
 
-/**
- * Formats multiple errors, sorted by priority.
- */
 export const formatErrors = (errors: ExtractedError[]): string => {
   if (errors.length === 0) {
     return "(no errors)";
@@ -207,9 +173,6 @@ export const formatErrors = (errors: ExtractedError[]): string => {
   return parts.join("\n\n");
 };
 
-/**
- * Counts errors and warnings.
- */
 export const countErrors = (
   errors: ExtractedError[]
 ): { errorCount: number; warningCount: number } => {
@@ -227,9 +190,6 @@ export const countErrors = (
   return { errorCount, warningCount };
 };
 
-/**
- * Counts errors by category.
- */
 export const countByCategory = (
   errors: ExtractedError[]
 ): Record<ErrorCategory, number> => {
@@ -256,9 +216,6 @@ export const countByCategory = (
   return counts;
 };
 
-/**
- * Formats multiple errors with hints from lore, sorted by priority.
- */
 export const formatErrorsWithHints = async (
   errors: ExtractedError[]
 ): Promise<string> => {

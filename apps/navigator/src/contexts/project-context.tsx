@@ -15,7 +15,7 @@ interface ProjectProviderProps {
 }
 
 export const ProjectProvider = ({ value, children }: ProjectProviderProps) => (
-  <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
+  <ProjectContext value={value}>{children}</ProjectContext>
 );
 
 export const useProject = (): ProjectContextType => {

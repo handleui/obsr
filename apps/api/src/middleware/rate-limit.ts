@@ -11,8 +11,7 @@ import { Redis } from "@upstash/redis";
 import type { Context, Next } from "hono";
 import type { Env } from "../types/env";
 
-// Ephemeral cache to reduce Redis calls (persists across invocations)
-const cache = new Map();
+const cache = new Map<string, number>();
 
 // Cache Ratelimit instances per environment (keyed by Redis URL)
 const ratelimitInstances = new Map<string, Ratelimit>();

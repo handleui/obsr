@@ -19,6 +19,8 @@ const SANDBOX_TEMPLATE = "base";
 const SANDBOX_TIMEOUT_SEC = 600;
 const CLONE_TIMEOUT_MS = 120_000;
 const INSTALL_TIMEOUT_MS = 300_000;
+const GIT_DIFF_TIMEOUT_MS = 30_000;
+const MAX_STDERR_PREVIEW = 500;
 
 const MAX_HEAL_ID_LENGTH = 128;
 const MAX_BRANCH_LENGTH = 256;
@@ -135,7 +137,9 @@ const installDependencies = async (
   });
 
   if (result.exitCode !== 0) {
-    const safeStderr = sanitizeForLogging(result.stderr?.slice(0, 500) ?? "");
+    const safeStderr = sanitizeForLogging(
+      result.stderr?.slice(0, MAX_STDERR_PREVIEW) ?? ""
+    );
     throw new Error(
       `Dependency install failed (exit ${result.exitCode}): ${safeStderr}`
     );
@@ -148,7 +152,7 @@ const extractPatch = async (
 ): Promise<string | null> => {
   const result = await sandbox.commands.run("git diff", {
     cwd: worktreePath,
-    timeoutMs: 30_000,
+    timeoutMs: GIT_DIFF_TIMEOUT_MS,
   });
 
   if (result.exitCode !== 0) {
@@ -166,7 +170,7 @@ const extractFilesChanged = async (
 ): Promise<string[]> => {
   const result = await sandbox.commands.run("git diff --name-only", {
     cwd: worktreePath,
-    timeoutMs: 30_000,
+    timeoutMs: GIT_DIFF_TIMEOUT_MS,
   });
 
   if (result.exitCode !== 0) {
@@ -188,8 +192,11 @@ const sanitizeForLogging = (value: string): string => {
   return value;
 };
 
+const CLEANUP_MAX_ATTEMPTS = 3;
+const CLEANUP_RETRY_DELAY_MS = 1000;
+
 const cleanupSandbox = async (sandbox: SandboxHandle): Promise<void> => {
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < CLEANUP_MAX_ATTEMPTS; attempt++) {
     try {
       await sandbox.kill();
       return;
@@ -197,13 +204,13 @@ const cleanupSandbox = async (sandbox: SandboxHandle): Promise<void> => {
       console.error(
         `[heal-executor] sandbox.kill() attempt ${attempt + 1} failed: ${killError instanceof Error ? killError.message : String(killError)}`
       );
-      if (attempt < 2) {
-        await new Promise((r) => setTimeout(r, 1000));
+      if (attempt < CLEANUP_MAX_ATTEMPTS - 1) {
+        await new Promise((r) => setTimeout(r, CLEANUP_RETRY_DELAY_MS));
       }
     }
   }
   console.error(
-    `[heal-executor] Failed to kill sandbox ${sandbox.sandboxId} after 3 attempts`
+    `[heal-executor] Failed to kill sandbox ${sandbox.sandboxId} after ${CLEANUP_MAX_ATTEMPTS} attempts`
   );
 };
 

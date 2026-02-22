@@ -24,25 +24,17 @@ export const DEFAULT_ORG_SETTINGS: Required<OrganizationSettings> = {
 
 export const getOrgSettings = (
   settings: OrganizationSettings | null | undefined
-): Required<OrganizationSettings> => ({
-  enableInlineAnnotations:
-    settings?.enableInlineAnnotations ??
-    DEFAULT_ORG_SETTINGS.enableInlineAnnotations,
-  enablePrComments:
-    settings?.enablePrComments ?? DEFAULT_ORG_SETTINGS.enablePrComments,
-  autofixEnabled:
-    settings?.autofixEnabled ?? DEFAULT_ORG_SETTINGS.autofixEnabled,
-  autofixAutoCommit:
-    settings?.autofixAutoCommit ?? DEFAULT_ORG_SETTINGS.autofixAutoCommit,
-  healAutoCommit:
-    settings?.healAutoCommit ?? DEFAULT_ORG_SETTINGS.healAutoCommit,
-  healAutoTrigger:
-    settings?.healAutoTrigger ?? DEFAULT_ORG_SETTINGS.healAutoTrigger,
-  healBudgetPerRunUsd:
-    settings?.healBudgetPerRunUsd ?? DEFAULT_ORG_SETTINGS.healBudgetPerRunUsd,
-  validationEnabled:
-    settings?.validationEnabled ?? DEFAULT_ORG_SETTINGS.validationEnabled,
-});
+): Required<OrganizationSettings> => {
+  if (!settings) {
+    return { ...DEFAULT_ORG_SETTINGS };
+  }
+
+  // Filter out undefined/null values before spreading so defaults are preserved
+  const defined = Object.fromEntries(
+    Object.entries(settings).filter(([, v]) => v != null)
+  );
+  return { ...DEFAULT_ORG_SETTINGS, ...defined };
+};
 
 export const providerShortCodes: Record<"github" | "gitlab", string> = {
   github: "gh",

@@ -13,7 +13,7 @@ import {
 import { AUTH_DURATIONS, COOKIE_NAMES } from "@/lib/constants";
 import { type BetterStackRequest, withLogging } from "@/lib/logger";
 import { sanitizeReturnUrl } from "@/lib/return-url";
-import { workos } from "@/lib/workos";
+import { getWorkOS } from "@/lib/workos";
 
 /**
  * Check if WorkOS sealed sessions are enabled
@@ -210,7 +210,7 @@ const syncIdentityWithApi = async (
 
   try {
     const cookiePassword = getWorkOSCookiePassword();
-    const session = workos.userManagement.loadSealedSession({
+    const session = getWorkOS().userManagement.loadSealedSession({
       sessionData: authResponse.sealedSession,
       cookiePassword,
     });
@@ -298,6 +298,7 @@ const handler = async (request: BetterStackRequest) => {
 
     // Exchange authorization code for user session
     // WorkOS validates the code and returns user info + optional sealed session
+    const workos = getWorkOS();
     const authResponse = await workos.userManagement.authenticateWithCode(
       authOptions as Parameters<
         typeof workos.userManagement.authenticateWithCode

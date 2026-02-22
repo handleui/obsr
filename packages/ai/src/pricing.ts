@@ -1,30 +1,13 @@
 import type { LanguageModel } from "ai";
 import type { TokenUsage } from "./types.js";
 
-/**
- * Model parameter type that accepts either a string model ID or a LanguageModel object.
- * This allows consumers to pass the same model reference to both pricing and cache functions.
- */
 export type ModelParam = string | LanguageModel;
 
-/**
- * Model pricing in USD per million tokens.
- * Cache pricing: read = 0.1x base input, write (5-min TTL) = 1.25x base input
- */
 interface ModelPricing {
   inputPerMillion: number;
   outputPerMillion: number;
 }
 
-/**
- * Model prefixes mapped to their pricing.
- * Order matters: more specific prefixes should come before less specific ones.
- *
- * Official pricing pages:
- * - Anthropic: https://www.anthropic.com/pricing
- * - OpenAI: https://openai.com/api/pricing
- * Last verified: 2025-02 (check these pages periodically)
- */
 const MODEL_PREFIXES: Array<{ prefix: string; pricing: ModelPricing }> = [
   {
     prefix: "gpt-5.2-codex",
@@ -89,18 +72,11 @@ const MODEL_PREFIXES: Array<{ prefix: string; pricing: ModelPricing }> = [
   },
 ];
 
-/**
- * Default pricing used for unknown models (sonnet pricing as fallback).
- */
 const DEFAULT_PRICING: ModelPricing = {
   inputPerMillion: 3.0,
   outputPerMillion: 15.0,
 };
 
-/**
- * Extracts the model ID string from a ModelParam.
- * Handles both string model IDs and LanguageModel objects.
- */
 export const extractModelId = (model: ModelParam): string => {
   if (typeof model === "string") {
     return model;
@@ -109,9 +85,6 @@ export const extractModelId = (model: ModelParam): string => {
   return model.modelId ?? model.provider ?? "";
 };
 
-/**
- * Normalizes model IDs by stripping provider prefixes like "openai/".
- */
 const normalizeModelName = (model: ModelParam): string => {
   const modelId = extractModelId(model);
   const parts = modelId.split("/");
@@ -121,9 +94,6 @@ const normalizeModelName = (model: ModelParam): string => {
   return parts.at(-1) ?? modelId;
 };
 
-/**
- * Gets the pricing for a model using prefix matching.
- */
 const getPricing = (model: ModelParam): ModelPricing => {
   const normalized = normalizeModelName(model);
   for (const { prefix, pricing } of MODEL_PREFIXES) {
@@ -134,44 +104,29 @@ const getPricing = (model: ModelParam): ModelPricing => {
   return DEFAULT_PRICING;
 };
 
-/**
- * Computes the USD cost including cache token pricing.
- * Cache read tokens cost 0.1x the base input price.
- * Cache write tokens (5-minute TTL) cost 1.25x the base input price.
- *
- * @param model - Model ID string or LanguageModel object
- * @param usage - Token usage breakdown
- */
+const CACHE_READ_MULTIPLIER = 0.1;
+const CACHE_WRITE_MULTIPLIER = 1.25;
+const TOKENS_PER_MILLION = 1_000_000;
+
 export const calculateCost = (model: ModelParam, usage: TokenUsage): number => {
   const pricing = getPricing(model);
 
-  // Standard input tokens at base rate
-  const inputCost = (usage.inputTokens / 1_000_000) * pricing.inputPerMillion;
-
-  // Cache read tokens at 0.1x base rate
+  const inputCost =
+    (usage.inputTokens / TOKENS_PER_MILLION) * pricing.inputPerMillion;
   const cacheReadCost =
-    (usage.cacheReadInputTokens / 1_000_000) * pricing.inputPerMillion * 0.1;
-
-  // Cache write tokens at 1.25x base rate
-  const cacheWriteCost =
-    (usage.cacheCreationInputTokens / 1_000_000) *
+    (usage.cacheReadInputTokens / TOKENS_PER_MILLION) *
     pricing.inputPerMillion *
-    1.25;
-
-  // Output tokens at output rate
+    CACHE_READ_MULTIPLIER;
+  const cacheWriteCost =
+    (usage.cacheCreationInputTokens / TOKENS_PER_MILLION) *
+    pricing.inputPerMillion *
+    CACHE_WRITE_MULTIPLIER;
   const outputCost =
-    (usage.outputTokens / 1_000_000) * pricing.outputPerMillion;
+    (usage.outputTokens / TOKENS_PER_MILLION) * pricing.outputPerMillion;
 
   return inputCost + cacheReadCost + cacheWriteCost + outputCost;
 };
 
-/**
- * Estimates the cost for a given number of input and output tokens.
- *
- * @param model - Model ID string or LanguageModel object
- * @param inputTokens - Number of input tokens
- * @param outputTokens - Number of output tokens
- */
 export const estimateCost = (
   model: ModelParam,
   inputTokens: number,

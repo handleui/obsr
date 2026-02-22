@@ -1,7 +1,7 @@
 "use client";
 
 import { NavArrowLeft } from "iconoir-react";
-import { useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { ErrorLine } from "./error-line";
 import type { ErrorDetailData } from "./mock-data";
 import { useRunData } from "./run-data-context";
@@ -12,6 +12,34 @@ interface HealSidebarProps {
   onSelectPreview: (id: string) => void;
   onBack: () => void;
 }
+
+const SidebarErrorLine = memo(
+  ({
+    error,
+    active,
+    onSelect,
+  }: {
+    error: ErrorDetailData & { status: string };
+    active: boolean;
+    onSelect: (id: string) => void;
+  }) => {
+    const handleClick = useCallback(
+      () => onSelect(error.id),
+      [error.id, onSelect]
+    );
+
+    return (
+      <ErrorLine
+        category={error.category}
+        compact
+        message={error.message}
+        onClick={handleClick}
+        selected={active}
+        status={error.status}
+      />
+    );
+  }
+);
 
 const STATUS_ORDER = ["Healing", "Found", "Fixed"] as const;
 
@@ -92,14 +120,11 @@ const HealSidebar = ({
               {group.label}
             </p>
             {group.items.map((error) => (
-              <ErrorLine
-                category={error.category}
-                compact
+              <SidebarErrorLine
+                active={error.id === activePreviewId}
+                error={error}
                 key={error.id}
-                message={error.message}
-                onClick={() => onSelectPreview(error.id)}
-                selected={error.id === activePreviewId}
-                status={error.status}
+                onSelect={onSelectPreview}
               />
             ))}
           </div>

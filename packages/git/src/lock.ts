@@ -1,10 +1,3 @@
-/**
- * PID-based lockfile mechanism for worktree ownership tracking.
- *
- * Similar to Go's nightlyone/lockfile, this writes the owner's PID to a lock file,
- * enabling detection of dead processes without a central registry.
- */
-
 import {
   closeSync,
   existsSync,
@@ -15,52 +8,24 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
-/**
- * Lock file name used in each worktree directory.
- */
 export const LOCK_FILE_NAME = ".detent.lock";
 
-/**
- * Lock retry configuration.
- */
 const LOCK_RETRY_ATTEMPTS = 3;
 const LOCK_RETRY_DELAY_MS = 100;
 
-/**
- * Result of a lock operation.
- */
 export type LockResult =
   | { success: true; release: () => void }
   | { success: false; reason: "busy" | "error"; error?: Error };
 
-/**
- * Checks if a process with the given PID is still alive.
- *
- * @param pid - Process ID to check
- * @returns true if process exists, false otherwise
- */
 export const isProcessAlive = (pid: number): boolean => {
   try {
-    // Signal 0 doesn't actually send a signal, just checks if process exists
     process.kill(pid, 0);
     return true;
   } catch (err) {
-    const error = err as NodeJS.ErrnoException;
-    // EPERM means process exists but we don't have permission to signal it
-    if (error.code === "EPERM") {
-      return true;
-    }
-    // ESRCH means no such process
-    return false;
+    return (err as NodeJS.ErrnoException).code === "EPERM";
   }
 };
 
-/**
- * Reads the PID from a lock file.
- *
- * @param lockPath - Path to the lock file
- * @returns PID if valid, undefined otherwise
- */
 export const readLockPid = (lockPath: string): number | undefined => {
   try {
     const content = readFileSync(lockPath, "utf-8").trim();
@@ -74,16 +39,6 @@ export const readLockPid = (lockPath: string): number | undefined => {
   }
 };
 
-/**
- * Attempts to acquire a lock on a worktree directory.
- *
- * The lock file contains our PID. If another process owns the lock
- * and is still alive, this returns { success: false, reason: "busy" }.
- * If the owning process is dead, we clean up the stale lock and retry.
- *
- * @param worktreePath - Path to the worktree directory
- * @returns Lock result with release function on success
- */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Security-critical lock acquisition with proper error handling
 export const tryAcquireLock = (worktreePath: string): LockResult => {
   const lockPath = join(worktreePath, LOCK_FILE_NAME);
@@ -172,11 +127,6 @@ export const tryAcquireLock = (worktreePath: string): LockResult => {
   };
 };
 
-/**
- * Releases a lock by removing the lock file.
- *
- * @param lockPath - Path to the lock file
- */
 const releaseLock = (lockPath: string): void => {
   try {
     unlinkSync(lockPath);
@@ -185,12 +135,6 @@ const releaseLock = (lockPath: string): void => {
   }
 };
 
-/**
- * Checks if a worktree is locked by another live process.
- *
- * @param worktreePath - Path to the worktree directory
- * @returns "free" if unlocked or owner is dead, "busy" if locked by live process
- */
 export const checkLockStatus = (
   worktreePath: string
 ): "free" | "busy" | "error" => {
@@ -214,9 +158,6 @@ export const checkLockStatus = (
   return isProcessAlive(pid) ? "busy" : "free";
 };
 
-/**
- * Synchronous sleep helper.
- */
 const sleep = (ms: number): void => {
   const end = Date.now() + ms;
   while (Date.now() < end) {

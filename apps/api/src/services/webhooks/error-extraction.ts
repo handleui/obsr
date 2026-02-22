@@ -12,6 +12,7 @@ import { scrubSecrets } from "@detent/types";
 import * as Sentry from "@sentry/cloudflare";
 import { getConvexClient } from "../../db/convex";
 import { createHeal, getHealsByPr } from "../../db/operations/heals";
+import { sleep } from "../../lib/async";
 import { getDb } from "../../lib/db.js";
 import {
   getOrgSettings,
@@ -116,9 +117,6 @@ const isRetryableError = (message: string): boolean => {
     lower.includes("rate limit")
   );
 };
-
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
 
 const countLines = (text: string): number => {
   let count = 1;

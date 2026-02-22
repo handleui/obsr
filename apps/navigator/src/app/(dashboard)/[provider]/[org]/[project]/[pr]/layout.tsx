@@ -1,11 +1,11 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
+import { FilterProvider } from "@/components/features/checks/hooks/use-filters";
+import { NavigationProvider } from "@/components/features/checks/hooks/use-navigation";
+import { RunDataProvider } from "@/components/features/checks/hooks/use-run-data";
+import { SelectionProvider } from "@/components/features/checks/hooks/use-selection";
+import type { RunData } from "@/components/features/checks/lib/types";
 import { fetchProject } from "@/lib/dal";
-import { FilterProvider } from "./_components/filter-context";
-import { NavigationProvider } from "./_components/navigation/navigation-context";
-import { RunDataProvider } from "./_components/run-data-context";
-import { SelectionProvider } from "./_components/selection-context";
-import type { RunData } from "./_components/types";
 
 const ALLOWED_PROVIDERS = new Set(["gh", "gl"]);
 const MAX_PR_NUMBER = 2_147_483_647;

@@ -5,58 +5,12 @@ import "./globals.css";
 import { Providers } from "./providers";
 import WebVitals from "./web-vitals";
 
-const neueMontreal = localFont({
-  src: "./fonts/PPNeueMontreal-Regular.woff2",
-  variable: "--font-neue-montreal",
-  display: "swap",
-});
-
 // HACK: Re-declare Geist Pixel fonts locally instead of importing from
 // geist/font/pixel because the package omits display:"swap", causing FOIT.
 // All values must be inline literals — Next.js font loaders are statically analyzed.
 const GeistPixelSquare = localFont({
   src: "../../node_modules/geist/dist/fonts/geist-pixel/GeistPixel-Square.woff2",
   variable: "--font-geist-pixel-square",
-  weight: "500",
-  display: "swap",
-  fallback: [
-    "Geist Mono",
-    "ui-monospace",
-    "SFMono-Regular",
-    "Roboto Mono",
-    "Menlo",
-    "Monaco",
-    "Liberation Mono",
-    "DejaVu Sans Mono",
-    "Courier New",
-    "monospace",
-  ],
-  adjustFontFallback: false,
-});
-
-const GeistPixelGrid = localFont({
-  src: "../../node_modules/geist/dist/fonts/geist-pixel/GeistPixel-Grid.woff2",
-  variable: "--font-geist-pixel-grid",
-  weight: "500",
-  display: "swap",
-  fallback: [
-    "Geist Mono",
-    "ui-monospace",
-    "SFMono-Regular",
-    "Roboto Mono",
-    "Menlo",
-    "Monaco",
-    "Liberation Mono",
-    "DejaVu Sans Mono",
-    "Courier New",
-    "monospace",
-  ],
-  adjustFontFallback: false,
-});
-
-const GeistPixelCircle = localFont({
-  src: "../../node_modules/geist/dist/fonts/geist-pixel/GeistPixel-Circle.woff2",
-  variable: "--font-geist-pixel-circle",
   weight: "500",
   display: "swap",
   fallback: [
@@ -94,26 +48,6 @@ const GeistPixelTriangle = localFont({
   adjustFontFallback: false,
 });
 
-const GeistPixelLine = localFont({
-  src: "../../node_modules/geist/dist/fonts/geist-pixel/GeistPixel-Line.woff2",
-  variable: "--font-geist-pixel-line",
-  weight: "500",
-  display: "swap",
-  fallback: [
-    "Geist Mono",
-    "ui-monospace",
-    "SFMono-Regular",
-    "Roboto Mono",
-    "Menlo",
-    "Monaco",
-    "Liberation Mono",
-    "DejaVu Sans Mono",
-    "Courier New",
-    "monospace",
-  ],
-  adjustFontFallback: false,
-});
-
 const GeistSans = localFont({
   src: "../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2",
   variable: "--font-geist-sans",
@@ -129,14 +63,10 @@ const GeistMono = localFont({
 });
 
 const fontVariables = [
-  neueMontreal.variable,
   GeistSans.variable,
   GeistMono.variable,
   GeistPixelSquare.variable,
-  GeistPixelGrid.variable,
-  GeistPixelCircle.variable,
   GeistPixelTriangle.variable,
-  GeistPixelLine.variable,
 ].join(" ");
 
 const META_DESCRIPTION =

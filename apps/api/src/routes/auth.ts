@@ -424,9 +424,6 @@ const fetchAllGitHubOrgs = async (
   return allOrgs;
 };
 
-// Type for organization with required fields for membership operations
-type DetentOrg = OrganizationDoc;
-
 // Type for soft-deleted membership info
 interface SoftDeletedMembership {
   _id: string;
@@ -443,7 +440,7 @@ const fetchMatchingDetentOrgs = async (
   userId: string,
   githubOrgs: { id: number; login: string }[]
 ): Promise<{
-  orgsToJoin: DetentOrg[];
+  orgsToJoin: OrganizationDoc[];
   softDeletedByOrg: Map<string, SoftDeletedMembership>;
 } | null> => {
   const githubOrgIds = githubOrgs.map((o) => String(o.id));
@@ -454,7 +451,7 @@ const fetchMatchingDetentOrgs = async (
       providerAccountIds: githubOrgIds,
       includeDeleted: false,
     }
-  )) as DetentOrg[];
+  )) as OrganizationDoc[];
 
   if (detentOrgs.length === 0) {
     return null;
@@ -584,7 +581,7 @@ const createNewMembership = async (
  */
 const processOrgMembership = async (
   convex: ConvexHttpClient,
-  org: DetentOrg,
+  org: OrganizationDoc,
   userId: string,
   githubUserId: string,
   githubUsername: string,

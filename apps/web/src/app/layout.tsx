@@ -6,18 +6,12 @@ import {
   GeistPixelSquare,
   GeistPixelTriangle,
 } from "geist/font/pixel";
+import { GeistSans } from "geist/font/sans";
 import type { Metadata } from "next";
-import localFont from "next/font/local";
 import "./globals.css";
 
-const neueMontreal = localFont({
-  src: "./fonts/PPNeueMontreal-Regular.woff2",
-  variable: "--font-neue-montreal",
-  display: "swap",
-});
-
 const fontVariables = [
-  neueMontreal.variable,
+  GeistSans.variable,
   GeistPixelSquare.variable,
   GeistPixelGrid.variable,
   GeistPixelCircle.variable,

@@ -95,9 +95,10 @@ const isVercelRateLimitError = (error: unknown): boolean => {
   ) {
     return true;
   }
-  const status = (error as { status?: number; statusCode?: number }).status;
-  const statusCode = (error as { status?: number; statusCode?: number })
-    .statusCode;
+  const { status, statusCode } = error as {
+    status?: number;
+    statusCode?: number;
+  };
   return status === 429 || statusCode === 429;
 };
 
@@ -264,14 +265,12 @@ class VercelSandboxHandle implements SandboxHandle {
     await this.#sandbox.extendTimeout(timeoutMs);
   };
 
-  isRunning = async () => {
+  isRunning = (): Promise<boolean> => {
     try {
       const status = this.#sandbox.status;
-      return await Promise.resolve(
-        status === "running" || status === "pending"
-      );
+      return Promise.resolve(status === "running" || status === "pending");
     } catch {
-      return await Promise.resolve(true);
+      return Promise.resolve(true);
     }
   };
 }

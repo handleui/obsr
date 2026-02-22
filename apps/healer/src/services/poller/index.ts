@@ -7,11 +7,15 @@ import type { Env } from "../../env.js";
 import { env } from "../../env.js";
 import { createConvexClient } from "../convex-client.js";
 import { createDbClient } from "../db-client.js";
-import { getInstallationToken } from "../github/token.js";
+import { GITHUB_API, getInstallationToken } from "../github/token.js";
 import { executeHeal } from "../heal-executor.js";
 import { dispatchWebhookEvent } from "../webhook-dispatch.js";
 
 const MAX_PATCH_LENGTH = 1_000_000;
+const MAX_REASON_LENGTH = 2000;
+const MAX_COMMENT_LENGTH = 200;
+const MAX_CHECK_RUN_ERROR_LENGTH = 500;
+const MAX_GITHUB_NAME_LENGTH = 100;
 
 const truncate = (value: string | null, maxLength: number): string | null => {
   if (!value) {
@@ -85,21 +89,18 @@ const state: PollerState = {
   activeHealIds: new Set(),
 };
 
-const mapConvexHeal = (heal: Record<string, unknown>): HealRow => {
-  return {
-    id: String(heal._id),
-    type: String(heal.type ?? ""),
-    status: String(heal.status ?? ""),
-    runId: (heal.runId as string | undefined) ?? null,
-    projectId: String(heal.projectId ?? ""),
-    commitSha: (heal.commitSha as string | undefined) ?? null,
-    prNumber:
-      typeof heal.prNumber === "number" ? (heal.prNumber as number) : null,
-    checkRunId: (heal.checkRunId as string | undefined) ?? null,
-    userInstructions: (heal.userInstructions as string | undefined) ?? null,
-    autofixSource: (heal.autofixSource as string | undefined) ?? null,
-  };
-};
+const mapConvexHeal = (heal: Record<string, unknown>): HealRow => ({
+  id: String(heal._id),
+  type: String(heal.type ?? ""),
+  status: String(heal.status ?? ""),
+  runId: (heal.runId as string | undefined) ?? null,
+  projectId: String(heal.projectId ?? ""),
+  commitSha: (heal.commitSha as string | undefined) ?? null,
+  prNumber: typeof heal.prNumber === "number" ? heal.prNumber : null,
+  checkRunId: (heal.checkRunId as string | undefined) ?? null,
+  userInstructions: (heal.userInstructions as string | undefined) ?? null,
+  autofixSource: (heal.autofixSource as string | undefined) ?? null,
+});
 
 const markHealRunning = async (
   convex: ConvexClient,
@@ -156,7 +157,9 @@ const markHealFailed = async (
   reason: string
 ): Promise<void> => {
   const truncatedReason =
-    reason.length > 2000 ? `${reason.slice(0, 1997)}...` : reason;
+    reason.length > MAX_REASON_LENGTH
+      ? `${reason.slice(0, MAX_REASON_LENGTH - 3)}...`
+      : reason;
 
   await convex.mutation(asMutation("heals:updateStatus"), {
     id: healId,
@@ -253,8 +256,6 @@ const fetchOrganization = async (
         : null,
   };
 };
-
-const GITHUB_API = "https://api.github.com";
 
 const githubHeaders = (token: string): Record<string, string> => ({
   Authorization: `Bearer ${token}`,
@@ -419,7 +420,7 @@ const GIT_SHA_PATTERN = /^[a-fA-F0-9]{7,40}$/;
 
 const isValidGitHubName = (name: string): boolean =>
   name.length > 0 &&
-  name.length <= 100 &&
+  name.length <= MAX_GITHUB_NAME_LENGTH &&
   GITHUB_NAME_PATTERN.test(name) &&
   !name.includes("..");
 
@@ -431,14 +432,15 @@ const sanitizeErrorForCheckRun = (error: string): string => {
     .replace(/https?:\/\/[^\s]+/g, "[URL]")
     .replace(/\/[\w/.-]+/g, "[PATH]")
     .replace(/token[=:]\s*\S+/gi, "token=[REDACTED]");
-  return sanitized.length > 500 ? `${sanitized.slice(0, 497)}...` : sanitized;
+  return sanitized.length > MAX_CHECK_RUN_ERROR_LENGTH
+    ? `${sanitized.slice(0, MAX_CHECK_RUN_ERROR_LENGTH - 3)}...`
+    : sanitized;
 };
 
 const DOCS_URL = "https://detent.sh/docs";
 
-const formatHeader = (message: string): string => {
-  return `${message}\nNot sure what's happening? [Read the docs](${DOCS_URL})`;
-};
+const formatHeader = (message: string): string =>
+  `${message}\nNot sure what's happening? [Read the docs](${DOCS_URL})`;
 
 const HTML_TAG_PATTERN = /[<>&"']/g;
 const HTML_ENTITIES: Record<string, string> = {
@@ -449,9 +451,8 @@ const HTML_ENTITIES: Record<string, string> = {
   "'": "&#39;",
 };
 
-const escapeHtml = (text: string): string => {
-  return text.replace(HTML_TAG_PATTERN, (char) => HTML_ENTITIES[char] ?? char);
-};
+const escapeHtml = (text: string): string =>
+  text.replace(HTML_TAG_PATTERN, (char) => HTML_ENTITIES[char] ?? char);
 
 const formatHealSuccessComment = (
   filesFixed: number,
@@ -465,8 +466,8 @@ const formatHealSuccessComment = (
 
 const formatHealFailedComment = (reason: string): string => {
   const safeReason =
-    reason.length > 200
-      ? `${escapeHtml(reason.slice(0, 197))}...`
+    reason.length > MAX_COMMENT_LENGTH
+      ? `${escapeHtml(reason.slice(0, MAX_COMMENT_LENGTH - 3))}...`
       : escapeHtml(reason);
   return `${formatHeader("Failed to heal.")}\n\nReason: ${safeReason}`;
 };

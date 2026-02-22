@@ -24,9 +24,7 @@ const groupByFile = (errors: CIError[]): Map<string, CIError[]> => {
 };
 
 const processFileErrors = (
-  _filePath: string,
   fileErrors: CIError[],
-  _repoRoot: string,
   fileLines: string[]
 ): {
   valid: CIError[];
@@ -49,7 +47,6 @@ const processFileErrors = (
 
 const readFileLines = (
   fullPath: string,
-  _filePath: string,
   fileErrors: CIError[]
 ): {
   lines: string[] | null;
@@ -150,16 +147,12 @@ export const validateErrors = (
     }
 
     // Read and validate file
-    const { lines, stale: fileStale } = readFileLines(
-      fullPath,
-      filePath,
-      fileErrors
-    );
+    const { lines, stale: fileStale } = readFileLines(fullPath, fileErrors);
     stale.push(...fileStale);
 
     if (lines !== null) {
       const { valid: fileValid, stale: fileStaleFromProcess } =
-        processFileErrors(filePath, fileErrors, repoRoot, lines);
+        processFileErrors(fileErrors, lines);
       valid.push(...fileValid);
       stale.push(...fileStaleFromProcess);
     }

@@ -13,9 +13,6 @@ const asQuery = (name: string) => name as unknown as FunctionReference<"query">;
 const base64ToBuffer = (base64: string): Uint8Array =>
   Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
 
-// Cache imported AES decryption keys by base64 string.
-// The encryption key is the same across all webhooks in a dispatch,
-// so we avoid calling crypto.subtle.importKey N times.
 let cachedAesKeyBase64: string | null = null;
 let cachedAesKey: CryptoKey | null = null;
 
@@ -63,13 +60,11 @@ interface WebhookRecord {
   active: boolean;
 }
 
-// Healer runs on Node.js (Railway) with no waitUntil budget constraint.
-// Keep original retry delays for better delivery reliability.
 const RETRY_DELAYS = [1000, 3000, 10_000];
 const FETCH_TIMEOUT_MS = 10_000;
 
-// Max webhook payload body size (256 KB)
 const MAX_PAYLOAD_BYTES = 256 * 1024;
+const PAYLOAD_OVERHEAD_BYTES = 4096;
 
 const deliverWebhook = async (
   url: string,
@@ -111,7 +106,7 @@ const deliverWithRetries = async (
         return;
       }
     } catch {
-      // Retry on network/timeout errors
+      // HACK: swallow network/timeout errors to retry on next iteration
     }
     if (attempt < RETRY_DELAYS.length) {
       await new Promise((resolve) =>
@@ -136,7 +131,7 @@ const truncatePatch = (data: WebhookHealData): WebhookHealData => {
   if (!data.patch) {
     return data;
   }
-  const maxPatchChars = MAX_PAYLOAD_BYTES - 4096;
+  const maxPatchChars = MAX_PAYLOAD_BYTES - PAYLOAD_OVERHEAD_BYTES;
   if (data.patch.length <= maxPatchChars) {
     return data;
   }
@@ -173,7 +168,6 @@ export const dispatchWebhookEvent = async (
       data: truncatePatch(healData),
     };
 
-    // Stringify once, reuse across all webhooks and retries
     const body = JSON.stringify(payload);
 
     await Promise.allSettled(

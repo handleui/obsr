@@ -368,7 +368,7 @@ const ErrorCardWithHeal = ({
   return (
     <div>
       {index > 0 && (
-        <div className="-mt-px h-7 border-subtle border-y bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,#e8e8e8_4px,#e8e8e8_5px)]" />
+        <div className="-mt-px h-7 border-subtle border-y bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,var(--color-subtle)_4px,var(--color-subtle)_5px)]" />
       )}
       <ErrorCard error={error} onHeal={onHeal ? handleHeal : undefined} />
     </div>

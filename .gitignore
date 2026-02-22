@@ -9,6 +9,7 @@ package-lock.json
 # Local env files
 .env*
 !.env
+!.env.example
 .dev.vars
 
 # Testing

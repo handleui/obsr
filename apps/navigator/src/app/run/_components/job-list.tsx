@@ -15,7 +15,8 @@ import {
   Sparks,
   Xmark,
 } from "iconoir-react";
-import { type ReactNode, useEffect, useMemo } from "react";
+import type * as React from "react";
+import { memo, type ReactNode, useCallback, useEffect, useMemo } from "react";
 import type { Category } from "./error-line";
 import { ErrorLine } from "./error-line";
 import { useFilters } from "./filter-context";
@@ -75,6 +76,34 @@ interface IssueTableProps {
   items: IssueItem[];
 }
 
+const IssueRow = memo(
+  ({
+    item,
+    selected,
+    onSelect,
+  }: {
+    item: IssueItem;
+    selected: boolean;
+    onSelect: (id: string, e: React.MouseEvent) => void;
+  }) => {
+    const handleClick = useCallback(
+      (e: React.MouseEvent) => onSelect(item.id, e),
+      [item.id, onSelect]
+    );
+
+    return (
+      <ErrorLine
+        category={item.category}
+        location={item.location}
+        message={item.message}
+        onClick={handleClick}
+        selected={selected}
+        status={item.status}
+      />
+    );
+  }
+);
+
 const IssueTable = ({ items }: IssueTableProps) => {
   const { selectedIds, select } = useSelection();
 
@@ -83,14 +112,11 @@ const IssueTable = ({ items }: IssueTableProps) => {
       <IssueTableHeader />
       <div className="flex w-full flex-col items-start py-3">
         {items.map((item) => (
-          <ErrorLine
-            category={item.category}
+          <IssueRow
+            item={item}
             key={item.id}
-            location={item.location}
-            message={item.message}
-            onClick={(e) => select(item.id, e)}
+            onSelect={select}
             selected={selectedIds.has(item.id)}
-            status={item.status}
           />
         ))}
       </div>
@@ -284,37 +310,35 @@ const resolveJobPanel = (
   return <NoIssuesPanel />;
 };
 
-const GenericJob = ({
-  jobKey,
-  status,
-  issues,
-}: {
-  jobKey: string;
-  status: string;
-  issues: ErrorDetailData[];
-}) => {
-  const label = JOB_LABELS[jobKey] ?? jobKey;
-  const icon = STATUS_ICONS[status] ?? <MinusCircle height={16} width={16} />;
+const GenericJob = memo(
+  ({
+    jobKey,
+    status,
+    issues,
+  }: {
+    jobKey: string;
+    status: string;
+    issues: ErrorDetailData[];
+  }) => {
+    const label = JOB_LABELS[jobKey] ?? jobKey;
+    const icon = STATUS_ICONS[status] ?? <MinusCircle height={16} width={16} />;
+    const subtitle = resolveJobSubtitle(status, issues.length);
+    const trailing =
+      status === "failed" || status === "healing" ? HEAL_ICON : undefined;
 
-  const subtitle = resolveJobSubtitle(status, issues.length);
-
-  const trailing =
-    status === "failed" || status === "healing" ? HEAL_ICON : undefined;
-
-  const panel = resolveJobPanel(status, issues);
-
-  return (
-    <Accordion.Item className="w-full" value={jobKey}>
-      <JobTrigger
-        icon={icon}
-        label={label}
-        subtitle={subtitle}
-        trailing={trailing}
-      />
-      <Accordion.Panel>{panel}</Accordion.Panel>
-    </Accordion.Item>
-  );
-};
+    return (
+      <Accordion.Item className="w-full" value={jobKey}>
+        <JobTrigger
+          icon={icon}
+          label={label}
+          subtitle={subtitle}
+          trailing={trailing}
+        />
+        <Accordion.Panel>{resolveJobPanel(status, issues)}</Accordion.Panel>
+      </Accordion.Item>
+    );
+  }
+);
 
 const JobListHeader = () => {
   const { errors } = useRunData();

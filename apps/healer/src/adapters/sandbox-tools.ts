@@ -581,10 +581,7 @@ const getFileTypeIncludeArg = (fileType?: string): ToolResult | string => {
 
   const globPattern = FILE_TYPE_MAP[fileType.toLowerCase()];
   if (!globPattern) {
-    const supported = Object.keys(FILE_TYPE_MAP)
-      .filter((k, i, arr) => arr.indexOf(k) === i)
-      .slice(0, 10)
-      .join(", ");
+    const supported = Object.keys(FILE_TYPE_MAP).slice(0, 10).join(", ");
     return errorResult(
       `unknown file type: ${fileType} (supported: ${supported}, ...)`
     );

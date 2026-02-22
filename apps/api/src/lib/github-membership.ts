@@ -1,8 +1,7 @@
 import { createGitHubService } from "../services/github";
+import { GITHUB_API } from "../services/github/validation";
 import type { Env } from "../types/env";
 import { CACHE_TTL, getFromCache, setInCache } from "./cache";
-
-const GITHUB_API = "https://api.github.com";
 
 interface GitHubMembershipResult {
   isMember: boolean;

@@ -10,14 +10,8 @@ const CLEANUP_TIMEOUT = 30_000;
 const DIRECTORY_MODE = 0o700;
 const SHA_REGEX = /^[a-f0-9]{40}$/i;
 
-/**
- * Validates that a commit SHA is in valid format (40 hex characters).
- */
 const isValidCommitSHA = (sha: string): boolean => SHA_REGEX.test(sha);
 
-/**
- * Validates that a file path doesn't escape the base directory via traversal.
- */
 const isPathWithinBase = (basePath: string, targetPath: string): boolean => {
   try {
     const realBase = realpathSync(basePath);
@@ -103,11 +97,6 @@ const createCloneDirectory = (finalPath: string): void => {
   }
 };
 
-/**
- * Creates a shallow clone of the repository.
- * Uses `git clone --depth 1 file://...` for a self-contained .git directory
- * that works with Docker containers (unlike worktrees).
- */
 const createShallowClone = async (
   repoRoot: string,
   clonePath: string,

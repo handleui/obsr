@@ -1,6 +1,7 @@
 "use client";
 
 import type * as React from "react";
+import { memo } from "react";
 import { ShimmerText } from "./shimmer-text";
 
 const CATEGORY_CONFIG = {
@@ -141,7 +142,7 @@ const CompactCells = ({
   </>
 );
 
-const ErrorLine = ({
+const ErrorLineInner = ({
   category = "Error",
   compact = false,
   selected = false,
@@ -196,6 +197,8 @@ const ErrorLine = ({
     </button>
   );
 };
+
+const ErrorLine = memo(ErrorLineInner);
 
 export { ErrorLine };
 export type { Category, ErrorLineProps };

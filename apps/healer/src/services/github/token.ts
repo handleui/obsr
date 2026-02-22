@@ -1,6 +1,6 @@
 import type { Env } from "../../env.js";
 
-const GITHUB_API = "https://api.github.com";
+export const GITHUB_API = "https://api.github.com";
 const PEM_BEGIN_RSA = /-----BEGIN RSA PRIVATE KEY-----/;
 const PEM_END_RSA = /-----END RSA PRIVATE KEY-----/;
 const PEM_BEGIN_PKCS8 = /-----BEGIN PRIVATE KEY-----/;

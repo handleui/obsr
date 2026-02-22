@@ -2,12 +2,9 @@
 @source "../../node_modules/@detent/ui/src";
 
 @theme inline {
-  --font-sans: var(--font-neue-montreal);
+  --font-sans: var(--font-geist-sans);
   --font-pixel-square: var(--font-geist-pixel-square);
-  --font-pixel-grid: var(--font-geist-pixel-grid);
-  --font-pixel-circle: var(--font-geist-pixel-circle);
   --font-pixel-triangle: var(--font-geist-pixel-triangle);
-  --font-pixel-line: var(--font-geist-pixel-line);
 
   /* CI/CD State Colors */
   --color-success-fg: #1e915b;
@@ -26,10 +23,8 @@
   --color-info-fg: #3672d9;
   --color-info-bg: #edf5ff;
 
-  --color-extracting-fg: #3672d9;
-  --color-extracting-bg: #edf5ff;
-
   /* UI Colors */
+  --color-subtle: #e8e8e8;
   --color-muted: #808080;
   --color-dim: #aaa;
   --color-surface: #fafafa;
@@ -63,8 +58,8 @@
 
   .resizable-grid > main:nth-child(2) {
     border-style: solid;
-    border-left-color: #e8e8e8;
-    border-right-color: #e8e8e8;
+    border-left-color: var(--color-subtle);
+    border-right-color: var(--color-subtle);
   }
 
   .resizable-grid[data-left-open] > main:nth-child(2) {
@@ -84,14 +79,6 @@
   .resizable-grid[data-hovered-handle="right"] > main:nth-child(2) {
     border-right-color: black;
   }
-}
-
-@utility border-subtle {
-  border-color: #e8e8e8;
-}
-
-@utility bg-subtle {
-  background-color: #e8e8e8;
 }
 
 @utility bg-healing-light {

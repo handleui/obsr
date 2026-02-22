@@ -33,8 +33,7 @@ export const getRemoteUrl = async (
     const result = await execGit(["remote", "get-url", "origin"], {
       cwd: repoRoot,
     });
-    const url = result.stdout;
-    return url ? url : null;
+    return result.stdout || null;
   } catch {
     return null;
   }
@@ -47,12 +46,8 @@ export const getFirstCommitSha = async (
     const result = await execGit(["rev-list", "--max-parents=0", "HEAD"], {
       cwd: repoRoot,
     });
-    const lines = result.stdout.split("\n");
-    const firstLine = lines[0];
-    if (lines.length === 0 || !firstLine || firstLine === "") {
-      return null;
-    }
-    return firstLine;
+    const firstLine = result.stdout.split("\n")[0];
+    return firstLine || null;
   } catch {
     return null;
   }
@@ -83,13 +78,6 @@ export const getDirtyFilesList = async (
   return result.stdout.split("\n");
 };
 
-/**
- * Finds the git repository root from a starting path.
- * Traverses upward to find the .git directory.
- *
- * @param startPath - Directory to start searching from
- * @returns Absolute path to git root, or null if not in a git repo
- */
 export const findGitRoot = async (
   startPath: string
 ): Promise<string | null> => {

@@ -10,6 +10,7 @@
  */
 
 import { getConvexClient } from "../db/convex";
+import { sleep } from "../lib/async";
 import { fetchAllPages } from "../lib/convex-pagination";
 import type { OrganizationSettings } from "../lib/org-settings";
 import { createGitHubService } from "../services/github";
@@ -186,12 +187,6 @@ const syncOrganization = async (
     updatedAt: now,
   });
 };
-
-/**
- * Sleep helper for batch delays
- */
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Process organizations in batches to respect rate limits.

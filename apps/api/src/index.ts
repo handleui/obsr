@@ -151,6 +151,16 @@ const worker: ExportedHandler<Env> = {
   },
 };
 
+const scrubSentryEvent = <T extends Sentry.ErrorEvent | TransactionEvent>(
+  event: T
+): T => {
+  scrubEvent(event);
+  if (event.user) {
+    event.user = event.user.id ? { id: event.user.id } : {};
+  }
+  return event;
+};
+
 export default Sentry.withSentry(
   (env: Env) => ({
     dsn: env.SENTRY_DSN,
@@ -158,20 +168,8 @@ export default Sentry.withSentry(
     tracesSampleRate: 0.05,
     sampleRate: 1.0,
     sendDefaultPii: false,
-    beforeSend: (event: Sentry.ErrorEvent) => {
-      scrubEvent(event);
-      if (event.user) {
-        event.user = event.user.id ? { id: event.user.id } : {};
-      }
-      return event;
-    },
-    beforeSendTransaction: (event: TransactionEvent) => {
-      scrubEvent(event);
-      if (event.user) {
-        event.user = event.user.id ? { id: event.user.id } : {};
-      }
-      return event;
-    },
+    beforeSend: scrubSentryEvent,
+    beforeSendTransaction: scrubSentryEvent,
   }),
   worker
 );

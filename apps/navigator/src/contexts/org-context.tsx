@@ -17,7 +17,7 @@ interface OrgProviderProps {
 }
 
 export const OrgProvider = ({ value, children }: OrgProviderProps) => (
-  <OrgContext.Provider value={value}>{children}</OrgContext.Provider>
+  <OrgContext value={value}>{children}</OrgContext>
 );
 
 export const useOrg = (): OrgContextType => {

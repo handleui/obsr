@@ -12,9 +12,6 @@ const GREP_TIMEOUT_MS = 30_000;
 const MAX_GREP_OUTPUT = 50 * 1024; // 50KB
 const MAX_GREP_MATCHES = 100;
 
-/**
- * File type mappings for ripgrep --type flag.
- */
 const FILE_TYPE_MAP: Record<string, string> = {
   go: "go",
   ts: "ts",
@@ -48,9 +45,6 @@ const isValidInput = (input: unknown): input is GrepInput =>
   input !== null &&
   typeof (input as GrepInput).pattern === "string";
 
-/**
- * Executes ripgrep as a child process with timeout.
- */
 const runRipgrep = (
   args: string[],
   cwd: string,
@@ -101,9 +95,6 @@ const runRipgrep = (
     });
   });
 
-/**
- * Grep tool - searches for patterns in code using ripgrep.
- */
 export const grepTool: Tool = {
   name: "grep",
   description:

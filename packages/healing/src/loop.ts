@@ -78,15 +78,9 @@ const getUsageFromResult = (result: HealResult): TokenUsage => ({
 });
 
 const calculateAccumulatedCost = (
-  accumulated: AccumulatedUsage,
+  accumulated: TokenUsage,
   modelName: string
-): number =>
-  calculateCost(modelName, {
-    inputTokens: accumulated.inputTokens,
-    outputTokens: accumulated.outputTokens,
-    cacheCreationInputTokens: accumulated.cacheCreationInputTokens,
-    cacheReadInputTokens: accumulated.cacheReadInputTokens,
-  });
+): number => calculateCost(modelName, accumulated);
 
 const checkBudgetLimits = (
   config: HealConfig,
@@ -335,14 +329,7 @@ const buildErrorContext = (
 
 const MAX_REPAIR_INPUT_SIZE = 1_000_000;
 
-interface AccumulatedUsage {
-  inputTokens: number;
-  outputTokens: number;
-  cacheCreationInputTokens: number;
-  cacheReadInputTokens: number;
-}
-
-const createEmptyAccumulator = (): AccumulatedUsage => ({
+const createEmptyAccumulator = (): TokenUsage => ({
   inputTokens: 0,
   outputTokens: 0,
   cacheCreationInputTokens: 0,
@@ -354,7 +341,7 @@ const isBudgetExceeded = (costUSD: number, config: HealConfig): boolean =>
   (config.remainingMonthlyUSD >= 0 && costUSD > config.remainingMonthlyUSD);
 
 const accumulateUsage = (
-  accumulated: AccumulatedUsage,
+  accumulated: TokenUsage,
   usage: {
     inputTokens?: number;
     outputTokens?: number;

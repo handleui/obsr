@@ -110,13 +110,6 @@ Biome/Ultracite handles standard linting. Project-specific only:
 - **API**: `backend.detent.sh`
 - **Dashboard**: `navigator.detent.sh`
 
-## Navigator Proxy
-
-- `apps/navigator/src/proxy.ts` is the Next.js middleware (Turbopack auto-detects it)
-- Rewrites `/:org/:project/:run` → `/run/:org/:project/:run` for dashboard routes
-- Real routes use provider prefixes: `gh/` (GitHub) or `gl/` (GitLab) — e.g. `/gh/detentsh/detent/159`
-- Demo page uses `/handleui/detent/159` (no provider prefix) — rendered by `/run` page via proxy rewrite
-
 ## Healing Architecture
 
 - **Autofix** (deterministic): GitHub Action, no sandbox

@@ -4,13 +4,13 @@ import { type CodeSnippet, runErrorOps, runOps } from "@detent/db";
 import { scrubSecrets } from "@detent/types";
 import { redirect } from "next/navigation";
 import { cache } from "react";
-import { api } from "../../../../convex/_generated/api";
-import type { Id } from "../../../../convex/_generated/dataModel";
 import type {
   ErrorDetailData,
   RunData,
   SourceLine,
-} from "../app/(dashboard)/[provider]/[org]/[project]/[pr]/_components/types";
+} from "@/components/features/checks/lib/types";
+import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { getConvexClient } from "./convex-client";
 import { type ProjectData, verifySession } from "./dal";
 import { getNeonDb } from "./neon";

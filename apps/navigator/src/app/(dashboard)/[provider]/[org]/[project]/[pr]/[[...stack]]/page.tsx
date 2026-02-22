@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import NavigableLayout from "../_components/navigable-layout";
+import NavigableLayout from "@/components/features/checks/ui/v1/navigable-layout";
 
 interface PageProps {
   params: Promise<{

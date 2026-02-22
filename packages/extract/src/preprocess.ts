@@ -65,6 +65,19 @@ const NOISE_SOURCES: Array<{ name: string; pattern: string }> = [
     pattern: "(?:Downloading|Installing|Resolving)\\b",
   },
   { name: "caret-underline", pattern: "\\s*[\\^~]+\\s*$" },
+  {
+    name: "gh-actions-commands",
+    pattern:
+      "^::(?:group|endgroup|add-matcher|remove-matcher|save-state|set-output)\\b",
+  },
+  {
+    name: "timing-lines",
+    pattern: "^\\s*(?:real|user|sys)\\s+\\d+m[\\d.]+s$",
+  },
+  {
+    name: "progress-bars",
+    pattern: "\\[?[#=>\\-\\s]{5,}\\]?\\s*\\d+%",
+  },
 ];
 
 const NOISE_PATTERN = new RegExp(
@@ -96,10 +109,16 @@ interface FilterResult {
 const PKG_MANAGER_NOISE = /^\s*(?:npm|yarn)\s+(?:warn|warning|notice)\b/i;
 
 const isSignalLine = (line: string): boolean => {
-  if (!NOISE_PATTERN.test(line)) {
+  // Fast path: most CI error lines contain diagnostic keywords — check first
+  if (IMPORTANT_PATTERN.test(line)) {
+    // Even if it matches noise, signal wins unless it's a package manager warning that is also noise
+    if (PKG_MANAGER_NOISE.test(line) && NOISE_PATTERN.test(line)) {
+      return false;
+    }
     return true;
   }
-  return !PKG_MANAGER_NOISE.test(line) && IMPORTANT_PATTERN.test(line);
+  // No diagnostic keywords — check if it matches noise patterns
+  return !NOISE_PATTERN.test(line);
 };
 
 const appendOmissionMarker = (

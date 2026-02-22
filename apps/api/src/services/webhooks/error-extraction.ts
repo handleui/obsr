@@ -621,10 +621,11 @@ const storeLogsInR2 = async (
   ctx: ExtractionContext,
   logs: string
 ): Promise<string | null> => {
-  const logBytes = new Blob([logs]).size;
-  if (logBytes > MAX_R2_LOG_BYTES) {
+  // CI logs are overwhelmingly ASCII, so string length ≈ byte length.
+  // Avoid allocating a Blob just for the size check.
+  if (logs.length > MAX_R2_LOG_BYTES) {
     console.warn(
-      `${LOG_PREFIX} ${ctx.logCtx}: Log too large for R2 (${(logBytes / 1024 / 1024).toFixed(1)} MB), skipping storage`
+      `${LOG_PREFIX} ${ctx.logCtx}: Log too large for R2 (${(logs.length / 1024 / 1024).toFixed(1)} MB), skipping storage`
     );
     return null;
   }
@@ -803,36 +804,39 @@ export const extractAndStoreErrors = async (
     return;
   }
 
-  const [extraction, logR2Key] = await Promise.all([
-    runExtraction(env, scrubSecrets(logs.slice(0, SCRUB_PRE_SLICE)), ctx),
-    storeLogsInR2(env, project.organizationId, ctx, logs),
-  ]);
-
-  if (
-    extraction.status === "success" &&
-    extraction.usage &&
-    extraction.costUsd != null
-  ) {
-    recordAIUsage(
-      env,
-      project.organizationId,
-      undefined,
-      {
-        model: extraction.model ?? DEFAULT_FAST_MODEL,
-        inputTokens: extraction.usage.inputTokens,
-        outputTokens: extraction.usage.outputTokens,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
-        costUSD: extraction.costUsd,
-      },
-      false
-    ).catch((err) => {
-      console.error(`${LOG_PREFIX} Failed to record extraction usage:`, err);
-    });
-  }
-
+  // Parallelize: extraction, R2 storage, line counting, and PR lookup all run concurrently
   const { db: sqlDb, pool } = getDb(env);
   try {
+    const [extraction, logR2Key, totalLogLines, prNumber] = await Promise.all([
+      runExtraction(env, scrubSecrets(logs.slice(0, SCRUB_PRE_SLICE)), ctx),
+      storeLogsInR2(env, project.organizationId, ctx, logs),
+      Promise.resolve(countLines(logs)),
+      findPrNumber(sqlDb, ctx.repository, ctx.commitSha),
+    ]);
+
+    if (
+      extraction.status === "success" &&
+      extraction.usage &&
+      extraction.costUsd != null
+    ) {
+      recordAIUsage(
+        env,
+        project.organizationId,
+        undefined,
+        {
+          model: extraction.model ?? DEFAULT_FAST_MODEL,
+          inputTokens: extraction.usage.inputTokens,
+          outputTokens: extraction.usage.outputTokens,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+          costUSD: extraction.costUsd,
+        },
+        false
+      ).catch((err) => {
+        console.error(`${LOG_PREFIX} Failed to record extraction usage:`, err);
+      });
+    }
+
     const pipeline: ExtractionPipelineContext = {
       sqlDb,
       env,
@@ -840,8 +844,8 @@ export const extractAndStoreErrors = async (
       project,
       extraction,
       logR2Key,
-      totalLogLines: countLines(logs),
-      prNumber: await findPrNumber(sqlDb, ctx.repository, ctx.commitSha),
+      totalLogLines,
+      prNumber,
       conclusion: sanitizeField(
         payload.workflow_job.conclusion ?? "failure",
         50

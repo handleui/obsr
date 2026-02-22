@@ -157,7 +157,16 @@ export const extractLogsFromZip = (
 
   // Sort file names for consistent ordering (GitHub names files by job)
   // Use pre-collected fileNames from scan to avoid Object.keys allocation
-  const sortedNames = fileNames.sort((a, b) => a.localeCompare(b));
+  // Simple comparison is faster than localeCompare for ASCII file paths
+  const sortedNames = fileNames.sort((a, b) => {
+    if (a < b) {
+      return -1;
+    }
+    if (a > b) {
+      return 1;
+    }
+    return 0;
+  });
 
   // Post-decompression size check (defense in depth)
   let totalBytes = 0;

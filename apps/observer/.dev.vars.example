@@ -31,8 +31,10 @@ RESEND_API_KEY=
 RESEND_EMAIL_FROM="Detent <noreply@detent.dev>"
 
 # URLs
-NAVIGATOR_BASE_URL=http://localhost:3001
-ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001
+APP_BASE_URL=http://detent.localhost:1355
+# Legacy alias (optional)
+# NAVIGATOR_BASE_URL=http://detent.localhost:1355
+ALLOWED_ORIGINS=http://detent.localhost:1355
 
 # Polar (billing)
 POLAR_ACCESS_TOKEN=

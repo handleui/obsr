@@ -40,22 +40,6 @@
       "inputs": ["src/**/*.ts", "tsconfig.json", "package.json"],
       "outputs": ["dist/**"]
     },
-    "@detent/navigator#build": {
-      "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", ".env", ".env.local"],
-      "outputs": [".next/**", "!.next/cache/**"],
-      "env": [
-        "WORKOS_API_KEY",
-        "WORKOS_CLIENT_ID",
-        "JWT_SECRET_KEY",
-        "CONVEX_URL",
-        "NEXT_PUBLIC_APP_URL",
-        "WORKOS_COOKIE_PASSWORD",
-        "POLAR_CHECKOUT_TOKEN",
-        "FLAGS",
-        "FLAGS_SECRET"
-      ]
-    },
     "@detent/web#build": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$"],

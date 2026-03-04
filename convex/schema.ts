@@ -3,7 +3,7 @@ import { v } from "convex/values";
 
 import { nullableBoolean, nullableNumber, nullableString } from "./validators";
 
-const healStatus = v.union(
+const resolveStatus = v.union(
   v.literal("found"),
   v.literal("pending"),
   v.literal("running"),
@@ -66,7 +66,7 @@ const organizationSettings = v.object({
   autofixAutoCommit: v.optional(nullableBoolean),
   resolveAutoCommit: v.optional(nullableBoolean),
   resolveAutoTrigger: v.optional(nullableBoolean),
-  healBudgetPerRunUsd: v.optional(nullableNumber),
+  resolveBudgetPerRunUsd: v.optional(nullableNumber),
   validationEnabled: v.optional(nullableBoolean),
 });
 
@@ -170,7 +170,7 @@ export default defineSchema({
 
   resolves: defineTable({
     type: resolveType,
-    status: healStatus,
+    status: resolveStatus,
     runId: v.optional(nullableString),
     projectId: v.id("projects"),
     commitSha: v.optional(nullableString),

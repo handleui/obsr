@@ -18,7 +18,7 @@ bun run dt <command>       # CLI local dev (never use ./dist/dt)
 - **Monorepo**: Turborepo
 - **API**: Hono on Cloudflare Workers
 - **Database**: Neon Postgres (Drizzle) + Convex (realtime)
-- **DB Access**: Hyperdrive (Workers), direct Neon URL (Resolver/Navigator), Convex service token
+- **DB Access**: Hyperdrive (Workers), direct Neon URL (Resolver/Web), Convex service token
 - **Web**: Next.js 16, React 19, Tailwind CSS
 - **CLI**: TypeScript, Citty, Ink
 - **Auth**: WorkOS, JWT (Jose)
@@ -34,8 +34,7 @@ apps/
 ├── observer/       # Cloudflare Workers Observer service (Hono)
 ├── resolver/       # AI resolving service (Railway)
 ├── cli/            # Command-line interface
-├── navigator/      # Auth portal + dashboard (Next.js; deprecated, deferred until CLI limits are in place)
-└── web/            # Landing page (Next.js)
+└── web/            # Web app (Next.js)
 
 packages/
 ├── ai/             # AI model routing & providers
@@ -97,7 +96,6 @@ Biome/Ultracite handles standard linting. Project-specific only:
 
 ## Local Dev (portless)
 
-- **Navigator**: `http://navigator.localhost:1355` (deprecated; deferred until CLI limits are in place)
 - **Web**: `http://detent.localhost:1355`
 - **API**: `http://observer.localhost:1355`
 - **Resolver**: `http://resolver.localhost:1355`
@@ -106,7 +104,6 @@ Biome/Ultracite handles standard linting. Project-specific only:
 
 - **App**: `detent.sh`
 - **API**: `observer.detent.sh`
-- **Dashboard**: `navigator.detent.sh`
 
 ## Resolving Architecture
 

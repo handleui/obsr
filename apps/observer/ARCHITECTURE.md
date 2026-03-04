@@ -38,8 +38,8 @@ Cloudflare Workers API for the Detent self-resolving CI/CD platform.
             +---------------+---------------+
             |               |               |
         +---+---+     +-----+-----+   +-----+-----+
-        |  CLI  |     | Navigator |   |    Web    |
-        +-------+     +-----------+   +-----------+
+        |  CLI  |     |   Web App   |
+        +-------+     +-------------+
 ```
 
 ## Request Flow

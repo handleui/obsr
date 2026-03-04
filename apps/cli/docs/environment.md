@@ -31,7 +31,7 @@ WORKOS_CLIENT_ID=client_xxx
 
 # Optional - point to local services
 DETENT_API_URL=http://localhost:8787
-DETENT_AUTH_URL=http://localhost:3001
+DETENT_AUTH_URL=http://detent.localhost:1355
 
 # Optional - use custom data directory (defaults to ~/.detent-dev in dev)
 # DETENT_HOME=~/.detent-custom
@@ -49,7 +49,7 @@ When building binaries (`bun run build:binaries`), the build script:
 |----------|-----------|---------|
 | `WORKOS_CLIENT_ID` | Yes | - |
 | `DETENT_API_URL` | No | `https://observer.detent.sh` |
-| `DETENT_AUTH_URL` | No | `https://navigator.detent.sh` |
+| `DETENT_AUTH_URL` | No | `https://detent.sh` |
 
 Example build command:
 

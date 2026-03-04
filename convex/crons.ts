@@ -6,7 +6,7 @@ const crons = cronJobs();
 crons.interval(
   "cleanup stale resolves",
   { minutes: 5 },
-  internal.resolves.cleanupStaleHeals
+  internal.resolves.cleanupStaleResolves
 );
 
 export default crons;

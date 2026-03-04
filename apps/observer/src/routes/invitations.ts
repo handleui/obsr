@@ -100,7 +100,9 @@ orgInvitationsRoutes.post(
     })) as string;
 
     // Send invitation email
-    const acceptUrl = `${c.env.NAVIGATOR_BASE_URL}/invitations/${token}`;
+    const appBaseUrl =
+      c.env.APP_BASE_URL ?? c.env.NAVIGATOR_BASE_URL ?? "https://detent.sh";
+    const acceptUrl = `${appBaseUrl}/invitations/${token}`;
     const emailService = createEmailService(c.env);
 
     try {

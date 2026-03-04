@@ -423,10 +423,12 @@ export const postErrorsFoundCommentForRun = async (
   }
 
   const { projectId, installationId } = resolved;
+  const appBaseUrl =
+    env.APP_BASE_URL ?? env.NAVIGATOR_BASE_URL ?? "https://detent.sh";
   const commentBody = formatErrorsFoundComment({
     errorCount,
     jobCount: failedRunCount,
-    projectUrl: `${env.NAVIGATOR_BASE_URL}/dashboard/${projectId}`,
+    projectUrl: `${appBaseUrl}/dashboard/${projectId}`,
   });
 
   const github = createGitHubService(env);

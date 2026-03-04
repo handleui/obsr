@@ -27,7 +27,7 @@ const securedFunctions = new Set([
   "resolves:reject",
   "resolves:trigger",
   "resolves:setCheckRunId",
-  "resolves:markStaleAsFailed",
+  "resolves:markStaleResolvesAsFailed",
   "organizations:create",
   "organizations:getById",
   "organizations:getBySlug",

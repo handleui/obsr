@@ -28,7 +28,8 @@ export interface Env {
   RESEND_API_KEY: string;
   RESEND_EMAIL_FROM: string;
 
-  NAVIGATOR_BASE_URL: string;
+  APP_BASE_URL?: string;
+  NAVIGATOR_BASE_URL?: string;
 
   SENTRY_DSN?: string;
 

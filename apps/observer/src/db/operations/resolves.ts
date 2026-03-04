@@ -478,7 +478,7 @@ export const markStaleResolvesAsFailed = async (
   const failedReason =
     resolveType === "autofix" ? "Autofix timed out" : "Resolve timed out";
 
-  const result = (await client.mutation("resolves:markStaleAsFailed", {
+  const result = (await client.mutation("resolves:markStaleResolvesAsFailed", {
     timeoutMinutes,
     resolveType,
     failedReason,

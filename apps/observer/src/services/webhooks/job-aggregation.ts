@@ -137,7 +137,9 @@ const postAggregatedComment = async (
     return false;
   }
 
-  const projectUrl = `${env.NAVIGATOR_BASE_URL}/dashboard/${context.projectId}`;
+  const appBaseUrl =
+    env.APP_BASE_URL ?? env.NAVIGATOR_BASE_URL ?? "https://detent.sh";
+  const projectUrl = `${appBaseUrl}/dashboard/${context.projectId}`;
 
   const commentBody = formatErrorsFoundComment({
     errorCount: totalErrors,

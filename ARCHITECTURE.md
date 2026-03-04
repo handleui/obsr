@@ -46,14 +46,12 @@ A self-resolving CI/CD platform that runs CI locally and uses AI (Claude) to aut
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                              WEB APPS (Vercel)                                   │
 │                                                                                  │
-│  ┌──────────────────────────┐          ┌──────────────────────────┐             │
-│  │   Navigator (Next.js)    │          │     Web (Next.js)        │             │
-│  │  ┌────────────────────┐  │          │  ┌────────────────────┐  │             │
-│  │  │ /auth/login        │  │          │  │ Landing Page       │  │             │
-│  │  │ /auth/callback     │◄─┼──WorkOS──│  │ Public Site        │  │             │
-│  │  │ /invitations/[id]  │  │  OAuth   │  │ Documentation      │  │             │
-│  │  └────────────────────┘  │          │  └────────────────────┘  │             │
-│  └──────────────────────────┘          └──────────────────────────┘             │
+│  ┌──────────────────────────────────────────────────────────────────────────┐     │
+│  │                           Web (apps/web, Next.js)                        │     │
+│  │  ┌────────────────────┐                                                  │     │
+│  │  │ Public Site + Docs │◄────────────── WorkOS / Auth flows ────────────┼──── │
+│  │  └────────────────────┘                                                  │     │
+│  └──────────────────────────────────────────────────────────────────────────┘     │
 └─────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -217,17 +215,9 @@ detent/
 │   │   │   └── tui/                  # Terminal UI components (Ink)
 │   │   └── build.ts                  # bun build → standalone binary
 │   │
-│   ├── navigator/                    # Auth portal (Next.js 16; deprecated, deferred until CLI limits are in place)
-│   │   └── src/
-│   │       └── app/
-│   │           ├── auth/login/       # Initiate WorkOS OAuth
-│   │           ├── auth/callback/    # Handle OAuth callback
-│   │           ├── invitations/      # Accept email invites
-│   │           └── api/auth/         # Session management APIs
-│   │
-│   ├── web/                          # Public landing (Next.js)
+│   ├── web/                          # Public web app (Next.js)
 │   │   └── src/app/
-│   │       └── page.tsx              # Landing page
+│   │       └── page.tsx              # Landing page + auth/docs entrypoint
 │   │
 │   ├── resolver/                     # AI Resolving Service (Railway)
 │   │   └── src/
@@ -360,7 +350,7 @@ detent/
 │                    CLI AUTHENTICATION (Device Flow)                     │
 └────────────────────────────────────────────────────────────────────────┘
 
-   User Terminal                    WorkOS                 Navigator
+   User Terminal                    WorkOS                 Web App
         │                             │                        │
         │  dt auth                    │                        │
         │──────────────────────────►  │                        │

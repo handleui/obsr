@@ -20,7 +20,7 @@ const organizationSettings = v.object({
   autofixAutoCommit: v.optional(nullableBoolean),
   resolveAutoCommit: v.optional(nullableBoolean),
   resolveAutoTrigger: v.optional(nullableBoolean),
-  healBudgetPerRunUsd: v.optional(nullableNumber),
+  resolveBudgetPerRunUsd: v.optional(nullableNumber),
   validationEnabled: v.optional(nullableBoolean),
 });
 

@@ -480,10 +480,10 @@ const escapeHtml = (text: string): string =>
 const formatResolveSuccessComment = (
   filesFixed: number,
   projectId: string,
-  navigatorBaseUrl: string
+  appBaseUrl: string
 ): string => {
   const fileText = filesFixed === 1 ? "1 file" : `${filesFixed} files`;
-  const projectUrl = `${navigatorBaseUrl}/dashboard/${projectId}`;
+  const projectUrl = `${appBaseUrl}/dashboard/${projectId}`;
   return `${formatHeader(`Resolved ${fileText}. Ready to apply.`)}\n\n[Review and apply in dashboard](${projectUrl})`;
 };
 
@@ -855,7 +855,7 @@ const tryCreateCheckRun = async (
     return undefined;
   }
 
-  const detailsUrl = `${appEnv.NAVIGATOR_BASE_URL}/dashboard/${ctx.project.id}`;
+  const detailsUrl = `${appEnv.APP_BASE_URL}/dashboard/${ctx.project.id}`;
   const resolveName = `Detent Resolve: ${resolve.autofixSource ?? "AI"}`;
   const checkRunId = await createCheckRun(
     appEnv,
@@ -974,7 +974,7 @@ const handleResolveSuccess = async (
     prComment: formatResolveSuccessComment(
       result.filesChanged.length,
       resolve.projectId,
-      appEnv.NAVIGATOR_BASE_URL
+      appEnv.APP_BASE_URL
     ),
     checkRunIdOverride: newCheckRunId,
   });
@@ -1316,7 +1316,7 @@ const markStaleResolvesAsFailed = async (
 ): Promise<void> => {
   try {
     const staleResolves = (await convex.mutation(
-      asMutation("resolves:markStaleAsFailed"),
+      asMutation("resolves:markStaleResolvesAsFailed"),
       {
         timeoutMinutes: 30,
         resolveType: ResolveTypes.Resolve,

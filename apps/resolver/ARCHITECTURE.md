@@ -92,7 +92,7 @@ The Resolver is a standalone Railway-deployed service that executes AI-powered r
    - Fetch project, organization, and run data from Convex/Postgres
    - Get GitHub installation token via App JWT
    - Build authenticated clone URL
-   - Build compact diagnostics context (`runId`, `projectId`, `commitSha`, `prNumber`, `jobName`, `source`, `logRef`, diagnostics[])
+   - Build compact resolver prompt context (`source`, `jobName`, `diagnostics[]`)
    - Format compact diagnostics into the resolver prompt
 
 3. **Sandbox Setup** (timeout: 600s)
@@ -257,17 +257,12 @@ type ResolverQueuePayload =
   | { resolveIds: string[]; source: "create" | "trigger" };
 ```
 
-### Diagnostics Context Contract (Observer -> Resolver)
+### Resolver Prompt Context Contract (Worker Internal)
 
 ```typescript
-interface ResolverDiagnosticsContext {
-  runId: string;
-  projectId: string;
-  commitSha: string | null;
-  prNumber: number | null;
-  jobName: string | null;
+interface ResolvePromptContext {
   source: string;
-  logRef: string | null;
+  jobName: string | null;
   diagnostics: Array<{
     message: string;
     filePath: string | null;
@@ -276,8 +271,6 @@ interface ResolverDiagnosticsContext {
     ruleId: string | null;
     severity: "error" | "warning" | null;
     category: string | null;
-    signatureId: string | null;
-    fixable: boolean;
   }>;
 }
 ```
@@ -315,7 +308,7 @@ const resolveRequestSchema = z.object({
 ### Response Format
 
 ```typescript
-interface HealResponse {
+interface ResolveResponse {
   success: boolean;
   patch: string | null;
   filesChanged: string[];
@@ -366,7 +359,7 @@ interface HealResponse {
 ### Concurrency Control
 
 ```
-MAX_CONCURRENT_HEALS = 5
+MAX_CONCURRENT_RESOLVES = 5
 ```
 
 Active resolves are tracked in-memory. Queue deliveries are accepted only when slots are available.
@@ -375,7 +368,8 @@ Active resolves are tracked in-memory. Queue deliveries are accepted only when s
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `PORT` | No | Server port (default: 3000) |
+| `PORT` | No | Server port (default: 8080) |
+| `MAX_CONCURRENT_RESOLVES` | No | Max in-memory concurrent resolves (default: 20, clamped to 1-100) |
 | `SANDBOX_PROVIDER` | No | Sandbox provider (`daytona`, `vercel`, `e2b`), default: `daytona` |
 | `DAYTONA_API_KEY` | No | Daytona API key (required if `SANDBOX_PROVIDER=daytona` and no JWT token is set) |
 | `DAYTONA_API_URL` | No | Optional Daytona API URL override |
@@ -387,10 +381,14 @@ Active resolves are tracked in-memory. Queue deliveries are accepted only when s
 | `VERCEL_TEAM_ID` | No | Legacy Vercel team ID (required for `SANDBOX_PROVIDER=vercel`) |
 | `VERCEL_PROJECT_ID` | No | Legacy Vercel project ID (required for `SANDBOX_PROVIDER=vercel`) |
 | `AI_GATEWAY_API_KEY` | Yes | AI Gateway access |
+| `DATABASE_URL` | Yes | Postgres connection URL for run/error reads |
 | `CONVEX_URL` | Yes | Convex deployment URL |
 | `CONVEX_SERVICE_TOKEN` | Yes | Convex service token for authenticated access |
 | `GITHUB_APP_ID` | Yes | GitHub App ID |
 | `GITHUB_APP_PRIVATE_KEY` | Yes | GitHub App private key (PEM) |
+| `APP_BASE_URL` | No | App base URL for resolve links (defaults to `NAVIGATOR_BASE_URL`, then `https://detent.sh`) |
+| `NAVIGATOR_BASE_URL` | No | Deprecated alias for `APP_BASE_URL` (fallback only) |
+| `ENCRYPTION_KEY` | Yes | Base64 AES-GCM key for decrypting webhook secrets |
 
 ## Health Endpoints
 

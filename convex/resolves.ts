@@ -12,7 +12,7 @@ import {
 
 const serviceToken = v.optional(v.string());
 
-const healStatus = v.union(
+const resolveStatus = v.union(
   v.literal("found"),
   v.literal("pending"),
   v.literal("running"),
@@ -64,7 +64,7 @@ const MAX_PENDING_LIMIT = 100;
 const MAX_ERROR_IDS = 500;
 const MAX_FILES_CHANGED = 500;
 
-const getHealById = async (
+const getResolveById = async (
   ctx: {
     db: {
       get: (id: Id<"resolves">) => Promise<Doc<"resolves"> | null>;
@@ -222,7 +222,7 @@ export const create = mutation({
   args: {
     serviceToken,
     type: resolveType,
-    status: v.optional(healStatus),
+    status: v.optional(resolveStatus),
     projectId: v.id("projects"),
     runId: v.optional(v.string()),
     commitSha: v.optional(nullableString),
@@ -275,7 +275,7 @@ export const get = query({
   args: { id: v.id("resolves"), serviceToken },
   handler: async (ctx, args) => {
     await requireServiceAuth(ctx, args);
-    return await getHealById(ctx, args.id);
+    return await getResolveById(ctx, args.id);
   },
 });
 
@@ -294,7 +294,7 @@ export const getByPr = query({
 });
 
 export const getByProjectStatus = query({
-  args: { projectId: v.id("projects"), status: healStatus, serviceToken },
+  args: { projectId: v.id("projects"), status: resolveStatus, serviceToken },
   handler: async (ctx, args) => {
     await requireServiceAuth(ctx, args);
     return await ctx.db
@@ -413,8 +413,8 @@ export const updateStatus = mutation({
   args: {
     serviceToken,
     id: v.id("resolves"),
-    status: healStatus,
-    expectedStatus: v.optional(healStatus),
+    status: resolveStatus,
+    expectedStatus: v.optional(resolveStatus),
     patch: v.optional(nullableString),
     commitMessage: v.optional(nullableString),
     filesChanged: v.optional(v.array(v.string())),
@@ -428,7 +428,7 @@ export const updateStatus = mutation({
   handler: async (ctx, args) => {
     await requireServiceAuth(ctx, args);
 
-    const resolve = await getHealById(ctx, args.id);
+    const resolve = await getResolveById(ctx, args.id);
     if (!resolve) {
       return null;
     }
@@ -451,7 +451,7 @@ export const apply = mutation({
   handler: async (ctx, args) => {
     await requireServiceAuth(ctx, args);
 
-    const resolve = await getHealById(ctx, args.id);
+    const resolve = await getResolveById(ctx, args.id);
     if (!resolve) {
       return null;
     }
@@ -481,7 +481,7 @@ export const reject = mutation({
   handler: async (ctx, args) => {
     await requireServiceAuth(ctx, args);
 
-    const resolve = await getHealById(ctx, args.id);
+    const resolve = await getResolveById(ctx, args.id);
     if (!resolve) {
       return null;
     }
@@ -507,7 +507,7 @@ export const trigger = mutation({
   handler: async (ctx, args) => {
     await requireServiceAuth(ctx, args);
 
-    const resolve = await getHealById(ctx, args.id);
+    const resolve = await getResolveById(ctx, args.id);
     if (!resolve) {
       return false;
     }
@@ -527,7 +527,7 @@ export const setCheckRunId = mutation({
   handler: async (ctx, args) => {
     await requireServiceAuth(ctx, args);
 
-    const resolve = await getHealById(ctx, args.id);
+    const resolve = await getResolveById(ctx, args.id);
     if (!resolve) {
       return null;
     }
@@ -550,17 +550,17 @@ interface DrainStaleOpts {
   budget: number;
 }
 
-interface StaleHealEntry {
+interface StaleResolveEntry {
   _id: Id<"resolves">;
   projectId: Id<"projects">;
   checkRunId?: string;
 }
 
-const drainStaleHeals = async (
+const drainStaleResolves = async (
   db: DatabaseWriter,
   opts: DrainStaleOpts
-): Promise<StaleHealEntry[]> => {
-  const results: StaleHealEntry[] = [];
+): Promise<StaleResolveEntry[]> => {
+  const results: StaleResolveEntry[] = [];
 
   while (results.length < opts.budget) {
     const take = Math.min(opts.batchSize, opts.budget - results.length);
@@ -600,7 +600,7 @@ const STALE_STATUSES: Array<"pending" | "running"> = ["pending", "running"];
 const STALE_BATCH_SIZE = 200;
 const STALE_MAX_PATCHES = 500;
 
-export const markStaleAsFailed = mutation({
+export const markStaleResolvesAsFailed = mutation({
   args: {
     serviceToken,
     timeoutMinutes: v.number(),
@@ -616,12 +616,12 @@ export const markStaleAsFailed = mutation({
       truncateString(args.failedReason, MAX_FAILED_REASON_LENGTH) ??
       "Resolve timed out";
 
-    const stale: StaleHealEntry[] = [];
+    const stale: StaleResolveEntry[] = [];
     for (const status of STALE_STATUSES) {
       if (stale.length >= STALE_MAX_PATCHES) {
         break;
       }
-      const entries = await drainStaleHeals(ctx.db, {
+      const entries = await drainStaleResolves(ctx.db, {
         status,
         resolveType: args.resolveType,
         cutoff,
@@ -646,14 +646,14 @@ const TIMEOUT_REASONS: Record<string, string> = {
   resolve: "Resolve timed out",
 };
 
-const CLEANUP_HEAL_TYPES = ["resolve", "autofix"] as const;
+const CLEANUP_RESOLVE_TYPES = ["resolve", "autofix"] as const;
 const CLEANUP_TIMEOUT_MS = 30 * 60 * 1000;
 
-const CLEANUP_COMBINATIONS = CLEANUP_HEAL_TYPES.flatMap((resolveType) =>
+const CLEANUP_COMBINATIONS = CLEANUP_RESOLVE_TYPES.flatMap((resolveType) =>
   STALE_STATUSES.map((status) => ({ resolveType, status }))
 );
 
-export const cleanupStaleHeals = internalMutation({
+export const cleanupStaleResolves = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
@@ -664,7 +664,7 @@ export const cleanupStaleHeals = internalMutation({
       if (totalCleaned >= STALE_MAX_PATCHES) {
         break;
       }
-      const entries = await drainStaleHeals(ctx.db, {
+      const entries = await drainStaleResolves(ctx.db, {
         status,
         resolveType,
         cutoff,

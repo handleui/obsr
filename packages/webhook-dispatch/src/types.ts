@@ -6,7 +6,7 @@ export type WebhookEventType =
   | "resolve.rejected"
   | "resolve.failed";
 
-export interface WebhookHealData {
+export interface WebhookResolveData {
   resolve_id: string;
   type: "autofix" | "resolve";
   status: string;
@@ -25,5 +25,5 @@ export interface WebhookPayload {
   event: WebhookEventType;
   timestamp: string;
   organization_id: string;
-  data: WebhookHealData;
+  data: WebhookResolveData;
 }

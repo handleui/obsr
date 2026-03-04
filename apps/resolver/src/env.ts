@@ -18,8 +18,10 @@ export interface Env {
   CONVEX_SERVICE_TOKEN: string;
   GITHUB_APP_ID: string;
   GITHUB_APP_PRIVATE_KEY: string;
-  /** Navigator (web app) base URL for dashboard links, e.g., https://navigator.detent.sh */
-  NAVIGATOR_BASE_URL: string;
+  /** Detent app base URL for resolve links, e.g., https://detent.sh */
+  APP_BASE_URL: string;
+  /** @deprecated Use APP_BASE_URL */
+  NAVIGATOR_BASE_URL?: string;
   /** Public resolver queue webhook URL (as configured in Upstash QStash) */
   RESOLVER_WEBHOOK_URL?: string;
   /** Upstash QStash request signing keys (current + optional next for key rotation) */
@@ -131,8 +133,11 @@ const loadEnv = (): Env => {
       "GITHUB_APP_PRIVATE_KEY",
       process.env.GITHUB_APP_PRIVATE_KEY
     ),
-    NAVIGATOR_BASE_URL:
-      process.env.NAVIGATOR_BASE_URL ?? "https://navigator.detent.sh",
+    APP_BASE_URL:
+      process.env.APP_BASE_URL ??
+      process.env.NAVIGATOR_BASE_URL ??
+      "https://detent.sh",
+    NAVIGATOR_BASE_URL: process.env.NAVIGATOR_BASE_URL,
     RESOLVER_WEBHOOK_URL: process.env.RESOLVER_WEBHOOK_URL,
     QSTASH_CURRENT_SIGNING_KEY: process.env.QSTASH_CURRENT_SIGNING_KEY,
     QSTASH_NEXT_SIGNING_KEY: process.env.QSTASH_NEXT_SIGNING_KEY,

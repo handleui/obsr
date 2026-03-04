@@ -1,5 +1,12 @@
 # @detent/observer
 
+## 2.0.0
+
+### Major Changes
+
+- 565831f: Breaking platform consolidation release.
+  Removes the navigator app, consolidates auth and docs flows into web, and renames core heal-era observer APIs/events to resolve terminology.
+
 ## 1.1.0
 
 ### Minor Changes

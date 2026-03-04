@@ -1,5 +1,12 @@
 # @detent/types
 
+## 1.0.0
+
+### Major Changes
+
+- 565831f: Publish a breaking resolve-first type surface.
+  Replaces healing-era naming with resolving/resolver diagnostics and queue types used by observer, resolver, and webhook consumers.
+
 ## 0.5.0
 
 ### Minor Changes

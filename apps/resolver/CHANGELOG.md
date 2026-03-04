@@ -1,5 +1,12 @@
 # @detent/resolver
 
+## 1.0.0
+
+### Major Changes
+
+- 565831f: First stable resolver major after the healing-to-resolving migration.
+  Renames service interfaces and resolve lifecycle behavior across queue handling, worker orchestration, and webhook dispatch integrations.
+
 ## 0.2.0
 
 ### Minor Changes

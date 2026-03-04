@@ -1,5 +1,12 @@
 # @detent/sandbox
 
+## 1.0.0
+
+### Major Changes
+
+- 565831f: Introduce a breaking sandbox provider model update.
+  Adds Daytona provider support and aligns sandbox abstractions with resolver-era execution flows.
+
 ## 0.1.1
 
 ### Patch Changes

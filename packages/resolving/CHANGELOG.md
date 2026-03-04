@@ -1,5 +1,12 @@
 # @detent/resolving
 
+## 1.0.0
+
+### Major Changes
+
+- 565831f: Stabilize resolving as the canonical package after the healing rename.
+  Exports, prompt/tooling nomenclature, and downstream integration contracts now use resolve-first naming consistently.
+
 ## 0.4.5
 
 ### Patch Changes

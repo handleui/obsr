@@ -1,6 +1,6 @@
 {
   "name": "@detent/sandbox",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@daytonaio/sdk": "^0.148.0",
     "@e2b/code-interpreter": "^2.3.3",
     "@vercel/sandbox": "^1.3.1"
   },

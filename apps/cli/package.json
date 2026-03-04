@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@detent/git": "*",
-    "@detent/healing": "*",
+    "@detent/resolving": "*",
     "@detent/sdk": "*",
     "@detent/sentry": "workspace:*",
     "@detent/types": "*",

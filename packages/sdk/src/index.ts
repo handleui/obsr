@@ -6,7 +6,7 @@ export { sanitizeCredentials, CREDENTIAL_PATTERNS } from "./utils/sanitize.js";
 export { ApiKeysResource } from "./resources/api-keys.js";
 export { AuthResource } from "./resources/auth.js";
 export { ErrorsResource } from "./resources/errors.js";
-export { HealsResource } from "./resources/heals.js";
+export { ResolvesResource } from "./resources/resolves.js";
 export { InvitationsResource } from "./resources/invitations.js";
 export { MembersResource } from "./resources/members.js";
 export {

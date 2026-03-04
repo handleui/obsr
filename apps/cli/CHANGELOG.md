@@ -68,7 +68,7 @@
 * decoupled oauth ([420f3d3](https://github.com/detentsh/detent/commit/420f3d3150bff258da0dca2f993ff13add7dc4da))
 * docs AI slop & openstatus setup ([9b317d5](https://github.com/detentsh/detent/commit/9b317d56fe75332082a722dc6bd06d627d47d1d1))
 * eslint parsing, cleanup fixes and preflight tool support, started rust ([01f4b6e](https://github.com/detentsh/detent/commit/01f4b6e5579c201dff746802df04bbf9c31894c1))
-* fix protocol persistence layer for parallel agent healing ([7c49e00](https://github.com/detentsh/detent/commit/7c49e00a88f3916bcd6a3a2759b540e4d352766c))
+* fix protocol persistence layer for parallel agent resolving ([7c49e00](https://github.com/detentsh/detent/commit/7c49e00a88f3916bcd6a3a2759b540e4d352766c))
 * fixed check ([2ffa39e](https://github.com/detentsh/detent/commit/2ffa39ec0666c995f917a4c5263dde19e0aff467))
 * fixed persistence layer for error caching ([a39b0b5](https://github.com/detentsh/detent/commit/a39b0b523a76ee1484f9ab7a60ca6de440c3f32e))
 * flatten error structure for AI consumption ([92b1771](https://github.com/detentsh/detent/commit/92b17717659559cf3ef8377eb74975c960a988dc))
@@ -80,11 +80,11 @@
 * harden install script with cosign signing, retry, version pinning ([2fc5abd](https://github.com/detentsh/detent/commit/2fc5abd495d9865a8c59cb36f70a04df2a1d667e))
 * hardened curl releases ur welcome everyone ([1b1b4e9](https://github.com/detentsh/detent/commit/1b1b4e9f731901eb39a30a136ddf71c942d60026))
 * headless CLI auth ([420f3d3](https://github.com/detentsh/detent/commit/420f3d3150bff258da0dca2f993ff13add7dc4da))
-* heal dedup and error location tracking ([80962fa](https://github.com/detentsh/detent/commit/80962fa244bf2b8df42b7574fdf2b853ef006e3c))
-* heal lock & testing ([e94ddf1](https://github.com/detentsh/detent/commit/e94ddf1e0865e525761b2e96f05d3c1e4a9cd3f8))
-* heal schemas ([80962fa](https://github.com/detentsh/detent/commit/80962fa244bf2b8df42b7574fdf2b853ef006e3c))
-* heal schemas ([#8](https://github.com/detentsh/detent/issues/8)) ([80962fa](https://github.com/detentsh/detent/commit/80962fa244bf2b8df42b7574fdf2b853ef006e3c))
-* **healing:** add run_check tool for CI command verification ([2957054](https://github.com/detentsh/detent/commit/29570542b9442a017ee089586bb007bfd756b41d))
+* resolve dedup and error location tracking ([80962fa](https://github.com/detentsh/detent/commit/80962fa244bf2b8df42b7574fdf2b853ef006e3c))
+* resolve lock & testing ([e94ddf1](https://github.com/detentsh/detent/commit/e94ddf1e0865e525761b2e96f05d3c1e4a9cd3f8))
+* resolve schemas ([80962fa](https://github.com/detentsh/detent/commit/80962fa244bf2b8df42b7574fdf2b853ef006e3c))
+* resolve schemas ([#8](https://github.com/detentsh/detent/issues/8)) ([80962fa](https://github.com/detentsh/detent/commit/80962fa244bf2b8df42b7574fdf2b853ef006e3c))
+* **resolving:** add run_check tool for CI command verification ([2957054](https://github.com/detentsh/detent/commit/29570542b9442a017ee089586bb007bfd756b41d))
 * hooks security and env vars isolation ([5045daa](https://github.com/detentsh/detent/commit/5045daac58e78b0d28c0522a792ff43229430761))
 * host schema and install script on detent.sh ([31a3850](https://github.com/detentsh/detent/commit/31a3850becc67be4d203d9e7760bf34f9a4ed4e5))
 * improved error tolerance and act job tracker ([165a476](https://github.com/detentsh/detent/commit/165a4763525b1f4f381217175df11fd0130c0efb))
@@ -118,7 +118,7 @@
 * removed npm, oidc will kill me + curl is better regardless ([04b5fd1](https://github.com/detentsh/detent/commit/04b5fd1e824227e955b939e401f156e5fbca1865))
 * removed unnecessary cache ([c3b68af](https://github.com/detentsh/detent/commit/c3b68af4610247eb6ec3b16a89c413957e66f37f))
 * reorganize blob distribution to product-based structure ([248e1c3](https://github.com/detentsh/detent/commit/248e1c315cd4469049d0004164f57a8cc7bc601c))
-* replace executor with healer service ([#129](https://github.com/detentsh/detent/issues/129)) ([9b6f274](https://github.com/detentsh/detent/commit/9b6f2747c4b7dd0e25662716253112271b4dfbd3))
+* replace executor with resolver service ([#129](https://github.com/detentsh/detent/issues/129)) ([9b6f274](https://github.com/detentsh/detent/commit/9b6f2747c4b7dd0e25662716253112271b4dfbd3))
 * replace parser package with GitHub Action for client-side parsing ([#126](https://github.com/detentsh/detent/issues/126)) ([e1cb50b](https://github.com/detentsh/detent/commit/e1cb50bfa90f36993d203f99a90d87f536cb9b1e))
 * retry logic ([cbfbea1](https://github.com/detentsh/detent/commit/cbfbea1d5608b62af147e88a910e31bf0d2e3e90))
 * sentry to build injection, simplified check logs ([974e02e](https://github.com/detentsh/detent/commit/974e02e4678bbd283519c10a4102b1bad82e8cb4))
@@ -191,7 +191,7 @@
 - Updated dependencies [6bfca1a]
 - Updated dependencies [6bfca1a]
   - @detent/parser@0.6.0
-  - @detent/healing@0.4.2
+  - @detent/resolving@0.4.2
 
 ## 0.10.0
 
@@ -205,7 +205,7 @@
 
 - Updated dependencies [5fa4de0]
 - Updated dependencies [5fa4de0]
-  - @detent/healing@0.4.1
+  - @detent/resolving@0.4.1
   - @detent/parser@0.5.3
 
 ## 0.9.0
@@ -224,7 +224,7 @@
 - 7c5c1d3: Update default API URL from api.detent.sh to backend.detent.sh across all references.
 - Updated dependencies [18b9db1]
 - Updated dependencies [2c9889d]
-  - @detent/healing@0.4.0
+  - @detent/resolving@0.4.0
 
 ## 0.8.1
 
@@ -353,7 +353,7 @@
 
   - Built with `citty` for CLI argument parsing
   - React 18 + Ink 5 for terminal UI components
-  - Uses workspace packages: `@detent/git`, `@detent/parser`, `@detent/persistence`, `@detent/healing`
+  - Uses workspace packages: `@detent/git`, `@detent/parser`, `@detent/persistence`, `@detent/resolving`
   - Vitest for unit testing
 
 ### Patch Changes
@@ -364,5 +364,5 @@
 - Updated dependencies [50d0ad0]
   - @detent/persistence@0.1.0
   - @detent/git@0.1.0
-  - @detent/healing@0.1.0
+  - @detent/resolving@0.1.0
   - @detent/parser@0.1.0

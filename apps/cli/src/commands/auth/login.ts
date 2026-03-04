@@ -1,7 +1,7 @@
 import { defineCommand } from "citty";
 import { syncUser } from "../../lib/api.js";
 import {
-  authenticateViaNavigator,
+  authenticateViaWeb,
   getJwtExpiration,
   pollForTokens,
   requestDeviceAuthorization,
@@ -50,11 +50,11 @@ const runHeadlessFlow = async (): Promise<TokenResponse> => {
   return tokens;
 };
 
-const runNavigatorFlow = async (): Promise<TokenResponse> => {
+const runBrowserFlow = async (): Promise<TokenResponse> => {
   console.log("Opening browser...");
 
   try {
-    return await authenticateViaNavigator();
+    return await authenticateViaWeb();
   } catch (error) {
     console.error(
       "Authentication failed:",
@@ -71,10 +71,10 @@ const showLoginSuccess = async (
   accessToken: string,
   githubToken?: string
 ): Promise<void> => {
-  // Debug: log whether GitHub token was received from Navigator
+  // Debug: log whether GitHub token was received from browser auth
   if (process.env.DEBUG) {
     console.log(
-      `[login] GitHub token from Navigator: ${githubToken ? "yes" : "no"}`
+      `[login] GitHub token from browser auth: ${githubToken ? "yes" : "no"}`
     );
   }
   try {
@@ -117,13 +117,13 @@ export const loginCommand = defineCommand({
 
     const tokens = args.headless
       ? await runHeadlessFlow()
-      : await runNavigatorFlow();
+      : await runBrowserFlow();
 
     const credentials: Credentials = {
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       expires_at: getJwtExpiration(tokens.access_token),
-      // Store GitHub OAuth tokens if available (from Navigator flow)
+      // Store GitHub OAuth tokens if available (from browser flow)
       ...(tokens.github_token && {
         github_token: tokens.github_token,
         github_token_expires_at: tokens.github_token_expires_at,

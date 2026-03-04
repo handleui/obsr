@@ -1,165 +1,144 @@
 #!/usr/bin/env bun
-/**
- * Verifies that securedQueries/securedMutations in convex-client.ts
- * stay in sync with Convex functions that call requireServiceAuth.
- *
- * Run: bun scripts/verify-secured-functions.ts
- */
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const CONVEX_DIR = "convex";
-const CLIENT_FILE = "apps/navigator/src/lib/convex-client.ts";
+const OBSERVER_CONVEX_FILE = "apps/observer/src/db/convex.ts";
 
-// Top-level regex patterns
-const EXPORT_FUNC_REGEX =
+const EXPORT_FUNCTION_REGEX =
   /export\s+const\s+(\w+)\s*=\s*(?:query|mutation|internalQuery|internalMutation)\s*\(/g;
-const SECURED_QUERIES_REGEX =
-  /const\s+securedQueries\s*=\s*new\s+Set[^(]*\(\s*\[([\s\S]*?)\]\s*\)/;
-const SECURED_MUTATIONS_REGEX =
-  /const\s+securedMutations\s*=\s*new\s+Set[^(]*\(\s*\[([\s\S]*?)\]\s*\)/;
-const API_ENTRY_REGEX = /api(?:\.(\w+)|\["([^"]+)"\])\.(\w+)/g;
+const SECURED_FUNCTIONS_SET_REGEX =
+  /const\s+securedFunctions\s*=\s*new\s+Set\s*\(\s*\[([\s\S]*?)\]\s*\)/;
+const STRING_ENTRY_REGEX = /["']([^"']+)["']/g;
 
-// Check if a function body contains requireServiceAuth
 const containsRequireServiceAuth = (
   content: string,
-  startIdx: number
+  startIndex: number
 ): boolean => {
-  let braceCount = 0;
-  let foundStart = false;
+  let parenthesesDepth = 0;
+  let sawOpenParenthesis = false;
 
-  for (let i = startIdx; i < content.length; i++) {
-    if (content[i] === "(") {
-      braceCount++;
-      foundStart = true;
-    } else if (content[i] === ")") {
-      braceCount--;
-      if (foundStart && braceCount === 0) {
-        return content.slice(startIdx, i).includes("requireServiceAuth");
+  for (let index = startIndex; index < content.length; index++) {
+    if (content[index] === "(") {
+      parenthesesDepth += 1;
+      sawOpenParenthesis = true;
+      continue;
+    }
+
+    if (content[index] === ")") {
+      parenthesesDepth -= 1;
+      if (sawOpenParenthesis && parenthesesDepth === 0) {
+        return content.slice(startIndex, index).includes("requireServiceAuth");
       }
     }
   }
+
   return false;
 };
 
-// Extract function names that call requireServiceAuth from a single file
-const extractFromFile = (filePath: string, moduleName: string): Set<string> => {
-  const funcs = new Set<string>();
+const extractSecuredFromConvexFile = (
+  filePath: string,
+  moduleName: string
+): Set<string> => {
   const content = readFileSync(filePath, "utf-8");
+  const securedFunctions = new Set<string>();
 
-  // Reset regex state
-  EXPORT_FUNC_REGEX.lastIndex = 0;
+  EXPORT_FUNCTION_REGEX.lastIndex = 0;
+  let functionMatch = EXPORT_FUNCTION_REGEX.exec(content);
 
-  let match = EXPORT_FUNC_REGEX.exec(content);
-  while (match !== null) {
-    if (containsRequireServiceAuth(content, match.index)) {
-      funcs.add(`${moduleName}:${match[1]}`);
+  while (functionMatch !== null) {
+    if (containsRequireServiceAuth(content, functionMatch.index)) {
+      securedFunctions.add(`${moduleName}:${functionMatch[1]}`);
     }
-    match = EXPORT_FUNC_REGEX.exec(content);
+    functionMatch = EXPORT_FUNCTION_REGEX.exec(content);
   }
 
-  return funcs;
+  return securedFunctions;
 };
 
-// Extract all secured functions from convex files
-const extractSecuredFunctions = (): Set<string> => {
-  const result = new Set<string>();
-  const files = readdirSync(CONVEX_DIR).filter((f) => f.endsWith(".ts"));
-
-  for (const file of files) {
-    const moduleName = file.replace(".ts", "");
-    const funcs = extractFromFile(join(CONVEX_DIR, file), moduleName);
-    for (const f of funcs) {
-      result.add(f);
-    }
-  }
-
-  return result;
-};
-
-// Parse api entries from a Set block
-const parseApiEntries = (block: string): Set<string> => {
-  const entries = new Set<string>();
-  API_ENTRY_REGEX.lastIndex = 0;
-
-  let m = API_ENTRY_REGEX.exec(block);
-  while (m !== null) {
-    const module = m[1] || m[2];
-    entries.add(`${module}:${m[3]}`);
-    m = API_ENTRY_REGEX.exec(block);
-  }
-
-  return entries;
-};
-
-// Extract secured functions from convex-client.ts
-const extractClientSecuredFunctions = (): Set<string> => {
-  const content = readFileSync(CLIENT_FILE, "utf-8");
-  const result = new Set<string>();
-
-  const queriesMatch = SECURED_QUERIES_REGEX.exec(content);
-  const mutationsMatch = SECURED_MUTATIONS_REGEX.exec(content);
-
-  if (queriesMatch) {
-    for (const entry of parseApiEntries(queriesMatch[1])) {
-      result.add(entry);
-    }
-  }
-
-  if (mutationsMatch) {
-    for (const entry of parseApiEntries(mutationsMatch[1])) {
-      result.add(entry);
-    }
-  }
-
-  return result;
-};
-
-// Report missing functions
-const reportMissing = (missing: string[]): void => {
-  console.error(
-    "Missing from convex-client.ts (add to securedQueries or securedMutations):"
+const extractSecuredFromConvexSource = (): Set<string> => {
+  const securedFunctions = new Set<string>();
+  const convexFiles = readdirSync(CONVEX_DIR).filter(
+    (fileName) => fileName.endsWith(".ts") && !fileName.startsWith("_")
   );
-  for (const m of missing) {
-    const [mod, func] = m.split(":");
-    console.error(`  - api["${mod}"].${func}`);
+
+  for (const fileName of convexFiles) {
+    const moduleName = fileName.replace(".ts", "");
+    const moduleFunctions = extractSecuredFromConvexFile(
+      join(CONVEX_DIR, fileName),
+      moduleName
+    );
+
+    for (const functionName of moduleFunctions) {
+      securedFunctions.add(functionName);
+    }
+  }
+
+  return securedFunctions;
+};
+
+const extractSecuredFromObserverClient = (): Set<string> => {
+  const content = readFileSync(OBSERVER_CONVEX_FILE, "utf-8");
+  const securedFunctions = new Set<string>();
+  const setMatch = SECURED_FUNCTIONS_SET_REGEX.exec(content);
+
+  if (!setMatch) {
+    throw new Error(
+      `Unable to locate securedFunctions set in ${OBSERVER_CONVEX_FILE}`
+    );
+  }
+
+  STRING_ENTRY_REGEX.lastIndex = 0;
+  let entryMatch = STRING_ENTRY_REGEX.exec(setMatch[1]);
+
+  while (entryMatch !== null) {
+    securedFunctions.add(entryMatch[1]);
+    entryMatch = STRING_ENTRY_REGEX.exec(setMatch[1]);
+  }
+
+  return securedFunctions;
+};
+
+const printMismatch = (title: string, entries: string[]): void => {
+  console.error(title);
+  for (const entry of entries) {
+    const [moduleName, functionName] = entry.split(":");
+    console.error(`  - ${moduleName}:${functionName}`);
   }
 };
 
-// Report extra functions
-const reportExtra = (extra: string[]): void => {
-  console.error(
-    "\nExtra in convex-client.ts (no longer uses requireServiceAuth):"
-  );
-  for (const e of extra) {
-    const [mod, func] = e.split(":");
-    console.error(`  - api["${mod}"].${func}`);
-  }
-};
+const verify = (): void => {
+  const sourceSecured = extractSecuredFromConvexSource();
+  const observerSecured = extractSecuredFromObserverClient();
 
-// Main verification
-const verify = () => {
-  const convexSecured = extractSecuredFunctions();
-  const clientSecured = extractClientSecuredFunctions();
-
-  const missing = [...convexSecured].filter((f) => !clientSecured.has(f));
-  const extra = [...clientSecured].filter((f) => !convexSecured.has(f));
+  const missing = [...sourceSecured]
+    .filter((entry) => !observerSecured.has(entry))
+    .sort((left, right) => left.localeCompare(right));
+  const extra = [...observerSecured]
+    .filter((entry) => !sourceSecured.has(entry))
+    .sort((left, right) => left.localeCompare(right));
 
   if (missing.length > 0 || extra.length > 0) {
-    console.error("❌ Secured functions mismatch!\n");
+    console.error("Secured function mismatch detected.");
     if (missing.length > 0) {
-      reportMissing(missing);
+      printMismatch(
+        `Missing from ${OBSERVER_CONVEX_FILE} securedFunctions (used requireServiceAuth in convex):`,
+        missing
+      );
     }
     if (extra.length > 0) {
-      reportExtra(extra);
+      printMismatch(
+        `Extra in ${OBSERVER_CONVEX_FILE} securedFunctions (no requireServiceAuth usage found):`,
+        extra
+      );
     }
-    console.error("\nSee: apps/navigator/src/lib/convex-client.ts");
     process.exit(1);
   }
 
-  console.log("✓ Secured functions are in sync");
-  console.log(`  ${clientSecured.size} functions verified`);
+  console.log(
+    `securedFunctions is in sync: ${observerSecured.size} secured functions verified against convex sources`
+  );
 };
 
 verify();

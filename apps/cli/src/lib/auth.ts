@@ -16,7 +16,7 @@ import {
 const WORKOS_API_BASE = "https://api.workos.com";
 
 const getAuthUrl = (): string => {
-  return process.env.DETENT_AUTH_URL ?? "https://navigator.detent.sh";
+  return process.env.DETENT_AUTH_URL ?? "https://detent.sh";
 };
 
 /**
@@ -42,7 +42,7 @@ export interface TokenResponse {
   refresh_token: string;
   token_type: string;
   expires_in: number;
-  // GitHub OAuth tokens (from Navigator flow when "Return GitHub OAuth tokens" is enabled)
+  // GitHub OAuth tokens (from browser flow when "Return GitHub OAuth tokens" is enabled)
   // Access token expires in ~8 hours, refresh token expires in ~6 months
   github_token?: string;
   github_token_expires_at?: number;
@@ -415,11 +415,11 @@ export const checkTokenHealth = (): TokenHealthStatus => {
 };
 
 /**
- * Authenticate via Navigator (browser-based flow)
- * Opens browser to Navigator app which handles WorkOS auth,
+ * Authenticate via Detent web app (browser-based flow)
+ * Opens browser to the web app which handles WorkOS auth,
  * then receives callback on localhost with encrypted tokens.
  */
-export const authenticateViaNavigator = async (): Promise<TokenResponse> => {
+export const authenticateViaWeb = async (): Promise<TokenResponse> => {
   const { openBrowser } = await import("./browser.js");
   const { generateState, startCallbackServer } = await import(
     "./localhost-server.js"
@@ -459,10 +459,10 @@ export const authenticateViaNavigator = async (): Promise<TokenResponse> => {
     github_refresh_token_expires_at?: number;
   };
 
-  // Debug: log what Navigator returned
+  // Debug: log what browser auth returned
   if (process.env.DEBUG) {
     console.log(
-      "[auth] Navigator token exchange response:",
+      "[auth] Browser token exchange response:",
       `access_token: ${tokens.access_token ? "present" : "missing"},`,
       `github_token: ${tokens.github_token ? "present" : "missing"}`
     );

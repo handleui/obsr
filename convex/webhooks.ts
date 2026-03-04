@@ -6,12 +6,12 @@ import { buildPatch, clampLimit, nullableNumber } from "./validators";
 const serviceToken = v.optional(v.string());
 
 const webhookEvent = v.union(
-  v.literal("heal.pending"),
-  v.literal("heal.running"),
-  v.literal("heal.completed"),
-  v.literal("heal.applied"),
-  v.literal("heal.rejected"),
-  v.literal("heal.failed")
+  v.literal("resolve.pending"),
+  v.literal("resolve.running"),
+  v.literal("resolve.completed"),
+  v.literal("resolve.applied"),
+  v.literal("resolve.rejected"),
+  v.literal("resolve.failed")
 );
 
 export const create = mutation({

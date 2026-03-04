@@ -20,7 +20,7 @@ import {
   type SyncIdentityResponse,
 } from "@detent/sdk";
 
-const API_BASE_URL = process.env.DETENT_API_URL ?? "https://backend.detent.sh";
+const API_BASE_URL = process.env.DETENT_API_URL ?? "https://observer.detent.sh";
 
 interface ApiOptions {
   method?: "GET" | "POST" | "PUT" | "DELETE";

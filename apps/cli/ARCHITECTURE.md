@@ -55,16 +55,16 @@ User runs `dt auth login`
     Generate cryptographic state token
          |
          v
-    Open browser to navigator.detent.sh/cli/auth?port=PORT&state=STATE
+    Open browser to detent.sh/cli/auth?port=PORT&state=STATE
          |
          v
     User authenticates via WorkOS (SSO/OAuth)
          |
          v
-    Navigator redirects to localhost:PORT/callback?code=CODE&state=STATE
+    Web app redirects to localhost:PORT/callback?code=CODE&state=STATE
          |
          v
-    Verify state, exchange code for tokens via Navigator API
+    Verify state, exchange code for tokens via web API
          |
          v
     Save credentials to ~/.detent/credentials.json
@@ -108,7 +108,7 @@ Three distinct storage layers:
     update.lock                # Concurrent update prevention
 
 <repo>/.detent/                # Per-repository
-    config.json                # Healing config (apiKey, model, budgets)
+    config.json                # Resolving config (apiKey, model, budgets)
     project.json               # Project link (org/project binding)
 ```
 
@@ -119,7 +119,7 @@ interface Credentials {
   access_token: string;        // WorkOS JWT
   refresh_token: string;
   expires_at: number;          // Unix timestamp (ms)
-  github_token?: string;       // GitHub OAuth (from Navigator)
+  github_token?: string;       // GitHub OAuth (from browser auth flow)
   github_token_expires_at?: number;
   github_refresh_token?: string;
   github_refresh_token_expires_at?: number;
@@ -132,7 +132,7 @@ interface Credentials {
 
 ### Config (`lib/config.ts`)
 
-Per-repo healing configuration:
+Per-repo resolving configuration:
 
 ```typescript
 interface GlobalConfig {

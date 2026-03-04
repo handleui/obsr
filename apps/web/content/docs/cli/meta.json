@@ -2,9 +2,9 @@
   "title": "CLI",
   "pages": [
     "installation",
-    "heal",
+    "resolve",
     "settings",
-    "how-healing-works",
+    "how-resolving-works",
     "tools",
     "error-hints",
     "budget",

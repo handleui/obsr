@@ -41,7 +41,7 @@
       }
     },
     {
-      "includes": ["apps/api/src/services/comment-formatter.ts"],
+      "includes": ["apps/observer/src/services/comment-formatter.ts"],
       "linter": {
         "rules": {
           "complexity": {

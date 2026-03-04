@@ -30,7 +30,7 @@ export interface HintMatch<T extends HintableError = HintableError> {
 }
 
 export type {
+  CIError,
   ErrorCategory,
   ErrorSource,
-  ExtractedError,
 } from "@detent/types";

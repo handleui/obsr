@@ -1,6 +1,6 @@
 export { importSigningKey, signPayload } from "./sign.js";
 export type {
   WebhookEventType,
-  WebhookHealData,
   WebhookPayload,
+  WebhookResolveData,
 } from "./types.js";

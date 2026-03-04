@@ -10,7 +10,7 @@ When you install Detent, we get access to:
 | Data | Why | Stored? |
 |------|-----|---------|
 | Error output (JSON) | Parse and fix errors | Yes, for 30 days |
-| Code snippets (7 lines per error) | Context for AI | Yes, during heal |
+| Code snippets (7 lines per error) | Context for AI | Yes, during resolve |
 | File paths | Locate errors | Yes |
 | Commit SHA | Track which commit had errors | Yes |
 
@@ -23,21 +23,21 @@ We **don't** access:
 
 ## Where Your Code Runs
 
-AI healing runs in an isolated sandbox. Each heal gets a fresh environment that:
+AI resolving runs in an isolated sandbox. Each resolve gets a fresh environment that:
 
 - Clones your repo (the specific commit)
 - Runs commands to test fixes
 - Submits patches back to Detent
-- Gets destroyed after the heal
+- Gets destroyed after the resolve
 
-Nothing persists. No shared state between heals.
+Nothing persists. No shared state between resolves.
 
 ## API Keys
 
 Your `DETENT_TOKEN` is a project-scoped API key. It can:
 
 - Submit error reports from CI
-- Trigger heals
+- Trigger resolves
 - Apply fixes to your repo
 
 It **cannot**:
@@ -46,12 +46,12 @@ It **cannot**:
 - Read your billing info
 - Manage your organization
 
-Rotate it anytime from [Navigator](https://navigator.detent.sh).
+Rotate it anytime from the [Detent dashboard](https://detent.sh).
 
 ## Data Retention
 
 - Error data: 30 days
-- Heal logs: 7 days
+- Resolve logs: 7 days
 - Applied patches: Permanent (in your git history)
 
 ## Compliance

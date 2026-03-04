@@ -2,7 +2,7 @@
   "name": "@detent/sdk",
   "version": "0.3.0",
   "type": "module",
-  "description": "TypeScript SDK for the Detent API",
+  "description": "TypeScript SDK for the Observer API",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -40,7 +40,7 @@
     "api",
     "ci",
     "cd",
-    "healing"
+    "resolving"
   ],
   "scripts": {
     "build": "tsc",

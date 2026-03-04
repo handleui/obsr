@@ -5,7 +5,7 @@ export const main = defineCommand({
   meta: {
     name: "dt",
     version: getVersion(),
-    description: "Self-healing CI/CD for GitHub Actions",
+    description: "Self-resolving CI/CD for GitHub Actions",
   },
   subCommands: {
     version: () => import("./version.js").then((m) => m.versionCommand),

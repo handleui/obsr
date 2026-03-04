@@ -1,7 +1,7 @@
 /**
  * Unified CI error schema.
  * Single source of truth for all error types across the monorepo.
- * Flows from extraction → healing.
+ * Flows from extraction → resolving.
  *
  * Usage:
  * - parsers populate: message, filePath, line, column, severity, ruleId, source
@@ -188,16 +188,6 @@ export const CIErrorSchema = z.object({
     .max(MAX_WORKFLOW_FIELD_LENGTH)
     .optional()
     .describe("Flattened job name for access"),
-
-  /**
-   * @deprecated Use workflowContext.step instead.
-   * Retained for backward compatibility with existing DB records.
-   */
-  workflowStep: z
-    .string()
-    .max(MAX_WORKFLOW_FIELD_LENGTH)
-    .optional()
-    .describe("Legacy: GitHub Actions step name. Use workflowContext.step."),
 });
 
 /**
@@ -227,18 +217,3 @@ export const CIErrorSchemaWithValidation = CIErrorSchema.refine(
 export type CIError = z.infer<typeof CIErrorSchema>;
 export type CICodeSnippet = z.infer<typeof CodeSnippetSchema>;
 export type CIWorkflowContext = z.infer<typeof WorkflowContextSchema>;
-
-/**
- * @deprecated Use CIError instead. This alias exists for backward compatibility.
- */
-export type ExtractedError = CIError;
-
-/**
- * @deprecated Use CIError instead. Mutable variant for error builders.
- */
-export type MutableExtractedError = CIError;
-
-/**
- * @deprecated Use CIError instead.
- */
-export type DiagnosticError = CIError;

@@ -16,13 +16,6 @@ export type {
   CIWorkflowContext,
 } from "./diagnostic.js";
 
-/** @deprecated Use CIError instead */
-export type { DiagnosticError } from "./diagnostic.js";
-/** @deprecated Use CIError instead */
-export type { ExtractedError } from "./diagnostic.js";
-/** @deprecated Use CIError instead */
-export type { MutableExtractedError } from "./diagnostic.js";
-
 export {
   CIErrorSchema,
   CIErrorSchemaWithValidation,
@@ -48,13 +41,26 @@ export type {
   ErrorSignature,
 } from "./fingerprint.js";
 export type {
-  HealCreateStatus,
-  HealStatus,
-  HealSummary,
-  HealType,
-  HealUpdateStatus,
-} from "./heal.js";
-export { HealStatuses, HealTypes } from "./heal.js";
+  ResolveCreateStatus,
+  ResolveStatus,
+  ResolveSummary,
+  ResolveType,
+  ResolveUpdateStatus,
+} from "./resolve.js";
+export { ResolveStatuses, ResolveTypes } from "./resolve.js";
+export type {
+  ResolverDiagnostic,
+  ResolverDiagnosticsContext,
+} from "./resolver-diagnostics.js";
+export type {
+  ResolverQueuePayload,
+  ResolverQueueSource,
+} from "./resolver-queue.js";
+export {
+  getResolverQueueResolveIds,
+  parseResolverQueuePayload,
+  ResolverQueueSources,
+} from "./resolver-queue.js";
 export type { DiagnosticLike, RedactionPattern } from "./sanitize.js";
 export {
   redactionPatterns,

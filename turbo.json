@@ -17,7 +17,7 @@
       ]
     },
     "@detent/cli#build": {
-      "dependsOn": ["@detent/healing#build", "@detent/git#build"],
+      "dependsOn": ["@detent/resolving#build", "@detent/git#build"],
       "inputs": [
         "src/**/*.ts",
         "src/**/*.tsx",
@@ -26,35 +26,19 @@
       ],
       "outputs": ["dist/**"]
     },
-    "@detent/api#build": {
+    "@detent/observer#build": {
       "dependsOn": ["@detent/db#build", "^build"],
       "inputs": ["src/**", "wrangler.jsonc", "tsconfig.json", "package.json"],
       "outputs": ["dist/**"]
     },
-    "@detent/healer#build": {
+    "@detent/resolver#build": {
       "dependsOn": [
         "@detent/db#build",
-        "@detent/healing#build",
+        "@detent/resolving#build",
         "@detent/sandbox#build"
       ],
       "inputs": ["src/**/*.ts", "tsconfig.json", "package.json"],
       "outputs": ["dist/**"]
-    },
-    "@detent/navigator#build": {
-      "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", ".env", ".env.local"],
-      "outputs": [".next/**", "!.next/cache/**"],
-      "env": [
-        "WORKOS_API_KEY",
-        "WORKOS_CLIENT_ID",
-        "JWT_SECRET_KEY",
-        "CONVEX_URL",
-        "NEXT_PUBLIC_APP_URL",
-        "WORKOS_COOKIE_PASSWORD",
-        "POLAR_CHECKOUT_TOKEN",
-        "FLAGS",
-        "FLAGS_SECRET"
-      ]
     },
     "@detent/web#build": {
       "dependsOn": ["^build"],

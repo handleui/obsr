@@ -1,16 +1,16 @@
 ---
 title: GitHub Action
-description: Collect errors and enable AI healing in your workflows
+description: Collect errors and enable AI resolving in your workflows
 ---
 
-The Detent action runs at the end of your CI job to collect structured error data and send it for AI-powered healing.
+The Detent action runs at the end of your CI job to collect structured error data and send it for AI-powered resolving.
 
 ## What It Does
 
 - **Detects Errors** — Finds JSON outputs from ESLint, Vitest, golangci-lint, Cargo
 - **Extracts Context** — Reads source code around each error for AI context
 - **Reports to API** — Sends structured data (not logs) to Detent backend
-- **Enables Healing** — Powers automatic fix suggestions and PR comments
+- **Enables Resolving** — Powers automatic fix suggestions and PR comments
 
 ## Installation
 
@@ -125,7 +125,7 @@ The action sends **only structured error data**, never raw logs:
 | `commitSha` | `a1b2c3d4...` | Link to code version |
 | `workflowName` | `CI` | Workflow identification |
 | `errors[]` | See below | Parsed error details |
-| `codeSnippet` | 7 lines | Context for AI healing |
+| `codeSnippet` | 7 lines | Context for AI resolving |
 
 ### Full Error Structure
 
@@ -159,13 +159,13 @@ The action sends **only structured error data**, never raw logs:
 
 | Input | Description |
 |-------|-------------|
-| `token` | Your Detent API token (from `secrets.DETENT_TOKEN`) |
+| `token` | Your Observer API token (from `secrets.DETENT_TOKEN`) |
 
 ### Optional Inputs
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `api-url` | `https://backend.detent.sh` | API endpoint (for self-hosted) |
+| `api-url` | `https://observer.detent.sh` | API endpoint (for self-hosted) |
 
 ### Full Example
 

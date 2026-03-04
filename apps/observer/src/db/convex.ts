@@ -40,6 +40,7 @@ const securedFunctions = new Set([
   "organizations:list",
   "organizations:listActiveGithub",
   "organizations:update",
+  "organization_members:getByOrgUser",
   "organization_members:updateRole",
   "projects:create",
   "projects:getById",
@@ -54,6 +55,7 @@ const securedFunctions = new Set([
   "projects:reactivate",
   "projects:syncFromGitHub",
   "projects:clearRemovedByOrg",
+  "projects:softDeleteByOrgRepoIds",
   "projects:softDeleteByRepoIds",
 ]);
 

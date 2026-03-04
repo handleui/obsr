@@ -40,6 +40,8 @@ export const SECURED_FUNCTIONS = new Set([
   "organizations:list",
   "organizations:listActiveGithub",
   "organizations:update",
+  "organization_members:getByOrgUser",
+  "organization_members:updateRole",
   "projects:create",
   "projects:getById",
   "projects:listByOrg",
@@ -53,6 +55,7 @@ export const SECURED_FUNCTIONS = new Set([
   "projects:reactivate",
   "projects:syncFromGitHub",
   "projects:clearRemovedByOrg",
+  "projects:softDeleteByOrgRepoIds",
   "projects:softDeleteByRepoIds",
 ]);
 

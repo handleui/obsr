@@ -1,5 +1,17 @@
 # @detent/cli
 
+## [1.4.0](https://github.com/handleui/detent/compare/cli-v1.3.0...cli-v1.4.0) (2026-03-04)
+
+
+### Features
+
+* Webhook delivery infrastructure + SDK API review ([#182](https://github.com/handleui/detent/issues/182)) ([f1aad0c](https://github.com/handleui/detent/commit/f1aad0c987085139936fde493187c59550b5f96d))
+
+
+### Bug Fixes
+
+* Use SDK for CLI API client ([#179](https://github.com/handleui/detent/issues/179)) ([a65e7b4](https://github.com/handleui/detent/commit/a65e7b4e481da4a4f6f6cf9ff8e6485e26d80791))
+
 ## [1.3.0](https://github.com/detentsh/detent/compare/cli-v1.2.0...cli-v1.3.0) (2026-02-02)
 
 

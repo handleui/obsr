@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/handleui/detent/compare/sdk-v0.3.0...sdk-v0.4.0) (2026-03-04)
+
+
+### Features
+
+* Webhook delivery infrastructure + SDK API review ([#182](https://github.com/handleui/detent/issues/182)) ([f1aad0c](https://github.com/handleui/detent/commit/f1aad0c987085139936fde493187c59550b5f96d))
+
 ## [0.3.0](https://github.com/detentsh/detent/compare/sdk-v0.2.0...sdk-v0.3.0) (2026-02-05)
 
 

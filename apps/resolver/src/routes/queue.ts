@@ -144,11 +144,11 @@ const enqueueHandler = async (c: Context) => {
 
       return c.json(
         {
-          error: "Resolver queue not ready",
           accepted: result.accepted,
           skipped: result.skipped,
+          warning: "All resolves were skipped due to concurrency/availability",
         },
-        503
+        200
       );
     }
 

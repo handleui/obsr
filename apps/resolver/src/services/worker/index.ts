@@ -1220,6 +1220,10 @@ export const enqueueResolves = async (
       result.skipped.push(resolveId);
       continue;
     }
+    if (resolve.status !== "pending") {
+      result.skipped.push(resolve.id);
+      continue;
+    }
 
     if (state.activeResolveIds.size >= env.MAX_CONCURRENT_RESOLVES) {
       result.skipped.push(resolve.id);

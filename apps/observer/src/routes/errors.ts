@@ -200,9 +200,8 @@ const formatRunResponse = (r: RunDoc) => ({
     : null,
 });
 
-// Only call scrubSecrets on non-empty strings to avoid unnecessary work
 const scrubField = (value: string | null | undefined): string | null =>
-  value ? scrubSecrets(value) : null;
+  value === null || value === undefined ? null : scrubSecrets(value);
 
 const formatErrorResponse = (e: RunErrorDoc) => {
   const workflowJob = scrubField(e.workflowJob);
@@ -227,7 +226,10 @@ const formatErrorResponse = (e: RunErrorDoc) => {
     fixable: e.fixable ?? false,
     relatedFiles: e.relatedFiles ?? null,
     workflowJob,
-    workflowContext: workflowJob ? { job: workflowJob } : null,
+    workflowContext:
+      workflowJob === null
+        ? null
+        : { job: workflowJob, step: null, action: null },
     logLineStart: e.logLineStart ?? null,
     logLineEnd: e.logLineEnd ?? null,
     createdAt: new Date(e.createdAt).toISOString(),

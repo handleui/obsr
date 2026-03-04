@@ -226,7 +226,7 @@ export const createResolve = async (
   if (typeof id !== "string") {
     throw new Error("Failed to create resolve");
   }
-  if (sanitizedData.type !== "autofix" && sanitizedData.status === "pending") {
+  if (sanitizedData.type === "resolve" && sanitizedData.status === "pending") {
     await enqueueResolveForResolver(env, id, "create").catch(
       (error: unknown) => {
         console.error(

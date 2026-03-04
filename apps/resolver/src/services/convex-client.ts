@@ -20,6 +20,7 @@ export const SECURED_FUNCTIONS = new Set([
   "resolves:getByPr",
   "resolves:getByProjectStatus",
   "resolves:getActiveByProject",
+  "resolves:getPending",
   "resolves:getByRunId",
   "resolves:updateStatus",
   "resolves:apply",

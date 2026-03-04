@@ -84,6 +84,7 @@ const MAX_PATCH_LENGTH = 1_000_000;
 const MAX_REJECTED_BY_LENGTH = 255;
 const MAX_RESOLVE_ID_LENGTH = 128;
 const MAX_CONVEX_DOC_BYTES = 900_000;
+const RESOLVER_QUEUE_TYPES = new Set<ResolveType>(["resolve"]);
 
 // ============================================================================
 // Validation Helpers
@@ -226,7 +227,10 @@ export const createResolve = async (
   if (typeof id !== "string") {
     throw new Error("Failed to create resolve");
   }
-  if (sanitizedData.type === "resolve" && sanitizedData.status === "pending") {
+  if (
+    sanitizedData.status === "pending" &&
+    RESOLVER_QUEUE_TYPES.has(sanitizedData.type)
+  ) {
     await enqueueResolveForResolver(env, id, "create").catch(
       (error: unknown) => {
         console.error(

@@ -1,4 +1,5 @@
 import { DEFAULT_TEMPLATE, DEFAULTS, TEMPLATES } from "./config.js";
+import { createDaytonaProvider } from "./providers/daytona.js";
 import { createE2BProvider } from "./providers/e2b.js";
 import { createVercelProvider } from "./providers/vercel.js";
 import type {
@@ -29,6 +30,7 @@ const MAX_ENV_VALUE_BYTES = 8 * 1024;
 const MAX_ENV_KEY_BYTES = 256;
 
 const PROVIDER_ROOTS: Record<SandboxProviderName, string> = {
+  daytona: "/workspace",
   e2b: "/home/user",
   vercel: "/vercel/sandbox",
 };
@@ -148,9 +150,13 @@ const validateTimeout = (
 const normalizeProvider = (value?: string): SandboxProviderName => {
   const normalized = value?.trim().toLowerCase();
   if (!normalized) {
-    return "vercel";
+    return "daytona";
   }
-  if (normalized === "vercel" || normalized === "e2b") {
+  if (
+    normalized === "daytona" ||
+    normalized === "e2b" ||
+    normalized === "vercel"
+  ) {
     return normalized;
   }
   throw new Error(`Unsupported SANDBOX_PROVIDER: ${value}`);
@@ -172,12 +178,36 @@ const resolveVercelAuth = (env: SandboxEnv) => {
 
 const createProvider = (env: SandboxEnv): SandboxProvider => {
   const providerName = normalizeProvider(env.SANDBOX_PROVIDER);
+  if (providerName === "daytona") {
+    const daytonaAuth = {
+      apiKey: env.DAYTONA_API_KEY,
+      apiUrl: env.DAYTONA_API_URL,
+      target: env.DAYTONA_TARGET,
+      organizationId: env.DAYTONA_ORGANIZATION_ID,
+      jwtToken: env.DAYTONA_JWT_TOKEN,
+    };
+    if (!(daytonaAuth.apiKey || daytonaAuth.jwtToken)) {
+      throw new Error(
+        "DAYTONA provider requires DAYTONA_API_KEY or DAYTONA_JWT_TOKEN"
+      );
+    }
+    return createDaytonaProvider(daytonaAuth);
+  }
 
   if (providerName === "e2b") {
+    console.warn(
+      "[sandbox] SANDBOX_PROVIDER=e2b is deprecated. Use daytona for idempotent sandboxes."
+    );
     if (!env.E2B_API_KEY) {
       throw new Error("E2B_API_KEY environment variable is not configured");
     }
     return createE2BProvider({ apiKey: env.E2B_API_KEY });
+  }
+
+  if (providerName === "vercel") {
+    console.warn(
+      "[sandbox] SANDBOX_PROVIDER=vercel is deprecated. Use daytona for idempotent sandboxes."
+    );
   }
 
   const auth = resolveVercelAuth(env);

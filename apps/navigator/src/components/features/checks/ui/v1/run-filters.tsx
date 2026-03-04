@@ -86,8 +86,8 @@ const STATUSES: IconOption[] = [
     icon: <Xmark color="var(--color-failure-fg)" height={12} width={12} />,
   },
   {
-    value: "healing",
-    label: "Healing",
+    value: "resolving",
+    label: "Resolving",
     icon: <Sparks color="#9747FF" height={12} width={12} />,
   },
   {
@@ -119,7 +119,7 @@ const buildStatusSections = (
 
 const STATUS_SECTIONS: StatusSection[] = buildStatusSections([
   { label: "Passing", values: ["successful", "healed"] },
-  { label: "Attention", values: ["failed", "healing", "waiting"] },
+  { label: "Attention", values: ["failed", "resolving", "waiting"] },
   { label: "Other", values: ["skipped"] },
 ]);
 

@@ -17,8 +17,8 @@
   --color-waiting-bg: #fefbcb;
   --color-waiting-accent: #ffd658;
 
-  --color-healing-fg: #911e85;
-  --color-healing-bg: #f6dbff;
+  --color-resolving-fg: #911e85;
+  --color-resolving-bg: #f6dbff;
 
   --color-info-fg: #3672d9;
   --color-info-bg: #edf5ff;
@@ -81,8 +81,8 @@
   }
 }
 
-@utility bg-healing-light {
-  background-color: color-mix(in srgb, var(--color-healing-bg) 40%, white);
+@utility bg-resolving-light {
+  background-color: color-mix(in srgb, var(--color-resolving-bg) 40%, white);
 }
 
 @utility scrollbar-hidden {

@@ -35,16 +35,16 @@ interface ErrorLineProps {
 
 const getLineStyle = (
   selected: boolean,
-  healing: boolean,
+  resolving: boolean,
   selectedStyle: string
 ) => {
-  if (selected && healing) {
-    return "border-healing-fg bg-healing-bg/40";
+  if (selected && resolving) {
+    return "border-resolving-fg bg-resolving-bg/40";
   }
   if (selected) {
     return selectedStyle;
   }
-  if (healing) {
+  if (resolving) {
     return "border-l-transparent";
   }
   return "border-l-transparent hover:bg-surface";
@@ -59,7 +59,7 @@ const extractFilename = (path?: string) => {
 
 const HEALING_SHIMMER = {
   animation: "animate-shimmer-sweep-fast" as const,
-  color: "var(--color-healing-fg)",
+  color: "var(--color-resolving-fg)",
   peakColor: "#e4b5ff",
 };
 
@@ -115,15 +115,15 @@ const CompactCells = ({
   message,
   status,
   color,
-  healing,
+  resolving,
 }: {
   message: string;
   status: string;
   color: string;
-  healing: boolean;
+  resolving: boolean;
 }) => (
   <>
-    {healing ? (
+    {resolving ? (
       <>
         <ShimmerText {...HEALING_SHIMMER} className="truncate text-[13px]">
           {message}
@@ -152,19 +152,19 @@ const ErrorLineInner = ({
 }: ErrorLineProps) => {
   const { color, label, selectedStyle } = CATEGORY_CONFIG[category];
   const filename = extractFilename(location);
-  const healing = status === "Healing";
+  const resolving = status === "Resolving";
 
   if (compact) {
     return (
       <button
-        className={`grid h-[28px] w-full cursor-pointer grid-cols-[1fr_52px] gap-2 border-l-2 px-3 py-1.5 text-left ${getLineStyle(selected, healing, selectedStyle)}`}
+        className={`grid h-[28px] w-full cursor-pointer grid-cols-[1fr_52px] gap-2 border-l-2 px-3 py-1.5 text-left ${getLineStyle(selected, resolving, selectedStyle)}`}
         onClick={onClick}
         type="button"
       >
         <CompactCells
           color={color}
-          healing={healing}
           message={message}
+          resolving={resolving}
           status={status}
         />
       </button>
@@ -173,11 +173,11 @@ const ErrorLineInner = ({
 
   return (
     <button
-      className={`grid h-[28px] w-full cursor-pointer grid-cols-[60px_140px_1fr_52px] gap-3 border-l-2 px-4 py-1.5 text-left ${getLineStyle(selected, healing, selectedStyle)}`}
+      className={`grid h-[28px] w-full cursor-pointer grid-cols-[60px_140px_1fr_52px] gap-3 border-l-2 px-4 py-1.5 text-left ${getLineStyle(selected, resolving, selectedStyle)}`}
       onClick={onClick}
       type="button"
     >
-      {healing ? (
+      {resolving ? (
         <HealingCells
           filename={filename}
           label={label}

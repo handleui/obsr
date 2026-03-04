@@ -30,5 +30,5 @@ const createFlag = (key: string) =>
   });
 
 export const showNewDashboard = createFlag("show-new-dashboard");
-export const healingV2 = createFlag("healing-v2");
+export const healingV2 = createFlag("resolving-v2");
 export const gitlab = createFlag("gitlab");

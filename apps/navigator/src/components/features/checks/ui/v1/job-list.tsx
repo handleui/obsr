@@ -186,7 +186,7 @@ const STATUS_ICONS: Record<string, ReactNode> = {
   successful: (
     <Check color={SUCCESS_COLOR} height={16} strokeWidth={1.2} width={16} />
   ),
-  healing: <Sparks color={HEAL_COLOR} height={16} width={16} />,
+  resolving: <Sparks color={HEAL_COLOR} height={16} width={16} />,
   skipped: <MinusCircle height={16} width={16} />,
 };
 
@@ -211,7 +211,7 @@ const resolveJobSubtitle = (status: string, issueCount: number): ReactNode => {
       </ShimmerText>
     );
   }
-  if (status === "healing") {
+  if (status === "resolving") {
     return (
       <ShimmerText
         animation="animate-shimmer-sweep-fast"
@@ -219,7 +219,7 @@ const resolveJobSubtitle = (status: string, issueCount: number): ReactNode => {
         color="var(--color-dim)"
         peakColor={HEAL_COLOR}
       >
-        Healing Errors
+        Resolving Errors
       </ShimmerText>
     );
   }
@@ -324,7 +324,7 @@ const GenericJob = memo(
     const icon = STATUS_ICONS[status] ?? <MinusCircle height={16} width={16} />;
     const subtitle = resolveJobSubtitle(status, issues.length);
     const trailing =
-      status === "failed" || status === "healing" ? HEAL_ICON : undefined;
+      status === "failed" || status === "resolving" ? HEAL_ICON : undefined;
 
     return (
       <Accordion.Item className="w-full" value={jobKey}>
@@ -373,7 +373,7 @@ const JobListHeader = () => {
           <TooltipTrigger className="flex cursor-pointer">
             <Sparks color={HEAL_COLOR} height={12} width={12} />
           </TooltipTrigger>
-          <TooltipContent>Heal failing jobs</TooltipContent>
+          <TooltipContent>Resolve failing jobs</TooltipContent>
         </TooltipRoot>
       </div>
     </div>
@@ -416,7 +416,7 @@ const JobList = () => {
       jobRegistry
         .filter(
           (j) =>
-            (j.status === "failed" || j.status === "healing") &&
+            (j.status === "failed" || j.status === "resolving") &&
             visible.has(j.key)
         )
         .map((j) => j.key),

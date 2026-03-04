@@ -12,12 +12,12 @@ import { useNavigation } from "../../hooks/use-navigation";
 import { useRunData } from "../../hooks/use-run-data";
 import { useSelection } from "../../hooks/use-selection";
 import ErrorDetail from "./error-detail";
-import { CompactHealingProgress } from "./healing-progress";
 import ResizableGrid from "./resizable-grid";
+import { CompactHealingProgress } from "./resolving-progress";
 import RunOverview from "./run-overview";
 
-const HealPreview = lazy(() => import("./heal-preview"));
-const HealSidebar = lazy(() => import("./heal-sidebar"));
+const HealPreview = lazy(() => import("./resolve-preview"));
+const HealSidebar = lazy(() => import("./resolve-sidebar"));
 
 const LeftPanelHeader = () => {
   const { run } = useRunData();
@@ -74,7 +74,7 @@ const NavigableLayout = () => {
   );
 
   const handleHeal = useCallback(
-    (errorId: string) => navigate(`heal/${errorId}`),
+    (errorId: string) => navigate(`resolve/${errorId}`),
     [navigate]
   );
 

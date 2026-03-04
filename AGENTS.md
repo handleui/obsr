@@ -1,6 +1,6 @@
 # Detent
 
-Self-healing CI/CD platform. Runs CI locally, uses AI to fix errors before pushing.
+Self-resolving CI/CD platform. Runs CI locally, uses AI to fix errors before pushing.
 
 ## Commands
 
@@ -18,12 +18,12 @@ bun run dt <command>       # CLI local dev (never use ./dist/dt)
 - **Monorepo**: Turborepo
 - **API**: Hono on Cloudflare Workers
 - **Database**: Neon Postgres (Drizzle) + Convex (realtime)
-- **DB Access**: Hyperdrive (Workers), direct Neon URL (Healer/Navigator), Convex service token
+- **DB Access**: Hyperdrive (Workers), direct Neon URL (Resolver/Navigator), Convex service token
 - **Web**: Next.js 16, React 19, Tailwind CSS
 - **CLI**: TypeScript, Citty, Ink
 - **Auth**: WorkOS, JWT (Jose)
 - **AI**: Claude Haiku (fast) + GPT-5.2-Codex (smart) via Vercel AI Gateway — routing logic in `packages/ai`
-- **Sandboxes**: E2B (fresh per heal)
+- **Sandboxes**: E2B (fresh per resolve)
 - **Linting**: Biome via Ultracite
 - **Icons**: `iconoir-react` — browse at [iconoir.com](https://iconoir.com). Do NOT grep `node_modules`.
 
@@ -31,22 +31,20 @@ bun run dt <command>       # CLI local dev (never use ./dist/dt)
 
 ```
 apps/
-├── api/            # Cloudflare Workers API (Hono)
-├── healer/         # AI healing service (Railway)
+├── observer/       # Cloudflare Workers Observer service (Hono)
+├── resolver/       # AI resolving service (Railway)
 ├── cli/            # Command-line interface
-├── navigator/      # Dashboard + auth (Next.js)
+├── navigator/      # Auth portal + dashboard (Next.js; deprecated, deferred until CLI limits are in place)
 └── web/            # Landing page (Next.js)
 
 packages/
 ├── ai/             # AI model routing & providers
 ├── autofix/        # Deterministic autofix logic
-├── code-storage/   # Heal file persistence
 ├── db/             # Drizzle schema, client, migrations
 ├── extract/        # CI log parsing & error extraction
 ├── git/            # Git operations
-├── healing/        # AI error fixing orchestration
+├── resolving/        # AI error fixing orchestration
 ├── lore/           # Knowledge base
-├── mcp/            # MCP server
 ├── sandbox/        # E2B sandbox management
 ├── sdk/            # Public SDK
 ├── sentry/         # Sentry integration
@@ -99,18 +97,18 @@ Biome/Ultracite handles standard linting. Project-specific only:
 
 ## Local Dev (portless)
 
-- **Navigator**: `http://navigator.localhost:1355`
+- **Navigator**: `http://navigator.localhost:1355` (deprecated; deferred until CLI limits are in place)
 - **Web**: `http://detent.localhost:1355`
-- **API**: `http://detent-backend.localhost:1355`
-- **Healer**: `http://healer.localhost:1355`
+- **API**: `http://observer.localhost:1355`
+- **Resolver**: `http://resolver.localhost:1355`
 
 ## Production
 
 - **App**: `detent.sh`
-- **API**: `backend.detent.sh`
+- **API**: `observer.detent.sh`
 - **Dashboard**: `navigator.detent.sh`
 
-## Healing Architecture
+## Resolving Architecture
 
 - **Autofix** (deterministic): GitHub Action, no sandbox
-- **AI Healing** (agentic): Healer on Railway → E2B sandbox → patches to API → user reviews
+- **AI Resolving** (agentic): Resolver on Railway → E2B sandbox → patches to API → user reviews

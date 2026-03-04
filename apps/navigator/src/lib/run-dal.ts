@@ -74,8 +74,8 @@ const STATUS_PRIORITY: Record<string, number> = {
 const HEAL_STATUS_DISPLAY: Record<string, string> = {
   applied: "Healed",
   completed: "Fixed",
-  running: "Healing",
-  pending: "Healing",
+  running: "Resolving",
+  pending: "Resolving",
   found: "Found",
   rejected: "Found",
   failed: "Found",
@@ -84,12 +84,12 @@ const HEAL_STATUS_DISPLAY: Record<string, string> = {
 const deriveErrorStatus = (
   errorId: string,
   signatureId: string | null,
-  heals: HealDoc[]
+  resolves: HealDoc[]
 ): string => {
   let best: HealDoc | null = null;
   let bestPriority = -1;
 
-  for (const h of heals) {
+  for (const h of resolves) {
     const matchesError = h.errorIds?.includes(errorId) ?? false;
     const matchesSig = signatureId
       ? (h.signatureIds?.includes(signatureId) ?? false)
@@ -114,12 +114,12 @@ const deriveErrorStatus = (
 const findHealPatch = (
   errorId: string,
   signatureId: string | null,
-  heals: HealDoc[]
+  resolves: HealDoc[]
 ): string | undefined => {
   let appliedPatch: string | undefined;
   let completedPatch: string | undefined;
 
-  for (const h of heals) {
+  for (const h of resolves) {
     if (!h.patch) {
       continue;
     }
@@ -153,19 +153,21 @@ const JOB_STATUS_WAITING: Record<string, string> = {
 
 const ACTIVE_HEAL_STATUSES = new Set(["pending", "running", "found"]);
 
-const healMatchesError = (heal: HealDoc, err: RunErrorRow): boolean => {
-  const matchesError = heal.errorIds?.includes(err.id) ?? false;
+const healMatchesError = (resolve: HealDoc, err: RunErrorRow): boolean => {
+  const matchesError = resolve.errorIds?.includes(err.id) ?? false;
   const matchesSig = err.signatureId
-    ? (heal.signatureIds?.includes(err.signatureId) ?? false)
+    ? (resolve.signatureIds?.includes(err.signatureId) ?? false)
     : false;
   return matchesError || matchesSig;
 };
 
 const hasActiveHealForErrors = (
   errors: RunErrorRow[],
-  heals: HealDoc[]
+  resolves: HealDoc[]
 ): boolean => {
-  const activeHeals = heals.filter((h) => ACTIVE_HEAL_STATUSES.has(h.status));
+  const activeHeals = resolves.filter((h) =>
+    ACTIVE_HEAL_STATUSES.has(h.status)
+  );
   return errors.some((err) =>
     activeHeals.some((h) => healMatchesError(h, err))
   );
@@ -174,7 +176,7 @@ const hasActiveHealForErrors = (
 const mapJobStatus = (
   job: JobDoc,
   errorsByJob: Map<string, RunErrorRow[]>,
-  heals: HealDoc[]
+  resolves: HealDoc[]
 ): string => {
   if (job.status !== "completed") {
     return JOB_STATUS_WAITING[job.status] ?? "waiting";
@@ -188,8 +190,8 @@ const mapJobStatus = (
   }
 
   const jobErrors = errorsByJob.get(job.name);
-  if (jobErrors?.length && hasActiveHealForErrors(jobErrors, heals)) {
-    return "healing";
+  if (jobErrors?.length && hasActiveHealForErrors(jobErrors, resolves)) {
+    return "resolving";
   }
 
   return "failed";
@@ -257,12 +259,12 @@ const buildLocation = (
   return loc;
 };
 
-const mapError = (err: RunErrorRow, heals: HealDoc[]): ErrorDetailData => {
-  const status = deriveErrorStatus(err.id, err.signatureId, heals);
+const mapError = (err: RunErrorRow, resolves: HealDoc[]): ErrorDetailData => {
+  const status = deriveErrorStatus(err.id, err.signatureId, resolves);
   const { sourceLines, faultyLineNumbers } = mapCodeSnippet(err.codeSnippet);
   const diff =
     status === "Fixed" || status === "Healed"
-      ? findHealPatch(err.id, err.signatureId, heals)
+      ? findHealPatch(err.id, err.signatureId, resolves)
       : undefined;
 
   return {
@@ -343,7 +345,7 @@ const fetchRunWithRelatedData = async (
           commitSha: run.commitSha,
         }) as Promise<JobDoc[]>)
       : ([] as JobDoc[]),
-    convex.query(api.heals.getByPr, {
+    convex.query(api.resolves.getByPr, {
       projectId: typedProjectId,
       prNumber,
     }) as Promise<HealDoc[]>,
@@ -357,7 +359,7 @@ const buildRunData = (
   run: RunRow,
   runErrors: RunErrorRow[],
   jobs: JobDoc[],
-  heals: HealDoc[]
+  resolves: HealDoc[]
 ): RunData => {
   const errorsByJob = groupErrorsByJob(runErrors);
 
@@ -377,9 +379,9 @@ const buildRunData = (
     description: "",
     jobs: jobs.map((job) => ({
       key: job.name,
-      status: mapJobStatus(job, errorsByJob, heals),
+      status: mapJobStatus(job, errorsByJob, resolves),
     })),
-    errors: runErrors.map((err) => mapError(err, heals)),
+    errors: runErrors.map((err) => mapError(err, resolves)),
   };
 };
 
@@ -403,7 +405,7 @@ export const fetchPrRunData = cache(
         return null;
       }
 
-      const [runErrors, jobs, heals] = await fetchRunWithRelatedData(
+      const [runErrors, jobs, resolves] = await fetchRunWithRelatedData(
         projectId,
         prNumber,
         run
@@ -416,7 +418,7 @@ export const fetchPrRunData = cache(
         run,
         runErrors,
         jobs,
-        heals
+        resolves
       );
     } catch (error) {
       if (isNextRedirect(error)) {

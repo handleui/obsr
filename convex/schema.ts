@@ -13,7 +13,7 @@ const healStatus = v.union(
   v.literal("failed")
 );
 
-const healType = v.union(v.literal("autofix"), v.literal("heal"));
+const resolveType = v.union(v.literal("autofix"), v.literal("resolve"));
 
 const provider = v.union(v.literal("github"), v.literal("gitlab"));
 const accountType = v.union(v.literal("organization"), v.literal("user"));
@@ -51,12 +51,12 @@ const jobConclusion = v.union(
 );
 
 const webhookEvent = v.union(
-  v.literal("heal.pending"),
-  v.literal("heal.running"),
-  v.literal("heal.completed"),
-  v.literal("heal.applied"),
-  v.literal("heal.rejected"),
-  v.literal("heal.failed")
+  v.literal("resolve.pending"),
+  v.literal("resolve.running"),
+  v.literal("resolve.completed"),
+  v.literal("resolve.applied"),
+  v.literal("resolve.rejected"),
+  v.literal("resolve.failed")
 );
 
 const organizationSettings = v.object({
@@ -64,8 +64,8 @@ const organizationSettings = v.object({
   enablePrComments: v.optional(nullableBoolean),
   autofixEnabled: v.optional(nullableBoolean),
   autofixAutoCommit: v.optional(nullableBoolean),
-  healAutoCommit: v.optional(nullableBoolean),
-  healAutoTrigger: v.optional(nullableBoolean),
+  resolveAutoCommit: v.optional(nullableBoolean),
+  resolveAutoTrigger: v.optional(nullableBoolean),
   healBudgetPerRunUsd: v.optional(nullableNumber),
   validationEnabled: v.optional(nullableBoolean),
 });
@@ -168,8 +168,8 @@ export default defineSchema({
     .index("by_repo_full_name", ["providerRepoFullName"])
     .index("by_repo_id", ["providerRepoId"]),
 
-  heals: defineTable({
-    type: healType,
+  resolves: defineTable({
+    type: resolveType,
     status: healStatus,
     runId: v.optional(nullableString),
     projectId: v.id("projects"),
@@ -192,7 +192,7 @@ export default defineSchema({
     autofixSource: v.optional(nullableString),
     autofixCommand: v.optional(nullableString),
     userInstructions: v.optional(nullableString),
-    healResult: v.optional(
+    resolveResult: v.optional(
       v.object({
         model: v.optional(nullableString),
         patchApplied: v.optional(nullableBoolean),

@@ -4,9 +4,9 @@ import { internal } from "./_generated/api";
 const crons = cronJobs();
 
 crons.interval(
-  "cleanup stale heals",
+  "cleanup stale resolves",
   { minutes: 5 },
-  internal.heals.cleanupStaleHeals
+  internal.resolves.cleanupStaleHeals
 );
 
 export default crons;

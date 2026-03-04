@@ -153,6 +153,12 @@ export interface CodeSnippet {
   language: string;
 }
 
+export interface WorkflowContext {
+  job?: string | null;
+  step?: string | null;
+  action?: string | null;
+}
+
 export interface ErrorInfo {
   id: string;
   filePath: string | null;
@@ -169,8 +175,7 @@ export interface ErrorInfo {
   fixable: boolean;
   relatedFiles: string[] | null;
   workflowJob: string | null;
-  workflowStep: string | null;
-  workflowAction: string | null;
+  workflowContext: WorkflowContext | null;
   logLineStart: number | null;
   logLineEnd: number | null;
   createdAt: string;
@@ -211,7 +216,7 @@ export interface RevokeInvitationResponse {
   success: boolean;
 }
 
-export type HealStatus =
+export type ResolveStatus =
   | "found"
   | "pending"
   | "running"
@@ -220,10 +225,10 @@ export type HealStatus =
   | "rejected"
   | "applied";
 
-export interface Heal {
+export interface Resolve {
   id: string;
   type: string;
-  status: HealStatus;
+  status: ResolveStatus;
   commitSha: string | null;
   prNumber: number | null;
   errorIds: string[];
@@ -233,7 +238,7 @@ export interface Heal {
   filesChanged: string[] | null;
   autofixSource: string | null;
   autofixCommand: string | null;
-  healResult: unknown | null;
+  resolveResult: unknown | null;
   costUsd: number | null;
   inputTokens: number | null;
   outputTokens: number | null;
@@ -247,46 +252,46 @@ export interface Heal {
   updatedAt: string;
 }
 
-export interface HealsResponse {
-  heals: Heal[];
+export interface ResolvesResponse {
+  resolves: Resolve[];
 }
 
-export interface HealDetailsResponse {
-  heal: Heal & {
+export interface ResolveDetailsResponse {
+  resolve: Resolve & {
     runId: string | null;
     projectId: string;
   };
 }
 
-export interface TriggerHealResponse {
+export interface TriggerResolveResponse {
   success: boolean;
   message: string;
   projectId: string;
   prNumber: number;
-  healsCreated: number;
-  healIds: string[];
+  resolvesCreated: number;
+  resolveIds: string[];
   autofixes: unknown[];
 }
 
-export interface ApplyHealResponse {
+export interface ApplyResolveResponse {
   success: boolean;
   commitSha?: string;
   commitUrl?: string;
   alreadyApplied?: boolean;
 }
 
-export interface RejectHealResponse {
+export interface RejectResolveResponse {
   success: boolean;
   message: string;
 }
 
 export type WebhookEventType =
-  | "heal.pending"
-  | "heal.running"
-  | "heal.completed"
-  | "heal.applied"
-  | "heal.rejected"
-  | "heal.failed";
+  | "resolve.pending"
+  | "resolve.running"
+  | "resolve.completed"
+  | "resolve.applied"
+  | "resolve.rejected"
+  | "resolve.failed";
 
 export interface Webhook {
   id: string;
@@ -329,9 +334,9 @@ export interface DeleteWebhookResponse {
   deleted_id: string;
 }
 
-export interface WebhookHealData {
-  heal_id: string;
-  type: "autofix" | "heal";
+export interface WebhookResolveData {
+  resolve_id: string;
+  type: "autofix" | "resolve";
   status: string;
   project_id: string;
   pr_number: number | null;
@@ -348,7 +353,7 @@ export interface WebhookPayload {
   event: WebhookEventType;
   timestamp: string;
   organization_id: string;
-  data: WebhookHealData;
+  data: WebhookResolveData;
 }
 
 export interface ApiKey {

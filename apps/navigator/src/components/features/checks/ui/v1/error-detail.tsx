@@ -68,15 +68,15 @@ const StatusLabel = () => (
 );
 
 const HealButton = ({
-  healing,
+  resolving,
   onHeal,
 }: {
-  healing: boolean;
+  resolving: boolean;
   onHeal?: () => void;
 }) =>
-  healing ? (
+  resolving ? (
     <Button
-      className="pointer-events-none bg-healing-fg text-[14px] leading-[1.1] hover:bg-healing-fg"
+      className="pointer-events-none bg-resolving-fg text-[14px] leading-[1.1] hover:bg-resolving-fg"
       type="button"
     >
       <Sparks color="white" />
@@ -86,7 +86,7 @@ const HealButton = ({
         color="white"
         peakColor="#ffffff"
       >
-        Healing
+        Resolving
       </ShimmerText>
     </Button>
   ) : (
@@ -96,34 +96,34 @@ const HealButton = ({
       type="button"
     >
       <Sparks color="white" />
-      Heal
+      Resolve
     </Button>
   );
 
 const ErrorCardTrigger = ({
   error,
   style,
-  healing,
+  resolving,
 }: {
   error: ErrorDetailData;
   style: CategoryStyle;
-  healing: boolean;
+  resolving: boolean;
 }) => (
   <Accordion.Trigger className="group flex h-10 w-full cursor-pointer items-center gap-3 px-4">
     <div
-      className={`flex size-4 shrink-0 items-center justify-center overflow-clip p-1 ${healing ? "bg-healing-bg" : style.bg}`}
+      className={`flex size-4 shrink-0 items-center justify-center overflow-clip p-1 ${resolving ? "bg-resolving-bg" : style.bg}`}
     >
       <p
-        className={`text-[12px] leading-[1.1] ${healing ? "text-healing-fg" : style.fg}`}
+        className={`text-[12px] leading-[1.1] ${resolving ? "text-resolving-fg" : style.fg}`}
       >
         {style.icon}
       </p>
     </div>
-    {healing ? (
+    {resolving ? (
       <ShimmerText
         animation="animate-shimmer-sweep-fast"
         className="truncate text-[13px] leading-[1.1]"
-        color="var(--color-healing-fg)"
+        color="var(--color-resolving-fg)"
         peakColor="#e4b5ff"
       >
         {error.message}
@@ -146,17 +146,17 @@ const ErrorCardHeader = ({
   style: CategoryStyle;
   onHeal?: () => void;
 }) => {
-  const healing = error.status === "Healing";
+  const resolving = error.status === "Resolving";
 
   return (
     <div
-      className={`sticky top-10 z-[9] flex h-10 items-center justify-between border-subtle border-b has-[button[aria-expanded]:hover]:border-b-black ${healing ? "bg-healing-light" : "bg-white"}`}
+      className={`sticky top-10 z-[9] flex h-10 items-center justify-between border-subtle border-b has-[button[aria-expanded]:hover]:border-b-black ${resolving ? "bg-resolving-light" : "bg-white"}`}
     >
       <Accordion.Header className="min-w-0 flex-1">
-        <ErrorCardTrigger error={error} healing={healing} style={style} />
+        <ErrorCardTrigger error={error} resolving={resolving} style={style} />
       </Accordion.Header>
       <div className="flex shrink-0 items-center">
-        <HealButton healing={healing} onHeal={onHeal} />
+        <HealButton onHeal={onHeal} resolving={resolving} />
       </div>
     </div>
   );

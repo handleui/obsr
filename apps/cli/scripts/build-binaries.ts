@@ -97,7 +97,7 @@ const compileBinary = async (
 
   // Optional environment variables with production defaults
   const detentApiUrl =
-    process.env.DETENT_API_URL ?? "https://backend.detent.sh";
+    process.env.DETENT_API_URL ?? "https://observer.detent.sh";
   const detentAuthUrl =
     process.env.DETENT_AUTH_URL ?? "https://navigator.detent.sh";
   const sentryDsn = process.env.SENTRY_DSN ?? "";

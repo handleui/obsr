@@ -1,5 +1,5 @@
 ---
-title: How Healing Works
+title: How Resolving Works
 description: What happens when Detent fixes your code
 ---
 
@@ -23,9 +23,9 @@ tsc-output.txt
 
 It extracts structured data: file path, line number, error message, and a code snippet around the error.
 
-### 2. AI Healing
+### 2. AI Resolving
 
-Your error data goes to our healing service. An AI agent (Claude) receives:
+Your error data goes to our resolving service. An AI agent (Claude) receives:
 
 - The error message
 - 7 lines of code around the error
@@ -54,17 +54,17 @@ Detent fixes the small stuff. It won't:
 
 If a fix is uncertain, it'll tell you instead of guessing.
 
-## Autofix vs. AI Heal
+## Autofix vs. AI Resolve
 
 Detent has two modes:
 
 | Mode | When | What |
 |------|------|------|
 | **Autofix** | Deterministic fixes (formatting, imports) | Runs instantly, no AI cost |
-| **AI Heal** | Complex errors (type mismatches, test failures) | Uses Claude, costs credits |
+| **AI Resolve** | Complex errors (type mismatches, test failures) | Uses Claude, costs credits |
 
-Autofix runs first. If it can't solve the problem, AI Heal kicks in.
+Autofix runs first. If it can't solve the problem, AI Resolve kicks in.
 
 ## Cost
 
-You're charged per successful heal, not per attempt. See [Pricing](/docs/pricing) for details.
+You're charged per successful resolve, not per attempt. See [Pricing](/docs/pricing) for details.

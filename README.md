@@ -2,7 +2,7 @@
 
 [![Better Stack Badge](https://uptime.betterstack.com/status-badges/v3/monitor/2cpdx.svg)](https://uptime.betterstack.com/?utm_source=status_badge)
 
-Self-healing CI/CD that runs on PR's, it is very much NOT ready, please, avoid installing while I fix my mess
+Self-resolving CI/CD that runs on PR's, it is very much NOT ready, please, avoid installing while I fix my mess
 
 ## Install
 
@@ -15,7 +15,7 @@ Installs `dt` to `~/.local/bin`. Update with `dt update`.
 ## Requirements
 BYOK for convenience, more providers on the way
 
-- Anthropic API key (for `heal` command)
+- Anthropic API key (for `resolve` command)
 
 ## Usage
 

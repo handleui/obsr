@@ -2,9 +2,9 @@
 
 ## Overview
 
-A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to automatically fix errors before pushing to remote. Bridges local development and CI pipelines with intelligent error correction.
+A self-resolving CI/CD platform that runs CI locally and uses AI (Claude) to automatically fix errors before pushing to remote. Bridges local development and CI pipelines with intelligent error correction.
 
-**Core Value:** Fast feedback loop + AI-powered healing + Git-aware checking
+**Core Value:** Fast feedback loop + AI-powered resolving + Git-aware checking
 
 ---
 
@@ -28,7 +28,7 @@ A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to autom
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                            CLOUDFLARE WORKERS                                    │
 │  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │                           API (apps/api)                                  │   │
+│  │                        Observer (apps/observer)                                │   │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │   │
 │  │  │   Webhooks   │  │    Auth      │  │   Autofix    │  │   Billing    │  │   │
 │  │  │   Handler    │  │   Routes     │  │   Service    │  │   Service    │  │   │
@@ -57,13 +57,13 @@ A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to autom
 └─────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           HEALER SERVICE (Railway)                               │
+│                           RESOLVER SERVICE (Railway)                               │
 │                                                                                  │
 │  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │                         Healer (apps/healer)                              │   │
+│  │                         Resolver (apps/resolver)                              │   │
 │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                    │   │
-│  │  │   Poller     │  │  E2B Client  │  │   Healing    │                    │   │
-│  │  │   Service    │  │  (Sandbox)   │  │   Package    │                    │   │
+│  │  │   Worker     │  │  E2B Client  │  │   Resolving    │                    │   │
+│  │  │  (Queue)     │  │  (Sandbox)   │  │   Package      │                    │   │
 │  │  └──────────────┘  └──────────────┘  └──────────────┘                    │   │
 │  └──────────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────────┘
@@ -82,7 +82,7 @@ A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to autom
 │  │   ┌─────────────────────────────────────────────────────────────────┐   │   │
 │  │   │                    Core Libraries                                │   │   │
 │  │   │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │   │   │
-│  │   │  │ @detent/git │  │ @detent/lore│ │   @detent/healing       │  │   │   │
+│  │   │  │ @detent/git │  │ @detent/lore│ │   @detent/resolving       │  │   │   │
 │  │   │  │ clone/push  │  │ hints/sigs  │ │   ┌─────────────────┐   │  │   │   │
 │  │   │  │ branches    │  ├─────────────┤ │   │  Codex 5.2      │   │  │   │   │
 │  │   │  │ diff/commit │  │@detent/types│ │   │  (AI Gateway)   │   │  │   │   │
@@ -100,24 +100,24 @@ A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to autom
 │                                                                                  │
 │  ~/.detent/                                                                      │
 │  ├── credentials.json    # JWT + GitHub OAuth tokens                            │
-│  └── config.jsonc        # User preferences (heal budget, trust, org)           │
+│  └── config.jsonc        # User preferences (resolve budget, trust, org)           │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Data Flow: Healing Loop
+## Data Flow: Resolving Loop
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         CI ERROR HEALING FLOW                                │
+│                         CI ERROR RESOLVING FLOW                                │
 └─────────────────────────────────────────────────────────────────────────────┘
 
   Developer pushes
         │
         ▼
 ┌───────────────┐      webhook        ┌──────────────┐
-│ GitHub Actions│ ──────────────────► │  Detent API  │
+│ GitHub Actions│ ──────────────────► │   Observer   │
 │ workflow fails│                     │              │
 └───────────────┘                     └──────┬───────┘
                                              │
@@ -143,20 +143,20 @@ A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to autom
                             ┌────────────────┼────────────────┐
                             ▼                ▼                ▼
                     ┌───────────────┐ ┌────────────┐ ┌───────────────┐
-                    │  PR Comment   │ │  Autofix   │ │  AI Healing   │
+                    │  PR Comment   │ │  Autofix   │ │  AI Resolving   │
                     │  (summary)    │ │(deterministic)│(if enabled)  │
                     └───────────────┘ └────────────┘ └───────┬───────┘
                                                               │
                                                               ▼
                                          ┌────────────────────────────────────┐
-                                         │     Healer Service (Railway)       │
+                                         │     Resolver Service (Railway)       │
                                          │  ┌─────────────────────────────┐   │
-                                         │  │ 1. Poll for pending heals   │   │
-                                         │  │ 2. Spin up E2B sandbox      │   │
-                                         │  │ 3. Run Codex 5.2 via AI SDK │   │
-                                         │  │ 4. Apply fixes in sandbox   │   │
-                                         │  │ 5. Verify and iterate       │   │
-                                         │  │ 6. POST patches to API      │   │
+                                         │  │ 1. Receive signed queue event │   │
+                                         │  │ 2. Dispatch queued resolve    │   │
+                                         │  │ 3. Spin up E2B sandbox        │   │
+                                         │  │ 4. Run Codex 5.2 via AI SDK   │   │
+                                         │  │ 5. Verify and iterate         │   │
+                                         │  │ 6. POST patches to API        │   │
                                          │  └─────────────────────────────┘   │
                                          └────────────────┬───────────────────┘
                                                           │
@@ -174,20 +174,20 @@ A self-healing CI/CD platform that runs CI locally and uses AI (Claude) to autom
 ```
 detent/
 ├── apps/
-│   ├── api/                          # Backend API (Cloudflare Workers)
+│   ├── observer/                     # Observer service (Cloudflare Workers)
 │   │   ├── src/
 │   │   │   ├── index.ts              # Hono app entry, middleware stack
 │   │   │   ├── routes/
 │   │   │   │   ├── auth.ts           # /v1/auth/* - login, verify, sync identity
 │   │   │   │   ├── organizations.ts  # /v1/organizations/* - CRUD orgs
 │   │   │   │   ├── errors.ts         # /v1/errors - retrieve stored errors
-│   │   │   │   ├── heal.ts           # /v1/heal - request AI healing
+│   │   │   │   ├── resolve.ts           # /v1/resolve - request AI resolving
 │   │   │   │   ├── webhooks.ts       # /webhooks/* - GitHub/GitLab handlers
 │   │   │   │   └── health.ts         # /health - status check
 │   │   │   ├── services/
 │   │   │   │   ├── github/           # GitHub App API, checks, installs
 │   │   │   │   ├── autofix/          # Deterministic autofix orchestration
-│   │   │   │   ├── healer.ts         # Request AI healing (stores in DB)
+│   │   │   │   ├── resolver.ts         # Request AI resolving (stores in DB)
 │   │   │   │   ├── billing.ts        # Subscription/usage billing
 │   │   │   │   ├── log-extractor.ts  # Fetch CI logs from providers
 │   │   │   │   └── idempotency.ts    # Webhook deduplication (KV + DB)
@@ -217,7 +217,7 @@ detent/
 │   │   │   └── tui/                  # Terminal UI components (Ink)
 │   │   └── build.ts                  # bun build → standalone binary
 │   │
-│   ├── navigator/                    # Auth portal (Next.js 16)
+│   ├── navigator/                    # Auth portal (Next.js 16; deprecated, deferred until CLI limits are in place)
 │   │   └── src/
 │   │       └── app/
 │   │           ├── auth/login/       # Initiate WorkOS OAuth
@@ -229,11 +229,11 @@ detent/
 │   │   └── src/app/
 │   │       └── page.tsx              # Landing page
 │   │
-│   ├── healer/                       # AI Healing Service (Railway)
+│   ├── resolver/                     # AI Resolving Service (Railway)
 │   │   └── src/
 │   │       ├── index.ts              # Hono app, graceful shutdown
 │   │       ├── services/
-│   │       │   └── poller/           # Poll Convex for pending heals
+│   │       │   └── worker/           # Queue-driven resolver worker/dispatcher
 │   │       ├── adapters/             # E2B sandbox adapter
 │   │       └── routes/               # Health check routes
 │   │
@@ -261,7 +261,7 @@ detent/
 │   ├── types/                        # Shared TypeScript types
 │   │   └── src/                      # Common interfaces and enums
 │   │
-│   ├── healing/                      # AI-powered error fixing
+│   ├── resolving/                      # AI-powered error fixing
 │   │   └── src/
 │   │       ├── client.ts             # Codex 5.2 via Vercel AI Gateway
 │   │       ├── loop.ts               # Multi-turn conversation loop
@@ -421,13 +421,13 @@ dt org                    # Organization management
 |--------------|---------------------------------------|
 | CLI          | TypeScript, Citty, Ink (React)        |
 | API          | Hono, Cloudflare Workers              |
-| Healer       | Hono, Bun, Railway                    |
+| Resolver     | Hono, Bun, Railway                    |
 | Database     | Convex                                |
 | Web Apps     | Next.js 16, React 19, Tailwind        |
 | Auth         | WorkOS, JWT (Jose), OAuth 2.0         |
 | AI Extraction| Claude Haiku via Vercel AI SDK        |
-| AI Healing   | Codex 5.2 via Vercel AI Gateway       |
-| Sandboxes    | E2B (fresh per heal)                  |
+| AI Resolving   | Codex 5.2 via Vercel AI Gateway       |
+| Sandboxes    | E2B (fresh per resolve)                  |
 | Monorepo     | Turborepo, Bun                        |
 | Lint/Format  | Ultracite (Biome)                     |
 | Monitoring   | Sentry, Logtail                       |

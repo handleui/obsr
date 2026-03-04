@@ -5,11 +5,11 @@
 export const VERIFICATION_CODE_LENGTH = 6;
 
 /**
- * Detent API base URL
+ * Observer API base URL
  * Used for server-side API calls (e.g., invitation acceptance)
  */
 export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "https://backend.detent.sh";
+  process.env.NEXT_PUBLIC_API_URL ?? "https://observer.detent.sh";
 
 export const COOKIE_NAMES = {
   session: "session",

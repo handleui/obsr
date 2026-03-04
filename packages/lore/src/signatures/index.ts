@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ErrorFingerprints } from "@detent/types";
-import type { ExtractedError } from "../types.js";
+import type { CIError } from "../types.js";
 import { normalizeFilePath, normalizeForLore } from "./normalize.js";
 
 export type { ErrorFingerprints } from "@detent/types";
@@ -20,9 +20,7 @@ const hash = (input: string): string =>
  * - repo: per-repo tracking (lore + normalized file path)
  * - instance: exact dedup (repo + line + column)
  */
-export const generateFingerprints = (
-  error: ExtractedError
-): ErrorFingerprints => {
+export const generateFingerprints = (error: CIError): ErrorFingerprints => {
   const normalizedPattern = normalizeForLore(error.message);
 
   // Level 1: Lore fingerprint (cross-repo)
@@ -48,6 +46,6 @@ export const generateFingerprints = (
 };
 
 /** Legacy: simple signature for backward compatibility */
-export const generateSignature = (error: ExtractedError): string => {
+export const generateSignature = (error: CIError): string => {
   return generateFingerprints(error).lore;
 };

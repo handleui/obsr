@@ -1,16 +1,16 @@
 ---
 title: API Introduction
-description: Integrate with the Detent API
+description: Integrate with the Observer API
 ---
 
-The Detent API enables programmatic access to CI management, healing, and organization features.
+The Observer API enables programmatic access to CI management, resolving, and organization features.
 
 ## Base URL
 
 <Tabs items={["Cloud", "Self-Hosted"]}>
   <Tab value="Cloud">
     ```bash
-    https://backend.detent.sh/v1
+    https://observer.detent.sh/v1
     ```
   </Tab>
   <Tab value="Self-Hosted">
@@ -25,7 +25,7 @@ The Detent API enables programmatic access to CI management, healing, and organi
 All API requests require authentication via JWT bearer token from WorkOS.
 
 ```bash
-curl https://backend.detent.sh/v1/projects \
+curl https://observer.detent.sh/v1/projects \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
@@ -87,7 +87,7 @@ X-RateLimit-Reset: 1704067200
 - **[Authentication](/docs/api/authentication)** — OAuth and token management
 - **[Webhooks](/docs/api/webhooks)** — GitHub and GitLab webhooks
 - **[Projects](/docs/api/repositories)** — Project and repository management
-- **[Checks](/docs/api/checks)** — CI check execution and healing
+- **[Checks](/docs/api/checks)** — CI check execution and resolving
 
 ## SDKs
 
@@ -100,7 +100,7 @@ Currently, the recommended way to interact with the API is via the CLI or direct
 ## Example: List Projects
 
 ```bash
-curl https://backend.detent.sh/v1/projects?organization_id=YOUR_ORG_ID \
+curl https://observer.detent.sh/v1/projects?organization_id=YOUR_ORG_ID \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 

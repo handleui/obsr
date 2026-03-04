@@ -1,7 +1,12 @@
-export type SandboxProviderName = "vercel" | "e2b";
+export type SandboxProviderName = "daytona" | "e2b" | "vercel";
 
 export interface SandboxEnv {
   SANDBOX_PROVIDER?: string;
+  DAYTONA_API_KEY?: string;
+  DAYTONA_API_URL?: string;
+  DAYTONA_TARGET?: string;
+  DAYTONA_ORGANIZATION_ID?: string;
+  DAYTONA_JWT_TOKEN?: string;
   E2B_API_KEY?: string;
   VERCEL_TOKEN?: string;
   VERCEL_TEAM_ID?: string;

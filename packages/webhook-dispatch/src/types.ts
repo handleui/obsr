@@ -1,14 +1,14 @@
 export type WebhookEventType =
-  | "heal.pending"
-  | "heal.running"
-  | "heal.completed"
-  | "heal.applied"
-  | "heal.rejected"
-  | "heal.failed";
+  | "resolve.pending"
+  | "resolve.running"
+  | "resolve.completed"
+  | "resolve.applied"
+  | "resolve.rejected"
+  | "resolve.failed";
 
 export interface WebhookHealData {
-  heal_id: string;
-  type: "autofix" | "heal";
+  resolve_id: string;
+  type: "autofix" | "resolve";
   status: string;
   project_id: string;
   pr_number: number | null;

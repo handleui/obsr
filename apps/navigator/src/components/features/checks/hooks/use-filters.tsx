@@ -36,7 +36,7 @@ const ALL_STATUSES = [
   "waiting",
   "successful",
   "healed",
-  "healing",
+  "resolving",
   "skipped",
 ];
 

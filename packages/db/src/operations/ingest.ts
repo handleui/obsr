@@ -11,7 +11,6 @@ import { commonFilesMergeFromExcludedSql } from "../utils.js";
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 const MAX_ERRORS_PER_JOB = 500;
-const MAX_PROVIDER_JOB_ID_LENGTH = 64;
 const MAX_WORKFLOW_JOB_LENGTH = 255;
 const MAX_LOG_MANIFEST_SEGMENTS = 1000;
 const MAX_SEGMENT_LINE_NUMBER = 1_000_000;
@@ -133,10 +132,7 @@ interface ErrorPayload {
   source?: string | null;
   stackTrace?: string | null;
   hints?: string[] | null;
-  providerJobId?: string | null;
   workflowJob?: string | null;
-  workflowStep?: string | null;
-  workflowAction?: string | null;
   codeSnippet?: CodeSnippet | null;
   relatedFiles?: string[] | null;
   fixable?: boolean | null;
@@ -160,7 +156,6 @@ interface JobReportArgs {
   errors: ErrorPayload[];
   signatures?: SignaturePayload[];
   workflowJob: string;
-  providerJobId?: string | null;
   source?: string | null;
 }
 
@@ -372,7 +367,6 @@ const insertRunErrors = async (
     runId: string;
     source: string;
     workflowJob: string;
-    sanitizedJobId: string | undefined;
     signatureMap: Map<string, string>;
   }
 ) => {
@@ -386,7 +380,6 @@ const insertRunErrors = async (
       : null,
     ...toErrorFields(error),
     source: ctx.source,
-    providerJobId: ctx.sanitizedJobId ?? error.providerJobId ?? null,
     workflowJob: ctx.workflowJob,
   }));
   await tx.insert(runErrors).values(errorRows);
@@ -402,9 +395,6 @@ export const storeJobReport = async (
     const workflowJob =
       truncateField(args.workflowJob, MAX_WORKFLOW_JOB_LENGTH) ??
       args.workflowJob;
-    const sanitizedJobId =
-      truncateField(args.providerJobId, MAX_PROVIDER_JOB_ID_LENGTH) ??
-      undefined;
     const cappedErrors = capErrors(args.errors);
     const runPayload = { ...args.run, errorCount: cappedErrors.length };
 
@@ -438,7 +428,6 @@ export const storeJobReport = async (
       runId,
       source,
       workflowJob,
-      sanitizedJobId,
       signatureMap,
     });
 

@@ -29,7 +29,7 @@ Yes, but only the code needed to fix errors — typically 7 lines around each er
 
 ### Where does my code run?
 
-AI healing runs in isolated sandboxes. Each heal gets a fresh environment that's destroyed after. Nothing persists between heals.
+AI resolving runs in isolated sandboxes. Each resolve gets a fresh environment that's destroyed after. Nothing persists between resolves.
 
 ### Can I self-host?
 
@@ -43,15 +43,15 @@ Yes, SOC 2 Type II. All data is encrypted at rest and in transit.
 
 ### How much does it cost?
 
-You pay per successful heal. Autofix (formatting, imports) is free. AI heals cost 1-5 credits depending on complexity. See [Pricing](/docs/pricing).
+You pay per successful resolve. Autofix (formatting, imports) is free. AI resolves cost 1-5 credits depending on complexity. See [Pricing](/docs/pricing).
 
 ### Is there a free tier?
 
-Yes. New accounts get 50 free credits — enough for ~30-50 heals.
+Yes. New accounts get 50 free credits — enough for ~30-50 resolves.
 
 ### What if the fix doesn't work?
 
-You're only charged for successful heals. If a fix fails or you reject it, no charge.
+You're only charged for successful resolves. If a fix fails or you reject it, no charge.
 
 ## Troubleshooting
 
@@ -59,7 +59,7 @@ You're only charged for successful heals. If a fix fails or you reject it, no ch
 
 Make sure your tools output JSON. Detent can't parse raw console output. See [Supported Tools](/docs/cli/tools) for setup instructions.
 
-### Why did my heal fail?
+### Why did my resolve fail?
 
 Complex logic bugs, missing dependencies, or architectural issues may be beyond what AI can fix. Detent flags these for human review instead of guessing.
 

@@ -17,7 +17,7 @@
       ]
     },
     "@detent/cli#build": {
-      "dependsOn": ["@detent/healing#build", "@detent/git#build"],
+      "dependsOn": ["@detent/resolving#build", "@detent/git#build"],
       "inputs": [
         "src/**/*.ts",
         "src/**/*.tsx",
@@ -26,15 +26,15 @@
       ],
       "outputs": ["dist/**"]
     },
-    "@detent/api#build": {
+    "@detent/observer#build": {
       "dependsOn": ["@detent/db#build", "^build"],
       "inputs": ["src/**", "wrangler.jsonc", "tsconfig.json", "package.json"],
       "outputs": ["dist/**"]
     },
-    "@detent/healer#build": {
+    "@detent/resolver#build": {
       "dependsOn": [
         "@detent/db#build",
-        "@detent/healing#build",
+        "@detent/resolving#build",
         "@detent/sandbox#build"
       ],
       "inputs": ["src/**/*.ts", "tsconfig.json", "package.json"],

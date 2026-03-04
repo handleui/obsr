@@ -37,19 +37,19 @@ type SecuredMutationRef = FunctionReference<
  *   - convex/organizations.ts
  *   - convex/organization_members.ts
  *   - convex/projects.ts
- *   - convex/heals.ts
+ *   - convex/resolves.ts
  *   - convex/webhooks.ts
  */
 const securedQueries = new Set<SecuredQueryRef>([
   api.api_keys.getById,
   api.api_keys.getByKeyHash,
   api.api_keys.listByOrg,
-  api.heals.get,
-  api.heals.getByPr,
-  api.heals.getByProjectStatus,
-  api.heals.getActiveByProject,
-  api.heals.getByRunId,
-  api.heals.getPending,
+  api.resolves.get,
+  api.resolves.getByPr,
+  api.resolves.getByProjectStatus,
+  api.resolves.getActiveByProject,
+  api.resolves.getByRunId,
+  api.resolves.getPending,
   api.organizations.getById,
   api.organizations.getBySlug,
   api.organizations.getByProviderAccount,
@@ -83,13 +83,13 @@ const securedMutations = new Set<SecuredMutationRef>([
   api.api_keys.updateLastUsedAt,
   api.api_keys.update,
   api.api_keys.remove,
-  api.heals.create,
-  api.heals.updateStatus,
-  api.heals.apply,
-  api.heals.reject,
-  api.heals.trigger,
-  api.heals.setCheckRunId,
-  api.heals.markStaleAsFailed,
+  api.resolves.create,
+  api.resolves.updateStatus,
+  api.resolves.apply,
+  api.resolves.reject,
+  api.resolves.trigger,
+  api.resolves.setCheckRunId,
+  api.resolves.markStaleAsFailed,
   api.organizations.create,
   api.organizations.update,
   api.organization_members.updateRole,

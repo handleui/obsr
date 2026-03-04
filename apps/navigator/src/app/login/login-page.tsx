@@ -26,7 +26,7 @@ interface CiStep {
   hasConnector?: boolean;
 }
 
-const DETENT_PROMPT = "What is Detent self-healing CI/CD?";
+const DETENT_PROMPT = "What is Detent self-resolving CI/CD?";
 const DETENT_QUERY = encodeURIComponent(DETENT_PROMPT);
 
 const PROVIDERS: Provider[] = [
@@ -173,10 +173,10 @@ const LoginForm = memo(
       <div className="flex w-[400px] flex-col gap-8">
         <div className="flex flex-col gap-2">
           <p className="text-black text-xl leading-[1.1]">
-            Detent is the new, self-healing CI/CD
+            Detent is the new, self-resolving CI/CD
           </p>
           <p className="text-[#575757] text-sm leading-[1.2]">
-            We provide self-healing capabilities to your CI/CD pipelines,
+            We provide self-resolving capabilities to your CI/CD pipelines,
             cleanly extracting the errors, and turning your checks green in
             under 2 minutes.
           </p>

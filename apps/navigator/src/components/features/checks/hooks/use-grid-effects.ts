@@ -8,7 +8,7 @@ export const parseHealState = (
   segments: string[],
   errorMap: Map<string, unknown>
 ) => {
-  if (segments.length >= 2 && segments[0] === "heal") {
+  if (segments.length >= 2 && segments[0] === "resolve") {
     const errorId = segments[1];
     if (errorMap.has(errorId)) {
       return { errorId };

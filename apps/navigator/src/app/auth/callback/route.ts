@@ -233,7 +233,7 @@ const syncIdentityWithApi = async (
     }
 
     const apiUrl =
-      process.env.NEXT_PUBLIC_API_URL ?? "https://backend.detent.sh";
+      process.env.NEXT_PUBLIC_API_URL ?? "https://observer.detent.sh";
     const response = await fetch(`${apiUrl}/v1/auth/sync-user`, {
       method: "POST",
       headers,

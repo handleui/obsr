@@ -1,7 +1,7 @@
 import { DEFAULT_FAST_MODEL, DEFAULT_SMART_MODEL } from "./types.js";
 
-// Minimal shape for routing — decoupled from healer's RunErrorRow
-// (packages/ai can't import from apps/healer)
+// Minimal shape for routing — decoupled from resolver's RunErrorRow
+// (packages/ai can't import from apps/resolver)
 interface RoutableError {
   category: string | null;
   stackTrace: string | null;

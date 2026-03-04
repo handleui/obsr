@@ -49,7 +49,7 @@ const StatusBar = () => (
     </div>
     <Button className="flex-1 gap-2.5 text-[14px] leading-[1.1]" type="button">
       <Sparks className="!size-3" color="white" />
-      Heal All Jobs
+      Resolve All Jobs
     </Button>
   </div>
 );

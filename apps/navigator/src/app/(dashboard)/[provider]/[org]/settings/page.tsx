@@ -69,8 +69,8 @@ const OrgSettingsPage = async ({ params }: OrgSettingsPageProps) => {
       <section>
         <h2 className="mb-4 font-medium text-lg text-neutral-900">API Keys</h2>
         <p className="mb-4 text-neutral-500 text-sm">
-          Create keys to access the Detent API from external services. Keys use
-          the{" "}
+          Create keys to access the Observer API from external services. Keys
+          use the{" "}
           <code className="rounded bg-neutral-100 px-1 font-mono text-xs">
             dtk_
           </code>{" "}

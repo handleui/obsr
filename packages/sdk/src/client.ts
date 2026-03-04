@@ -2,7 +2,7 @@ import { DetentApiError, DetentAuthError, DetentNetworkError } from "./errors.js
 import { ApiKeysResource } from "./resources/api-keys.js";
 import { AuthResource } from "./resources/auth.js";
 import { ErrorsResource } from "./resources/errors.js";
-import { HealsResource } from "./resources/heals.js";
+import { ResolvesResource } from "./resources/resolves.js";
 import { InvitationsResource } from "./resources/invitations.js";
 import { MembersResource } from "./resources/members.js";
 import { OrganizationsResource } from "./resources/organizations.js";
@@ -11,7 +11,7 @@ import { WebhooksResource } from "./resources/webhooks.js";
 import type { AuthConfig, DetentConfig } from "./types.js";
 import { sanitizeCredentials } from "./utils/sanitize.js";
 
-const DEFAULT_BASE_URL = "https://backend.detent.sh";
+const DEFAULT_BASE_URL = "https://observer.detent.sh";
 const DEFAULT_TIMEOUT = 30_000;
 
 const validateBaseUrl = (url: string): void => {
@@ -61,7 +61,7 @@ export class DetentClient {
   readonly auth: AuthResource;
   readonly projects: ProjectsResource;
   readonly errors: ErrorsResource;
-  readonly heals: HealsResource;
+  readonly resolves: ResolvesResource;
   readonly organizations: OrganizationsResource;
   readonly members: MembersResource;
   readonly invitations: InvitationsResource;
@@ -86,7 +86,7 @@ export class DetentClient {
     this.auth = new AuthResource(this);
     this.projects = new ProjectsResource(this);
     this.errors = new ErrorsResource(this);
-    this.heals = new HealsResource(this);
+    this.resolves = new ResolvesResource(this);
     this.organizations = new OrganizationsResource(this);
     this.members = new MembersResource(this);
     this.invitations = new InvitationsResource(this);
@@ -135,7 +135,7 @@ export class DetentClient {
 
     if (error instanceof TypeError && error.message.includes("fetch")) {
       return new DetentNetworkError(
-        "Network error: Unable to connect to the Detent API. Please check your internet connection."
+        "Network error: Unable to connect to the Observer API. Please check your internet connection."
       );
     }
 

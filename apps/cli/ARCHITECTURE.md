@@ -108,7 +108,7 @@ Three distinct storage layers:
     update.lock                # Concurrent update prevention
 
 <repo>/.detent/                # Per-repository
-    config.json                # Healing config (apiKey, model, budgets)
+    config.json                # Resolving config (apiKey, model, budgets)
     project.json               # Project link (org/project binding)
 ```
 
@@ -132,7 +132,7 @@ interface Credentials {
 
 ### Config (`lib/config.ts`)
 
-Per-repo healing configuration:
+Per-repo resolving configuration:
 
 ```typescript
 interface GlobalConfig {

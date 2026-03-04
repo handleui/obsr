@@ -63,9 +63,9 @@ const ProjectPage = async ({ params }: ProjectPageProps) => {
           title="CI Runs"
         />
         <NavCard
-          description="View AI healing history"
-          href={`${basePath}/heals`}
-          title="AI Heals"
+          description="View AI resolving history"
+          href={`${basePath}/resolves`}
+          title="AI Resolves"
         />
       </div>
 

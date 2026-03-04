@@ -139,9 +139,9 @@ readonly filePath?: string;
 | Package | Usage |
 |---------|-------|
 | `@detent/extract` | Uses CIError, CIErrorSchema for error extraction and validation |
-| `@detent/healing` | Reads CIError for AI prompt generation, validation |
+| `@detent/resolving` | Reads CIError for AI prompt generation, validation |
 | `@detent/lore` | Uses ErrorFingerprints, ErrorSource for error signature tracking |
-| `apps/api` | Stores/retrieves errors, uses ErrorCategory, ErrorSource, CodeSnippet |
+| `apps/observer` | Stores/retrieves errors, uses ErrorCategory, ErrorSource, CodeSnippet |
 | `apps/cli` | Uses redactSensitiveData for config sanitization |
 
 ---

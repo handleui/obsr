@@ -48,7 +48,7 @@ When building binaries (`bun run build:binaries`), the build script:
 | Variable | Required? | Default |
 |----------|-----------|---------|
 | `WORKOS_CLIENT_ID` | Yes | - |
-| `DETENT_API_URL` | No | `https://backend.detent.sh` |
+| `DETENT_API_URL` | No | `https://observer.detent.sh` |
 | `DETENT_AUTH_URL` | No | `https://navigator.detent.sh` |
 
 Example build command:

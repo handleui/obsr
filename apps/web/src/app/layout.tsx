@@ -21,7 +21,7 @@ const fontVariables = [
 
 export const metadata: Metadata = {
   title: "Detent",
-  description: "Self-healing CI/CD platform",
+  description: "Self-resolving CI/CD platform",
 };
 
 const RootLayout = ({

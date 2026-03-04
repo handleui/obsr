@@ -97,11 +97,6 @@ interface RunErrorDoc {
   fixable?: boolean | null;
   relatedFiles?: string[] | null;
   workflowJob?: string | null;
-  workflowContext?: {
-    job?: string | null;
-    step?: string | null;
-    action?: string | null;
-  } | null;
   logLineStart?: number | null;
   logLineEnd?: number | null;
   createdAt: number;
@@ -209,36 +204,35 @@ const formatRunResponse = (r: RunDoc) => ({
 const scrubField = (value: string | null | undefined): string | null =>
   value ? scrubSecrets(value) : null;
 
-const formatErrorResponse = (e: RunErrorDoc) => ({
-  id: e.id,
-  filePath: e.filePath,
-  line: e.line,
-  column: e.column,
-  message: scrubSecrets(e.message),
-  category: e.category,
-  severity: e.severity,
-  source: e.source,
-  ruleId: e.ruleId,
-  hints: e.hints ? e.hints.map(scrubSecrets) : null,
-  stackTrace: scrubField(e.stackTrace),
-  codeSnippet: e.codeSnippet
-    ? {
-        ...e.codeSnippet,
-        lines: e.codeSnippet.lines.map(scrubSecrets),
-      }
-    : null,
-  fixable: e.fixable ?? false,
-  relatedFiles: e.relatedFiles ?? null,
-  workflowJob: scrubField(e.workflowJob),
-  workflowContext: {
-    job: scrubField(e.workflowJob),
-    step: e.workflowContext ? scrubField(e.workflowContext.step) : null,
-    action: e.workflowContext ? scrubField(e.workflowContext.action) : null,
-  },
-  logLineStart: e.logLineStart ?? null,
-  logLineEnd: e.logLineEnd ?? null,
-  createdAt: new Date(e.createdAt).toISOString(),
-});
+const formatErrorResponse = (e: RunErrorDoc) => {
+  const workflowJob = scrubField(e.workflowJob);
+  return {
+    id: e.id,
+    filePath: e.filePath,
+    line: e.line,
+    column: e.column,
+    message: scrubSecrets(e.message),
+    category: e.category,
+    severity: e.severity,
+    source: e.source,
+    ruleId: e.ruleId,
+    hints: e.hints ? e.hints.map(scrubSecrets) : null,
+    stackTrace: scrubField(e.stackTrace),
+    codeSnippet: e.codeSnippet
+      ? {
+          ...e.codeSnippet,
+          lines: e.codeSnippet.lines.map(scrubSecrets),
+        }
+      : null,
+    fixable: e.fixable ?? false,
+    relatedFiles: e.relatedFiles ?? null,
+    workflowJob,
+    workflowContext: workflowJob ? { job: workflowJob } : null,
+    logLineStart: e.logLineStart ?? null,
+    logLineEnd: e.logLineEnd ?? null,
+    createdAt: new Date(e.createdAt).toISOString(),
+  };
+};
 
 app.get("/", async (c) => {
   const commitParam = c.req.query("commit");

@@ -1152,7 +1152,9 @@ const dispatchResolves = (
   client: ConvexClient,
   db: Db,
   appEnv: Env
-): void => {
+): string[] => {
+  const dispatchedResolveIds: string[] = [];
+
   for (const resolve of resolves) {
     if (!state.isRunning) {
       break;
@@ -1165,6 +1167,7 @@ const dispatchResolves = (
     }
 
     state.activeResolveIds.add(resolve.id);
+    dispatchedResolveIds.push(resolve.id);
     processResolve(client, db, resolve, appEnv)
       .catch((err) => {
         console.error(
@@ -1175,6 +1178,8 @@ const dispatchResolves = (
         state.activeResolveIds.delete(resolve.id);
       });
   }
+
+  return dispatchedResolveIds;
 };
 
 export const enqueueResolves = async (
@@ -1221,7 +1226,16 @@ export const enqueueResolves = async (
       continue;
     }
 
-    dispatchResolves([resolve], state.client, state.db, env);
+    const dispatchedResolveIds = dispatchResolves(
+      [resolve],
+      state.client,
+      state.db,
+      env
+    );
+    if (dispatchedResolveIds.length === 0) {
+      result.skipped.push(resolve.id);
+      continue;
+    }
     result.accepted.push(resolve.id);
   }
 

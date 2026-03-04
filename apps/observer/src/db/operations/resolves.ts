@@ -226,10 +226,10 @@ export const createResolve = async (
   if (typeof id !== "string") {
     throw new Error("Failed to create resolve");
   }
-  if ((data.status ?? "pending") === "pending") {
+  if (sanitizedData.type !== "autofix" && sanitizedData.status === "pending") {
     enqueueResolveForResolver(env, id, "create").catch((error: unknown) => {
       console.error(
-        `[resolve-queue] Failed to enqueue resolve ${id} (${data.status ?? "pending"}):`,
+        `[resolve-queue] Failed to enqueue resolve ${id} (${sanitizedData.status}):`,
         error instanceof Error ? error.message : String(error)
       );
     });

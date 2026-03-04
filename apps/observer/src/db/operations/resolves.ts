@@ -227,12 +227,14 @@ export const createResolve = async (
     throw new Error("Failed to create resolve");
   }
   if (sanitizedData.type !== "autofix" && sanitizedData.status === "pending") {
-    enqueueResolveForResolver(env, id, "create").catch((error: unknown) => {
-      console.error(
-        `[resolve-queue] Failed to enqueue resolve ${id} (${sanitizedData.status}):`,
-        error instanceof Error ? error.message : String(error)
-      );
-    });
+    await enqueueResolveForResolver(env, id, "create").catch(
+      (error: unknown) => {
+        console.error(
+          `[resolve-queue] Failed to enqueue resolve ${id} (${sanitizedData.status}):`,
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+    );
   }
   return id;
 };
@@ -247,7 +249,7 @@ export const triggerResolve = async (
     id: resolveId,
   })) as boolean;
   if (triggered) {
-    enqueueResolveForResolver(env, resolveId, "trigger").catch(
+    await enqueueResolveForResolver(env, resolveId, "trigger").catch(
       (error: unknown) => {
         console.error(
           `[resolve-queue] Failed to enqueue trigger resolve ${resolveId}:`,

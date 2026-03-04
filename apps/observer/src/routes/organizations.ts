@@ -925,7 +925,7 @@ app.delete(
     const targetUserId = c.req.param("userId");
 
     // SECURITY: Validate userId format to prevent invalid database lookups
-    if (!isValidWorkOSUserId(targetUserId)) {
+    if (!(targetUserId && isValidWorkOSUserId(targetUserId))) {
       return c.json({ error: "Invalid user ID format" }, 400);
     }
 

@@ -49,5 +49,9 @@
   },
   "[mdx]": {
     "editor.defaultFormatter": "biomejs.biome"
+  },
+  "files.associations": {
+    "*.dev.vars": "dotenv",
+    "*.dev.vars.example": "dotenv"
   }
 }

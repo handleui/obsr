@@ -19,6 +19,7 @@ import {
   type RevokeInvitationResponse,
   type SyncIdentityResponse,
 } from "@detent/sdk";
+import { isDebugEnabled } from "./debug.js";
 
 const API_BASE_URL = process.env.DETENT_API_URL ?? "https://observer.detent.sh";
 
@@ -98,7 +99,7 @@ export const syncUser = (
   accessToken: string,
   githubToken?: string | null
 ): Promise<SyncIdentityResponse> => {
-  if (process.env.DEBUG) {
+  if (isDebugEnabled()) {
     console.log(
       `[sync-user] Sending request with GitHub token: ${githubToken ? "yes" : "no"}`
     );

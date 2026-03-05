@@ -21,7 +21,7 @@
     },
     "apps/cli": {
       "name": "@detent/cli",
-      "version": "1.4.0",
+      "version": "0.1.0",
       "bin": {
         "dt": "./dist/index.js",
       },

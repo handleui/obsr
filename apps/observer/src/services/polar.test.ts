@@ -43,7 +43,6 @@ const createMockPolar = (overrides?: Partial<Polar>): Polar => {
 // Factory for mock environment
 const createMockEnv = (overrides?: Partial<Env>): Env =>
   ({
-    CONVEX_URL: "https://test.convex.cloud",
     POLAR_ACCESS_TOKEN: "test-polar-token",
     POLAR_ORGANIZATION_ID: "polar-org-123",
     ...overrides,

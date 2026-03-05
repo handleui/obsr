@@ -38,8 +38,8 @@ A self-resolving CI/CD platform that runs CI locally and uses AI (Claude) to aut
 │              ┌────────────────────────┼────────────────────────┐                │
 │              ▼                        ▼                        ▼                │
 │  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐          │
-│  │  Cloudflare KV   │    │     Convex       │    │  Upstash Redis   │          │
-│  │  (idempotency)   │    │ (DB + functions) │    │  (rate limit)    │          │
+│  │  Cloudflare KV   │    │   Neon Postgres  │    │  Upstash Redis   │          │
+│  │  (idempotency)   │    │   (Drizzle DB)   │    │  (rate limit)    │          │
 │  └──────────────────┘    └──────────────────┘    └──────────────────┘          │
 └─────────────────────────────────────────────────────────────────────────────────┘
 
@@ -49,7 +49,7 @@ A self-resolving CI/CD platform that runs CI locally and uses AI (Claude) to aut
 │  ┌──────────────────────────────────────────────────────────────────────────┐     │
 │  │                           Web (apps/web, Next.js)                        │     │
 │  │  ┌────────────────────┐                                                  │     │
-│  │  │ Public Site + Docs │◄────────────── WorkOS / Auth flows ────────────┼──── │
+│  │  │ Public Site + Docs │◄────────────── Better Auth / Auth flows ──────┼──── │
 │  │  └────────────────────┘                                                  │     │
 │  └──────────────────────────────────────────────────────────────────────────┘     │
 └─────────────────────────────────────────────────────────────────────────────────┘
@@ -193,11 +193,11 @@ detent/
 │   │   │   │   ├── auth.ts           # JWT verification
 │   │   │   │   └── rate-limit.ts     # Upstash Redis rate limiting
 │   │   │   └── db/
-│   │   │       ├── convex.ts         # Convex client helpers
+│   │   │       ├── client.ts         # Neon DB client helpers
 │   │   │       └── index.ts          # DB exports
 │   │   └── wrangler.jsonc            # Cloudflare Workers config
 │   │
-│   ├── cli/                          # Command-line interface
+│   ├── cli/                          # Command-line interface (auth: WorkOS deferred)
 │   │   ├── src/
 │   │   │   ├── index.ts              # Entry point, auto-update, Sentry
 │   │   │   ├── commands/
@@ -208,7 +208,7 @@ detent/
 │   │   │   │   ├── errors.ts         # dt errors - view CI errors
 │   │   │   │   └── whoami.ts         # dt whoami - current user
 │   │   │   ├── lib/
-│   │   │   │   ├── auth.ts           # WorkOS Device Authorization
+│   │   │   │   ├── auth.ts           # WorkOS Device Authorization (deferred)
 │   │   │   │   ├── api.ts            # Authenticated API client
 │   │   │   │   ├── credentials.ts    # Token storage (~/.detent/)
 │   │   │   │   └── config.ts         # Config file handling (JSONC)
@@ -228,8 +228,6 @@ detent/
 │   │       └── routes/               # Health check routes
 │   │
 │   └── docs/                         # Documentation site
-│
-├── convex/                           # Convex schema + functions
 │
 ├── packages/
 │   ├── action/                       # GitHub Action entry point
@@ -285,11 +283,11 @@ detent/
 
 ---
 
-## Data Model (Convex)
+## Data Model (Neon)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           CONVEX COLLECTIONS                                 │
+│                             NEON TABLES                                      │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
@@ -311,7 +309,7 @@ detent/
                     ├──────────────────────┤    ├──────────────────┤
                     │ id                   │    │ id               │
                     │ organizationId       │    │ projectId        │
-                    │ userId (WorkOS)      │    │ runId            │
+                    │ userId (provider)    │    │ runId            │
                     │ role (owner/admin/   │    │ commitSha        │
                     │       member)        │    │ prNumber?        │
                     │ providerUserId       │    │ conclusion       │
@@ -350,7 +348,7 @@ detent/
 │                    CLI AUTHENTICATION (Device Flow)                     │
 └────────────────────────────────────────────────────────────────────────┘
 
-   User Terminal                    WorkOS                 Web App
+   User Terminal                    WorkOS (CLI legacy)    Web App
         │                             │                        │
         │  dt auth                    │                        │
         │──────────────────────────►  │                        │
@@ -412,9 +410,9 @@ dt org                    # Organization management
 | CLI          | TypeScript, Citty, Ink (React)        |
 | API          | Hono, Cloudflare Workers              |
 | Resolver     | Hono, Bun, Railway                    |
-| Database     | Convex                                |
+| Database     | Neon Postgres (Drizzle)               |
 | Web Apps     | Next.js 16, React 19, Tailwind        |
-| Auth         | WorkOS, JWT (Jose), OAuth 2.0         |
+| Auth         | Better Auth, JWT (Jose), OAuth 2.0 (CLI deferred WorkOS) |
 | AI Extraction| Claude Haiku via Vercel AI SDK        |
 | AI Resolving   | Codex 5.2 via Vercel AI Gateway       |
 | Sandboxes    | E2B (fresh per resolve)                  |

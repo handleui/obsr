@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import { validateHandle } from "../lib/validation";
 import type { Env } from "../types/env";
 
@@ -112,8 +112,8 @@ app.get("/:provider/:slug", async (c) => {
 
   const slug = slugParam.toLowerCase();
 
-  const convex = getConvexClient(c.env);
-  const org = (await convex.query("organizations:getByProviderAccountLogin", {
+  const dbClient = getDbClient(c.env);
+  const org = (await dbClient.query("organizations:getByProviderAccountLogin", {
     provider,
     providerAccountLogin: slug,
   })) as OrganizationDoc | null;
@@ -122,7 +122,7 @@ app.get("/:provider/:slug", async (c) => {
     return c.json({ error: "Organization not found" }, 404);
   }
 
-  const member = (await convex.query("organization_members:getByOrgUser", {
+  const member = (await dbClient.query("organization_members:getByOrgUser", {
     organizationId: org._id,
     userId: auth.userId,
   })) as OrganizationMemberDoc | null;
@@ -164,8 +164,8 @@ app.get("/:provider/:slug/membership", async (c) => {
 
   const slug = slugParam.toLowerCase();
 
-  const convex = getConvexClient(c.env);
-  const org = (await convex.query("organizations:getByProviderAccountLogin", {
+  const dbClient = getDbClient(c.env);
+  const org = (await dbClient.query("organizations:getByProviderAccountLogin", {
     provider,
     providerAccountLogin: slug,
   })) as OrganizationDoc | null;
@@ -174,7 +174,7 @@ app.get("/:provider/:slug/membership", async (c) => {
     return c.json({ error: "Organization not found" }, 404);
   }
 
-  const member = (await convex.query("organization_members:getByOrgUser", {
+  const member = (await dbClient.query("organization_members:getByOrgUser", {
     organizationId: org._id,
     userId: auth.userId,
   })) as OrganizationMemberDoc | null;
@@ -207,8 +207,8 @@ app.get("/:provider/:slug/projects", async (c) => {
 
   const slug = slugParam.toLowerCase();
 
-  const convex = getConvexClient(c.env);
-  const org = (await convex.query("organizations:getByProviderAccountLogin", {
+  const dbClient = getDbClient(c.env);
+  const org = (await dbClient.query("organizations:getByProviderAccountLogin", {
     provider,
     providerAccountLogin: slug,
   })) as OrganizationDoc | null;
@@ -217,7 +217,7 @@ app.get("/:provider/:slug/projects", async (c) => {
     return c.json({ error: "Organization not found" }, 404);
   }
 
-  const member = (await convex.query("organization_members:getByOrgUser", {
+  const member = (await dbClient.query("organization_members:getByOrgUser", {
     organizationId: org._id,
     userId: auth.userId,
   })) as OrganizationMemberDoc | null;
@@ -226,7 +226,7 @@ app.get("/:provider/:slug/projects", async (c) => {
     return c.json({ error: "Not a member of this organization" }, 403);
   }
 
-  const orgProjects = (await convex.query("projects:listByOrg", {
+  const orgProjects = (await dbClient.query("projects:listByOrg", {
     organizationId: org._id,
   })) as ProjectDoc[];
 
@@ -270,8 +270,8 @@ app.get("/:provider/:slug/projects/:handle", async (c) => {
   const slug = slugParam.toLowerCase();
   const handle = handleParam.toLowerCase();
 
-  const convex = getConvexClient(c.env);
-  const org = (await convex.query("organizations:getByProviderAccountLogin", {
+  const dbClient = getDbClient(c.env);
+  const org = (await dbClient.query("organizations:getByProviderAccountLogin", {
     provider,
     providerAccountLogin: slug,
   })) as OrganizationDoc | null;
@@ -280,7 +280,7 @@ app.get("/:provider/:slug/projects/:handle", async (c) => {
     return c.json({ error: "Organization not found" }, 404);
   }
 
-  const member = (await convex.query("organization_members:getByOrgUser", {
+  const member = (await dbClient.query("organization_members:getByOrgUser", {
     organizationId: org._id,
     userId: auth.userId,
   })) as OrganizationMemberDoc | null;
@@ -289,7 +289,7 @@ app.get("/:provider/:slug/projects/:handle", async (c) => {
     return c.json({ error: "Not a member of this organization" }, 403);
   }
 
-  const project = (await convex.query("projects:getByOrgHandle", {
+  const project = (await dbClient.query("projects:getByOrgHandle", {
     organizationId: org._id,
     handle,
   })) as ProjectDoc | null;

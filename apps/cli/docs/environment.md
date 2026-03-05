@@ -23,10 +23,13 @@ DETENT_HOME=/path/to/custom/dir detent <command>
 
 ## Development
 
+> WorkOS is currently the temporary/legacy auth provider for CLI flows only.
+> Web + observer auth migration is complete on Better Auth.
+
 Create a `.env` file in `apps/cli/`:
 
 ```bash
-# Required - get from WorkOS dashboard
+# Required for CLI auth testing - get from WorkOS dashboard
 WORKOS_CLIENT_ID=client_xxx
 
 # Optional - point to local services
@@ -57,7 +60,7 @@ Example build command:
 WORKOS_CLIENT_ID=client_xxx bun run build:binaries
 ```
 
-The magic happens in `scripts/build-binaries.ts` - it uses Bun's `--define` flag to replace `process.env.X` references with literal strings at compile time. No runtime env lookup needed.
+The magic happens in `scripts/build-binaries.ts` - it uses Bun's `--define` flag to replace `process.env.X` references with literal strings at compile time. No runtime env lookup is needed.
 
 ## How It Works
 

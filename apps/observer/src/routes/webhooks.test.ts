@@ -43,7 +43,7 @@ const mockUpdate = vi.fn();
 const mockSet = vi.fn();
 const mockQuery = vi.fn();
 const mockMutation = vi.fn();
-const mockConvex = { query: mockQuery, mutation: mockMutation };
+const mockDB = { query: mockQuery, mutation: mockMutation };
 
 const queryQueue = new Map<string, unknown[]>();
 const queueQueryResult = (name: string, ...results: unknown[]): void => {
@@ -55,8 +55,8 @@ const setQueryResult = (name: string, result: unknown): void => {
   queryQueue.set(name, [result]);
 };
 
-vi.mock("../db/convex", () => ({
-  getConvexClient: vi.fn(() => mockConvex),
+vi.mock("../db/client", () => ({
+  getDbClient: vi.fn(() => mockDB),
 }));
 
 // Mock GitHub membership verification for autoLinkInstaller admin check
@@ -76,8 +76,6 @@ const MOCK_ENV = createMockEnv({
   GITHUB_APP_ID: "123456",
   GITHUB_CLIENT_ID: "test-client-id",
   GITHUB_APP_PRIVATE_KEY: "test-private-key",
-  WORKOS_CLIENT_ID: "test-workos-client",
-  WORKOS_API_KEY: "test-workos-key",
 });
 
 // Factory for installation payloads

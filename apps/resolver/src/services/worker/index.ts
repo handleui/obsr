@@ -1,16 +1,20 @@
 import { selectModelForErrors } from "@detent/ai";
-import { type Db, runErrorOps, runOps } from "@detent/db";
+import {
+  type Db,
+  organizationOps,
+  projectOps,
+  resolveOps,
+  runErrorOps,
+  runOps,
+} from "@detent/db";
 import {
   getResolverQueueResolveIds,
   type ResolverDiagnostic,
   type ResolverQueuePayload,
   ResolveTypes,
 } from "@detent/types";
-import type { ConvexClient } from "convex/browser";
-import type { FunctionReference } from "convex/server";
 import type { Env } from "../../env.js";
 import { env } from "../../env.js";
-import { createConvexClient } from "../convex-client.js";
 import { createDbClient } from "../db-client.js";
 import { GITHUB_API, getInstallationToken } from "../github/token.js";
 import { executeResolve } from "../resolve-executor.js";
@@ -32,11 +36,6 @@ const truncate = (value: string | null, maxLength: number): string | null => {
   }
   return value.length > maxLength ? value.slice(0, maxLength) : value;
 };
-
-const asQuery = (name: string) => name as unknown as FunctionReference<"query">;
-
-const asMutation = (name: string) =>
-  name as unknown as FunctionReference<"mutation">;
 
 interface ResolveRow {
   id: string;
@@ -69,7 +68,6 @@ interface OrganizationRow {
 interface WorkerState {
   isRunning: boolean;
   activeResolveIds: Set<string>;
-  client?: ConvexClient;
   db?: Db;
   pool?: ReturnType<typeof createDbClient>["pool"];
 }
@@ -84,46 +82,46 @@ const state: WorkerState = {
   activeResolveIds: new Set(),
 };
 
-const mapConvexResolve = (resolve: Record<string, unknown>): ResolveRow => ({
-  id: String(resolve._id),
-  type: String(resolve.type ?? ""),
-  status: String(resolve.status ?? ""),
-  runId: (resolve.runId as string | undefined) ?? null,
-  projectId: String(resolve.projectId ?? ""),
-  commitSha: (resolve.commitSha as string | undefined) ?? null,
-  prNumber: typeof resolve.prNumber === "number" ? resolve.prNumber : null,
-  checkRunId: (resolve.checkRunId as string | undefined) ?? null,
-  userInstructions: (resolve.userInstructions as string | undefined) ?? null,
-  autofixSource: (resolve.autofixSource as string | undefined) ?? null,
+const mapResolve = (
+  resolve: NonNullable<Awaited<ReturnType<typeof resolveOps.getById>>>
+): ResolveRow => ({
+  id: resolve.id,
+  type: resolve.type,
+  status: resolve.status,
+  runId: resolve.runId ?? null,
+  projectId: resolve.projectId,
+  commitSha: resolve.commitSha ?? null,
+  prNumber: resolve.prNumber ?? null,
+  checkRunId: resolve.checkRunId ?? null,
+  userInstructions: resolve.userInstructions ?? null,
+  autofixSource: resolve.autofixSource ?? null,
 });
 
 const fetchResolveById = async (
-  convex: ConvexClient,
+  db: Db,
   resolveId: string
 ): Promise<ResolveRow | null> => {
-  const resolve = await convex.query(asQuery("resolves:get"), {
-    id: resolveId,
-  });
-  if (!resolve || typeof resolve !== "object") {
+  const resolve = await resolveOps.getById(db, resolveId);
+  if (!resolve) {
     return null;
   }
-  const mapped = mapConvexResolve(resolve);
+  const mapped = mapResolve(resolve);
   return hasRequiredFields(mapped) ? mapped : null;
 };
 
-const markResolveRunning = async (
-  convex: ConvexClient,
+const markResolveRunning = (
+  db: Db,
   resolveId: string
 ): Promise<string | null> => {
-  return (await convex.mutation(asMutation("resolves:updateStatus"), {
+  return resolveOps.updateStatus(db, {
     id: resolveId,
     status: "running",
     expectedStatus: "pending",
-  })) as string | null;
+  });
 };
 
 const markResolveCompleted = async (
-  convex: ConvexClient,
+  db: Db,
   resolveId: string,
   data: {
     patch: string | null;
@@ -147,7 +145,7 @@ const markResolveCompleted = async (
 
   const costUsdCents = Math.round(data.result.costUSD * 100);
 
-  await convex.mutation(asMutation("resolves:updateStatus"), {
+  await resolveOps.updateStatus(db, {
     id: resolveId,
     status: "completed",
     expectedStatus: "running",
@@ -161,7 +159,7 @@ const markResolveCompleted = async (
 };
 
 const markResolveFailed = async (
-  convex: ConvexClient,
+  db: Db,
   resolveId: string,
   reason: string
 ): Promise<void> => {
@@ -170,7 +168,7 @@ const markResolveFailed = async (
       ? `${reason.slice(0, MAX_REASON_LENGTH - 3)}...`
       : reason;
 
-  await convex.mutation(asMutation("resolves:updateStatus"), {
+  await resolveOps.updateStatus(db, {
     id: resolveId,
     status: "failed",
     expectedStatus: "running",
@@ -179,36 +177,27 @@ const markResolveFailed = async (
 };
 
 const fetchProject = async (
-  convex: ConvexClient,
+  db: Db,
   projectId: string
 ): Promise<ProjectRow | null> => {
-  const project = (await convex.query(asQuery("projects:getById"), {
-    id: projectId,
-  })) as Record<string, unknown> | null;
+  const project = await projectOps.getById(db, projectId);
 
   if (!project) {
     return null;
   }
 
-  const organizationId =
-    typeof project.organizationId === "string" ? project.organizationId : null;
-  const providerRepoFullName =
-    typeof project.providerRepoFullName === "string"
-      ? project.providerRepoFullName
-      : null;
+  const organizationId = project.organizationId ?? null;
+  const providerRepoFullName = project.providerRepoFullName ?? null;
 
   if (!(organizationId && providerRepoFullName)) {
     return null;
   }
 
   return {
-    id: typeof project._id === "string" ? project._id : projectId,
+    id: project.id,
     organizationId,
     providerRepoFullName,
-    providerDefaultBranch:
-      typeof project.providerDefaultBranch === "string"
-        ? project.providerDefaultBranch
-        : null,
+    providerDefaultBranch: project.providerDefaultBranch ?? null,
   };
 };
 
@@ -232,7 +221,7 @@ const fetchRunDiagnostics = async (
   source: string;
   jobName: string | null;
 }> => {
-  const rows = await runErrorOps.listByRunId(db, runId, 1000);
+  const rows = await runErrorOps.listDiagnosticRowsByRunId(db, runId, 1000);
 
   const diagnostics = rows.map((row) => ({
     message: row.message,
@@ -261,22 +250,17 @@ const fetchRunDiagnostics = async (
 };
 
 const fetchOrganization = async (
-  convex: ConvexClient,
+  db: Db,
   orgId: string
 ): Promise<OrganizationRow | null> => {
-  const organization = (await convex.query(asQuery("organizations:getById"), {
-    id: orgId,
-  })) as Record<string, unknown> | null;
+  const organization = await organizationOps.getById(db, orgId);
 
   if (!organization) {
     return null;
   }
 
   return {
-    providerInstallationId:
-      typeof organization.providerInstallationId === "string"
-        ? organization.providerInstallationId
-        : null,
+    providerInstallationId: organization.providerInstallationId ?? null,
   };
 };
 
@@ -592,15 +576,12 @@ const createCheckRun = async (
 };
 
 const storeCheckRunId = async (
-  convex: ConvexClient,
+  db: Db,
   resolveId: string,
   checkRunId: number
 ): Promise<void> => {
   try {
-    await convex.mutation(asMutation("resolves:setCheckRunId"), {
-      id: resolveId,
-      checkRunId: String(checkRunId),
-    });
+    await resolveOps.setCheckRunId(db, resolveId, String(checkRunId));
   } catch (error) {
     console.error(
       `[worker] Failed to store check run ID ${checkRunId} for resolve ${resolveId}:`,
@@ -789,17 +770,16 @@ interface ResolvePromptContext {
 }
 
 const buildResolveContext = async (
-  convex: ConvexClient,
   db: Db,
   resolve: ResolveRow,
   appEnv: Env
 ): Promise<ResolveContext> => {
-  const project = await fetchProject(convex, resolve.projectId);
+  const project = await fetchProject(db, resolve.projectId);
   if (!project) {
     throw new Error(`Project ${resolve.projectId} not found`);
   }
 
-  const org = await fetchOrganization(convex, project.organizationId);
+  const org = await fetchOrganization(db, project.organizationId);
 
   let branch = project.providerDefaultBranch ?? "main";
   let promptContext: ResolvePromptContext = {
@@ -836,7 +816,7 @@ const buildResolveContext = async (
 };
 
 const tryCreateCheckRun = async (
-  convex: ConvexClient,
+  db: Db,
   resolve: ResolveRow,
   appEnv: Env,
   ctx: ResolveContext
@@ -872,7 +852,7 @@ const tryCreateCheckRun = async (
     return undefined;
   }
 
-  await storeCheckRunId(convex, resolve.id, checkRunId);
+  await storeCheckRunId(db, resolve.id, checkRunId);
   return String(checkRunId);
 };
 
@@ -913,7 +893,7 @@ interface ResolveResultData {
 }
 
 interface HandleResolveOutcomeParams {
-  convex: ConvexClient;
+  db: Db;
   appEnv: Env;
   resolve: ResolveRow;
   organizationId: string;
@@ -927,7 +907,7 @@ const handleResolveSuccess = async (
   result: ResolveResultData
 ): Promise<void> => {
   const {
-    convex,
+    db,
     appEnv,
     resolve,
     organizationId,
@@ -936,7 +916,7 @@ const handleResolveSuccess = async (
     newCheckRunId,
   } = params;
 
-  await markResolveCompleted(convex, resolve.id, {
+  await markResolveCompleted(db, resolve.id, {
     patch: result.patch,
     filesChanged: result.filesChanged,
     result: result.result,
@@ -944,7 +924,7 @@ const handleResolveSuccess = async (
   console.log(`[worker] Resolve ${resolve.id} completed successfully`);
 
   dispatchWebhookEvent(
-    convex,
+    db,
     appEnv.ENCRYPTION_KEY,
     organizationId,
     "resolve.completed",
@@ -985,7 +965,7 @@ const handleResolveFailure = async (
   errorMessage: string
 ): Promise<void> => {
   const {
-    convex,
+    db,
     appEnv,
     resolve,
     organizationId,
@@ -994,12 +974,12 @@ const handleResolveFailure = async (
     newCheckRunId,
   } = params;
 
-  await markResolveFailed(convex, resolve.id, errorMessage);
+  await markResolveFailed(db, resolve.id, errorMessage);
   console.log(`[worker] Resolve ${resolve.id} failed: ${errorMessage}`);
 
   if (organizationId) {
     dispatchWebhookEvent(
-      convex,
+      db,
       appEnv.ENCRYPTION_KEY,
       organizationId,
       "resolve.failed",
@@ -1032,12 +1012,11 @@ const handleResolveFailure = async (
 };
 
 const runResolvePipeline = async (
-  convex: ConvexClient,
   db: Db,
   resolve: ResolveRow,
   appEnv: Env
 ): Promise<HandleResolveOutcomeParams | null> => {
-  const claimed = await markResolveRunning(convex, resolve.id);
+  const claimed = await markResolveRunning(db, resolve.id);
   if (!claimed) {
     console.log(
       `[worker] Resolve ${resolve.id} already claimed by another instance, skipping`
@@ -1045,10 +1024,10 @@ const runResolvePipeline = async (
     return null;
   }
 
-  const ctx = await buildResolveContext(convex, db, resolve, appEnv);
+  const ctx = await buildResolveContext(db, resolve, appEnv);
 
   dispatchWebhookEvent(
-    convex,
+    db,
     appEnv.ENCRYPTION_KEY,
     ctx.project.organizationId,
     "resolve.running",
@@ -1072,7 +1051,7 @@ const runResolvePipeline = async (
     `[worker] Model: ${resolveModelName} for ${ctx.promptContext.diagnostics.length} diagnostics`
   );
 
-  const newCheckRunId = await tryCreateCheckRun(convex, resolve, appEnv, ctx);
+  const newCheckRunId = await tryCreateCheckRun(db, resolve, appEnv, ctx);
 
   const { url: repoUrl, masked: maskedRepoUrl } = buildRepoUrl(
     ctx.project.providerRepoFullName,
@@ -1091,7 +1070,7 @@ const runResolvePipeline = async (
   });
 
   const outcomeParams: HandleResolveOutcomeParams = {
-    convex,
+    db,
     appEnv,
     resolve,
     organizationId: ctx.project.organizationId,
@@ -1110,7 +1089,6 @@ const runResolvePipeline = async (
 };
 
 const processResolve = async (
-  convex: ConvexClient,
   db: Db,
   resolve: ResolveRow,
   appEnv: Env
@@ -1118,7 +1096,7 @@ const processResolve = async (
   console.log(`[worker] Processing resolve ${resolve.id}`);
 
   try {
-    await runResolvePipeline(convex, db, resolve, appEnv);
+    await runResolvePipeline(db, resolve, appEnv);
   } catch (error) {
     const message = sanitizeErrorMessage(error);
     console.error(
@@ -1126,7 +1104,7 @@ const processResolve = async (
     );
     await handleResolveFailure(
       {
-        convex,
+        db,
         appEnv,
         resolve,
         organizationId: "",
@@ -1149,7 +1127,6 @@ const hasRequiredFields = (resolve: ResolveRow): boolean => {
 
 const dispatchResolves = (
   resolves: ResolveRow[],
-  client: ConvexClient,
   db: Db,
   appEnv: Env
 ): string[] => {
@@ -1168,7 +1145,7 @@ const dispatchResolves = (
 
     state.activeResolveIds.add(resolve.id);
     dispatchedResolveIds.push(resolve.id);
-    processResolve(client, db, resolve, appEnv)
+    processResolve(db, resolve, appEnv)
       .catch((err) => {
         console.error(
           `[worker] Unhandled error in processResolve: ${err instanceof Error ? err.message : String(err)}`
@@ -1185,7 +1162,7 @@ const dispatchResolves = (
 export const enqueueResolves = async (
   payload: ResolverQueuePayload
 ): Promise<EnqueueResult> => {
-  if (!(state.isRunning && state.client && state.db)) {
+  if (!(state.isRunning && state.db)) {
     throw new Error("Resolver worker is not running");
   }
 
@@ -1215,7 +1192,7 @@ export const enqueueResolves = async (
       continue;
     }
 
-    const resolve = await fetchResolveById(state.client, resolveId);
+    const resolve = await fetchResolveById(state.db, resolveId);
     if (!resolve) {
       result.skipped.push(resolveId);
       continue;
@@ -1230,12 +1207,7 @@ export const enqueueResolves = async (
       continue;
     }
 
-    const dispatchedResolveIds = dispatchResolves(
-      [resolve],
-      state.client,
-      state.db,
-      env
-    );
+    const dispatchedResolveIds = dispatchResolves([resolve], state.db, env);
     if (dispatchedResolveIds.length === 0) {
       result.skipped.push(resolve.id);
       continue;
@@ -1249,7 +1221,7 @@ export const enqueueResolves = async (
 interface StaleResolveEntry {
   id: string;
   projectId: string;
-  checkRunId?: string;
+  checkRunId: string | null;
 }
 
 interface StaleResolveCheckRunContext {
@@ -1260,19 +1232,19 @@ interface StaleResolveCheckRunContext {
 }
 
 const resolveStaleResolveCheckRunContext = async (
-  convex: ConvexClient,
+  db: Db,
   resolve: StaleResolveEntry
 ): Promise<StaleResolveCheckRunContext | null> => {
   if (!resolve.checkRunId) {
     return null;
   }
 
-  const project = await fetchProject(convex, resolve.projectId);
+  const project = await fetchProject(db, resolve.projectId);
   if (!project?.providerRepoFullName) {
     return null;
   }
 
-  const org = await fetchOrganization(convex, project.organizationId);
+  const org = await fetchOrganization(db, project.organizationId);
   if (!org?.providerInstallationId) {
     return null;
   }
@@ -1297,10 +1269,10 @@ const resolveStaleResolveCheckRunContext = async (
 
 const updateStaleCheckRun = async (
   appEnv: Env,
-  convex: ConvexClient,
+  db: Db,
   resolve: StaleResolveEntry
 ): Promise<void> => {
-  const ctx = await resolveStaleResolveCheckRunContext(convex, resolve);
+  const ctx = await resolveStaleResolveCheckRunContext(db, resolve);
   if (!ctx) {
     return;
   }
@@ -1329,18 +1301,15 @@ const updateStaleCheckRun = async (
 };
 
 const markStaleResolvesAsFailed = async (
-  convex: ConvexClient,
+  db: Db,
   appEnv: Env
 ): Promise<void> => {
   try {
-    const staleResolves = (await convex.mutation(
-      asMutation("resolves:markStaleResolvesAsFailed"),
-      {
-        timeoutMinutes: 30,
-        resolveType: ResolveTypes.Resolve,
-        failedReason: "Resolve timed out",
-      }
-    )) as StaleResolveEntry[];
+    const staleResolves = await resolveOps.markStaleResolvesAsFailed(db, {
+      timeoutMinutes: 30,
+      resolveType: ResolveTypes.Resolve,
+      failedReason: "Resolve timed out",
+    });
 
     if (staleResolves.length === 0) {
       return;
@@ -1351,9 +1320,7 @@ const markStaleResolvesAsFailed = async (
     );
 
     await Promise.all(
-      staleResolves.map((resolve) =>
-        updateStaleCheckRun(appEnv, convex, resolve)
-      )
+      staleResolves.map((resolve) => updateStaleCheckRun(appEnv, db, resolve))
     );
   } catch (error) {
     console.error(
@@ -1373,14 +1340,10 @@ export const startWorker = async (): Promise<void> => {
   try {
     state.isRunning = true;
 
-    const convex = createConvexClient();
     const { db, pool } = createDbClient(env.DATABASE_URL);
 
-    // HACK: kept despite cron — this path updates GitHub check runs for stale resolves,
-    // which the cron's internalMutation cannot do (no GitHub API access from Convex)
-    await markStaleResolvesAsFailed(convex, env);
+    await markStaleResolvesAsFailed(db, env);
 
-    state.client = convex;
     state.db = db;
     state.pool = pool;
 
@@ -1423,11 +1386,9 @@ export const stopWorker = async (): Promise<void> => {
 
   await awaitActiveResolves();
   await state.pool?.end();
-  await state.client?.close();
 
   state.pool = undefined;
   state.db = undefined;
-  state.client = undefined;
   state.activeResolveIds.clear();
 
   console.log("[resolver] Stopped");

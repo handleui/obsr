@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import {
   githubOrgAccessMiddleware,
   type OrgAccessContext,
@@ -98,8 +98,8 @@ app.post(
     }
 
     try {
-      const convex = getConvexClient(c.env);
-      const org = (await convex.query("organizations:getById", {
+      const dbClient = getDbClient(c.env);
+      const org = (await dbClient.query("organizations:getById", {
         id: organization._id,
       })) as { polarCustomerId?: string | null } | null;
 
@@ -125,7 +125,7 @@ app.post(
         name
       );
 
-      await convex.mutation("organizations:update", {
+      await dbClient.mutation("organizations:update", {
         id: organization._id,
         polarCustomerId: customer.id,
         updatedAt: Date.now(),
@@ -213,8 +213,8 @@ app.post(
     }
 
     try {
-      const convex = getConvexClient(c.env);
-      const org = (await convex.query("organizations:getById", {
+      const dbClient = getDbClient(c.env);
+      const org = (await dbClient.query("organizations:getById", {
         id: organization._id,
       })) as { polarCustomerId?: string | null } | null;
 
@@ -254,8 +254,8 @@ app.get(
     const { organization } = orgAccess;
 
     try {
-      const convex = getConvexClient(c.env);
-      const org = (await convex.query("organizations:getById", {
+      const dbClient = getDbClient(c.env);
+      const org = (await dbClient.query("organizations:getById", {
         id: organization._id,
       })) as { polarCustomerId?: string | null } | null;
 

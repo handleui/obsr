@@ -1,6 +1,6 @@
-import type { ConvexHttpClient } from "convex/browser";
 import { Hono } from "hono";
-import { getConvexClient } from "../../db/convex";
+import type { ObserverClient } from "../../db/client";
+import { getDbClient } from "../../db/client";
 import type { Env } from "../../types/env";
 
 // ============================================================================
@@ -182,13 +182,13 @@ const getStringField = (
 // ============================================================================
 
 const handleCustomerCreated = async (
-  convex: ConvexHttpClient,
+  dbClient: ObserverClient,
   data: PolarWebhookEvent["data"]
 ) => {
   const externalId = getStringField(data, "externalId");
   const customerId = getStringField(data, "id");
   if (externalId && customerId) {
-    await convex.mutation("organizations:update", {
+    await dbClient.mutation("organizations:update", {
       id: externalId,
       polarCustomerId: customerId,
       updatedAt: Date.now(),
@@ -222,12 +222,12 @@ const handleSubscriptionEnded = (
 };
 
 const processDbEvent = async (
-  convex: ConvexHttpClient,
+  dbClient: ObserverClient,
   event: PolarWebhookEvent
 ) => {
   switch (event.type) {
     case "customer.created":
-      await handleCustomerCreated(convex, event.data);
+      await handleCustomerCreated(dbClient, event.data);
       break;
     case "order.paid":
       handleOrderPaid(event.data);
@@ -299,8 +299,8 @@ app.post("/", async (c) => {
 
   try {
     if (DB_REQUIRED_EVENTS.has(event.type)) {
-      const convex = getConvexClient(c.env);
-      await processDbEvent(convex, event);
+      const dbClient = getDbClient(c.env);
+      await processDbEvent(dbClient, event);
     } else {
       processNonDbEvent(event);
     }

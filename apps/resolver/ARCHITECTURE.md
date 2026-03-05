@@ -89,7 +89,7 @@ The Resolver is a standalone Railway-deployed service that executes AI-powered r
    - Accept only shared payload contract: `resolveId|resolveIds` + `source`
 
 2. **Context Assembly**
-   - Fetch project, organization, and run data from Convex/Postgres
+   - Fetch project, organization, and run data from Neon Postgres
    - Get GitHub installation token via App JWT
    - Build authenticated clone URL
    - Build compact resolver prompt context (`source`, `jobName`, `diagnostics[]`)
@@ -381,9 +381,7 @@ Active resolves are tracked in-memory. Queue deliveries are accepted only when s
 | `VERCEL_TEAM_ID` | No | Legacy Vercel team ID (required for `SANDBOX_PROVIDER=vercel`) |
 | `VERCEL_PROJECT_ID` | No | Legacy Vercel project ID (required for `SANDBOX_PROVIDER=vercel`) |
 | `AI_GATEWAY_API_KEY` | Yes | AI Gateway access |
-| `DATABASE_URL` | Yes | Postgres connection URL for run/error reads |
-| `CONVEX_URL` | Yes | Convex deployment URL |
-| `CONVEX_SERVICE_TOKEN` | Yes | Convex service token for authenticated access |
+| `DATABASE_URL` | Yes | Postgres connection URL for resolve, project/org, run/error, and webhook operations |
 | `GITHUB_APP_ID` | Yes | GitHub App ID |
 | `GITHUB_APP_PRIVATE_KEY` | Yes | GitHub App private key (PEM) |
 | `APP_BASE_URL` | No | App base URL for resolve links (defaults to `NAVIGATOR_BASE_URL`, then `https://detent.sh`) |

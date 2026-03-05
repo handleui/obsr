@@ -5,7 +5,7 @@
  * Used across multiple routes to ensure consistent access control.
  */
 
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import type { Env } from "../types/env";
 import { getVerifiedGitHubIdentity } from "./github-identity";
 import { verifyGitHubMembership } from "./github-membership";
@@ -47,8 +47,8 @@ interface OrganizationMemberDoc {
 
 /**
  * Verify user has access to an organization via on-demand GitHub membership check.
- * Uses stored GitHub identity from membership records as fallback when WorkOS
- * doesn't have GitHub linked (e.g., user logged in via email/password).
+ * Uses stored GitHub identity from membership records as fallback when auth
+ * provider identity linkage is unavailable (e.g., user logged in without GitHub).
  */
 export const verifyOrgAccess = async (
   userId: string,
@@ -61,8 +61,8 @@ export const verifyOrgAccess = async (
   }
 
   // Check for existing membership with stored GitHub identity (active members only)
-  const convex = getConvexClient(env);
-  const existingMember = (await convex.query(
+  const dbClient = getDbClient(env);
+  const existingMember = (await dbClient.query(
     "organization_members:getByOrgUser",
     {
       organizationId: org._id,
@@ -72,10 +72,10 @@ export const verifyOrgAccess = async (
   const activeMember =
     existingMember && !existingMember.removedAt ? existingMember : null;
 
-  // Try WorkOS for GitHub identity first
+  // Try auth provider for GitHub identity first
   let githubIdentity: GitHubIdentity | null = await getVerifiedGitHubIdentity(
     userId,
-    env.WORKOS_API_KEY
+    env
   );
 
   // Fall back to stored identity from membership record

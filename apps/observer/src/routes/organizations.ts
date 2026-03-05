@@ -5,9 +5,9 @@
  */
 
 import { Hono } from "hono";
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import { cacheKey, deleteFromCache } from "../lib/cache";
-import { fetchAllPages } from "../lib/convex-pagination";
+import { fetchAllPages } from "../lib/db-pagination";
 import { getOrgSettings, type OrganizationSettings } from "../lib/org-settings";
 import {
   githubOrgAccessMiddleware,
@@ -23,7 +23,7 @@ interface SyncResult {
   updated: number;
 }
 
-type DbClient = ReturnType<typeof getConvexClient>;
+type DbClient = ReturnType<typeof getDbClient>;
 
 interface OrganizationMemberDoc {
   _id: string;
@@ -209,7 +209,7 @@ const categorizePotentialMembers = (
  * Batch reactivate mirror-removed members
  */
 const batchReactivateMembers = async (
-  convex: DbClient,
+  dbClient: DbClient,
   toReactivate: Array<{ id: string; login: string }>
 ): Promise<void> => {
   if (toReactivate.length === 0) {
@@ -218,7 +218,7 @@ const batchReactivateMembers = async (
 
   const now = Date.now();
   for (const member of toReactivate) {
-    await convex.mutation("organization_members:update", {
+    await dbClient.mutation("organization_members:update", {
       id: member.id,
       removedAt: null,
       removalReason: null,
@@ -234,7 +234,7 @@ const batchReactivateMembers = async (
  * Batch insert new members
  */
 const batchInsertMembers = async (
-  convex: DbClient,
+  dbClient: DbClient,
   organizationId: string,
   toInsert: Array<{ userId: string; ghUserId: string; login: string }>
 ): Promise<void> => {
@@ -244,7 +244,7 @@ const batchInsertMembers = async (
 
   const now = Date.now();
   for (const entry of toInsert) {
-    await convex.mutation("organization_members:createIfMissing", {
+    await dbClient.mutation("organization_members:createIfMissing", {
       organizationId,
       userId: entry.userId,
       role: "member",
@@ -262,13 +262,13 @@ const batchInsertMembers = async (
  * Actively reconciles memberships based on GitHub org membership.
  */
 const syncOrganizationMembers = async (
-  convex: DbClient,
+  dbClient: DbClient,
   organizationId: string,
   githubMembers: GitHubMember[]
 ): Promise<MemberSyncResult> => {
   // Get existing active Detent members for this org
   const detentMembers = await fetchAllPages<OrganizationMemberDoc>(
-    convex,
+    dbClient,
     "organization_members:paginateByOrg",
     { organizationId, includeRemoved: true }
   );
@@ -350,10 +350,10 @@ const syncOrganizationMembers = async (
       existingUsersByGhId
     );
 
-    await batchReactivateMembers(convex, toReactivate);
+    await batchReactivateMembers(dbClient, toReactivate);
     added += toReactivate.length;
 
-    await batchInsertMembers(convex, organizationId, toInsert);
+    await batchInsertMembers(dbClient, organizationId, toInsert);
     added += toInsert.length;
   }
 
@@ -361,7 +361,7 @@ const syncOrganizationMembers = async (
   if (staleMembers.length > 0) {
     const now = Date.now();
     for (const member of staleMembers) {
-      await convex.mutation("organization_members:update", {
+      await dbClient.mutation("organization_members:update", {
         id: member._id,
         removedAt: now,
         removalReason: "github_left",
@@ -376,7 +376,7 @@ const syncOrganizationMembers = async (
   if (activeMembersInGitHub.length > 0) {
     const now = Date.now();
     for (const member of activeMembersInGitHub) {
-      await convex.mutation("organization_members:update", {
+      await dbClient.mutation("organization_members:update", {
         id: member._id,
         providerVerifiedAt: now,
         updatedAt: now,
@@ -403,9 +403,9 @@ const app = new Hono<{ Bindings: Env }>();
 app.get("/:organizationId/github-app", async (c) => {
   const auth = c.get("auth");
   const organizationId = c.req.param("organizationId");
-  const convex = getConvexClient(c.env);
+  const dbClient = getDbClient(c.env);
 
-  const organization = (await convex.query("organizations:getById", {
+  const organization = (await dbClient.query("organizations:getById", {
     id: organizationId,
   })) as {
     _id: string;
@@ -430,10 +430,13 @@ app.get("/:organizationId/github-app", async (c) => {
     );
   }
 
-  const membership = (await convex.query("organization_members:getByOrgUser", {
-    organizationId: organization._id,
-    userId: auth.userId,
-  })) as {
+  const membership = (await dbClient.query(
+    "organization_members:getByOrgUser",
+    {
+      organizationId: organization._id,
+      userId: auth.userId,
+    }
+  )) as {
     role: string;
     removedAt?: number | null;
     providerUserId?: string | null;
@@ -489,11 +492,11 @@ app.get("/:organizationId/status", githubOrgAccessMiddleware, async (c) => {
   const orgAccess = c.get("orgAccess") as OrgAccessContext;
   const { organization } = orgAccess;
 
-  const convex = getConvexClient(c.env);
+  const dbClient = getDbClient(c.env);
 
   // Fetch full organization details and project count in parallel
   const [fullOrg, projectCount] = await Promise.all([
-    convex.query("organizations:getById", {
+    dbClient.query("organizations:getById", {
       id: organization._id,
     }) as Promise<{
       _id: string;
@@ -508,7 +511,7 @@ app.get("/:organizationId/status", githubOrgAccessMiddleware, async (c) => {
       lastSyncedAt?: number | null;
       settings?: OrganizationSettings | null;
     } | null>,
-    convex.query("projects:countByOrg", {
+    dbClient.query("projects:countByOrg", {
       organizationId: organization._id,
     }) as Promise<number>,
   ]);
@@ -582,10 +585,10 @@ app.post(
     const github = createGitHubService(c.env);
     const installationId = Number(organization.providerInstallationId);
 
-    const convex = getConvexClient(c.env);
+    const dbClient = getDbClient(c.env);
     try {
       // Fetch full org to get suspendedAt (middleware subset doesn't include it)
-      const fullOrg = (await convex.query("organizations:getById", {
+      const fullOrg = (await dbClient.query("organizations:getById", {
         id: organizationId,
       })) as {
         _id: string;
@@ -601,7 +604,7 @@ app.post(
 
       if (!installationInfo) {
         // Installation was removed - mark organization as deleted
-        await convex.mutation("organizations:update", {
+        await dbClient.mutation("organizations:update", {
           id: organizationId,
           deletedAt: Date.now(),
           lastSyncedAt: Date.now(),
@@ -620,7 +623,7 @@ app.post(
       const isSuspended = Boolean(installationInfo.suspended_at);
 
       if (wasSuspended !== isSuspended) {
-        await convex.mutation("organizations:update", {
+        await dbClient.mutation("organizations:update", {
           id: organizationId,
           suspendedAt: isSuspended
             ? new Date(installationInfo.suspended_at as string).getTime()
@@ -632,7 +635,7 @@ app.post(
       // 3. Get current repos from GitHub and reconcile with our projects
       const githubRepos = await github.getInstallationRepos(installationId);
 
-      const result = (await convex.mutation("projects:syncFromGitHub", {
+      const result = (await dbClient.mutation("projects:syncFromGitHub", {
         organizationId,
         repos: githubRepos.map((repo) => ({
           id: String(repo.id),
@@ -656,7 +659,7 @@ app.post(
           );
 
           memberSyncResult = await syncOrganizationMembers(
-            convex,
+            dbClient,
             organizationId,
             githubMembers
           );
@@ -670,7 +673,7 @@ app.post(
       }
 
       // 5. Update lastSyncedAt
-      await convex.mutation("organizations:update", {
+      await dbClient.mutation("organizations:update", {
         id: organizationId,
         lastSyncedAt: Date.now(),
         updatedAt: Date.now(),
@@ -790,10 +793,10 @@ app.patch(
       );
     }
 
-    const convex = getConvexClient(c.env);
+    const dbClient = getDbClient(c.env);
 
     // Fetch current settings
-    const current = (await convex.query("organizations:getById", {
+    const current = (await dbClient.query("organizations:getById", {
       id: organization._id,
     })) as { settings?: OrganizationSettings | null } | null;
 
@@ -818,7 +821,7 @@ app.patch(
       newSettings.validationEnabled = providedSettings.validation_enabled;
     }
 
-    await convex.mutation("organizations:update", {
+    await dbClient.mutation("organizations:update", {
       id: organization._id,
       settings: newSettings,
       updatedAt: Date.now(),
@@ -858,9 +861,9 @@ app.delete(
     const orgAccess = c.get("orgAccess") as OrgAccessContext;
     const { organization } = orgAccess;
 
-    const convex = getConvexClient(c.env);
+    const dbClient = getDbClient(c.env);
 
-    const fresh = (await convex.query("organizations:getById", {
+    const fresh = (await dbClient.query("organizations:getById", {
       id: organization._id,
     })) as { deletedAt?: number | null } | null;
 
@@ -874,7 +877,7 @@ app.delete(
     // Soft-delete the organization
     // HACK: organization_members intentionally left intact for potential recovery.
     // Hard-delete should cascade to members via DB constraint or explicit cleanup.
-    await convex.mutation("organizations:update", {
+    await dbClient.mutation("organizations:update", {
       id: organization._id,
       deletedAt: Date.now(),
       updatedAt: Date.now(),
@@ -895,12 +898,13 @@ app.delete(
   }
 );
 
-// WorkOS user IDs follow the pattern: user_<alphanumeric>
-// Use flexible length to avoid breaking if WorkOS changes their ID format
-const WORKOS_USER_ID_PATTERN = /^user_[a-zA-Z0-9]+$/;
+// Provider-agnostic user ID validation for route params.
+// Keeps shape constrained to avoid malformed lookups while supporting
+// multiple auth providers and identifier formats.
+const AUTH_USER_ID_PATTERN = /^[^\s/]{1,128}$/;
 
-const isValidWorkOSUserId = (userId: string): boolean =>
-  WORKOS_USER_ID_PATTERN.test(userId);
+const isValidAuthUserId = (userId: string): boolean =>
+  AUTH_USER_ID_PATTERN.test(userId);
 
 /**
  * DELETE /:organizationId/members/:userId
@@ -925,7 +929,7 @@ app.delete(
     const targetUserId = c.req.param("userId");
 
     // SECURITY: Validate userId format to prevent invalid database lookups
-    if (!(targetUserId && isValidWorkOSUserId(targetUserId))) {
+    if (!(targetUserId && isValidAuthUserId(targetUserId))) {
       return c.json({ error: "Invalid user ID format" }, 400);
     }
 
@@ -937,9 +941,9 @@ app.delete(
       );
     }
 
-    const convex = getConvexClient(c.env);
+    const dbClient = getDbClient(c.env);
 
-    const targetMember = (await convex.query(
+    const targetMember = (await dbClient.query(
       "organization_members:getByOrgUser",
       {
         organizationId: organization._id,
@@ -975,7 +979,7 @@ app.delete(
       );
     }
 
-    await convex.mutation("organization_members:update", {
+    await dbClient.mutation("organization_members:update", {
       id: targetMember._id,
       removedAt: Date.now(),
       removalReason: "admin_action",
@@ -1003,8 +1007,8 @@ app.get(
     const orgAccess = c.get("orgAccess") as OrgAccessContext;
     const { organization } = orgAccess;
 
-    const convex = getConvexClient(c.env);
-    const members = (await convex.query("organization_members:listByOrg", {
+    const dbClient = getDbClient(c.env);
+    const members = (await dbClient.query("organization_members:listByOrg", {
       organizationId: organization._id,
       limit: 5000,
     })) as Array<{

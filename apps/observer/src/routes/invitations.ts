@@ -10,7 +10,7 @@
  */
 
 import { Hono } from "hono";
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import { generateSecureToken } from "../lib/crypto";
 import { getVerifiedGitHubIdentity } from "../lib/github-identity";
 import { validateEmail } from "../lib/validation";
@@ -65,8 +65,8 @@ orgInvitationsRoutes.post(
       );
     }
 
-    const convex = getConvexClient(c.env);
-    const existingInvitations = (await convex.query(
+    const dbClient = getDbClient(c.env);
+    const existingInvitations = (await dbClient.query(
       "invitations:listByOrgStatus",
       {
         organizationId: organization._id,
@@ -87,7 +87,7 @@ orgInvitationsRoutes.post(
     expiresAt.setDate(expiresAt.getDate() + INVITATION_EXPIRY_DAYS);
 
     // Create invitation
-    const invitationId = (await convex.mutation("invitations:create", {
+    const invitationId = (await dbClient.mutation("invitations:create", {
       organizationId: organization._id,
       email,
       role: role as "admin" | "member" | "visitor",
@@ -116,7 +116,7 @@ orgInvitationsRoutes.post(
       });
     } catch (emailError) {
       // Rollback invitation if email fails
-      await convex.mutation("invitations:remove", { id: invitationId });
+      await dbClient.mutation("invitations:remove", { id: invitationId });
       console.error("[invitations] Email send failed:", emailError);
       return c.json({ error: "Failed to send invitation email" }, 500);
     }
@@ -150,8 +150,8 @@ orgInvitationsRoutes.get(
     const orgAccess = c.get("orgAccess") as OrgAccessContext;
     const { organization } = orgAccess;
 
-    const convex = getConvexClient(c.env);
-    const pendingInvitations = (await convex.query(
+    const dbClient = getDbClient(c.env);
+    const pendingInvitations = (await dbClient.query(
       "invitations:listByOrgStatus",
       {
         organizationId: organization._id,
@@ -199,8 +199,8 @@ orgInvitationsRoutes.delete(
     const auth = c.get("auth");
     const invitationId = c.req.param("invitationId");
 
-    const convex = getConvexClient(c.env);
-    const invitation = (await convex.query("invitations:getById", {
+    const dbClient = getDbClient(c.env);
+    const invitation = (await dbClient.query("invitations:getById", {
       id: invitationId,
     })) as {
       _id: string;
@@ -222,7 +222,7 @@ orgInvitationsRoutes.delete(
       );
     }
 
-    await convex.mutation("invitations:update", {
+    await dbClient.mutation("invitations:update", {
       id: invitationId,
       status: "revoked",
       revokedAt: Date.now(),
@@ -251,8 +251,8 @@ export const invitationRoutes = new Hono<{ Bindings: Env }>();
 invitationRoutes.get("/:token", async (c) => {
   const token = c.req.param("token");
 
-  const convex = getConvexClient(c.env);
-  const invitation = (await convex.query("invitations:getByToken", {
+  const dbClient = getDbClient(c.env);
+  const invitation = (await dbClient.query("invitations:getByToken", {
     token,
   })) as {
     organizationId: string;
@@ -291,7 +291,7 @@ invitationRoutes.get("/:token", async (c) => {
     );
   }
 
-  const organization = (await convex.query("organizations:getById", {
+  const organization = (await dbClient.query("organizations:getById", {
     id: invitation.organizationId,
   })) as { name: string; slug: string } | null;
 
@@ -327,13 +327,10 @@ invitationRoutes.post("/accept", async (c) => {
     return c.json({ error: "Token is required" }, 400);
   }
 
-  const convex = getConvexClient(c.env);
+  const dbClient = getDbClient(c.env);
 
   // Verify GitHub identity is linked
-  const githubIdentity = await getVerifiedGitHubIdentity(
-    auth.userId,
-    c.env.WORKOS_API_KEY
-  );
+  const githubIdentity = await getVerifiedGitHubIdentity(auth.userId, c.env);
 
   if (!githubIdentity) {
     return c.json(
@@ -347,7 +344,7 @@ invitationRoutes.post("/accept", async (c) => {
     );
   }
 
-  const result = (await convex.mutation("invitations:accept", {
+  const result = (await dbClient.mutation("invitations:accept", {
     token,
     userId: auth.userId,
     githubUserId: githubIdentity.userId,
@@ -369,7 +366,7 @@ invitationRoutes.post("/accept", async (c) => {
     return c.json({ error: "Failed to accept invitation" }, 500);
   }
 
-  const organization = (await convex.query("organizations:getById", {
+  const organization = (await dbClient.query("organizations:getById", {
     id: result.organizationId,
   })) as { name: string; slug: string } | null;
 

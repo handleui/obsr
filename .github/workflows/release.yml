@@ -36,7 +36,12 @@ jobs:
       - name: Trigger CLI Build
         if: ${{ steps.release.outputs['apps/cli--release_created'] }}
         run: |
-          gh workflow run build.yml --ref "$CLI_TAG_NAME"
+          if [ -z "$CLI_TAG_NAME" ]; then
+            echo "Expected CLI_TAG_NAME from release-please, but it was empty."
+            exit 1
+          fi
+
+          gh workflow run build.yml --ref main -f ref="$CLI_TAG_NAME"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CLI_TAG_NAME: ${{ steps.release.outputs['apps/cli--tag_name'] }}

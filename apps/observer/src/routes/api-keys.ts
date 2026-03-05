@@ -5,7 +5,7 @@
  */
 
 import { Hono } from "hono";
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import { generateApiKey, hashApiKey } from "../lib/crypto";
 import {
   githubOrgAccessMiddleware,
@@ -45,12 +45,12 @@ app.post(
       return c.json({ error: "name must be 255 characters or less" }, 400);
     }
 
-    const convex = getConvexClient(c.env);
+    const dbClient = getDbClient(c.env);
     const key = generateApiKey();
     const keyHash = await hashApiKey(key);
     const keyPrefix = key.substring(0, 8); // "dtk_XXXX"
 
-    const keyId = (await convex.mutation("api_keys:create", {
+    const keyId = (await dbClient.mutation("api_keys:create", {
       organizationId: organization._id,
       keyHash,
       keyPrefix,
@@ -84,8 +84,8 @@ app.get(
     const orgAccess = c.get("orgAccess") as OrgAccessContext;
     const { organization } = orgAccess;
 
-    const convex = getConvexClient(c.env);
-    const keys = (await convex.query("api_keys:listByOrg", {
+    const dbClient = getDbClient(c.env);
+    const keys = (await dbClient.query("api_keys:listByOrg", {
       organizationId: organization._id,
     })) as Array<{
       _id: string;
@@ -127,8 +127,8 @@ app.delete(
     const keyId = c.req.param("keyId");
     const kv = c.env["detent-idempotency"];
 
-    const convex = getConvexClient(c.env);
-    const existing = (await convex.query("api_keys:getById", {
+    const dbClient = getDbClient(c.env);
+    const existing = (await dbClient.query("api_keys:getById", {
       id: keyId,
     })) as { _id: string; organizationId: string; keyHash: string } | null;
 
@@ -136,7 +136,7 @@ app.delete(
       return c.json({ error: "API key not found" }, 404);
     }
 
-    await convex.mutation("api_keys:remove", { id: keyId });
+    await dbClient.mutation("api_keys:remove", { id: keyId });
 
     // Invalidate the cache in background (uses hash-based key)
     c.executionCtx.waitUntil(invalidateApiKeyCache(existing.keyHash, kv));

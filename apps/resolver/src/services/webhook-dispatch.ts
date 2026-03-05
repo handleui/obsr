@@ -1,13 +1,10 @@
+import { type Db, webhookOps } from "@detent/db";
 import {
   importSigningKey,
   signPayload,
   type WebhookEventType,
   type WebhookPayload,
 } from "@detent/webhook-dispatch";
-import type { ConvexClient } from "convex/browser";
-import type { FunctionReference } from "convex/server";
-
-const asQuery = (name: string) => name as unknown as FunctionReference<"query">;
 
 const base64ToBuffer = (base64: string): Uint8Array =>
   Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -52,7 +49,7 @@ const decryptToken = async (
 };
 
 interface WebhookRecord {
-  _id: string;
+  id: string;
   url: string;
   events: string[];
   secretEncrypted: string;
@@ -142,16 +139,17 @@ const truncatePatch = (data: WebhookResolveData): WebhookResolveData => {
 };
 
 export const dispatchWebhookEvent = async (
-  convex: ConvexClient,
+  db: Db,
   encryptionKey: string,
   organizationId: string,
   event: WebhookEventType,
   resolveData: WebhookResolveData
 ): Promise<void> => {
   try {
-    const webhooks = (await convex.query(asQuery("webhooks:listActiveByOrg"), {
-      organizationId,
-    })) as WebhookRecord[];
+    const webhooks = (await webhookOps.listActiveByOrg(
+      db,
+      organizationId
+    )) as WebhookRecord[];
     if (!webhooks || webhooks.length === 0) {
       return;
     }
@@ -187,7 +185,7 @@ export const dispatchWebhookEvent = async (
           );
         } catch (error) {
           console.error(
-            `[webhook] Dispatch error for webhook ${webhook._id}:`,
+            `[webhook] Dispatch error for webhook ${webhook.id}:`,
             error instanceof Error ? error.message : "Unknown error"
           );
         }

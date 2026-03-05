@@ -1,7 +1,7 @@
 import { type createDb, runErrorOps, runOps } from "@detent/db";
 import { scrubSecrets } from "@detent/types";
 import { type Context, Hono } from "hono";
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import { getDb } from "../lib/db.js";
 import { verifyOrgAccess } from "../lib/org-access";
 import type { Env } from "../types/env";
@@ -46,8 +46,8 @@ const verifyProjectOrgAccess = async (
   }
 
   const auth = c.get("auth");
-  const convex = getConvexClient(c.env);
-  const organization = (await convex.query("organizations:getById", {
+  const dbClient = getDbClient(c.env);
+  const organization = (await dbClient.query("organizations:getById", {
     id: projectOrgId,
   })) as OrganizationDoc | null;
   if (!organization) {
@@ -245,8 +245,8 @@ app.get("/", async (c) => {
     return c.json({ error: validated.error }, 400);
   }
 
-  const convex = getConvexClient(c.env);
-  const project = (await convex.query("projects:getByRepoFullName", {
+  const dbClient = getDbClient(c.env);
+  const project = (await dbClient.query("projects:getByRepoFullName", {
     providerRepoFullName: validated.repository,
   })) as ProjectDoc | null;
 
@@ -335,8 +335,8 @@ app.get("/pr", async (c) => {
     return c.json({ error: "prNumber must be a positive integer" }, 400);
   }
 
-  const convex = getConvexClient(c.env);
-  const project = (await convex.query("projects:getById", {
+  const dbClient = getDbClient(c.env);
+  const project = (await dbClient.query("projects:getById", {
     id: projectId,
   })) as ProjectDoc | null;
 

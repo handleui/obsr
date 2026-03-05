@@ -1,4 +1,4 @@
-import { getConvexClient } from "../../../db/convex";
+import { getDbClient } from "../../../db/client";
 import { getDb } from "../../../lib/db.js";
 import { extractAndStoreErrors } from "../../../services/webhooks/error-extraction";
 import { checkAndTriggerAggregation } from "../../../services/webhooks/job-aggregation";
@@ -53,7 +53,7 @@ interface JobHandlerContext {
   payload: WorkflowJobPayload;
   normalizedSha: string;
   prNumber: number | undefined;
-  db: ReturnType<typeof getConvexClient>;
+  db: ReturnType<typeof getDbClient>;
   deliveryId: string;
 }
 
@@ -74,7 +74,7 @@ const prepareJobHandler = async (
     `[workflow_job] ${label}: ${safeLogValue(repository.full_name)} / ${safeLogValue(workflow_job.name)} (job ${workflow_job.id}) [delivery: ${safeLogValue(deliveryId)}]`
   );
 
-  const db = getConvexClient(c.env);
+  const db = getDbClient(c.env);
   const { db: drizzleDb, pool } = getDb(c.env);
   const normalizedSha = workflow_job.head_sha.toLowerCase();
   const prNumber = await lookupPrNumberFromRuns(

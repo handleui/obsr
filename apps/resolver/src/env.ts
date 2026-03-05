@@ -14,8 +14,6 @@ export interface Env {
   VERCEL_PROJECT_ID?: string;
   AI_GATEWAY_API_KEY: string;
   DATABASE_URL: string;
-  CONVEX_URL: string;
-  CONVEX_SERVICE_TOKEN: string;
   GITHUB_APP_ID: string;
   GITHUB_APP_PRIVATE_KEY: string;
   /** Detent app base URL for resolve links, e.g., https://detent.sh */
@@ -123,11 +121,6 @@ const loadEnv = (): Env => {
       process.env.AI_GATEWAY_API_KEY
     ),
     DATABASE_URL: validateRequired("DATABASE_URL", process.env.DATABASE_URL),
-    CONVEX_URL: validateRequired("CONVEX_URL", process.env.CONVEX_URL),
-    CONVEX_SERVICE_TOKEN: validateRequired(
-      "CONVEX_SERVICE_TOKEN",
-      process.env.CONVEX_SERVICE_TOKEN
-    ),
     GITHUB_APP_ID: validateRequired("GITHUB_APP_ID", process.env.GITHUB_APP_ID),
     GITHUB_APP_PRIVATE_KEY: validateRequired(
       "GITHUB_APP_PRIVATE_KEY",

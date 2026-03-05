@@ -7,7 +7,7 @@
 
 import type { Context } from "hono";
 import { Hono } from "hono";
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import {
   applyResolve,
   getResolveByPrAndSource,
@@ -526,7 +526,7 @@ const AUTOFIX_EVENT_MAP: Record<
 
 const dispatchAutofixWebhooks = (
   c: Context<{ Bindings: Env }>,
-  convex: ReturnType<typeof getConvexClient>,
+  dbClient: ReturnType<typeof getDbClient>,
   organizationId: string,
   projectId: string,
   prNumber: number,
@@ -544,7 +544,7 @@ const dispatchAutofixWebhooks = (
     }
 
     c.executionCtx.waitUntil(
-      dispatchWebhookEvent(convex, encryptionKey, organizationId, event, {
+      dispatchWebhookEvent(dbClient, encryptionKey, organizationId, event, {
         resolve_id: p.resolveId,
         type: "autofix",
         status: p.status,
@@ -596,10 +596,10 @@ app.post("/", async (c) => {
   const { projectId, prNumber, results } = validation.payload;
 
   try {
-    const convex = getConvexClient(c.env);
+    const dbClient = getDbClient(c.env);
 
     // Verify project exists and belongs to the organization
-    const project = (await convex.query("projects:getById", {
+    const project = (await dbClient.query("projects:getById", {
       id: projectId,
     })) as {
       id: string;
@@ -616,7 +616,7 @@ app.post("/", async (c) => {
       return c.json({ error: "Project not found" }, 404);
     }
 
-    const organization = (await convex.query("organizations:getById", {
+    const organization = (await dbClient.query("organizations:getById", {
       id: project.organizationId,
     })) as {
       settings?: OrganizationSettings | null;
@@ -675,7 +675,7 @@ app.post("/", async (c) => {
 
     dispatchAutofixWebhooks(
       c,
-      convex,
+      dbClient,
       organizationId,
       projectId,
       prNumber,

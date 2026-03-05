@@ -600,7 +600,7 @@ export interface CreateTokenSecretResult {
   batchResult?: BatchSecretResult;
 }
 
-import type { ConvexHttpClient } from "convex/browser";
+import type { ObserverClient } from "../db/client";
 
 /**
  * Create DETENT_TOKEN secrets with API key lifecycle management.
@@ -614,7 +614,7 @@ import type { ConvexHttpClient } from "convex/browser";
  * Used by both installation handlers and the manual injection endpoint.
  */
 export const createTokenSecretWithCleanup = async ({
-  convex,
+  dbClient,
   organizationId,
   providerAccountLogin,
   providerAccountType,
@@ -622,8 +622,8 @@ export const createTokenSecretWithCleanup = async ({
   repositories,
   keyName,
 }: {
-  /** Convex client */
-  convex: ConvexHttpClient;
+  /** DB client */
+  dbClient: ObserverClient;
   /** Detent organization ID */
   organizationId: string;
   /** GitHub account login (username or org name) */
@@ -644,7 +644,7 @@ export const createTokenSecretWithCleanup = async ({
   const keyHash = await hashApiKey(apiKey);
   const keyPrefix = apiKey.substring(0, 8);
 
-  const keyId = (await convex.mutation("api_keys:create", {
+  const keyId = (await dbClient.mutation("api_keys:create", {
     organizationId,
     keyHash,
     keyPrefix,
@@ -667,7 +667,7 @@ export const createTokenSecretWithCleanup = async ({
 
       // If ALL repos failed, clean up the orphaned API key
       if (batchResult.succeeded === 0 && repositories.length > 0) {
-        await convex.mutation("api_keys:remove", { id: keyId });
+        await dbClient.mutation("api_keys:remove", { id: keyId });
         throw new Error(
           `All ${repositories.length} repo secret creations failed for ${providerAccountLogin}`
         );
@@ -679,7 +679,7 @@ export const createTokenSecretWithCleanup = async ({
     // Only clean up API key if no secrets were created
     if (!secretsCreated) {
       try {
-        await convex.mutation("api_keys:remove", { id: keyId });
+        await dbClient.mutation("api_keys:remove", { id: keyId });
       } catch (deleteError) {
         console.error(
           `[github-secrets] ORPHAN_KEY: Failed to delete API key ${keyId} for org ${organizationId}:`,

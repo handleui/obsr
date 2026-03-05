@@ -2,6 +2,8 @@ import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({
   schema: [
+    "./src/schema/auth.ts",
+    "./src/schema/diagnostics.ts",
     "./src/schema/runs.ts",
     "./src/schema/errors.ts",
     "./src/schema/usage.ts",

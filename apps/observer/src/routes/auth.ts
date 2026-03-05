@@ -1,13 +1,15 @@
 /**
  * Auth routes
  *
- * Handles identity synchronization from WorkOS to update organization members
- * with GitHub identity information obtained during authentication.
+ * Handles identity synchronization from Better Auth account linkage to update
+ * organization members with GitHub identity information obtained during
+ * authentication.
  */
 
-import type { ConvexHttpClient } from "convex/browser";
 import { Hono } from "hono";
-import { getConvexClient } from "../db/convex";
+import type { ObserverClient } from "../db/client";
+import { getDbClient } from "../db/client";
+import { getBetterAuthPool } from "../lib/better-auth";
 import { verifyGitHubMembership } from "../lib/github-membership";
 import type { Env } from "../types/env";
 
@@ -36,25 +38,14 @@ interface GitHubOrgWithStatus {
   detent_org_id?: string;
 }
 
-// WorkOS identity from /user_management/users/:id/identities
-interface WorkOSIdentity {
-  idp_id: string;
-  type: "OAuth";
-  provider: string;
-}
-
-// Response from WorkOS identities endpoint
-interface WorkOSIdentitiesResponse {
-  data: WorkOSIdentity[];
-}
-
-// Response from WorkOS get user endpoint
-interface WorkOSUser {
+interface BetterAuthUser {
   id: string;
   email: string;
-  first_name?: string;
-  last_name?: string;
-  profile_picture_url?: string;
+  name: string | null;
+}
+
+interface BetterAuthGitHubAccount {
+  accountId: string;
 }
 
 interface OrganizationDoc {
@@ -86,58 +77,30 @@ const app = new Hono<{ Bindings: Env }>();
 
 // Regex for validating numeric target_id parameter
 const NUMERIC_REGEX = /^\d+$/;
+const WHITESPACE_SPLIT_REGEX = /\s+/;
+const NUMERIC_ACCOUNT_ID_PATTERN = /^\d+$/;
+const GITHUB_PROVIDER_ID = "github";
+const GITHUB_MEMBERSHIP_CONCURRENCY = 8;
+const GITHUB_MEMBERSHIP_TIMEOUT_MS = 8000;
+const GITHUB_MEMBERSHIP_MAX_ATTEMPTS = 2;
+const GITHUB_MEMBERSHIP_RETRY_DELAY_MS = 500;
 
-/**
- * Fetch GitHub username via WorkOS Pipes (authenticated)
- * Uses the user's OAuth token to avoid GitHub API rate limits (5000/hr vs 60/hr)
- */
-const fetchGitHubUsername = async (
-  userId: string,
-  workosApiKey: string
-): Promise<string | null> => {
-  try {
-    const tokenResponse = await fetch(
-      "https://api.workos.com/data-integrations/github/token",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${workosApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ user_id: userId }),
-      }
-    );
-
-    if (!tokenResponse.ok) {
-      return null;
-    }
-
-    const tokenData = (await tokenResponse.json()) as {
-      active: boolean;
-      access_token?: { token: string };
-    };
-
-    if (!(tokenData.active && tokenData.access_token)) {
-      return null;
-    }
-
-    const githubResponse = await fetch("https://api.github.com/user", {
-      headers: {
-        Authorization: `Bearer ${tokenData.access_token.token}`,
-        Accept: "application/vnd.github.v3+json",
-        "User-Agent": "Detent-API",
-      },
-    });
-
-    if (!githubResponse.ok) {
-      return null;
-    }
-
-    const githubUser = (await githubResponse.json()) as { login: string };
-    return githubUser.login;
-  } catch {
-    return null;
+const splitDisplayName = (
+  name: string | null
+): { firstName?: string; lastName?: string } => {
+  if (!name) {
+    return {};
   }
+
+  const parts = name.trim().split(WHITESPACE_SPLIT_REGEX).filter(Boolean);
+  if (parts.length === 0) {
+    return {};
+  }
+
+  return {
+    firstName: parts[0],
+    lastName: parts.length > 1 ? parts.slice(1).join(" ") : undefined,
+  };
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -147,6 +110,238 @@ interface GitHubIdentity {
   userId: string;
   username: string | null;
 }
+
+interface GitHubUserResponse {
+  id: number;
+  login: string;
+}
+
+interface GitHubMembershipLookupResult {
+  org: string;
+  membership: GitHubOrgMembership | null;
+  hardFailureStatus?: number;
+  rateLimited?: boolean;
+}
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRateLimitedResponse = (response: Response): boolean =>
+  response.status === 429 ||
+  (response.status === 403 &&
+    response.headers.get("x-ratelimit-remaining") === "0");
+
+const isHardFailureStatus = (status: number): boolean =>
+  status === 401 || status === 403 || status === 429 || status >= 500;
+
+const shouldRetryMembershipLookup = (
+  response: Response,
+  attempt: number
+): boolean =>
+  attempt + 1 < GITHUB_MEMBERSHIP_MAX_ATTEMPTS &&
+  (isRateLimitedResponse(response) || response.status >= 500);
+
+const parseGitHubOrgMembership = (
+  payload: Partial<GitHubOrgMembership>
+): GitHubOrgMembership | null => {
+  if (
+    (payload.role === "admin" || payload.role === "member") &&
+    (payload.state === "active" || payload.state === "pending")
+  ) {
+    return {
+      role: payload.role,
+      state: payload.state,
+    };
+  }
+
+  return null;
+};
+
+const fetchGitHubOrgMembership = async (
+  orgLogin: string,
+  githubToken: string
+): Promise<GitHubMembershipLookupResult> => {
+  for (let attempt = 0; attempt < GITHUB_MEMBERSHIP_MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(
+        `https://api.github.com/user/memberships/orgs/${orgLogin}`,
+        {
+          headers: {
+            Authorization: `Bearer ${githubToken}`,
+            Accept: "application/vnd.github.v3+json",
+            "User-Agent": "Detent-API",
+          },
+          signal: AbortSignal.timeout(GITHUB_MEMBERSHIP_TIMEOUT_MS),
+        }
+      );
+
+      if (response.ok) {
+        const payload = (await response.json()) as Partial<GitHubOrgMembership>;
+        const membership = parseGitHubOrgMembership(payload);
+        if (membership) {
+          return {
+            org: orgLogin,
+            membership,
+          };
+        }
+        return { org: orgLogin, membership: null };
+      }
+
+      if (response.status === 404) {
+        return { org: orgLogin, membership: null };
+      }
+
+      const rateLimited = isRateLimitedResponse(response);
+
+      if (
+        isHardFailureStatus(response.status) &&
+        shouldRetryMembershipLookup(response, attempt)
+      ) {
+        await sleep(GITHUB_MEMBERSHIP_RETRY_DELAY_MS * (attempt + 1));
+        continue;
+      }
+
+      if (isHardFailureStatus(response.status)) {
+        return {
+          org: orgLogin,
+          membership: null,
+          hardFailureStatus: response.status,
+          rateLimited,
+        };
+      }
+
+      return { org: orgLogin, membership: null };
+    } catch {
+      if (attempt + 1 < GITHUB_MEMBERSHIP_MAX_ATTEMPTS) {
+        await sleep(GITHUB_MEMBERSHIP_RETRY_DELAY_MS * (attempt + 1));
+        continue;
+      }
+      return { org: orgLogin, membership: null, hardFailureStatus: 502 };
+    }
+  }
+
+  return { org: orgLogin, membership: null, hardFailureStatus: 502 };
+};
+
+const mapWithConcurrency = async <TInput, TOutput>(
+  items: TInput[],
+  concurrency: number,
+  mapper: (item: TInput) => Promise<TOutput>
+): Promise<TOutput[]> => {
+  const cappedConcurrency = Math.max(1, Math.min(concurrency, items.length));
+  const results = new Array<TOutput>(items.length);
+  let index = 0;
+
+  const workers = Array.from({ length: cappedConcurrency }, async () => {
+    while (index < items.length) {
+      const currentIndex = index;
+      index++;
+      const item = items[currentIndex];
+      if (item === undefined) {
+        continue;
+      }
+      results[currentIndex] = await mapper(item);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+};
+
+const loadBetterAuthUser = async (
+  userId: string,
+  env: Env
+): Promise<BetterAuthUser | null> => {
+  const pool = getBetterAuthPool(env);
+  const result = await pool.query<{
+    id: string;
+    email: string;
+    name: string | null;
+  }>(
+    `
+      SELECT id, email, name
+      FROM "user"
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [userId]
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+  };
+};
+
+const loadLatestGitHubAccount = async (
+  userId: string,
+  env: Env
+): Promise<BetterAuthGitHubAccount | null> => {
+  const pool = getBetterAuthPool(env);
+  const result = await pool.query<{ account_id: string }>(
+    `
+      SELECT account_id
+      FROM account
+      WHERE user_id = $1 AND provider_id = $2
+      ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+      LIMIT 1
+    `,
+    [userId, GITHUB_PROVIDER_ID]
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    accountId: row.account_id,
+  };
+};
+
+const fetchGitHubUserByAccountId = async (
+  accountId: string
+): Promise<GitHubUserResponse | null> => {
+  const urls = NUMERIC_ACCOUNT_ID_PATTERN.test(accountId)
+    ? [
+        `https://api.github.com/user/${accountId}`,
+        `https://api.github.com/users/${accountId}`,
+      ]
+    : [`https://api.github.com/users/${accountId}`];
+
+  for (const url of urls) {
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "Detent-API",
+      },
+    });
+
+    if (!response.ok) {
+      continue;
+    }
+
+    const payload = await response.json();
+    if (
+      isRecord(payload) &&
+      typeof payload.id === "number" &&
+      typeof payload.login === "string"
+    ) {
+      return {
+        id: payload.id,
+        login: payload.login,
+      };
+    }
+  }
+
+  return null;
+};
 
 /**
  * Get GitHub identity from a provided OAuth token
@@ -198,68 +393,21 @@ const getGitHubIdentityFromToken = async (
   };
 };
 
-/**
- * Get GitHub identity from WorkOS identities endpoint
- */
-const getGitHubIdentityFromWorkOS = async (
-  userId: string,
-  workosApiKey: string
+const getGitHubIdentityFromLinkedAccount = async (
+  accountId: string
 ): Promise<GitHubIdentity | null> => {
-  const response = await fetch(
-    `https://api.workos.com/user_management/users/${userId}/identities`,
-    {
-      headers: {
-        Authorization: `Bearer ${workosApiKey}`,
-      },
-    }
-  );
-
-  if (!response.ok) {
-    console.warn(
-      `[workos-identity] Failed to fetch identities: ${response.status}`
-    );
-    return null;
+  const githubUser = await fetchGitHubUserByAccountId(accountId);
+  if (!githubUser) {
+    return {
+      userId: accountId,
+      username: null,
+    };
   }
 
-  const identities = (await response.json()) as WorkOSIdentitiesResponse;
-  const githubIdentity = identities.data?.find(
-    (identity) => identity.provider === "GitHubOAuth"
-  );
-
-  if (!githubIdentity) {
-    return null;
-  }
-
-  const username = await fetchGitHubUsername(userId, workosApiKey);
   return {
-    userId: githubIdentity.idp_id,
-    username,
+    userId: String(githubUser.id),
+    username: githubUser.login,
   };
-};
-
-/**
- * Resolve GitHub identity using multiple methods in priority order:
- * 1. Provided GitHub OAuth token (preferred - most reliable)
- * 2. WorkOS identities endpoint (fallback)
- */
-const resolveGitHubIdentity = async (
-  userId: string,
-  workosApiKey: string,
-  providedToken: string | undefined
-): Promise<GitHubIdentity | null> => {
-  // Method 1: Use provided GitHub OAuth token (preferred)
-  if (providedToken) {
-    const identity = await getGitHubIdentityFromToken(
-      providedToken,
-      "sync-user"
-    );
-    if (identity) {
-      return identity;
-    }
-  }
-
-  // Method 2: Fall back to WorkOS identities
-  return getGitHubIdentityFromWorkOS(userId, workosApiKey);
 };
 
 /**
@@ -267,7 +415,7 @@ const resolveGitHubIdentity = async (
  * Verifies current GitHub org membership before granting owner access
  */
 const linkInstallerOrganizations = async (
-  convex: ConvexHttpClient,
+  dbClient: ObserverClient,
   userId: string,
   githubUserId: string,
   githubUsername: string | null,
@@ -278,7 +426,7 @@ const linkInstallerOrganizations = async (
     return 0;
   }
 
-  const installerOrgs = (await convex.query(
+  const installerOrgs = (await dbClient.query(
     "organizations:listByInstallerGithubId",
     {
       installerGithubId: githubUserId,
@@ -294,7 +442,7 @@ const linkInstallerOrganizations = async (
 
   // Get active memberships only - soft-deleted users must go through invitation flow
   const activeMemberships = (
-    (await convex.query("organization_members:listByUser", {
+    (await dbClient.query("organization_members:listByUser", {
       userId,
       limit: 500,
     })) as OrganizationMemberDoc[]
@@ -352,17 +500,20 @@ const linkInstallerOrganizations = async (
   let linked = 0;
 
   for (const org of verifiedOrgs) {
-    const existing = (await convex.query("organization_members:getByOrgUser", {
-      organizationId: org._id,
-      userId,
-    })) as OrganizationMemberDoc | null;
+    const existing = (await dbClient.query(
+      "organization_members:getByOrgUser",
+      {
+        organizationId: org._id,
+        userId,
+      }
+    )) as OrganizationMemberDoc | null;
 
     if (existing) {
       continue;
     }
 
     const now = Date.now();
-    await convex.mutation("organization_members:create", {
+    await dbClient.mutation("organization_members:create", {
       organizationId: org._id,
       userId,
       role: "owner",
@@ -436,7 +587,7 @@ interface SoftDeletedMembership {
  * Returns orgs that don't have an active membership for the user.
  */
 const fetchMatchingDetentOrgs = async (
-  convex: ConvexHttpClient,
+  dbClient: ObserverClient,
   userId: string,
   githubOrgs: { id: number; login: string }[]
 ): Promise<{
@@ -444,7 +595,7 @@ const fetchMatchingDetentOrgs = async (
   softDeletedByOrg: Map<string, SoftDeletedMembership>;
 } | null> => {
   const githubOrgIds = githubOrgs.map((o) => String(o.id));
-  const detentOrgs = (await convex.query(
+  const detentOrgs = (await dbClient.query(
     "organizations:listByProviderAccountIds",
     {
       provider: "github",
@@ -459,7 +610,7 @@ const fetchMatchingDetentOrgs = async (
 
   const detentOrgIds = detentOrgs.map((o) => o._id);
   const allMemberships = (
-    (await convex.query("organization_members:listByUser", {
+    (await dbClient.query("organization_members:listByUser", {
       userId,
       limit: 500,
     })) as OrganizationMemberDoc[]
@@ -497,7 +648,7 @@ const fetchMatchingDetentOrgs = async (
  * Returns true if membership was reactivated, false if blocked.
  */
 const handleExistingMembership = async (
-  convex: ConvexHttpClient,
+  dbClient: ObserverClient,
   softDeleted: SoftDeletedMembership,
   role: "admin" | "member",
   githubUserId: string,
@@ -512,7 +663,7 @@ const handleExistingMembership = async (
   }
 
   const now = Date.now();
-  await convex.mutation("organization_members:update", {
+  await dbClient.mutation("organization_members:update", {
     id: softDeleted._id,
     removedAt: null,
     removalReason: null,
@@ -537,7 +688,7 @@ const handleExistingMembership = async (
  * Returns true if membership was created, false otherwise.
  */
 const createNewMembership = async (
-  convex: ConvexHttpClient,
+  dbClient: ObserverClient,
   orgId: string,
   userId: string,
   role: "admin" | "member",
@@ -545,7 +696,7 @@ const createNewMembership = async (
   githubUsername: string,
   orgSlug: string | null
 ): Promise<boolean> => {
-  const existing = (await convex.query("organization_members:getByOrgUser", {
+  const existing = (await dbClient.query("organization_members:getByOrgUser", {
     organizationId: orgId,
     userId,
   })) as OrganizationMemberDoc | null;
@@ -555,7 +706,7 @@ const createNewMembership = async (
   }
 
   const now = Date.now();
-  await convex.mutation("organization_members:create", {
+  await dbClient.mutation("organization_members:create", {
     organizationId: orgId,
     userId,
     role,
@@ -580,7 +731,7 @@ const createNewMembership = async (
  * Returns true if a membership was created or reactivated.
  */
 const processOrgMembership = async (
-  convex: ConvexHttpClient,
+  dbClient: ObserverClient,
   org: OrganizationDoc,
   userId: string,
   githubUserId: string,
@@ -607,7 +758,7 @@ const processOrgMembership = async (
 
   if (softDeleted) {
     return handleExistingMembership(
-      convex,
+      dbClient,
       softDeleted,
       role,
       githubUserId,
@@ -617,7 +768,7 @@ const processOrgMembership = async (
   }
 
   return createNewMembership(
-    convex,
+    dbClient,
     org._id,
     userId,
     role,
@@ -632,7 +783,7 @@ const processOrgMembership = async (
  * This allows non-installer admins/members to join existing orgs.
  */
 const linkGitHubMemberOrganizations = async (
-  convex: ConvexHttpClient,
+  dbClient: ObserverClient,
   userId: string,
   githubUserId: string,
   githubUsername: string,
@@ -644,7 +795,11 @@ const linkGitHubMemberOrganizations = async (
     return 0;
   }
 
-  const matchResult = await fetchMatchingDetentOrgs(convex, userId, githubOrgs);
+  const matchResult = await fetchMatchingDetentOrgs(
+    dbClient,
+    userId,
+    githubOrgs
+  );
   if (!matchResult) {
     return 0;
   }
@@ -655,7 +810,7 @@ const linkGitHubMemberOrganizations = async (
   for (const org of orgsToJoin) {
     try {
       const success = await processOrgMembership(
-        convex,
+        dbClient,
         org,
         userId,
         githubUserId,
@@ -682,20 +837,30 @@ const linkGitHubMemberOrganizations = async (
  *
  * Accepts optional X-GitHub-Token header with the user's GitHub OAuth token.
  * If provided, uses the token directly to get the user's GitHub ID (preferred).
- * Falls back to WorkOS identities if no token provided.
+ * Falls back to Better Auth account linkage if no token provided.
  */
 app.post("/sync-user", async (c) => {
   const auth = c.get("auth");
   const providedGitHubToken = c.req.header("X-GitHub-Token");
   let verifiedGitHubToken: string | undefined;
+  const [user, linkedGitHubAccount] = await Promise.all([
+    loadBetterAuthUser(auth.userId, c.env),
+    loadLatestGitHubAccount(auth.userId, c.env),
+  ]);
+
+  if (!user) {
+    console.error(`Failed to load Better Auth user for ${auth.userId}`);
+    return c.json({ error: "Failed to fetch user details" }, 500);
+  }
+
+  const { firstName, lastName } = splitDisplayName(user.name);
 
   // Security: never trust raw X-GitHub-Token without ownership verification.
-  // If verification fails, continue with WorkOS identity fallback.
+  // If verification fails, continue with Better Auth account linkage fallback.
   if (providedGitHubToken) {
     const tokenResult = await getVerifiedOptionalGitHubToken(
       providedGitHubToken,
-      auth.userId,
-      c.env.WORKOS_API_KEY
+      linkedGitHubAccount?.accountId ?? null
     );
 
     if (tokenResult.success) {
@@ -707,43 +872,34 @@ app.post("/sync-user", async (c) => {
     }
   }
 
-  const userResponse = await fetch(
-    `https://api.workos.com/user_management/users/${auth.userId}`,
-    {
-      headers: { Authorization: `Bearer ${c.env.WORKOS_API_KEY}` },
-    }
-  );
-
-  if (!userResponse.ok) {
-    console.error(
-      `Failed to fetch user from WorkOS: ${userResponse.status} ${userResponse.statusText}`
+  let identity: GitHubIdentity | null = null;
+  if (verifiedGitHubToken) {
+    identity = await getGitHubIdentityFromToken(
+      verifiedGitHubToken,
+      "sync-user"
     );
-    return c.json({ error: "Failed to fetch user details" }, 500);
   }
 
-  const user = (await userResponse.json()) as WorkOSUser;
-
-  // Resolve GitHub identity from token or WorkOS (no DB cache)
-  const identity = await resolveGitHubIdentity(
-    auth.userId,
-    c.env.WORKOS_API_KEY,
-    verifiedGitHubToken
-  );
+  if (!identity && linkedGitHubAccount) {
+    identity = await getGitHubIdentityFromLinkedAccount(
+      linkedGitHubAccount.accountId
+    );
+  }
 
   if (!identity) {
     return c.json({
       user_id: auth.userId,
       email: user.email,
-      first_name: user.first_name,
-      last_name: user.last_name,
+      first_name: firstName,
+      last_name: lastName,
       github_synced: false,
       github_username: null,
     });
   }
 
-  const convex = getConvexClient(c.env);
+  const dbClient = getDbClient(c.env);
 
-  const memberships = (await convex.query("organization_members:listByUser", {
+  const memberships = (await dbClient.query("organization_members:listByUser", {
     userId: auth.userId,
     limit: 500,
   })) as OrganizationMemberDoc[];
@@ -751,7 +907,7 @@ app.post("/sync-user", async (c) => {
   const now = Date.now();
   await Promise.all(
     memberships.map((membership) =>
-      convex.mutation("organization_members:update", {
+      dbClient.mutation("organization_members:update", {
         id: membership._id,
         providerUserId: identity.userId,
         providerUsername: identity.username ?? undefined,
@@ -763,7 +919,7 @@ app.post("/sync-user", async (c) => {
 
   // Auto-link installer organizations (with membership verification)
   const autoLinkedCount = await linkInstallerOrganizations(
-    convex,
+    dbClient,
     auth.userId,
     identity.userId,
     identity.username,
@@ -774,7 +930,7 @@ app.post("/sync-user", async (c) => {
   let autoJoinedCount = 0;
   if (verifiedGitHubToken && identity.username) {
     autoJoinedCount = await linkGitHubMemberOrganizations(
-      convex,
+      dbClient,
       auth.userId,
       identity.userId,
       identity.username,
@@ -786,8 +942,8 @@ app.post("/sync-user", async (c) => {
   return c.json({
     user_id: auth.userId,
     email: user.email,
-    first_name: user.first_name,
-    last_name: user.last_name,
+    first_name: firstName,
+    last_name: lastName,
     github_synced: true,
     github_user_id: identity.userId,
     github_username: identity.username,
@@ -804,67 +960,48 @@ app.post("/sync-user", async (c) => {
 app.get("/me", async (c) => {
   const auth = c.get("auth");
 
-  // Fetch user details from WorkOS and check membership in parallel
-  const convex = getConvexClient(c.env);
-  const [userResponse, memberships] = await Promise.all([
-    fetch(`https://api.workos.com/user_management/users/${auth.userId}`, {
-      headers: {
-        Authorization: `Bearer ${c.env.WORKOS_API_KEY}`,
-      },
-    }),
-    convex.query("organization_members:listByUser", {
+  // Fetch user details and linked account in parallel
+  const dbClient = getDbClient(c.env);
+  const [user, memberships, linkedGitHubAccount] = await Promise.all([
+    loadBetterAuthUser(auth.userId, c.env),
+    dbClient.query("organization_members:listByUser", {
       userId: auth.userId,
       limit: 1,
     }) as Promise<OrganizationMemberDoc[]>,
+    loadLatestGitHubAccount(auth.userId, c.env),
   ]);
 
-  if (!userResponse.ok) {
-    console.error(
-      `Failed to fetch user from WorkOS: ${userResponse.status} ${userResponse.statusText}`
-    );
+  if (!user) {
+    console.error(`Failed to load Better Auth user for ${auth.userId}`);
     return c.json({ error: "Failed to fetch user details" }, 500);
   }
 
-  const user = (await userResponse.json()) as WorkOSUser;
+  const { firstName, lastName } = splitDisplayName(user.name);
   const membership = memberships[0] ?? null;
 
-  // If no organization membership found, also check WorkOS identities directly
-  // This handles the case where a user authenticated via GitHub but has no organization yet
+  // If no organization membership found, fall back to linked GitHub account.
   let githubUserId: string | null = membership?.providerUserId ?? null;
-  const githubUsername: string | null = membership?.providerUsername ?? null;
+  let githubUsername: string | null = membership?.providerUsername ?? null;
   let githubLinked = Boolean(githubUserId);
 
-  if (!githubLinked) {
-    // Check WorkOS identities for GitHub OAuth
-    const identitiesResponse = await fetch(
-      `https://api.workos.com/user_management/users/${auth.userId}/identities`,
-      {
-        headers: {
-          Authorization: `Bearer ${c.env.WORKOS_API_KEY}`,
-        },
-      }
+  if (!githubLinked && linkedGitHubAccount) {
+    githubLinked = true;
+    const linkedIdentity = await getGitHubIdentityFromLinkedAccount(
+      linkedGitHubAccount.accountId
     );
-
-    if (identitiesResponse.ok) {
-      const identities =
-        (await identitiesResponse.json()) as WorkOSIdentitiesResponse;
-      const githubIdentity = identities.data?.find(
-        (identity) => identity.provider === "GitHubOAuth"
-      );
-
-      if (githubIdentity) {
-        githubUserId = githubIdentity.idp_id;
-        githubLinked = true;
-        // Note: username not available from WorkOS identity, would need GitHub API call
-      }
+    if (linkedIdentity) {
+      githubUserId = linkedIdentity.userId;
+      githubUsername = linkedIdentity.username;
+    } else {
+      githubUserId = linkedGitHubAccount.accountId;
     }
   }
 
   return c.json({
     user_id: auth.userId,
     email: user.email,
-    first_name: user.first_name,
-    last_name: user.last_name,
+    first_name: firstName,
+    last_name: lastName,
     github_linked: githubLinked,
     github_user_id: githubUserId,
     github_username: githubUsername,
@@ -907,6 +1044,7 @@ interface VerifyTokenFailureResult {
   success: false;
   rateLimited?: boolean;
   missingScopes?: string[];
+  accountNotLinked?: boolean;
 }
 
 type VerifyTokenResult = VerifyTokenSuccessResult | VerifyTokenFailureResult;
@@ -930,13 +1068,13 @@ const findMissingScopes = (
 
 /**
  * Verify a GitHub token belongs to the expected user by checking the authenticated user's GitHub ID
- * against the WorkOS identity. Also validates that the token has required scopes.
+ * against the Better Auth linked GitHub account. Also validates that the token
+ * has required scopes.
  * Returns the GitHub user data and scopes if verified, or failure info otherwise.
  */
 const verifyGitHubTokenOwnership = async (
   githubToken: string,
-  userId: string,
-  workosApiKey: string
+  linkedGitHubAccountId: string | null
 ): Promise<VerifyTokenResult> => {
   const githubUserResponse = await fetch("https://api.github.com/user", {
     headers: {
@@ -990,39 +1128,15 @@ const verifyGitHubTokenOwnership = async (
     return { success: false };
   }
 
-  const identitiesResponse = await fetch(
-    `https://api.workos.com/user_management/users/${userId}/identities`,
-    {
-      headers: {
-        Authorization: `Bearer ${workosApiKey}`,
-      },
-    }
-  );
-
-  if (!identitiesResponse.ok) {
-    return { success: false };
+  if (!linkedGitHubAccountId) {
+    return { success: false, accountNotLinked: true };
   }
 
-  let identities: WorkOSIdentitiesResponse;
-  try {
-    identities = (await identitiesResponse.json()) as WorkOSIdentitiesResponse;
-  } catch (error) {
-    console.error(
-      "Failed to parse WorkOS identities response as JSON",
-      error instanceof Error ? error.message : error
-    );
-    return { success: false };
-  }
+  const matchesAccount =
+    String(githubUser.id) === linkedGitHubAccountId ||
+    githubUser.login.toLowerCase() === linkedGitHubAccountId.toLowerCase();
 
-  const githubIdentity = identities.data?.find(
-    (identity) => identity.provider === "GitHubOAuth"
-  );
-
-  if (!githubIdentity) {
-    return { success: false };
-  }
-
-  if (String(githubUser.id) !== githubIdentity.idp_id) {
+  if (!matchesAccount) {
     console.error("GitHub token ownership verification failed for user");
     return { success: false };
   }
@@ -1054,8 +1168,7 @@ type OptionalTokenResult =
  */
 const getVerifiedGitHubToken = async (
   providedToken: string | undefined,
-  userId: string,
-  workosApiKey: string
+  linkedGitHubAccountId: string | null
 ): Promise<TokenResult> => {
   if (!providedToken) {
     return {
@@ -1078,11 +1191,19 @@ const getVerifiedGitHubToken = async (
 
   const verifyResult = await verifyGitHubTokenOwnership(
     providedToken,
-    userId,
-    workosApiKey
+    linkedGitHubAccountId
   );
 
   if (!verifyResult.success) {
+    if (verifyResult.accountNotLinked) {
+      return {
+        success: false,
+        error:
+          "GitHub account not linked. Please sign in with GitHub before using this endpoint.",
+        code: "github_account_not_linked",
+        status: 401,
+      };
+    }
     if (verifyResult.rateLimited) {
       return {
         success: false,
@@ -1117,8 +1238,7 @@ const getVerifiedGitHubToken = async (
  */
 const getVerifiedOptionalGitHubToken = async (
   providedToken: string,
-  userId: string,
-  workosApiKey: string
+  linkedGitHubAccountId: string | null
 ): Promise<OptionalTokenResult> => {
   if (!isValidGitHubTokenFormat(providedToken)) {
     return { success: false, reason: "invalid_token_format" };
@@ -1126,11 +1246,13 @@ const getVerifiedOptionalGitHubToken = async (
 
   const verifyResult = await verifyGitHubTokenOwnership(
     providedToken,
-    userId,
-    workosApiKey
+    linkedGitHubAccountId
   );
 
   if (!verifyResult.success) {
+    if (verifyResult.accountNotLinked) {
+      return { success: false, reason: "github_account_not_linked" };
+    }
     if (verifyResult.rateLimited) {
       return { success: false, reason: "rate_limit_exceeded" };
     }
@@ -1203,12 +1325,12 @@ const handleGitHubApiError = (response: Response): TokenErrorResult => {
  */
 app.get("/github-orgs", async (c) => {
   const auth = c.get("auth");
+  const linkedGitHubAccount = await loadLatestGitHubAccount(auth.userId, c.env);
 
   // Get verified GitHub token from header
   const tokenResult = await getVerifiedGitHubToken(
     c.req.header("X-GitHub-Token"),
-    auth.userId,
-    c.env.WORKOS_API_KEY
+    linkedGitHubAccount?.accountId ?? null
   );
 
   if (!tokenResult.success) {
@@ -1261,30 +1383,47 @@ app.get("/github-orgs", async (c) => {
     return c.json({ orgs: [] });
   }
 
-  // Fetch membership details for each org in parallel to check admin status
-  const membershipPromises = githubOrgs.map((org) =>
-    fetch(`https://api.github.com/user/memberships/orgs/${org.login}`, {
-      headers: {
-        Authorization: `Bearer ${githubToken}`,
-        Accept: "application/vnd.github.v3+json",
-        "User-Agent": "Detent-API",
-      },
-    }).then(async (res) => {
-      if (!res.ok) {
-        return { org: org.login, membership: null };
-      }
-      const membership = (await res.json()) as GitHubOrgMembership;
-      return { org: org.login, membership };
-    })
+  const membershipLookups = await mapWithConcurrency(
+    githubOrgs,
+    GITHUB_MEMBERSHIP_CONCURRENCY,
+    (org) => fetchGitHubOrgMembership(org.login, githubToken)
   );
 
-  const memberships = await Promise.all(membershipPromises);
-  const membershipMap = new Map(memberships.map((m) => [m.org, m.membership]));
+  const rateLimitedLookup = membershipLookups.find(
+    (lookup) => lookup.rateLimited
+  );
+  if (rateLimitedLookup) {
+    return c.json(
+      {
+        error: "GitHub API rate limit exceeded. Please try again later.",
+        code: "rate_limit_exceeded",
+      },
+      429
+    );
+  }
+
+  const hardFailure = membershipLookups.find(
+    (lookup) => typeof lookup.hardFailureStatus === "number"
+  );
+  if (hardFailure) {
+    const status = hardFailure.hardFailureStatus === 401 ? 401 : 502;
+    return c.json(
+      {
+        error: "Failed to verify GitHub organization memberships",
+        code: "github_membership_check_failed",
+      },
+      status
+    );
+  }
+
+  const membershipMap = new Map(
+    membershipLookups.map((lookup) => [lookup.org, lookup.membership])
+  );
 
   // Query our database to find which orgs are already installed
-  const convex = getConvexClient(c.env);
+  const dbClient = getDbClient(c.env);
   const githubOrgIds = githubOrgs.map((org) => String(org.id));
-  const installedOrgs = (await convex.query(
+  const installedOrgs = (await dbClient.query(
     "organizations:listByProviderAccountIds",
     {
       provider: "github",
@@ -1457,15 +1596,25 @@ app.post("/github-token/refresh", async (c) => {
   }
 
   const successData = tokenData as GitHubTokenRefreshResponse;
+  const linkedGitHubAccount = await loadLatestGitHubAccount(auth.userId, c.env);
 
   // Verify the new token belongs to the authenticated user
   const verifyResult = await verifyGitHubTokenOwnership(
     successData.access_token,
-    auth.userId,
-    c.env.WORKOS_API_KEY
+    linkedGitHubAccount?.accountId ?? null
   );
 
   if (!verifyResult.success) {
+    if (verifyResult.accountNotLinked) {
+      return c.json(
+        {
+          error:
+            "GitHub account not linked. Please sign in with GitHub before refreshing tokens.",
+          code: "github_account_not_linked",
+        },
+        401
+      );
+    }
     console.error("Refreshed GitHub token ownership verification failed");
     return c.json(
       {
@@ -1517,8 +1666,8 @@ app.get("/install-url", (c) => {
 app.get("/organizations", async (c) => {
   const auth = c.get("auth");
 
-  const convex = getConvexClient(c.env);
-  const memberships = (await convex.query("organization_members:listByUser", {
+  const dbClient = getDbClient(c.env);
+  const memberships = (await dbClient.query("organization_members:listByUser", {
     userId: auth.userId,
     limit: 500,
   })) as OrganizationMemberDoc[];
@@ -1529,7 +1678,7 @@ app.get("/organizations", async (c) => {
   );
 
   const orgs = await Promise.all(
-    orgIds.map((id) => convex.query("organizations:getById", { id }))
+    orgIds.map((id) => dbClient.query("organizations:getById", { id }))
   );
 
   const orgById = new Map<string, OrganizationDoc>();

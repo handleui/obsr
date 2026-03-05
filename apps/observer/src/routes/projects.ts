@@ -7,7 +7,7 @@
 
 import type { Context } from "hono";
 import { Hono } from "hono";
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import { verifyOrgAccess } from "../lib/org-access";
 import { validateHandle, validateSlug } from "../lib/validation";
 import type { Env } from "../types/env";
@@ -120,9 +120,9 @@ app.post("/", async (c) => {
     handle: customHandle,
   } = body;
 
-  const convex = getConvexClient(c.env);
+  const dbClient = getDbClient(c.env);
 
-  const org = (await convex.query("organizations:getById", {
+  const org = (await dbClient.query("organizations:getById", {
     id: organizationId,
   })) as OrganizationDoc | null;
 
@@ -142,7 +142,7 @@ app.post("/", async (c) => {
   }
 
   // Check if project already exists for this repo in this organization
-  const existingProject = (await convex.query("projects:getByOrgRepo", {
+  const existingProject = (await dbClient.query("projects:getByOrgRepo", {
     organizationId: org._id,
     providerRepoId,
   })) as ProjectDoc | null;
@@ -168,7 +168,7 @@ app.post("/", async (c) => {
   const handleToUse = existingProject?.removedAt
     ? existingProject.handle
     : requestedHandle;
-  const handleConflict = (await convex.query("projects:getByOrgHandle", {
+  const handleConflict = (await dbClient.query("projects:getByOrgHandle", {
     organizationId: org._id,
     handle: handleToUse,
   })) as ProjectDoc | null;
@@ -184,7 +184,7 @@ app.post("/", async (c) => {
   // Create the project
   // Handle defaults to lowercase repo name for URL-friendly routing
   if (existingProject?.removedAt) {
-    await convex.mutation("projects:reactivate", {
+    await dbClient.mutation("projects:reactivate", {
       id: existingProject._id,
       providerRepoName,
       providerRepoFullName,
@@ -209,7 +209,7 @@ app.post("/", async (c) => {
     );
   }
 
-  const projectId = (await convex.mutation("projects:create", {
+  const projectId = (await dbClient.mutation("projects:create", {
     organizationId: org._id,
     handle: handleToUse,
     providerRepoId,
@@ -249,8 +249,8 @@ app.get("/", async (c) => {
     return c.json({ error: "organization_id is required" }, 400);
   }
 
-  const convex = getConvexClient(c.env);
-  const org = (await convex.query("organizations:getById", {
+  const dbClient = getDbClient(c.env);
+  const org = (await dbClient.query("organizations:getById", {
     id: organizationId,
   })) as OrganizationDoc | null;
 
@@ -265,7 +265,7 @@ app.get("/", async (c) => {
   }
 
   // Get all active projects for this organization
-  const organizationProjects = (await convex.query("projects:listByOrg", {
+  const organizationProjects = (await dbClient.query("projects:listByOrg", {
     organizationId: org._id,
   })) as ProjectDoc[];
 
@@ -299,8 +299,8 @@ app.get("/lookup", async (c) => {
     return c.json({ error: "repo query parameter is required" }, 400);
   }
 
-  const convex = getConvexClient(c.env);
-  const project = (await convex.query("projects:getByRepoFullName", {
+  const dbClient = getDbClient(c.env);
+  const project = (await dbClient.query("projects:getByRepoFullName", {
     providerRepoFullName: repoFullName,
   })) as ProjectDoc | null;
 
@@ -308,7 +308,7 @@ app.get("/lookup", async (c) => {
     return c.json({ error: "Project not found" }, 404);
   }
 
-  const organization = (await convex.query("organizations:getById", {
+  const organization = (await dbClient.query("organizations:getById", {
     id: project.organizationId,
   })) as OrganizationDoc | null;
 
@@ -365,8 +365,8 @@ app.get("/by-handle", async (c) => {
     return c.json({ error: handleValidation.error }, 400);
   }
 
-  const convex = getConvexClient(c.env);
-  const org = (await convex.query("organizations:getBySlug", {
+  const dbClient = getDbClient(c.env);
+  const org = (await dbClient.query("organizations:getBySlug", {
     slug: orgSlug,
   })) as OrganizationDoc | null;
 
@@ -381,7 +381,7 @@ app.get("/by-handle", async (c) => {
   }
 
   // Find project by handle
-  const project = (await convex.query("projects:getByOrgHandle", {
+  const project = (await dbClient.query("projects:getByOrgHandle", {
     organizationId: org._id,
     handle: projectHandle.toLowerCase(),
   })) as ProjectDoc | null;
@@ -413,8 +413,8 @@ app.get("/:projectId", async (c) => {
   const auth = c.get("auth");
   const projectId = c.req.param("projectId");
 
-  const convex = getConvexClient(c.env);
-  const project = (await convex.query("projects:getById", {
+  const dbClient = getDbClient(c.env);
+  const project = (await dbClient.query("projects:getById", {
     id: projectId,
   })) as ProjectDoc | null;
 
@@ -422,7 +422,7 @@ app.get("/:projectId", async (c) => {
     return c.json({ error: "Project not found" }, 404);
   }
 
-  const organization = (await convex.query("organizations:getById", {
+  const organization = (await dbClient.query("organizations:getById", {
     id: project.organizationId,
   })) as OrganizationDoc | null;
 
@@ -459,8 +459,8 @@ app.delete("/:projectId", async (c) => {
   const auth = c.get("auth");
   const projectId = c.req.param("projectId");
 
-  const convex = getConvexClient(c.env);
-  const project = (await convex.query("projects:getById", {
+  const dbClient = getDbClient(c.env);
+  const project = (await dbClient.query("projects:getById", {
     id: projectId,
   })) as ProjectDoc | null;
 
@@ -468,7 +468,7 @@ app.delete("/:projectId", async (c) => {
     return c.json({ error: "Project not found" }, 404);
   }
 
-  const organization = (await convex.query("organizations:getById", {
+  const organization = (await dbClient.query("organizations:getById", {
     id: project.organizationId,
   })) as OrganizationDoc | null;
 
@@ -491,7 +491,7 @@ app.delete("/:projectId", async (c) => {
   }
 
   // Soft delete the project
-  await convex.mutation("projects:update", {
+  await dbClient.mutation("projects:update", {
     id: projectId,
     removedAt: Date.now(),
     updatedAt: Date.now(),

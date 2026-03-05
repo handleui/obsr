@@ -1,24 +1,13 @@
 /**
  * JWT authentication middleware
  *
- * Validates WorkOS AuthKit access tokens from the Authorization header.
+ * Validates bearer access tokens from configured auth provider.
  * Sets userId and organizationId in context for downstream handlers.
  */
 
 import type { Context, Next } from "hono";
-import { verifyAccessToken } from "../lib/auth";
+import { resolveAuthProvider } from "../auth/auth-provider";
 import type { Env } from "../types/env";
-
-interface AuthContext {
-  userId: string;
-  organizationId?: string;
-}
-
-declare module "hono" {
-  interface ContextVariableMap {
-    auth: AuthContext;
-  }
-}
 
 const BEARER_TOKEN_REGEX = /^Bearer\s+(.+)$/i;
 
@@ -35,19 +24,18 @@ export const authMiddleware = async (
   next: Next
 ): Promise<Response | undefined> => {
   const token = extractBearerToken(c.req.header("authorization"));
+  const authProvider = resolveAuthProvider(c.env);
 
   if (!token) {
     return c.json({ error: "Missing authorization header" }, 401);
   }
 
   try {
-    const payload = await verifyAccessToken(token, {
-      clientId: c.env.WORKOS_CLIENT_ID,
-    });
+    const principal = await authProvider.verifyBearerToken(token, c.env);
 
     c.set("auth", {
-      userId: payload.sub,
-      organizationId: payload.org_id,
+      userId: principal.userId,
+      organizationId: principal.organizationId,
     });
 
     await next();
@@ -56,7 +44,7 @@ export const authMiddleware = async (
     // Log verification failure details for debugging
     console.error("Token verification failed:", {
       error: error instanceof Error ? error.message : String(error),
-      clientId: c.env.WORKOS_CLIENT_ID,
+      provider: authProvider.name,
     });
     return c.json({ error: "Invalid or expired token" }, 401);
   }

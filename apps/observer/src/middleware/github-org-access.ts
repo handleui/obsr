@@ -1,6 +1,6 @@
-import type { ConvexHttpClient } from "convex/browser";
 import type { Context, Next } from "hono";
-import { getConvexClient } from "../db/convex";
+import type { ObserverClient } from "../db/client";
+import { getDbClient } from "../db/client";
 import { getVerifiedGitHubIdentity } from "../lib/github-identity";
 import { verifyGitHubMembership } from "../lib/github-membership";
 import type { OrganizationSettings } from "../lib/org-settings";
@@ -36,10 +36,39 @@ interface OrganizationMemberDoc {
   organizationId: string;
   userId: string;
   role: OrgAccessRole;
+  membershipSource?: string;
   providerUserId?: string;
   providerUsername?: string;
+  providerVerifiedAt?: number;
   removedAt?: number;
 }
+
+const GITHUB_MANAGED_MEMBERSHIP_SOURCES = new Set([
+  "github_access",
+  "github_sync",
+  "github_webhook",
+  "installer",
+]);
+const GITHUB_MEMBERSHIP_REVALIDATION_INTERVAL_MS = 10 * 60 * 1000;
+
+const shouldRevalidateGitHubMembership = (
+  member: OrganizationMemberDoc,
+  now: number
+): boolean => {
+  if (!member.membershipSource) {
+    return false;
+  }
+  if (!GITHUB_MANAGED_MEMBERSHIP_SOURCES.has(member.membershipSource)) {
+    return false;
+  }
+  if (!member.providerVerifiedAt) {
+    return true;
+  }
+  return (
+    now - member.providerVerifiedAt >=
+    GITHUB_MEMBERSHIP_REVALIDATION_INTERVAL_MS
+  );
+};
 
 export interface OrgAccessContext {
   organization: {
@@ -71,7 +100,7 @@ declare module "hono" {
 // uses ON CONFLICT to prevent race conditions from creating duplicate owners.
 // See resolveGitHubOrgRole for the atomic insert with conflict handling.
 const seedRoleFromGitHub = async (
-  convex: ConvexHttpClient,
+  dbClient: ObserverClient,
   org: OrganizationDoc,
   githubRole: "admin" | "member"
 ): Promise<OrgAccessRole> => {
@@ -83,7 +112,7 @@ const seedRoleFromGitHub = async (
   // 2. If multiple admins race, only one can win the owner slot due to
   //    the recheck after insert (see resolveGitHubOrgRole)
   if (githubRole === "admin") {
-    const owners = (await convex.query("organization_members:listByOrgRole", {
+    const owners = (await dbClient.query("organization_members:listByOrgRole", {
       organizationId: org._id,
       role: "owner",
     })) as OrganizationMemberDoc[];
@@ -101,45 +130,128 @@ const seedRoleFromGitHub = async (
   return "member";
 };
 
-// Handle GitHub organization membership check and role determination
-const resolveGitHubOrgRole = async (
-  convex: ConvexHttpClient,
+const getActiveMember = async (
+  dbClient: ObserverClient,
   org: OrganizationDoc,
-  userId: string,
-  githubIdentity: GitHubIdentity,
-  env: Env
-): Promise<{ role: OrgAccessRole } | { error: string; status: number }> => {
-  // Check for existing Detent membership first (active members only)
-  const existingMember = (await convex.query(
+  userId: string
+): Promise<OrganizationMemberDoc | null> => {
+  const existingMember = (await dbClient.query(
     "organization_members:getByOrgUser",
     {
       organizationId: org._id,
       userId,
     }
   )) as OrganizationMemberDoc | null;
-  const activeMember =
-    existingMember && !existingMember.removedAt ? existingMember : null;
+  return existingMember && !existingMember.removedAt ? existingMember : null;
+};
 
-  // For existing active members, trust DB role without re-verifying GitHub membership.
-  // This avoids failures when GitHub App lacks members:read permission.
-  // The user was verified when they first joined.
-  if (activeMember) {
-    // Update GitHub identity if changed
-    if (
-      activeMember.providerUserId !== githubIdentity.userId ||
-      activeMember.providerUsername !== githubIdentity.username
-    ) {
-      await convex.mutation("organization_members:update", {
-        id: activeMember._id,
-        providerUserId: githubIdentity.userId,
-        providerUsername: githubIdentity.username,
-        providerLinkedAt: Date.now(),
-        updatedAt: Date.now(),
-      });
-    }
-    return { role: activeMember.role };
+const syncActiveMemberIdentity = async (
+  dbClient: ObserverClient,
+  activeMember: OrganizationMemberDoc,
+  githubIdentity: GitHubIdentity,
+  now: number
+): Promise<void> => {
+  if (
+    activeMember.providerUserId === githubIdentity.userId &&
+    activeMember.providerUsername === githubIdentity.username
+  ) {
+    return;
   }
 
+  await dbClient.mutation("organization_members:update", {
+    id: activeMember._id,
+    providerUserId: githubIdentity.userId,
+    providerUsername: githubIdentity.username,
+    providerLinkedAt: now,
+    updatedAt: now,
+  });
+};
+
+const revalidateActiveGitHubMembership = async (
+  dbClient: ObserverClient,
+  org: OrganizationDoc,
+  activeMember: OrganizationMemberDoc,
+  githubIdentity: GitHubIdentity,
+  env: Env,
+  now: number
+): Promise<{ error: string; status: number } | null> => {
+  if (!shouldRevalidateGitHubMembership(activeMember, now)) {
+    return null;
+  }
+
+  try {
+    const membership = await verifyGitHubMembership(
+      githubIdentity.username,
+      org.providerAccountLogin,
+      org.providerInstallationId as string,
+      env
+    );
+
+    if (!(membership.permissionDenied || membership.isMember)) {
+      await dbClient.mutation("organization_members:update", {
+        id: activeMember._id,
+        removedAt: now,
+        removalReason: "github_left",
+        removedBy: null,
+        updatedAt: now,
+      });
+
+      return {
+        error: "You are not a member of this GitHub organization",
+        status: 403,
+      };
+    }
+
+    if (membership.isMember) {
+      await dbClient.mutation("organization_members:update", {
+        id: activeMember._id,
+        providerVerifiedAt: now,
+        updatedAt: now,
+      });
+    }
+  } catch (error) {
+    console.warn(
+      `[org-access] Membership revalidation failed for ${githubIdentity.username}@${org.providerAccountLogin}:`,
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+
+  return null;
+};
+
+const resolveExistingActiveMemberRole = async (
+  dbClient: ObserverClient,
+  org: OrganizationDoc,
+  activeMember: OrganizationMemberDoc,
+  githubIdentity: GitHubIdentity,
+  env: Env
+): Promise<{ role: OrgAccessRole } | { error: string; status: number }> => {
+  const now = Date.now();
+  await syncActiveMemberIdentity(dbClient, activeMember, githubIdentity, now);
+
+  const membershipError = await revalidateActiveGitHubMembership(
+    dbClient,
+    org,
+    activeMember,
+    githubIdentity,
+    env,
+    now
+  );
+
+  if (membershipError) {
+    return membershipError;
+  }
+
+  return { role: activeMember.role };
+};
+
+const resolveNewMemberRole = async (
+  dbClient: ObserverClient,
+  org: OrganizationDoc,
+  userId: string,
+  githubIdentity: GitHubIdentity,
+  env: Env
+): Promise<{ role: OrgAccessRole } | { error: string; status: number }> => {
   // Only verify membership via GitHub for NEW members trying to auto-join
   const membership = await verifyGitHubMembership(
     githubIdentity.username,
@@ -171,12 +283,12 @@ const resolveGitHubOrgRole = async (
   // 3. If insert was skipped due to conflict, fetch the actual record
   // 4. If we tried to become owner but someone else won, we stay as admin
   const intendedRole = await seedRoleFromGitHub(
-    convex,
+    dbClient,
     org,
     membership.role ?? "member"
   );
 
-  const createdMember = (await convex.mutation(
+  const createdMember = (await dbClient.mutation(
     "organization_members:createIfMissing",
     {
       organizationId: org._id,
@@ -214,15 +326,37 @@ const resolveGitHubOrgRole = async (
   return { role: actualMember.role };
 };
 
+// Handle GitHub organization membership check and role determination
+const resolveGitHubOrgRole = async (
+  dbClient: ObserverClient,
+  org: OrganizationDoc,
+  userId: string,
+  githubIdentity: GitHubIdentity,
+  env: Env
+): Promise<{ role: OrgAccessRole } | { error: string; status: number }> => {
+  const activeMember = await getActiveMember(dbClient, org, userId);
+  if (activeMember) {
+    return resolveExistingActiveMemberRole(
+      dbClient,
+      org,
+      activeMember,
+      githubIdentity,
+      env
+    );
+  }
+
+  return resolveNewMemberRole(dbClient, org, userId, githubIdentity, env);
+};
+
 const loadOrganization = async (
-  convex: ConvexHttpClient,
+  dbClient: ObserverClient,
   orgIdOrSlug: string,
   c: Context<{ Bindings: Env }>
 ): Promise<OrganizationDoc | Response> => {
   const org = (
     orgIdOrSlug.includes("/")
-      ? await convex.query("organizations:getBySlug", { slug: orgIdOrSlug })
-      : await convex.query("organizations:getById", { id: orgIdOrSlug })
+      ? await dbClient.query("organizations:getBySlug", { slug: orgIdOrSlug })
+      : await dbClient.query("organizations:getById", { id: orgIdOrSlug })
   ) as OrganizationDoc | null;
 
   if (!org || org.deletedAt) {
@@ -255,10 +389,7 @@ const resolveGitHubIdentityForOrg = async (
   activeMember: OrganizationMemberDoc | null,
   env: Env
 ): Promise<GitHubIdentity | null> => {
-  const githubIdentity = await getVerifiedGitHubIdentity(
-    userId,
-    env.WORKOS_API_KEY
-  );
+  const githubIdentity = await getVerifiedGitHubIdentity(userId, env);
 
   if (
     !githubIdentity &&
@@ -275,7 +406,7 @@ const resolveGitHubIdentityForOrg = async (
 };
 
 const resolveOrgAccessRole = async (
-  convex: ConvexHttpClient,
+  dbClient: ObserverClient,
   org: OrganizationDoc,
   userId: string,
   githubIdentity: GitHubIdentity,
@@ -296,7 +427,7 @@ const resolveOrgAccessRole = async (
   }
 
   const result = await resolveGitHubOrgRole(
-    convex,
+    dbClient,
     org,
     userId,
     githubIdentity,
@@ -328,16 +459,16 @@ export const githubOrgAccessMiddleware = async (
   }
 
   // Fetch organization
-  const convex = getConvexClient(c.env);
+  const dbClient = getDbClient(c.env);
   try {
-    const orgResult = await loadOrganization(convex, orgIdOrSlug, c);
+    const orgResult = await loadOrganization(dbClient, orgIdOrSlug, c);
     if (orgResult instanceof Response) {
       return orgResult;
     }
     const org = orgResult;
 
     // Check for existing membership with stored GitHub identity (active members only)
-    const existingMember = (await convex.query(
+    const existingMember = (await dbClient.query(
       "organization_members:getByOrgUser",
       { organizationId: org._id, userId: auth.userId }
     )) as OrganizationMemberDoc | null;
@@ -355,15 +486,14 @@ export const githubOrgAccessMiddleware = async (
         {
           error: "GitHub account not linked",
           code: "GITHUB_NOT_LINKED",
-          message:
-            "Please link your GitHub account via WorkOS to access organizations",
+          message: "Please link your GitHub account to access organizations",
         },
         403
       );
     }
 
     const roleResult = await resolveOrgAccessRole(
-      convex,
+      dbClient,
       org,
       auth.userId,
       githubIdentity,

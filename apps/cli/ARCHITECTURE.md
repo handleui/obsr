@@ -58,7 +58,7 @@ User runs `dt auth login`
     Open browser to detent.sh/cli/auth?port=PORT&state=STATE
          |
          v
-    User authenticates via WorkOS (SSO/OAuth)
+    User authenticates via WorkOS (legacy CLI auth; deferred)
          |
          v
     Web app redirects to localhost:PORT/callback?code=CODE&state=STATE
@@ -84,13 +84,13 @@ For environments without browser access (CI, SSH, containers):
 User runs `dt auth login --headless`
          |
          v
-    Request device authorization from WorkOS
+    Request device authorization from WorkOS (legacy CLI auth; deferred)
          |
          v
     Display verification URL and user code
          |
          v
-    Poll WorkOS for token completion
+    Poll WorkOS for token completion (legacy CLI auth; deferred)
          |
          v
     Save credentials
@@ -326,6 +326,8 @@ If update available:
 - `~/.detent/update.lock` - Concurrent update prevention (5-min stale threshold)
 
 ## Build System
+
+CLI auth remains on the deferred WorkOS surface until the migration of CLI flows is completed.
 
 Standalone binaries built with Bun's compile feature:
 

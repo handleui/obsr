@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { timeout } from "hono/timeout";
 import pkg from "../../package.json";
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import type { Env } from "../types/env";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -26,8 +26,8 @@ const checkDatabaseWithTimeout = async (
   try {
     return await Promise.race([
       (async () => {
-        const convex = getConvexClient(env);
-        await convex.query("organizations:list", { limit: 1 });
+        const dbClient = getDbClient(env);
+        await dbClient.query("organizations:list", { limit: 1 });
         return "operational" as const;
       })(),
       new Promise<never>((_, reject) => {

@@ -1,5 +1,5 @@
 import { type Db, runErrorOps, runOps } from "@detent/db";
-import { getConvexClient } from "../../../db/convex";
+import { getDbClient } from "../../../db/client";
 import {
   getResolvesByPr,
   triggerResolve,
@@ -144,7 +144,7 @@ const parseDetentCommand = (body: string): DetentCommand | null => {
 
 const loadResolveProjectContext = async (
   c: WebhookContext,
-  convex: ReturnType<typeof getConvexClient>,
+  dbClient: ReturnType<typeof getDbClient>,
   github: ReturnType<typeof createGitHubService>,
   token: string,
   owner: string,
@@ -152,7 +152,7 @@ const loadResolveProjectContext = async (
   prNumber: number,
   repositoryFullName: string
 ): Promise<ResolveProjectContext | Response> => {
-  const project = (await convex.query("projects:getByRepoFullName", {
+  const project = (await dbClient.query("projects:getByRepoFullName", {
     providerRepoFullName: repositoryFullName,
   })) as ResolveProject | null;
 
@@ -170,7 +170,7 @@ const loadResolveProjectContext = async (
     });
   }
 
-  const organization = (await convex.query("organizations:getById", {
+  const organization = (await dbClient.query("organizations:getById", {
     id: project.organizationId,
   })) as ResolveOrganization | null;
 
@@ -219,7 +219,7 @@ const loadLatestRun = async (
 const loadFixableErrors = async (
   c: WebhookContext,
   db: Db,
-  convex: ReturnType<typeof getConvexClient>,
+  dbClient: ReturnType<typeof getDbClient>,
   github: ReturnType<typeof createGitHubService>,
   token: string,
   owner: string,
@@ -228,19 +228,22 @@ const loadFixableErrors = async (
   prNumber: number,
   runId: string
 ): Promise<ResolveError[] | Response> => {
-  const errors = (await runErrorOps.listFixableByRunId(
-    db,
-    runId
-  )) as ResolveError[];
+  const errors = await runErrorOps.listFixableSummariesByRunId(db, runId);
+  const normalizedErrors = errors.map((error) => ({
+    id: error.id,
+    source: error.source,
+    signatureId: error.signatureId,
+    fixable: true,
+  }));
 
-  if (errors.length === 0) {
+  if (normalizedErrors.length === 0) {
     const commentBody = formatNoResolveCandidatesComment();
     const appId = Number.parseInt(c.env.GITHUB_APP_ID, 10);
     await deleteAndPostComment({
       github,
       token,
       kv: c.env["detent-idempotency"],
-      db: convex,
+      db: dbClient,
       owner,
       repo,
       repository: repositoryFullName,
@@ -254,7 +257,7 @@ const loadFixableErrors = async (
     });
   }
 
-  return errors;
+  return normalizedErrors;
 };
 
 const filterActiveResolves = (
@@ -346,13 +349,13 @@ const handleResolveCommand = async (
   const owner = repository.owner.login;
   const repo = repository.name;
 
-  const convex = getConvexClient(c.env);
+  const dbClient = getDbClient(c.env);
   const { db: drizzleDb, pool } = getDb(c.env);
 
   try {
     const projectContextResult = await loadResolveProjectContext(
       c,
-      convex,
+      dbClient,
       github,
       token,
       owner,
@@ -383,7 +386,7 @@ const handleResolveCommand = async (
     const errorsResult = await loadFixableErrors(
       c,
       drizzleDb,
-      convex,
+      dbClient,
       github,
       token,
       owner,
@@ -454,7 +457,7 @@ const handleResolveCommand = async (
           github,
           token,
           kv: c.env["detent-idempotency"],
-          db: convex,
+          db: dbClient,
           owner,
           repo,
           repository: repository.full_name,

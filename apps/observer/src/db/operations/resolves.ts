@@ -7,7 +7,7 @@ import type {
 } from "@detent/types";
 import { enqueueResolveForResolver } from "../../services/resolve-queue";
 import type { Env } from "../../types/env";
-import { getConvexClient } from "../convex";
+import { getDbClient } from "../client";
 
 export interface ResolveRecord {
   id: string;
@@ -41,7 +41,7 @@ export interface ResolveRecord {
   updatedAt: Date;
 }
 
-interface ConvexResolveDoc {
+interface DBResolveDoc {
   _id: string;
   _creationTime: number;
   type: ResolveRecord["type"];
@@ -83,7 +83,7 @@ const MAX_FAILED_REASON_LENGTH = 2000;
 const MAX_PATCH_LENGTH = 1_000_000;
 const MAX_REJECTED_BY_LENGTH = 255;
 const MAX_RESOLVE_ID_LENGTH = 128;
-const MAX_CONVEX_DOC_BYTES = 900_000;
+const MAX_DATABASE_DOC_BYTES = 900_000;
 const RESOLVER_QUEUE_TYPES = new Set<ResolveType>(["resolve"]);
 
 // ============================================================================
@@ -137,10 +137,10 @@ const validateResolveId = (id: string): void => {
 };
 
 // ============================================================================
-// Convex Client
+// DB Client
 // ============================================================================
 
-const getClient = (env: Env) => getConvexClient(env);
+const getClient = (env: Env) => getDbClient(env);
 
 const toDate = (value: number | undefined): Date | undefined => {
   if (value === undefined) {
@@ -149,7 +149,7 @@ const toDate = (value: number | undefined): Date | undefined => {
   return new Date(value);
 };
 
-const normalizeResolve = (resolve: ConvexResolveDoc): ResolveRecord => {
+const normalizeResolve = (resolve: DBResolveDoc): ResolveRecord => {
   return {
     id: resolve._id,
     type: resolve.type,
@@ -295,8 +295,8 @@ export const updateResolveStatus = async (
   const filesBytes = estimateFilesChangedWithContentSize(
     data?.filesChangedWithContent
   );
-  if (patchBytes + filesBytes > MAX_CONVEX_DOC_BYTES) {
-    throw new Error("Resolve payload exceeds Convex document size limit");
+  if (patchBytes + filesBytes > MAX_DATABASE_DOC_BYTES) {
+    throw new Error("Resolve payload exceeds DB document size limit");
   }
 
   const sanitizedData = {
@@ -364,7 +364,7 @@ export const getResolvesByPr = async (
   const resolves = (await client.query("resolves:getByPr", {
     projectId,
     prNumber,
-  })) as ConvexResolveDoc[];
+  })) as DBResolveDoc[];
 
   return resolves.map(normalizeResolve);
 };
@@ -378,7 +378,7 @@ export const getResolveById = async (
   const client = getClient(env);
   const resolve = (await client.query("resolves:get", {
     id: resolveId,
-  })) as ConvexResolveDoc | null;
+  })) as DBResolveDoc | null;
 
   return resolve ? normalizeResolve(resolve) : null;
 };
@@ -399,7 +399,7 @@ export const getResolvesByProjectStatus = async (
   const resolves = (await client.query("resolves:getByProjectStatus", {
     projectId,
     status,
-  })) as ConvexResolveDoc[];
+  })) as DBResolveDoc[];
 
   return resolves.map(normalizeResolve);
 };
@@ -411,7 +411,7 @@ export const getActiveResolvesByProject = async (
   const client = getClient(env);
   const resolves = (await client.query("resolves:getActiveByProject", {
     projectId,
-  })) as ConvexResolveDoc[];
+  })) as DBResolveDoc[];
 
   return resolves.map(normalizeResolve);
 };
@@ -423,7 +423,7 @@ export const getResolvesByRunId = async (
   const client = getClient(env);
   const resolves = (await client.query("resolves:getByRunId", {
     runId,
-  })) as ConvexResolveDoc[];
+  })) as DBResolveDoc[];
 
   return resolves.map(normalizeResolve);
 };

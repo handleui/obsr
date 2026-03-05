@@ -3,7 +3,7 @@ import { type generateFingerprints, sanitizeSensitiveData } from "@detent/lore";
 import type { CIError, ResolverDiagnostic } from "@detent/types";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK official pattern
 import * as Sentry from "@sentry/cloudflare";
-import { getConvexClient } from "../../db/convex";
+import { getDbClient } from "../../db/client";
 import { CACHE_TTL, cacheKey, getFromCache, setInCache } from "../../lib/cache";
 import {
   getOrgSettings,
@@ -171,14 +171,14 @@ export const buildSignatureInputs = (
 };
 
 const fetchAndCacheOrgSettings = async (
-  convex: ReturnType<typeof getConvexClient>,
+  dbClient: ReturnType<typeof getDbClient>,
   installationId: number,
   repository: string,
   settingsCacheKey: string
 ): Promise<Required<OrganizationSettings>> => {
   let settings: OrganizationSettings | null = null;
   try {
-    const orgs = (await convex.query(
+    const orgs = (await dbClient.query(
       "organizations:listByProviderInstallationId",
       { providerInstallationId: String(installationId) }
     )) as Array<{ settings?: OrganizationSettings | null }>;
@@ -216,7 +216,7 @@ export const checkRunsAndLoadOrgSettings = async (
     };
   }
 
-  const convex = getConvexClient(env);
+  const dbClient = getDbClient(env);
 
   const runIds = runIdentifiers.map((r) => String(r.runId));
   const existingRunsResult =
@@ -234,7 +234,7 @@ export const checkRunsAndLoadOrgSettings = async (
   const orgSettings = cachedSettings
     ? getOrgSettings(cachedSettings)
     : await fetchAndCacheOrgSettings(
-        convex,
+        dbClient,
         installationId,
         repository,
         settingsCacheKey

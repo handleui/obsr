@@ -19,7 +19,6 @@
     "@detent/sandbox": "*",
     "@detent/types": "*",
     "@detent/webhook-dispatch": "*",
-    "convex": "^1.31.7",
     "hono": "^4.7.4",
     "jose": "^6.0.10",
     "zod": "^3.25.34"

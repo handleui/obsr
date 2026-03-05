@@ -1,7 +1,7 @@
 import { type createDb, runErrorOps, runOps } from "@detent/db";
 import type { Context } from "hono";
 import { Hono } from "hono";
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import {
   applyResolve,
   getPendingResolves,
@@ -65,7 +65,7 @@ const validateResolveId = (
 
 const loadResolveApplyContext = async (
   c: Context<{ Bindings: Env }>,
-  convex: ReturnType<typeof getConvexClient>,
+  dbClient: ReturnType<typeof getDbClient>,
   resolveId: string,
   userId: string
 ): Promise<
@@ -81,7 +81,7 @@ const loadResolveApplyContext = async (
     return c.json({ error: "Resolve not found" }, 404);
   }
 
-  const project = (await convex.query("projects:getById", {
+  const project = (await dbClient.query("projects:getById", {
     id: resolve.projectId,
   })) as ProjectDoc | null;
 
@@ -89,7 +89,7 @@ const loadResolveApplyContext = async (
     return c.json({ error: "Project not found" }, 404);
   }
 
-  const organization = (await convex.query("organizations:getById", {
+  const organization = (await dbClient.query("organizations:getById", {
     id: project.organizationId,
   })) as OrganizationDoc | null;
 
@@ -192,8 +192,8 @@ const verifyProjectAccess = async (
 ): Promise<
   { project: ProjectDoc; organization: OrganizationDoc } | Response
 > => {
-  const convex = getConvexClient(c.env);
-  const project = (await convex.query("projects:getById", {
+  const dbClient = getDbClient(c.env);
+  const project = (await dbClient.query("projects:getById", {
     id: projectId,
   })) as ProjectDoc | null;
 
@@ -201,7 +201,7 @@ const verifyProjectAccess = async (
     return c.json({ error: "Project not found" }, 404);
   }
 
-  const organization = (await convex.query("organizations:getById", {
+  const organization = (await dbClient.query("organizations:getById", {
     id: project.organizationId,
   })) as OrganizationDoc | null;
 
@@ -356,10 +356,10 @@ app.post("/:id/apply", async (c) => {
   }
 
   try {
-    const convex = getConvexClient(c.env);
+    const dbClient = getDbClient(c.env);
     const contextResult = await loadResolveApplyContext(
       c,
-      convex,
+      dbClient,
       id,
       auth.userId
     );
@@ -392,7 +392,7 @@ app.post("/:id/apply", async (c) => {
     if (c.env.ENCRYPTION_KEY) {
       c.executionCtx.waitUntil(
         dispatchWebhookEvent(
-          convex,
+          dbClient,
           c.env.ENCRYPTION_KEY,
           organization._id,
           "resolve.applied",
@@ -471,10 +471,10 @@ app.post("/:id/reject", async (c) => {
   await rejectResolve(c.env, id, auth.userId, body.reason);
 
   if (c.env.ENCRYPTION_KEY) {
-    const convex = getConvexClient(c.env);
+    const dbClient = getDbClient(c.env);
     c.executionCtx.waitUntil(
       dispatchWebhookEvent(
-        convex,
+        dbClient,
         c.env.ENCRYPTION_KEY,
         result.organization._id,
         "resolve.rejected",
@@ -530,10 +530,10 @@ app.post("/:id/trigger", async (c) => {
   await triggerResolve(c.env, id);
 
   if (c.env.ENCRYPTION_KEY) {
-    const convex = getConvexClient(c.env);
+    const dbClient = getDbClient(c.env);
     c.executionCtx.waitUntil(
       dispatchWebhookEvent(
-        convex,
+        dbClient,
         c.env.ENCRYPTION_KEY,
         result.organization._id,
         "resolve.pending",
@@ -603,8 +603,11 @@ const loadFixableErrors = async (
     return c.json({ error: "No runs found for this PR" }, 404);
   }
 
-  const runErrors = await runErrorOps.listByRunId(db, run.id, 1000);
-  const fixableErrors = runErrors.filter((e) => e.fixable);
+  const fixableErrors = await runErrorOps.listFixableSummariesByRunId(
+    db,
+    run.id,
+    1000
+  );
 
   if (fixableErrors.length === 0) {
     return c.json({ error: "No fixable errors found for this PR" }, 400);
@@ -662,7 +665,7 @@ app.post("/trigger", async (c) => {
         id: e.id,
         source: e.source ?? undefined,
         signatureId: e.signatureId ?? undefined,
-        fixable: e.fixable ?? false,
+        fixable: true,
       })),
       orgSettings,
     });

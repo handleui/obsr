@@ -1,4 +1,32 @@
 export {
+  account,
+  accountRelations,
+  apikey,
+  invitation,
+  invitationRelations,
+  member,
+  memberRelations,
+  organization,
+  organizationRelations,
+  session,
+  sessionRelations,
+  user,
+  userRelations,
+  verification,
+} from "./auth.js";
+export {
+  apiKeys,
+  commitJobStats,
+  invitations,
+  jobs,
+  organizationMembers,
+  organizations,
+  prComments,
+  projects,
+  resolves,
+  webhooks,
+} from "./diagnostics.js";
+export {
   type CodeSnippet,
   errorOccurrences,
   errorSignatures,

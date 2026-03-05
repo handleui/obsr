@@ -9,7 +9,7 @@
  */
 
 import { Hono } from "hono";
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import { generateApiKey, hashApiKey } from "../lib/crypto";
 import { encryptSecretForGitHub } from "../lib/github-crypto";
 import {
@@ -113,7 +113,7 @@ app.post(
     const installationId = Number(organization.providerInstallationId);
     const token = await github.getInstallationToken(installationId);
 
-    const convex = getConvexClient(c.env);
+    const dbClient = getDbClient(c.env);
     let keyId: string | undefined;
 
     try {
@@ -122,7 +122,7 @@ app.post(
       const keyHash = await hashApiKey(apiKey);
       const keyPrefix = apiKey.substring(0, 8); // "dtk_XXXX"
 
-      keyId = (await convex.mutation("api_keys:create", {
+      keyId = (await dbClient.mutation("api_keys:create", {
         organizationId: organization._id,
         keyHash,
         keyPrefix,
@@ -162,7 +162,7 @@ app.post(
       // Clean up the API key if creation failed
       if (keyId) {
         try {
-          await convex.mutation("api_keys:remove", { id: keyId });
+          await dbClient.mutation("api_keys:remove", { id: keyId });
         } catch (deleteError) {
           // CRITICAL: Orphaned API key - key exists in DB but no corresponding GitHub secret
           console.error(

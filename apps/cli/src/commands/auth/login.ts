@@ -9,6 +9,7 @@ import {
 } from "../../lib/auth.js";
 import type { Credentials } from "../../lib/credentials.js";
 import { isLoggedIn, saveCredentials } from "../../lib/credentials.js";
+import { isDebugEnabled } from "../../lib/debug.js";
 import { ANSI_RESET, colors, hexToAnsi } from "../../tui/styles.js";
 
 const brand = hexToAnsi(colors.brand);
@@ -69,8 +70,7 @@ const showLoginSuccess = async (
   accessToken: string,
   githubToken?: string
 ): Promise<void> => {
-  // Debug: log whether GitHub token was received from browser auth
-  if (process.env.DEBUG) {
+  if (isDebugEnabled()) {
     console.log(
       `[login] GitHub token from browser auth: ${githubToken ? "yes" : "no"}`
     );

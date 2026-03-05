@@ -127,6 +127,28 @@ const htmlResponse = (
   });
 };
 
+const appendSetCookieHeaders = (
+  sourceHeaders: Headers,
+  targetHeaders: Headers
+): void => {
+  const sourceWithGetSetCookie = sourceHeaders as Headers & {
+    getSetCookie?: () => string[];
+  };
+
+  const setCookies = sourceWithGetSetCookie.getSetCookie?.();
+  if (setCookies && setCookies.length > 0) {
+    for (const cookie of setCookies) {
+      targetHeaders.append("set-cookie", cookie);
+    }
+    return;
+  }
+
+  const setCookie = sourceHeaders.get("set-cookie");
+  if (setCookie) {
+    targetHeaders.append("set-cookie", setCookie);
+  }
+};
+
 app.get("/", async (c) => {
   const userCode = normalizeUserCode(c.req.query("user_code") ?? "");
   const session = await getSession(c);
@@ -195,7 +217,12 @@ app.post("/sign-in", async (c) => {
     try {
       const payload = (await response.json()) as { url?: string };
       if (payload.url) {
-        return c.redirect(payload.url);
+        const headers = new Headers({ location: payload.url });
+        appendSetCookieHeaders(response.headers, headers);
+        return new Response(null, {
+          status: 302,
+          headers,
+        });
       }
     } catch {
       return c.redirect(`/device?user_code=${encodeURIComponent(userCode)}`);

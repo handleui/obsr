@@ -40,6 +40,12 @@
           }
         }
       }
+    },
+    {
+      "includes": [".vscode/settings.json"],
+      "formatter": {
+        "enabled": false
+      }
     }
   ]
 }

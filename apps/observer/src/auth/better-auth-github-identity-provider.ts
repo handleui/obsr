@@ -11,6 +11,11 @@ interface GitHubUserResponse {
   login: string;
 }
 
+interface BetterAuthGitHubAccount {
+  accountId: string;
+  accessToken: string | null;
+}
+
 const GITHUB_PROVIDER_ID = "github";
 const GITHUB_USER_AGENT = "Detent-API";
 const NUMERIC_ACCOUNT_ID_PATTERN = /^\d+$/;
@@ -27,7 +32,8 @@ const isGitHubUserResponse = (value: unknown): value is GitHubUserResponse => {
 };
 
 const fetchGitHubUser = async (
-  accountId: string
+  accountId: string,
+  accessToken: string | null
 ): Promise<GitHubUserResponse | null> => {
   const urls = NUMERIC_ACCOUNT_ID_PATTERN.test(accountId)
     ? [
@@ -36,13 +42,40 @@ const fetchGitHubUser = async (
       ]
     : [`https://api.github.com/users/${accountId}`];
 
+  const buildHeaders = (token: string | null): HeadersInit => {
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github.v3+json",
+      "User-Agent": GITHUB_USER_AGENT,
+    };
+
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    return headers;
+  };
+
   for (const url of urls) {
     const response = await fetch(url, {
-      headers: {
-        Accept: "application/vnd.github.v3+json",
-        "User-Agent": GITHUB_USER_AGENT,
-      },
+      headers: buildHeaders(accessToken),
     });
+
+    if ((response.status === 401 || response.status === 403) && accessToken) {
+      const fallbackResponse = await fetch(url, {
+        headers: buildHeaders(null),
+      });
+
+      if (!fallbackResponse.ok) {
+        continue;
+      }
+
+      const fallbackPayload = await fallbackResponse.json();
+      if (isGitHubUserResponse(fallbackPayload)) {
+        return fallbackPayload;
+      }
+
+      continue;
+    }
 
     if (!response.ok) {
       continue;
@@ -60,11 +93,14 @@ const fetchGitHubUser = async (
 const resolveGitHubAccountId = async (
   authUserId: string,
   env: Env
-): Promise<string | null> => {
+): Promise<BetterAuthGitHubAccount | null> => {
   const pool = getBetterAuthPool(env);
-  const result = await pool.query<{ account_id: string }>(
+  const result = await pool.query<{
+    account_id: string;
+    access_token: string | null;
+  }>(
     `
-      SELECT account_id
+      SELECT account_id, access_token
       FROM account
       WHERE user_id = $1 AND provider_id = $2
       ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
@@ -73,7 +109,15 @@ const resolveGitHubAccountId = async (
     [authUserId, GITHUB_PROVIDER_ID]
   );
 
-  return result.rows[0]?.account_id ?? null;
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    accountId: row.account_id,
+    accessToken: row.access_token,
+  };
 };
 
 export const betterAuthGitHubIdentityProvider: GitHubIdentityProvider = {
@@ -89,12 +133,15 @@ export const betterAuthGitHubIdentityProvider: GitHubIdentityProvider = {
       return cached;
     }
 
-    const accountId = await resolveGitHubAccountId(authUserId, env);
-    if (!accountId) {
+    const account = await resolveGitHubAccountId(authUserId, env);
+    if (!account) {
       return null;
     }
 
-    const githubUser = await fetchGitHubUser(accountId);
+    const githubUser = await fetchGitHubUser(
+      account.accountId,
+      account.accessToken
+    );
     if (!githubUser) {
       return null;
     }

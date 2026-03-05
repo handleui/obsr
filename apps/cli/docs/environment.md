@@ -18,7 +18,7 @@ This separation ensures local development doesn't interfere with production inst
 Set `DETENT_HOME` to use a custom directory:
 
 ```bash
-DETENT_HOME=/path/to/custom/dir detent <command>
+DETENT_HOME=/path/to/custom/dir dt <command>
 ```
 
 ## Development
@@ -29,7 +29,7 @@ Create a `.env` file in `apps/cli/`:
 
 ```bash
 # Optional - point to local services
-DETENT_API_URL=http://localhost:8787
+DETENT_API_URL=http://observer.localhost:1355
 
 # Optional - custom device client id (defaults to "detent-cli")
 DETENT_CLI_CLIENT_ID=detent-cli

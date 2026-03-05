@@ -2,420 +2,86 @@
 
 ## Overview
 
-A self-resolving CI/CD platform that runs CI locally and uses AI (Claude) to automatically fix errors before pushing to remote. Bridges local development and CI pipelines with intelligent error correction.
+Detent is a self-resolving CI/CD platform with four main applications:
 
-**Core Value:** Fast feedback loop + AI-powered resolving + Git-aware checking
+- `apps/observer` (Cloudflare Workers): API, auth, webhook ingestion, orchestration.
+- `apps/resolver` (Railway): queue worker that runs AI resolving jobs in sandboxes.
+- `apps/cli` (Bun/Node): local command-line interface (`dt`).
+- `apps/web` (Next.js): product web surface.
 
----
+Core runtime path is:
 
-## Architecture Diagram
+1. CI failure/event arrives in Observer.
+2. Observer normalizes and stores run/error context.
+3. Resolver claims queued work and attempts fixes in E2B sandboxes.
+4. Results are reported back through Observer and surfaced to users.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              DETENT PLATFORM                                     │
-└─────────────────────────────────────────────────────────────────────────────────┘
+## Service Responsibilities
 
-                    ┌──────────────────────────────────────┐
-                    │         CI PROVIDERS (External)       │
-                    │  ┌─────────────┐  ┌─────────────────┐ │
-                    │  │   GitHub    │  │     GitLab      │ │
-                    │  │   Actions   │  │       CI        │ │
-                    │  └──────┬──────┘  └────────┬────────┘ │
-                    └─────────┼──────────────────┼──────────┘
-                              │ webhooks         │
-                              │ workflow_run     │ pipeline
-                              ▼                  ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                            CLOUDFLARE WORKERS                                    │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │                        Observer (apps/observer)                                │   │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │   │
-│  │  │   Webhooks   │  │    Auth      │  │   Autofix    │  │   Billing    │  │   │
-│  │  │   Handler    │  │   Routes     │  │   Service    │  │   Service    │  │   │
-│  │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘  │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-│                                       │                                          │
-│              ┌────────────────────────┼────────────────────────┐                │
-│              ▼                        ▼                        ▼                │
-│  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐          │
-│  │  Cloudflare KV   │    │   Neon Postgres  │    │  Upstash Redis   │          │
-│  │  (idempotency)   │    │   (Drizzle DB)   │    │  (rate limit)    │          │
-│  └──────────────────┘    └──────────────────┘    └──────────────────┘          │
-└─────────────────────────────────────────────────────────────────────────────────┘
+### Observer (`apps/observer`)
 
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              WEB APPS (Vercel)                                   │
-│                                                                                  │
-│  ┌──────────────────────────────────────────────────────────────────────────┐     │
-│  │                           Web (apps/web, Next.js)                        │     │
-│  │  ┌────────────────────┐                                                  │     │
-│  │  │ Public Site + Docs │◄────────────── Better Auth / Auth flows ──────┼──── │
-│  │  └────────────────────┘                                                  │     │
-│  └──────────────────────────────────────────────────────────────────────────┘     │
-└─────────────────────────────────────────────────────────────────────────────────┘
+- Auth and identity APIs.
+- Organization/project APIs.
+- Webhook processing and idempotency.
+- Resolve request lifecycle and state transitions.
+- Data persistence through `packages/db` (Neon + Drizzle).
 
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           RESOLVER SERVICE (Railway)                               │
-│                                                                                  │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │                         Resolver (apps/resolver)                              │   │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                    │   │
-│  │  │   Worker     │  │  E2B Client  │  │   Resolving    │                    │   │
-│  │  │  (Queue)     │  │  (Sandbox)   │  │   Package      │                    │   │
-│  │  └──────────────┘  └──────────────┘  └──────────────┘                    │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────────────┘
+### Resolver (`apps/resolver`)
 
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           USER'S MACHINE (Local)                                 │
-│                                                                                  │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │                          CLI (apps/cli)                                   │   │
-│  │                                                                           │   │
-│  │   ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐            │   │
-│  │   │ dt auth   │  │ dt link   │  │ dt config │  │ dt errors │            │   │
-│  │   └─────┬─────┘  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘            │   │
-│  │         │              │              │              │                   │   │
-│  │         ▼              ▼              ▼              ▼                   │   │
-│  │   ┌─────────────────────────────────────────────────────────────────┐   │   │
-│  │   │                    Core Libraries                                │   │   │
-│  │   │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │   │   │
-│  │   │  │ @detent/git │  │ @detent/lore│ │   @detent/resolving       │  │   │   │
-│  │   │  │ clone/push  │  │ hints/sigs  │ │   ┌─────────────────┐   │  │   │   │
-│  │   │  │ branches    │  ├─────────────┤ │   │  Codex 5.2      │   │  │   │   │
-│  │   │  │ diff/commit │  │@detent/types│ │   │  (AI Gateway)   │   │  │   │   │
-│  │   │  └─────────────┘  │ shared types│ │   │  ┌───────────┐  │   │  │   │   │
-│  │   │                   └─────────────┘ │   │  │   Tools   │  │   │  │   │   │
-│  │   │                                   │   │  │ read_file │  │   │  │   │   │
-│  │   │                                   │   │  │ edit_file │  │   │  │   │   │
-│  │   │                                   │   │  │ glob/grep │  │   │  │   │   │
-│  │   │                                   │   │  │ execute   │  │   │  │   │   │
-│  │   │                                   │   │  └───────────┘  │   │  │   │   │
-│  │   │                                   │   └─────────────────┘   │  │   │   │
-│  │   │                                   └─────────────────────────┘  │   │   │
-│  │   └─────────────────────────────────────────────────────────────────┘   │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                  │
-│  ~/.detent/                                                                      │
-│  ├── credentials.json    # JWT + GitHub OAuth tokens                            │
-│  └── config.jsonc        # User preferences (resolve budget, trust, org)           │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+- Polls and processes resolve jobs.
+- Boots isolated sandboxes through `packages/sandbox`.
+- Executes resolving loop from `packages/resolving`.
+- Sends results/patches back to Observer APIs.
 
----
+### CLI (`apps/cli`)
 
-## Data Flow: Resolving Loop
+- Local interface for auth, linking, org/project actions, config, and errors.
+- Uses Better Auth device authorization flow against Observer endpoints.
+- Stores local state under `~/.detent` (prod) and `~/.detent-dev` (dev).
+- Supports auto-update and signed binary distribution.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         CI ERROR RESOLVING FLOW                                │
-└─────────────────────────────────────────────────────────────────────────────┘
+### Web (`apps/web`)
 
-  Developer pushes
-        │
-        ▼
-┌───────────────┐      webhook        ┌──────────────┐
-│ GitHub Actions│ ──────────────────► │   Observer   │
-│ workflow fails│                     │              │
-└───────────────┘                     └──────┬───────┘
-                                             │
-                                             ▼
-                                    ┌──────────────────┐
-                                    │  Log Extractor   │
-                                    │  (fetch CI logs) │
-                                    └────────┬─────────┘
-                                             │
-                                             ▼
-                                    ┌──────────────────┐
-                                    │  @detent/extract │
-                                    │  (AI extraction) │
-                                    │  Claude Haiku    │
-                                    └────────┬─────────┘
-                                             │
-                                             ▼
-                                    ┌──────────────────┐
-                                    │   Store Errors   │
-                                    │   (RunErrors)    │
-                                    └────────┬─────────┘
-                                             │
-                            ┌────────────────┼────────────────┐
-                            ▼                ▼                ▼
-                    ┌───────────────┐ ┌────────────┐ ┌───────────────┐
-                    │  PR Comment   │ │  Autofix   │ │  AI Resolving   │
-                    │  (summary)    │ │(deterministic)│(if enabled)  │
-                    └───────────────┘ └────────────┘ └───────┬───────┘
-                                                              │
-                                                              ▼
-                                         ┌────────────────────────────────────┐
-                                         │     Resolver Service (Railway)       │
-                                         │  ┌─────────────────────────────┐   │
-                                         │  │ 1. Receive signed queue event │   │
-                                         │  │ 2. Dispatch queued resolve    │   │
-                                         │  │ 3. Spin up E2B sandbox        │   │
-                                         │  │ 4. Run Codex 5.2 via AI SDK   │   │
-                                         │  │ 5. Verify and iterate         │   │
-                                         │  │ 6. POST patches to API        │   │
-                                         │  └─────────────────────────────┘   │
-                                         └────────────────┬───────────────────┘
-                                                          │
-                                                          ▼
-                                                  ┌───────────────┐
-                                                  │  User Reviews │
-                                                  │  Patches      │
-                                                  └───────────────┘
-```
+- Main product website and supporting web UX.
+- Shares backend contracts with Observer.
 
----
+## Shared Packages
 
-## Directory Structure
+- `packages/db`: schema, queries, migrations.
+- `packages/sdk`: public API client used by CLI and external consumers.
+- `packages/resolving`: agentic resolving logic.
+- `packages/autofix`: deterministic non-agent fix paths.
+- `packages/extract`: CI log parsing/extraction.
+- `packages/git`, `packages/types`, `packages/sentry`, `packages/ai`, `packages/lore`, `packages/sandbox`, `packages/ui`.
 
-```
-detent/
-├── apps/
-│   ├── observer/                     # Observer service (Cloudflare Workers)
-│   │   ├── src/
-│   │   │   ├── index.ts              # Hono app entry, middleware stack
-│   │   │   ├── routes/
-│   │   │   │   ├── auth.ts           # /v1/auth/* - login, verify, sync identity
-│   │   │   │   ├── organizations.ts  # /v1/organizations/* - CRUD orgs
-│   │   │   │   ├── errors.ts         # /v1/errors - retrieve stored errors
-│   │   │   │   ├── resolve.ts           # /v1/resolve - request AI resolving
-│   │   │   │   ├── webhooks.ts       # /webhooks/* - GitHub/GitLab handlers
-│   │   │   │   └── health.ts         # /health - status check
-│   │   │   ├── services/
-│   │   │   │   ├── github/           # GitHub App API, checks, installs
-│   │   │   │   ├── autofix/          # Deterministic autofix orchestration
-│   │   │   │   ├── resolver.ts         # Request AI resolving (stores in DB)
-│   │   │   │   ├── billing.ts        # Subscription/usage billing
-│   │   │   │   ├── log-extractor.ts  # Fetch CI logs from providers
-│   │   │   │   └── idempotency.ts    # Webhook deduplication (KV + DB)
-│   │   │   ├── middleware/
-│   │   │   │   ├── auth.ts           # JWT verification
-│   │   │   │   └── rate-limit.ts     # Upstash Redis rate limiting
-│   │   │   └── db/
-│   │   │       ├── client.ts         # Neon DB client helpers
-│   │   │       └── index.ts          # DB exports
-│   │   └── wrangler.jsonc            # Cloudflare Workers config
-│   │
-│   ├── cli/                          # Command-line interface (auth: Better Auth device flow)
-│   │   ├── src/
-│   │   │   ├── index.ts              # Entry point, auto-update, Sentry
-│   │   │   ├── commands/
-│   │   │   │   ├── auth/             # dt auth - device flow login
-│   │   │   │   ├── link/             # dt link - connect repo to org
-│   │   │   │   ├── config/           # dt config - manage preferences
-│   │   │   │   ├── org/              # dt org - organization mgmt
-│   │   │   │   ├── errors.ts         # dt errors - view CI errors
-│   │   │   │   └── whoami.ts         # dt whoami - current user
-│   │   │   ├── lib/
-│   │   │   │   ├── auth.ts           # Better Auth device authorization flow
-│   │   │   │   ├── api.ts            # Authenticated API client
-│   │   │   │   ├── credentials.ts    # Token storage (~/.detent/)
-│   │   │   │   └── config.ts         # Config file handling (JSONC)
-│   │   │   └── tui/                  # Terminal UI components (Ink)
-│   │   └── build.ts                  # bun build → standalone binary
-│   │
-│   ├── web/                          # Public web app (Next.js)
-│   │   └── src/app/
-│   │       └── page.tsx              # Landing page + auth/docs entrypoint
-│   │
-│   ├── resolver/                     # AI Resolving Service (Railway)
-│   │   └── src/
-│   │       ├── index.ts              # Hono app, graceful shutdown
-│   │       ├── services/
-│   │       │   └── worker/           # Queue-driven resolver worker/dispatcher
-│   │       ├── adapters/             # E2B sandbox adapter
-│   │       └── routes/               # Health check routes
-│   │
-│   └── docs/                         # Documentation site
-│
-├── packages/
-│   ├── action/                       # GitHub Action entry point
-│   │   └── src/                      # Runs client-side in CI
-│   │
-│   ├── extract/                      # AI-powered error extraction
-│   │   └── src/
-│   │       ├── extract.ts            # Main extraction via Claude Haiku
-│   │       ├── preprocess.ts         # Log compaction and sanitization
-│   │       ├── prompt.ts             # Extraction system prompts
-│   │       ├── schema.ts             # Zod schemas for extracted errors
-│   │       └── related-files.ts      # File path extraction from errors
-│   │
-│   ├── lore/                         # Error hints and signatures
-│   │   └── src/
-│   │       ├── hints/                # Context-aware error hints
-│   │       └── signatures/           # Error pattern signatures
-│   │
-│   ├── types/                        # Shared TypeScript types
-│   │   └── src/                      # Common interfaces and enums
-│   │
-│   ├── resolving/                      # AI-powered error fixing
-│   │   └── src/
-│   │       ├── client.ts             # Codex 5.2 via Vercel AI Gateway
-│   │       ├── loop.ts               # Multi-turn conversation loop
-│   │       ├── tools/                # AI tool implementations
-│   │       │   ├── read-file.ts      # Read source files
-│   │       │   ├── edit-file.ts      # Apply code edits
-│   │       │   ├── glob.ts           # Find files by pattern
-│   │       │   ├── grep.ts           # Search file contents
-│   │       │   ├── execute.ts        # Run shell commands
-│   │       │   └── run-check.ts      # Run linting/tests
-│   │       └── prompt/               # System prompts
-│   │
-│   ├── git/                          # Git operations
-│   │   └── src/
-│   │       ├── clone.ts              # Clone to temp directory
-│   │       ├── branch.ts             # Branch management
-│   │       ├── diff.ts               # Changed file detection
-│   │       └── lock.ts               # Concurrent operation safety
-│   │
-│   ├── ui/                           # Shared React components
-│   │   └── src/
-│   │       ├── button.tsx            # CVA-styled button
-│   │       └── input.tsx             # Form input component
-│   │
-│   └── typescript-config/            # Shared tsconfig presets
-│
-├── turbo.json                        # Turborepo pipeline config
-├── biome.json                        # Biome (lint/format) config
-└── package.json                      # Root workspace config
-```
+## Data and Auth
 
----
+- Primary database: Neon Postgres.
+- Auth stack: Better Auth.
+- API keys and bearer auth coexist for machine and user flows.
 
-## Data Model (Neon)
+## Release Flow
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                             NEON TABLES                                      │
-└─────────────────────────────────────────────────────────────────────────────┘
+### CLI
 
-┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│   enterprises    │     │  organizations   │     │     projects     │
-├──────────────────┤     ├──────────────────┤     ├──────────────────┤
-│ id               │◄────│ enterpriseId?    │◄────│ organizationId   │
-│ name             │     │ id               │     │ id               │
-│ slug             │     │ name, slug       │     │ handle           │
-│ suspendedAt?     │     │ provider         │     │ providerRepoId   │
-│ deletedAt?       │     │ providerAcctId   │     │ providerRepoName │
-└──────────────────┘     │ providerAcctLogin│     │ isPrivate        │
-                         │ installationId   │     │ removedAt?       │
-                         │ settings         │     └────────┬─────────┘
-                         └────────┬─────────┘              │
-                                  │                        │
-                                  ▼                        ▼
-                    ┌──────────────────────┐    ┌──────────────────┐
-                    │ organizationMembers  │    │       runs       │
-                    ├──────────────────────┤    ├──────────────────┤
-                    │ id                   │    │ id               │
-                    │ organizationId       │    │ projectId        │
-                    │ userId (provider)    │    │ runId            │
-                    │ role (owner/admin/   │    │ commitSha        │
-                    │       member)        │    │ prNumber?        │
-                    │ providerUserId       │    │ conclusion       │
-                    │ providerUsername     │    │ workflowName     │
-                    └──────────────────────┘    │ headBranch       │
-                                                │ errorCount       │
-                    ┌──────────────────────┐    └────────┬─────────┘
-                    │    invitations       │             │
-                    ├──────────────────────┤             ▼
-                    │ id                   │    ┌──────────────────┐
-                    │ organizationId       │    │    runErrors     │
-                    │ email                │    ├──────────────────┤
-                    │ role                 │    │ id               │
-                    │ token (unique)       │    │ runId            │
-                    │ status (pending/     │    │ filePath         │
-                    │   accepted/expired)  │    │ line, column     │
-                    │ expiresAt            │    │ message          │
-                    └──────────────────────┘    │ category         │
-                                                │ severity         │
-                    ┌──────────────────────┐    │ codeSnippet      │
-                    │     prComments       │    │ suggestions      │
-                    ├──────────────────────┤    │ workflowJob      │
-                    │ id                   │    │ workflowStep     │
-                    │ repository           │    └──────────────────┘
-                    │ prNumber             │
-                    │ commentId (GitHub)   │
-                    └──────────────────────┘
-```
+1. `release.yml` runs `release-please` on `main`.
+2. If a CLI release is created, it emits a `cli-v*` tag.
+3. `release.yml` dispatches `build.yml` with that tag and waits for completion.
+4. `build.yml` builds binaries, signs checksums, uploads assets/blob artifacts, and publishes GitHub release artifacts.
 
----
+### SDK
 
-## Auth Flow
+- When `release-please` creates an SDK release, `release.yml` builds and publishes `@detent/sdk` to npm.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                    CLI AUTHENTICATION (Device Flow)                     │
-└────────────────────────────────────────────────────────────────────────┘
+## Local Development
 
-   User Terminal                  Better Auth (CLI)       Web App
-        │                             │                        │
-        │  dt auth                    │                        │
-        │──────────────────────────►  │                        │
-        │    requestDeviceAuth()      │                        │
-        │                             │                        │
-        │  ◄────────────────────────  │                        │
-        │   device_code + user_code   │                        │
-        │                             │                        │
-        │  Display: "Visit detent.sh/auth and enter: XXXX"     │
-        │                             │                        │
-        │                             │    User opens browser  │
-        │                             │ ─────────────────────► │
-        │                             │                        │
-        │                             │    OAuth redirect      │
-        │                             │ ◄───────────────────── │
-        │                             │                        │
-        │  pollForTokens() ───────►   │                        │
-        │  (every 5 sec)              │                        │
-        │                             │                        │
-        │  ◄────────────────────────  │                        │
-        │   access_token + id_token   │                        │
-        │                             │                        │
-        │  Save to ~/.detent/credentials.json                  │
-        │                             │                        │
-        ▼                             │                        │
-   Authenticated!                     │                        │
-```
+Portless endpoints:
 
----
+- Web: `http://detent.localhost:1355`
+- Observer: `http://observer.localhost:1355`
+- Resolver: `http://resolver.localhost:1355`
 
-## Key Commands
+## Notes
 
-```bash
-# Development
-bun run dev               # All apps in dev mode
-bun run build             # Build everything (Turborepo)
-bun run dt <cmd>          # Run CLI locally (uses local build)
-
-# Code Quality
-bun run lint              # Check with Ultracite/Biome
-bun run fix               # Auto-fix issues
-bun run check-types       # TypeScript type checking
-
-# CLI Commands
-dt auth                   # Authenticate with Detent
-dt link                   # Link repo to organization
-dt config                 # Manage preferences
-dt whoami                 # Show current user
-dt errors                 # View CI errors
-dt org                    # Organization management
-```
-
----
-
-## Tech Stack Summary
-
-| Layer        | Technology                            |
-|--------------|---------------------------------------|
-| CLI          | TypeScript, Citty, Ink (React)        |
-| API          | Hono, Cloudflare Workers              |
-| Resolver     | Hono, Bun, Railway                    |
-| Database     | Neon Postgres (Drizzle)               |
-| Web Apps     | Next.js 16, React 19, Tailwind        |
-| Auth         | Better Auth, JWT (Jose), OAuth 2.0 |
-| AI Extraction| Claude Haiku via Vercel AI SDK        |
-| AI Resolving   | Codex 5.2 via Vercel AI Gateway       |
-| Sandboxes    | E2B (fresh per resolve)                  |
-| Monorepo     | Turborepo, Bun                        |
-| Lint/Format  | Ultracite (Biome)                     |
-| Monitoring   | Sentry, Logtail                       |
+- This document is intentionally concise and operational.
+- Detailed implementation notes should live close to each app/package.

@@ -2,40 +2,44 @@
 
 [![Better Stack Badge](https://uptime.betterstack.com/status-badges/v3/monitor/2cpdx.svg)](https://uptime.betterstack.com/?utm_source=status_badge)
 
-Self-resolving CI/CD that runs on PR's, it is very much NOT ready, please, avoid installing while I fix my mess
+Self-resolving CI/CD platform.
+Detent runs checks locally, surfaces CI failures, and helps resolve them before push.
 
-## Install
+## Install CLI
 
 ```bash
 curl -fsSL https://detent.sh/install.sh | bash
 ```
 
-Installs `dt` to `~/.local/bin`. Update with `dt update`.
+Installs `dt` to `~/.local/bin`.
 
-## Requirements
-BYOK for convenience, more providers on the way
-
-- Anthropic API key (for `resolve` command)
-
-## Usage
+## Core Commands
 
 ```bash
-dt auth        # authenticate with GitHub
-dt link        # link this repo to a Detent organization
-dt config      # manage settings
-dt whoami      # show current user info
-dt org         # manage organizations
-dt errors      # view CI errors
-dt update      # update the CLI
+dt auth         # authenticate
+dt link         # link repo to org/project
+dt config       # manage resolving settings
+dt whoami       # show current identity
+dt org          # org and member management
+dt errors       # fetch CI errors for a commit
+dt update       # update local CLI install
 ```
 
-## Platforms
+## Local Development URLs
 
-Linux (x64, arm64) · macOS (Intel, Apple Silicon) · Windows (x64)
+- Web: `http://detent.localhost:1355`
+- Observer API: `http://observer.localhost:1355`
+- Resolver API: `http://resolver.localhost:1355`
 
-## Links
+## Production URLs
 
-[Github Releases](https://github.com/handleui/detent/releases) · [Issues](https://github.com/handleui/detent/issues)
+- App: `https://detent.sh`
+- Observer API: `https://observer.detent.sh`
+
+## Repository
+
+- Releases: <https://github.com/handleui/detent/releases>
+- Issues: <https://github.com/handleui/detent/issues>
 
 ## License
 

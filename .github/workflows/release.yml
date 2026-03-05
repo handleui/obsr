@@ -36,12 +36,43 @@ jobs:
       - name: Trigger CLI Build
         if: ${{ steps.release.outputs['apps/cli--release_created'] }}
         run: |
+          set -euo pipefail
+
           if [ -z "$CLI_TAG_NAME" ]; then
             echo "Expected CLI_TAG_NAME from release-please, but it was empty."
             exit 1
           fi
 
+          DISPATCHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          EXPECTED_TITLE="Build ($CLI_TAG_NAME)"
+          echo "Dispatching build.yml for $CLI_TAG_NAME"
           gh workflow run build.yml --ref main -f ref="$CLI_TAG_NAME"
+
+          RUN_ID=""
+          for _ in {1..30}; do
+            RUN_ID="$(gh run list \
+              --workflow build.yml \
+              --event workflow_dispatch \
+              --branch main \
+              --limit 20 \
+              --json databaseId,createdAt,displayTitle \
+              --jq "map(select(.createdAt >= \"$DISPATCHED_AT\" and .displayTitle == \"$EXPECTED_TITLE\")) | sort_by(.createdAt) | reverse | .[0].databaseId")" || { sleep 5; continue; }
+
+            if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
+              break
+            fi
+            sleep 5
+          done
+
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "Failed to locate dispatched build.yml run for $CLI_TAG_NAME (expected title: $EXPECTED_TITLE)"
+            exit 1
+          fi
+
+          RUN_URL="$(gh run view "$RUN_ID" --json url --jq '.url')"
+          echo "Waiting for CLI build run: $RUN_URL"
+          gh run watch "$RUN_ID" --exit-status --interval 10
+          echo "CLI build succeeded: $RUN_URL"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CLI_TAG_NAME: ${{ steps.release.outputs['apps/cli--tag_name'] }}

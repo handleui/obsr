@@ -171,7 +171,7 @@ app.post("/sign-in", async (c) => {
   const userCodeRaw = body.user_code;
   const userCode =
     typeof userCodeRaw === "string" ? normalizeUserCode(userCodeRaw) : "";
-  const callbackURL = new URL(c.req.url);
+  const callbackURL = new URL("/device", c.req.url);
   if (userCode) {
     callbackURL.searchParams.set("user_code", userCode);
   }

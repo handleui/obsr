@@ -50,6 +50,7 @@
   "[mdx]": {
     "editor.defaultFormatter": "biomejs.biome"
   },
+  "files.insertFinalNewline": true,
   "files.associations": {
     "*.dev.vars": "dotenv",
     "*.dev.vars.example": "dotenv"

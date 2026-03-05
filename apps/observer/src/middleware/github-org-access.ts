@@ -179,11 +179,16 @@ const revalidateActiveGitHubMembership = async (
     return null;
   }
 
+  const installationId = org.providerInstallationId;
+  if (!installationId) {
+    return null;
+  }
+
   try {
     const membership = await verifyGitHubMembership(
       githubIdentity.username,
       org.providerAccountLogin,
-      org.providerInstallationId as string,
+      installationId,
       env
     );
 
@@ -252,11 +257,19 @@ const resolveNewMemberRole = async (
   githubIdentity: GitHubIdentity,
   env: Env
 ): Promise<{ role: OrgAccessRole } | { error: string; status: number }> => {
+  const installationId = org.providerInstallationId;
+  if (!installationId) {
+    return {
+      error: "GitHub App not installed for this organization",
+      status: 400,
+    };
+  }
+
   // Only verify membership via GitHub for NEW members trying to auto-join
   const membership = await verifyGitHubMembership(
     githubIdentity.username,
     org.providerAccountLogin,
-    org.providerInstallationId as string,
+    installationId,
     env
   );
 

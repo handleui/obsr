@@ -246,17 +246,12 @@ export const getGitHubToken = async (): Promise<string | null> => {
     credentials.github_refresh_token &&
     !isGitHubRefreshTokenExpired(credentials)
   ) {
-    try {
-      const accessToken = await getAccessToken();
-      const newCredentials = await refreshGitHubTokenInternal(
-        accessToken,
-        credentials
-      );
-      if (newCredentials?.github_token) {
-        return newCredentials.github_token;
-      }
-    } catch {
-      return null;
+    const newCredentials = await refreshGitHubTokenInternal(
+      credentials.access_token,
+      credentials
+    );
+    if (newCredentials?.github_token) {
+      return newCredentials.github_token;
     }
   }
 

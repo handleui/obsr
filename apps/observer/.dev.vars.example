@@ -4,18 +4,31 @@
 # GitHub App
 GITHUB_APP_ID=
 GITHUB_CLIENT_ID=
+# Required for POST /v1/auth/github-token/refresh
+GITHUB_CLIENT_SECRET=
 # Private key must be single-line with literal \n
 # Convert: awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' your-key.pem
 GITHUB_APP_PRIVATE_KEY=
 GITHUB_WEBHOOK_SECRET=
 
-# WorkOS
-WORKOS_CLIENT_ID=
-WORKOS_API_KEY=
-
-# Convex
-CONVEX_URL=https://your-deployment.convex.cloud
-CONVEX_SERVICE_TOKEN=
+# Better Auth
+BETTER_AUTH_SECRET=
+BETTER_AUTH_URL=http://observer.localhost:1355
+BETTER_AUTH_TRUSTED_ORIGINS=http://detent.localhost:1355
+BETTER_AUTH_GITHUB_CLIENT_ID=
+BETTER_AUTH_GITHUB_CLIENT_SECRET=
+BETTER_AUTH_GITHUB_SCOPES=read:user,user:email,read:org
+# Optional: override provider endpoints if needed
+# BETTER_AUTH_GITHUB_AUTHORIZATION_URL=https://github.com/login/oauth/authorize
+# BETTER_AUTH_GITHUB_TOKEN_URL=https://github.com/login/oauth/access_token
+# BETTER_AUTH_GITHUB_USER_INFO_URL=https://api.github.com/user
+# Optional: enable only in non-production preview/dev environments
+# BETTER_AUTH_OAUTH_PROXY_ENABLED=true
+# BETTER_AUTH_OAUTH_PROXY_CURRENT_URL=http://observer.localhost:1355
+# BETTER_AUTH_OAUTH_PROXY_PRODUCTION_URL=https://observer.detent.sh
+# Optional: CLI device auth settings
+# BETTER_AUTH_DEVICE_CLIENT_IDS=detent-cli
+# BETTER_AUTH_DEVICE_VERIFICATION_URI=http://observer.localhost:1355/device
 
 # Neon PostgreSQL (local dev, prod uses Hyperdrive)
 DATABASE_URL=postgresql://user:pass@host/neondb?sslmode=require

@@ -6,7 +6,7 @@ Cloudflare Workers API for the Detent self-resolving CI/CD platform.
 
 - **Runtime**: Cloudflare Workers
 - **Framework**: Hono
-- **Data Store**: Convex (database + functions)
+- **Data Store**: Neon Postgres via `@detent/db` operations
 - **Caching**: Cloudflare KV (idempotency, rate limiting)
 - **Observability**: Sentry
 
@@ -30,7 +30,7 @@ Cloudflare Workers API for the Detent self-resolving CI/CD platform.
                             v                                  v
                     +-------+--------+                  +-------------+
                     |                |                  |             |
-                    |   Cloudflare   |<---------------->|   Convex    |
+                    |   Cloudflare   |<---------------->| Neon Postgres|
                     |    Workers     |                  | (DB + funcs)|
                     |     (API)      |                  |             |
                     +-------+--------+                  +-------------+
@@ -91,7 +91,7 @@ All routes under `/v1/`:
 |   (User APIs)     |     |   (Machine APIs)  |     |   (Provider)      |
 +-------------------+     +-------------------+     +-------------------+
          |                         |                         |
-   WorkOS Token            X-Detent-Token           X-Hub-Signature-256
+   Better Auth Session/Bearer  X-Detent-Token           X-Hub-Signature-256
    Bearer Auth             SHA-256 hash                   HMAC
          |                         |                         |
    userId, orgId             organizationId              Raw payload
@@ -102,7 +102,7 @@ All routes under `/v1/`:
 ### Organization Access Control
 
 ```
-GitHub OAuth --> WorkOS --> JWT --> githubOrgAccessMiddleware
+GitHub OAuth --> Better Auth --> Session/Bearer --> githubOrgAccessMiddleware
                                             |
                                    +--------+--------+
                                    |                 |
@@ -120,7 +120,7 @@ GitHub OAuth --> WorkOS --> JWT --> githubOrgAccessMiddleware
 
 Role hierarchy: `owner > admin > member > visitor`
 
-## Data Model (Convex)
+## Data Model (Neon)
 
 ### Core Entities
 

@@ -10,7 +10,7 @@ import type { CIError, ErrorSource, ResolveCreateStatus } from "@detent/types";
 import { scrubSecrets } from "@detent/types";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK is designed for namespace import
 import * as Sentry from "@sentry/cloudflare";
-import { getConvexClient } from "../../db/convex";
+import { getDbClient } from "../../db/client";
 import { createResolve, getResolvesByPr } from "../../db/operations/resolves";
 import { sleep } from "../../lib/async";
 import { getDb } from "../../lib/db.js";
@@ -564,7 +564,7 @@ const dispatchResolves = async (
 
 interface CreateResolvesOptions {
   env: Env;
-  convex: DbClient;
+  dbClient: DbClient;
   project: { _id: string; organizationId: string };
   runRecordId: string;
   commitSha: string;
@@ -575,15 +575,22 @@ interface CreateResolvesOptions {
 const createResolvesForErrors = async (
   options: CreateResolvesOptions
 ): Promise<void> => {
-  const { env, convex, project, runRecordId, commitSha, prNumber, runErrors } =
-    options;
+  const {
+    env,
+    dbClient,
+    project,
+    runRecordId,
+    commitSha,
+    prNumber,
+    runErrors,
+  } = options;
 
   if (runErrors.length === 0) {
     return;
   }
 
   const [organization, resolvesByPr] = await Promise.all([
-    convex.query("organizations:getById", {
+    dbClient.query("organizations:getById", {
       id: project.organizationId,
     }) as Promise<{ settings?: OrganizationSettings | null } | null>,
     prNumber
@@ -743,7 +750,7 @@ const storeAndResolveErrors = async (
     `${LOG_PREFIX} ${ctx.logCtx}: Stored ${cappedErrors.length} errors`
   );
 
-  const convex = getConvexClient(env);
+  const dbClient = getDbClient(env);
   const runErrors = errorsWithFingerprints.map(({ error: e, fingerprints }) =>
     toRunError(e, ctx.jobName, fingerprints.lore)
   );
@@ -751,7 +758,7 @@ const storeAndResolveErrors = async (
   try {
     await createResolvesForErrors({
       env,
-      convex,
+      dbClient,
       project,
       runRecordId,
       commitSha: ctx.commitSha,

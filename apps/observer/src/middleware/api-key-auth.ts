@@ -17,9 +17,9 @@
  */
 
 import type { KVNamespace } from "@cloudflare/workers-types";
-import type { ConvexHttpClient } from "convex/browser";
 import type { Context, Next } from "hono";
-import { getConvexClient } from "../db/convex";
+import type { ObserverClient } from "../db/client";
+import { getDbClient } from "../db/client";
 import { hashApiKey } from "../lib/crypto";
 import { getOrgSettings, type OrganizationSettings } from "../lib/org-settings";
 import type { Env } from "../types/env";
@@ -78,7 +78,7 @@ interface CachedApiKey {
 const lookupApiKey = async (
   tokenHash: string,
   kv: KVNamespace,
-  convex: ConvexHttpClient
+  dbClient: ObserverClient
 ): Promise<CachedApiKey | null> => {
   // Cache key uses hash - never store plaintext tokens in KV
   const cacheKey = `${API_KEY_CACHE_PREFIX}${tokenHash}`;
@@ -90,7 +90,7 @@ const lookupApiKey = async (
   }
 
   // Cache miss: lookup in database by hash (select only needed columns)
-  const apiKey = (await convex.query("api_keys:getByKeyHash", {
+  const apiKey = (await dbClient.query("api_keys:getByKeyHash", {
     keyHash: tokenHash,
   })) as { _id: string; organizationId: string; keyHash: string } | null;
 
@@ -100,7 +100,7 @@ const lookupApiKey = async (
 
   // Fetch org settings in parallel with the API key lookup would be ideal,
   // but since we need the organizationId first, we fetch it after
-  const organization = (await convex.query("organizations:getById", {
+  const organization = (await dbClient.query("organizations:getById", {
     id: apiKey.organizationId,
   })) as { settings?: OrganizationSettings | null } | null;
 
@@ -145,12 +145,12 @@ export const apiKeyAuthMiddleware = async (
   }
 
   const kv = c.env["detent-idempotency"];
-  const convex = getConvexClient(c.env);
+  const dbClient = getDbClient(c.env);
 
   try {
     // Hash the provided token for lookup
     const tokenHash = await hashApiKey(token);
-    const apiKey = await lookupApiKey(tokenHash, kv, convex);
+    const apiKey = await lookupApiKey(tokenHash, kv, dbClient);
 
     if (!apiKey) {
       return c.json({ error: "Authentication failed" }, 401);
@@ -159,7 +159,7 @@ export const apiKeyAuthMiddleware = async (
     // Update lastUsedAt in background using waitUntil
     // This doesn't block the response and uses a separate connection
     c.executionCtx.waitUntil(
-      convex
+      dbClient
         .mutation("api_keys:updateLastUsedAt", {
           id: apiKey._id,
           lastUsedAt: Date.now(),

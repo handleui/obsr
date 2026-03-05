@@ -17,11 +17,11 @@ bun run dt <command>       # CLI local dev (never use ./dist/dt)
 - **Runtime**: Bun, Node >=18
 - **Monorepo**: Turborepo
 - **API**: Hono on Cloudflare Workers
-- **Database**: Neon Postgres (Drizzle) + Convex (realtime)
-- **DB Access**: Hyperdrive (Workers), direct Neon URL (Resolver/Web), Convex service token
+- **Database**: Neon Postgres (Drizzle)
+- **DB Access**: Hyperdrive (Workers), direct Neon URL (Resolver/Web)
 - **Web**: Next.js 16, React 19, Tailwind CSS
 - **CLI**: TypeScript, Citty, Ink
-- **Auth**: WorkOS, JWT (Jose)
+- **Auth**: Better Auth (web/observer), WorkOS (CLI deferred), JWT (Jose)
 - **AI**: Claude Haiku (fast) + GPT-5.2-Codex (smart) via Vercel AI Gateway — routing logic in `packages/ai`
 - **Sandboxes**: E2B (fresh per resolve)
 - **Linting**: Biome via Ultracite
@@ -54,10 +54,9 @@ packages/
 
 ## Database
 
-Dual-DB: Neon Postgres (non-realtime) + Convex (realtime).
+Single DB: Neon Postgres.
 
 - **Neon**: Schema in `packages/db/src/schema/` → `drizzle-kit generate` → `drizzle-kit migrate`
-- **Convex**: Schema at `convex/schema.ts` → edit mutations/queries → `npx convex deploy`
 
 ## Rules
 
@@ -65,8 +64,8 @@ Dual-DB: Neon Postgres (non-realtime) + Convex (realtime).
 - IMPORTANT: Use **Context7 MCP** (`resolve-library-id` → `query-docs`) for any external library/docs research. Always use it without asking — just call it directly when you need documentation or code examples for any dependency.
 - Run `bun run fix` before every commit
 - Use `bun run dt x` for local CLI testing
-- Never edit Convex `_generated/` files
 - Never edit Drizzle generated SQL/files manually (including `packages/db/drizzle/**`); only change schema files and regenerate
+- Always generate Drizzle migrations via command (`cd packages/db && bun run db:generate`), never by hand-writing SQL
 - Never create markdown summary files when closing tasks
 
 ### Ask First

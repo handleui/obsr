@@ -5,10 +5,10 @@ import type { Env } from "../types/env";
 
 const mockQuery = vi.fn();
 const mockMutation = vi.fn();
-const mockConvex = { query: mockQuery, mutation: mockMutation };
+const mockDB = { query: mockQuery, mutation: mockMutation };
 
-vi.mock("../db/convex", () => ({
-  getConvexClient: vi.fn(() => mockConvex),
+vi.mock("../db/client", () => ({
+  getDbClient: vi.fn(() => mockDB),
 }));
 
 // Mock polar services

@@ -39,7 +39,6 @@
   },
   "dependencies": {
     "@handleui/shimmer": "0.1.0",
-    "convex": "^1.31.7",
     "motion": "^12.34.0",
     "tar": "^7.5.6"
   }

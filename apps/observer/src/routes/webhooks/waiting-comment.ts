@@ -1,4 +1,4 @@
-import { getConvexClient } from "../../db/convex";
+import { getDbClient } from "../../db/client";
 import { captureLockConflict } from "../../lib/sentry";
 import { formatWaitingComment } from "../../services/comment-formatter";
 import { createGitHubService } from "../../services/github";
@@ -118,8 +118,13 @@ export const postWaitingComment = async (
     await storeCommentId(kv, repository, prNumber, commentId);
 
     // Store in DB for persistence
-    const convex = getConvexClient(env);
-    await upsertCommentIdInDb(convex, repository, prNumber, String(commentId));
+    const dbClient = getDbClient(env);
+    await upsertCommentIdInDb(
+      dbClient,
+      repository,
+      prNumber,
+      String(commentId)
+    );
 
     console.log(
       `[webhook] Posted waiting comment ${commentId} on ${repository}#${prNumber}`

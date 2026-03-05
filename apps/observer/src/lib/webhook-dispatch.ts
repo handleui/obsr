@@ -4,7 +4,7 @@ import {
   type WebhookEventType,
   type WebhookPayload,
 } from "@detent/webhook-dispatch";
-import type { ConvexHttpClient } from "convex/browser";
+import type { ObserverClient } from "../db/client";
 import { decryptToken } from "./encryption";
 
 type WebhookResolveData = WebhookPayload["data"];
@@ -106,14 +106,14 @@ const truncatePatch = (data: WebhookResolveData): WebhookResolveData => {
 };
 
 export const dispatchWebhookEvent = async (
-  convex: ConvexHttpClient,
+  dbClient: ObserverClient,
   encryptionKey: string,
   organizationId: string,
   event: WebhookEventType,
   resolveData: WebhookResolveData
 ): Promise<void> => {
   try {
-    const webhooks = (await convex.query("webhooks:listActiveByOrg", {
+    const webhooks = (await dbClient.query("webhooks:listActiveByOrg", {
       organizationId,
     })) as WebhookRecord[];
 

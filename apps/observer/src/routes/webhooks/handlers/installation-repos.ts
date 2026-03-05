@@ -1,5 +1,5 @@
-import type { ConvexHttpClient } from "convex/browser";
-import { getConvexClient } from "../../../db/convex";
+import type { ObserverClient } from "../../../db/client";
+import { getDbClient } from "../../../db/client";
 import { createTokenSecretWithCleanup } from "../../../lib/github-secrets-helper";
 import { captureWebhookError } from "../../../lib/sentry";
 import { createGitHubService } from "../../../services/github";
@@ -15,7 +15,7 @@ import { createTrackedWaitUntil } from "../utils/tracked-background-task";
  * Uses shared helper for API key lifecycle management.
  */
 const autoCreateSecretsForNewRepos = async (
-  convex: ConvexHttpClient,
+  dbClient: ObserverClient,
   organizationId: string,
   providerAccountLogin: string,
   installationId: string,
@@ -26,7 +26,7 @@ const autoCreateSecretsForNewRepos = async (
   const token = await github.getInstallationToken(Number(installationId));
 
   const result = await createTokenSecretWithCleanup({
-    convex,
+    dbClient,
     organizationId,
     providerAccountLogin,
     providerAccountType: "user",
@@ -60,11 +60,11 @@ export const handleInstallationRepositoriesEvent = async (
     `[installation_repositories] ${action}: installation ${installation.id}, added=${repositories_added.length}, removed=${repositories_removed.length} [delivery: ${deliveryId}]`
   );
 
-  const convex = getConvexClient(c.env);
+  const dbClient = getDbClient(c.env);
 
   try {
     // Find organization by installation ID
-    const orgs = (await convex.query(
+    const orgs = (await dbClient.query(
       "organizations:listByProviderInstallationId",
       {
         providerInstallationId: String(installation.id),
@@ -89,7 +89,7 @@ export const handleInstallationRepositoriesEvent = async (
 
     // Handle added repositories
     if (repositories_added.length > 0) {
-      await convex.mutation("projects:syncFromGitHub", {
+      await dbClient.mutation("projects:syncFromGitHub", {
         organizationId: org._id,
         repos: repositories_added.map((repo) => ({
           id: String(repo.id),
@@ -118,7 +118,7 @@ export const handleInstallationRepositoriesEvent = async (
         waitUntilTracked(
           (async () => {
             await autoCreateSecretsForNewRepos(
-              getConvexClient(c.env),
+              getDbClient(c.env),
               org._id,
               org.providerAccountLogin as string,
               String(installation.id),
@@ -134,7 +134,7 @@ export const handleInstallationRepositoriesEvent = async (
     // Handle removed repositories (soft-delete) - batch update for performance
     if (repositories_removed.length > 0) {
       const repoIds = repositories_removed.map((repo) => String(repo.id));
-      await convex.mutation("projects:softDeleteByOrgRepoIds", {
+      await dbClient.mutation("projects:softDeleteByOrgRepoIds", {
         organizationId: org._id,
         providerRepoIds: repoIds,
         removedAt: Date.now(),

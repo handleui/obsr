@@ -4,6 +4,24 @@ import type { Db } from "../client.js";
 import { runErrors } from "../schema/index.js";
 import { clampLimit } from "../utils.js";
 
+export interface RunErrorDiagnosticRow {
+  message: string;
+  filePath: string | null;
+  line: number | null;
+  column: number | null;
+  category: string | null;
+  severity: string | null;
+  ruleId: string | null;
+  source: string | null;
+  workflowJob: string | null;
+}
+
+export interface RunErrorFixableSummary {
+  id: string;
+  signatureId: string | null;
+  source: string | null;
+}
+
 export const getById = async (db: Db, id: string) => {
   const [row] = await db
     .select()
@@ -22,6 +40,29 @@ export const listByRunId = (db: Db, runId: string, limit?: number | null) => {
     .limit(take);
 };
 
+export const listDiagnosticRowsByRunId = (
+  db: Db,
+  runId: string,
+  limit?: number | null
+) => {
+  const take = clampLimit(limit, 1, 1000, 500);
+  return db
+    .select({
+      message: runErrors.message,
+      filePath: runErrors.filePath,
+      line: runErrors.line,
+      column: runErrors.column,
+      category: runErrors.category,
+      severity: runErrors.severity,
+      ruleId: runErrors.ruleId,
+      source: runErrors.source,
+      workflowJob: runErrors.workflowJob,
+    })
+    .from(runErrors)
+    .where(eq(runErrors.runId, runId))
+    .limit(take);
+};
+
 export const listFixableByRunId = (
   db: Db,
   runId: string,
@@ -30,6 +71,23 @@ export const listFixableByRunId = (
   const take = clampLimit(limit, 1, 1000, 500);
   return db
     .select()
+    .from(runErrors)
+    .where(and(eq(runErrors.runId, runId), eq(runErrors.fixable, true)))
+    .limit(take);
+};
+
+export const listFixableSummariesByRunId = (
+  db: Db,
+  runId: string,
+  limit?: number | null
+) => {
+  const take = clampLimit(limit, 1, 1000, 500);
+  return db
+    .select({
+      id: runErrors.id,
+      signatureId: runErrors.signatureId,
+      source: runErrors.source,
+    })
     .from(runErrors)
     .where(and(eq(runErrors.runId, runId), eq(runErrors.fixable, true)))
     .limit(take);

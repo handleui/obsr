@@ -1,5 +1,5 @@
-import type { ConvexHttpClient } from "convex/browser";
-import { getConvexClient } from "../../../db/convex";
+import type { ObserverClient } from "../../../db/client";
+import { getDbClient } from "../../../db/client";
 import { verifyGitHubMembership } from "../../../lib/github-membership";
 import { createTokenSecretWithCleanup } from "../../../lib/github-secrets-helper";
 import {
@@ -15,7 +15,7 @@ import type { InstallationPayload, WebhookContext } from "../types";
 import { createTrackedWaitUntil } from "../utils/tracked-background-task";
 
 const autoLinkInstaller = async (
-  convex: DbClient,
+  dbClient: DbClient,
   organizationId: string,
   installerGithubId: string,
   installerUsername: string,
@@ -25,7 +25,7 @@ const autoLinkInstaller = async (
   env: Env
 ): Promise<boolean> => {
   // Check if installer already has a Detent account (via any org membership with matching GitHub ID)
-  const existingMembers = (await convex.query(
+  const existingMembers = (await dbClient.query(
     "organization_members:listByProviderUserId",
     {
       providerUserId: installerGithubId,
@@ -39,7 +39,7 @@ const autoLinkInstaller = async (
   }
 
   // Check if they already have active membership to this specific org
-  const existingMembership = (await convex.query(
+  const existingMembership = (await dbClient.query(
     "organization_members:getByOrgUser",
     {
       organizationId,
@@ -76,7 +76,7 @@ const autoLinkInstaller = async (
   // For personal accounts: installer is the account owner by definition, no verification needed
 
   // Create owner membership for the installer
-  await convex.mutation("organization_members:createIfMissing", {
+  await dbClient.mutation("organization_members:createIfMissing", {
     organizationId,
     userId: existingMember.userId,
     role: "owner",
@@ -94,7 +94,7 @@ const autoLinkInstaller = async (
 };
 
 interface AutoCreateSecretParams {
-  convex: ConvexHttpClient;
+  dbClient: ObserverClient;
   organizationId: string;
   providerAccountLogin: string;
   providerAccountType: "organization" | "user";
@@ -111,7 +111,7 @@ interface AutoCreateSecretParams {
  * Uses shared helper for API key lifecycle management.
  */
 const autoCreateSecret = async ({
-  convex,
+  dbClient,
   organizationId,
   providerAccountLogin,
   providerAccountType,
@@ -123,7 +123,7 @@ const autoCreateSecret = async ({
   const token = await github.getInstallationToken(Number(installationId));
 
   const result = await createTokenSecretWithCleanup({
-    convex,
+    dbClient,
     organizationId,
     providerAccountLogin,
     providerAccountType,
@@ -161,9 +161,9 @@ const triggerSecretCreation = async (
   repositories: Array<{ full_name: string }>,
   env: Env
 ): Promise<void> => {
-  const convex = getConvexClient(env);
+  const dbClient = getDbClient(env);
   await autoCreateSecret({
-    convex,
+    dbClient,
     organizationId: orgId,
     providerAccountLogin,
     providerAccountType,
@@ -174,7 +174,7 @@ const triggerSecretCreation = async (
 };
 
 const generateUniqueSlug = async (
-  convex: DbClient,
+  dbClient: DbClient,
   baseSlug: string
 ): Promise<string> => {
   const maxSlugAttempts = 10;
@@ -190,7 +190,7 @@ const generateUniqueSlug = async (
 
   // Return the first available slug
   for (const slug of potentialSlugs) {
-    const existing = (await convex.query("organizations:getBySlug", {
+    const existing = (await dbClient.query("organizations:getBySlug", {
       slug,
     })) as { _id: string } | null;
     if (!existing) {
@@ -204,7 +204,7 @@ const generateUniqueSlug = async (
 
 // Handle installation.created event - create organization and projects
 const handleInstallationCreated = async (
-  convex: DbClient,
+  dbClient: DbClient,
   installation: InstallationPayload["installation"],
   repositories: InstallationPayload["repositories"],
   sender: InstallationPayload["sender"],
@@ -217,7 +217,7 @@ const handleInstallationCreated = async (
   const now = Date.now();
 
   // Check by providerAccountId first (survives reinstalls - GitHub org/user ID is immutable)
-  const existingByAccount = (await convex.query(
+  const existingByAccount = (await dbClient.query(
     "organizations:getByProviderAccount",
     {
       provider: "github",
@@ -228,7 +228,7 @@ const handleInstallationCreated = async (
   if (existingByAccount) {
     if (existingByAccount.deletedAt) {
       // Reactivate soft-deleted org with new installation
-      await convex.mutation("organizations:update", {
+      await dbClient.mutation("organizations:update", {
         id: existingByAccount._id,
         deletedAt: null,
         providerInstallationId: String(installation.id),
@@ -238,7 +238,7 @@ const handleInstallationCreated = async (
         updatedAt: now,
       });
 
-      await convex.mutation("projects:clearRemovedByOrg", {
+      await dbClient.mutation("projects:clearRemovedByOrg", {
         organizationId: existingByAccount._id,
         updatedAt: now,
       });
@@ -248,7 +248,7 @@ const handleInstallationCreated = async (
       );
 
       if (repositories && repositories.length > 0) {
-        await convex.mutation("projects:syncFromGitHub", {
+        await dbClient.mutation("projects:syncFromGitHub", {
           organizationId: existingByAccount._id,
           repos: repositories.map((repo) => ({
             id: String(repo.id),
@@ -262,7 +262,7 @@ const handleInstallationCreated = async (
       }
 
       await autoLinkInstaller(
-        convex,
+        dbClient,
         existingByAccount._id,
         String(sender.id),
         sender.login,
@@ -280,7 +280,7 @@ const handleInstallationCreated = async (
       };
     }
 
-    await convex.mutation("organizations:update", {
+    await dbClient.mutation("organizations:update", {
       id: existingByAccount._id,
       providerInstallationId: String(installation.id),
       providerAccountLogin: account.login,
@@ -299,7 +299,7 @@ const handleInstallationCreated = async (
   }
 
   // Fallback: check by installation ID (handles edge case of duplicate webhooks)
-  const existingByInstall = (await convex.query(
+  const existingByInstall = (await dbClient.query(
     "organizations:listByProviderInstallationId",
     {
       providerInstallationId: String(installation.id),
@@ -320,9 +320,9 @@ const handleInstallationCreated = async (
   // Create organization when app is installed
   // Use provider-prefixed slug format: gh/login or gl/login
   const baseSlug = createProviderSlug("github", account.login);
-  const slug = await generateUniqueSlug(convex, baseSlug);
+  const slug = await generateUniqueSlug(dbClient, baseSlug);
 
-  const organizationId = (await convex.mutation("organizations:create", {
+  const organizationId = (await dbClient.mutation("organizations:create", {
     name: account.login,
     slug,
     provider: "github",
@@ -343,7 +343,7 @@ const handleInstallationCreated = async (
   );
 
   if (repositories && repositories.length > 0) {
-    await convex.mutation("projects:syncFromGitHub", {
+    await dbClient.mutation("projects:syncFromGitHub", {
       organizationId,
       repos: repositories.map((repo) => ({
         id: String(repo.id),
@@ -361,7 +361,7 @@ const handleInstallationCreated = async (
   }
 
   await autoLinkInstaller(
-    convex,
+    dbClient,
     organizationId,
     String(sender.id),
     sender.login,
@@ -377,7 +377,7 @@ const handleInstallationCreated = async (
 // Handle the "created" action for installation events
 const handleCreatedAction = async (
   c: WebhookContext,
-  convex: DbClient,
+  dbClient: DbClient,
   installation: InstallationPayload["installation"],
   repositories: InstallationPayload["repositories"],
   sender: InstallationPayload["sender"]
@@ -386,7 +386,7 @@ const handleCreatedAction = async (
   const deliveryId = c.req.header("X-GitHub-Delivery") ?? "unknown";
 
   const result = await handleInstallationCreated(
-    convex,
+    dbClient,
     installation,
     repositories,
     sender,
@@ -458,14 +458,14 @@ export const handleInstallationEvent = async (
     `[installation] ${action}: ${account.login} (${account.type}, installation ${installation.id}) [delivery: ${deliveryId}]`
   );
 
-  const convex = getConvexClient(c.env);
+  const dbClient = getDbClient(c.env);
 
   try {
     switch (action) {
       case "created":
         return await handleCreatedAction(
           c,
-          convex,
+          dbClient,
           installation,
           repositories,
           payload.sender
@@ -473,7 +473,7 @@ export const handleInstallationEvent = async (
 
       case "deleted": {
         // Get org with polarCustomerId before soft-deleting
-        const orgs = (await convex.query(
+        const orgs = (await dbClient.query(
           "organizations:listByProviderInstallationId",
           {
             providerInstallationId: String(installation.id),
@@ -511,7 +511,7 @@ export const handleInstallationEvent = async (
         }
 
         if (orgToDelete) {
-          await convex.mutation("organizations:update", {
+          await dbClient.mutation("organizations:update", {
             id: orgToDelete._id,
             deletedAt: Date.now(),
             updatedAt: Date.now(),
@@ -529,14 +529,14 @@ export const handleInstallationEvent = async (
       }
 
       case "suspend": {
-        const orgs = (await convex.query(
+        const orgs = (await dbClient.query(
           "organizations:listByProviderInstallationId",
           {
             providerInstallationId: String(installation.id),
           }
         )) as Array<{ _id: string }>;
         if (orgs[0]) {
-          await convex.mutation("organizations:update", {
+          await dbClient.mutation("organizations:update", {
             id: orgs[0]._id,
             suspendedAt: Date.now(),
             updatedAt: Date.now(),
@@ -550,14 +550,14 @@ export const handleInstallationEvent = async (
       }
 
       case "unsuspend": {
-        const orgs = (await convex.query(
+        const orgs = (await dbClient.query(
           "organizations:listByProviderInstallationId",
           {
             providerInstallationId: String(installation.id),
           }
         )) as Array<{ _id: string }>;
         if (orgs[0]) {
-          await convex.mutation("organizations:update", {
+          await dbClient.mutation("organizations:update", {
             id: orgs[0]._id,
             suspendedAt: null,
             updatedAt: Date.now(),
@@ -573,14 +573,14 @@ export const handleInstallationEvent = async (
       case "new_permissions_accepted": {
         // User accepted new permissions requested by the app
         // Update the organization's updatedAt to track this event
-        const orgs = (await convex.query(
+        const orgs = (await dbClient.query(
           "organizations:listByProviderInstallationId",
           {
             providerInstallationId: String(installation.id),
           }
         )) as Array<{ _id: string }>;
         if (orgs[0]) {
-          await convex.mutation("organizations:update", {
+          await dbClient.mutation("organizations:update", {
             id: orgs[0]._id,
             updatedAt: Date.now(),
           });

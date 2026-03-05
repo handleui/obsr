@@ -58,10 +58,10 @@ const mockReturning = vi.fn();
 
 const mockQuery = vi.fn();
 const mockMutation = vi.fn();
-const mockConvex = { query: mockQuery, mutation: mockMutation };
+const mockDB = { query: mockQuery, mutation: mockMutation };
 
-vi.mock("../db/convex", () => ({
-  getConvexClient: vi.fn(() => mockConvex),
+vi.mock("../db/client", () => ({
+  getDbClient: vi.fn(() => mockDB),
 }));
 
 // Mock GitHub identity verification
@@ -125,8 +125,6 @@ const createMember = (
 });
 
 const MOCK_ENV = createMockEnv({
-  WORKOS_API_KEY: "sk_test_workos_key",
-  WORKOS_CLIENT_ID: "client_123",
   GITHUB_APP_ID: "123",
   GITHUB_APP_PRIVATE_KEY: "key",
 });
@@ -588,6 +586,87 @@ describe("github-org-access middleware", () => {
 
       expect(res.status).toBe(403);
       expect(json.error).toBe("Access denied");
+    });
+
+    it("revalidates stale github-managed memberships and revokes removed users", async () => {
+      const org = createOrg();
+      const member = createMember({
+        role: "admin",
+        membershipSource: "github_access",
+        providerVerifiedAt: new Date(Date.now() - 11 * 60 * 1000),
+      });
+
+      mockOrgFindFirst.mockResolvedValue(org);
+      mockMemberFindFirst.mockResolvedValue(member);
+
+      mockGetVerifiedGitHubIdentity.mockResolvedValue({
+        userId: "gh-user-456",
+        username: "testuser",
+      });
+
+      mockVerifyGitHubMembership.mockResolvedValue({
+        isMember: false,
+        role: null,
+      });
+
+      const { githubOrgAccessMiddleware } = await import("./github-org-access");
+      const { Hono } = await import("hono");
+      const app = new Hono();
+
+      app.use("*", async (c, next) => {
+        c.set("auth" as never, { userId: "user-abc" } as never);
+        await next();
+      });
+      app.use("/orgs/:orgId/*", githubOrgAccessMiddleware);
+      app.get("/orgs/:orgId/test", (c) => c.json({ ok: true }));
+
+      const res = await app.request("/orgs/org-123/test", {}, MOCK_ENV);
+      const json = (await res.json()) as { error: string };
+
+      expect(res.status).toBe(403);
+      expect(json.error).toBe("Access denied");
+      expect(mockVerifyGitHubMembership).toHaveBeenCalled();
+      expect(mockMutation).toHaveBeenCalledWith(
+        "organization_members:update",
+        expect.objectContaining({
+          id: "member-123",
+          removalReason: "github_left",
+        })
+      );
+    });
+
+    it("does not revalidate recently verified github-managed members", async () => {
+      const org = createOrg();
+      const member = createMember({
+        membershipSource: "github_access",
+        providerVerifiedAt: new Date(),
+      });
+
+      mockOrgFindFirst.mockResolvedValue(org);
+      mockMemberFindFirst.mockResolvedValue(member);
+
+      mockGetVerifiedGitHubIdentity.mockResolvedValue({
+        userId: "gh-user-456",
+        username: "testuser",
+      });
+
+      const { githubOrgAccessMiddleware } = await import("./github-org-access");
+      const { Hono } = await import("hono");
+      const app = new Hono();
+
+      app.use("*", async (c, next) => {
+        c.set("auth" as never, { userId: "user-abc" } as never);
+        await next();
+      });
+      app.use("/orgs/:orgId/*", githubOrgAccessMiddleware);
+      app.get("/orgs/:orgId/test", (c) => c.json({ ok: true }));
+
+      const res = await app.request("/orgs/org-123/test", {}, MOCK_ENV);
+      const json = (await res.json()) as { ok: boolean };
+
+      expect(res.status).toBe(200);
+      expect(json.ok).toBe(true);
+      expect(mockVerifyGitHubMembership).not.toHaveBeenCalled();
     });
   });
 });

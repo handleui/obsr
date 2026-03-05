@@ -10,6 +10,7 @@ type TransactionEvent = Parameters<
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
+import { getBetterAuth } from "./lib/better-auth";
 import { apiKeyRateLimitMiddleware } from "./middleware/api-key-rate-limit";
 import { authMiddleware } from "./middleware/auth";
 import { combinedAuthMiddleware } from "./middleware/combined-auth";
@@ -19,6 +20,7 @@ import apiKeysRoutes from "./routes/api-keys";
 import authRoutes from "./routes/auth";
 import autofixResultRoutes from "./routes/autofix-result";
 import billingRoutes from "./routes/billing";
+import deviceRoutes from "./routes/device";
 import errorsRoutes from "./routes/errors";
 import githubSecretsRoutes from "./routes/github-secrets";
 import healthRoutes from "./routes/health";
@@ -33,7 +35,7 @@ import webhookRoutes from "./routes/webhooks";
 import polarWebhookRoutes from "./routes/webhooks/polar";
 import type { Env } from "./types/env";
 
-const app = new Hono<{ Bindings: Env }>();
+export const app = new Hono<{ Bindings: Env }>();
 
 app.use("*", logger());
 
@@ -92,6 +94,11 @@ app.use(
 app.use("*", sentryContextMiddleware);
 
 app.get("/", (c) => c.text("detent observer"));
+app.route("/device", deviceRoutes);
+app.on(["GET", "POST"], "/api/auth/*", (c) => {
+  const auth = getBetterAuth(c.env);
+  return auth.handler(c.req.raw);
+});
 app.route("/health", healthRoutes);
 app.route("/webhooks", webhookRoutes);
 app.route("/webhooks/polar", polarWebhookRoutes);

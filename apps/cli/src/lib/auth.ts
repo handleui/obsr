@@ -1,5 +1,5 @@
 /**
- * WorkOS Device Authorization Flow for CLI authentication
+ * Better Auth Device Authorization Flow for CLI authentication
  *
  * Implements OAuth 2.0 Device Authorization Grant (RFC 8628)
  * for authenticating CLI users through their browser.
@@ -13,19 +13,12 @@ import {
   saveCredentials,
 } from "./credentials.js";
 
-const WORKOS_API_BASE = "https://api.workos.com";
-
-const getAuthUrl = (): string => {
-  return process.env.DETENT_AUTH_URL ?? "https://detent.sh";
+const getApiUrl = (): string => {
+  return process.env.DETENT_API_URL ?? "https://observer.detent.sh";
 };
 
-/**
- * Get WorkOS client ID at runtime (not module load time)
- * This ensures dotenv has been loaded before we read the env variable
- */
-const getWorkosClientId = (): string => {
-  const clientId = process.env.WORKOS_CLIENT_ID ?? "";
-  return clientId;
+const getDeviceClientId = (): string => {
+  return process.env.DETENT_CLI_CLIENT_ID ?? "detent-cli";
 };
 
 export interface DeviceAuthorizationResponse {
@@ -39,11 +32,9 @@ export interface DeviceAuthorizationResponse {
 
 export interface TokenResponse {
   access_token: string;
-  refresh_token: string;
   token_type: string;
   expires_in: number;
-  // GitHub OAuth tokens (from browser flow when "Return GitHub OAuth tokens" is enabled)
-  // Access token expires in ~8 hours, refresh token expires in ~6 months
+  refresh_token?: string;
   github_token?: string;
   github_token_expires_at?: number;
   github_refresh_token?: string;
@@ -68,22 +59,14 @@ const sleep = (ms: number): Promise<void> =>
 
 export const requestDeviceAuthorization =
   async (): Promise<DeviceAuthorizationResponse> => {
-    const clientId = getWorkosClientId();
-    if (!clientId) {
-      throw new Error(
-        "WORKOS_CLIENT_ID environment variable is not set. " +
-          "Set it in your shell or .env file."
-      );
-    }
-
-    const response = await fetch(
-      `${WORKOS_API_BASE}/user_management/authorize/device`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client_id: clientId }),
-      }
-    );
+    const response = await fetch(`${getApiUrl()}/api/auth/device/code`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: getDeviceClientId(),
+        scope: "openid profile email",
+      }),
+    });
 
     if (!response.ok) {
       const error = await response.text();
@@ -100,7 +83,6 @@ export const pollForTokens = async (
   interval: number,
   onPoll?: () => void
 ): Promise<TokenResponse> => {
-  const clientId = getWorkosClientId();
   let pollInterval = interval;
   let attempts = 0;
 
@@ -109,18 +91,15 @@ export const pollForTokens = async (
     await sleep(pollInterval * 1000);
     onPoll?.();
 
-    const response = await fetch(
-      `${WORKOS_API_BASE}/user_management/authenticate`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-          device_code: deviceCode,
-          client_id: clientId,
-        }),
-      }
-    );
+    const response = await fetch(`${getApiUrl()}/api/auth/device/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: deviceCode,
+        client_id: getDeviceClientId(),
+      }),
+    });
 
     const data = (await response.json()) as TokenResponse | TokenErrorResponse;
 
@@ -149,46 +128,15 @@ export const pollForTokens = async (
   );
 };
 
-export const refreshAccessToken = async (
-  refreshToken: string
-): Promise<TokenResponse> => {
-  const clientId = getWorkosClientId();
-  // Use the same /user_management/authenticate endpoint with refresh_token grant type
-  // For CLI (public client) apps using device flow, client_secret is not required
-  const response = await fetch(
-    `${WORKOS_API_BASE}/user_management/authenticate`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        grant_type: "refresh_token",
-        refresh_token: refreshToken,
-        client_id: clientId,
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to refresh token: ${error}`);
-  }
-
-  return response.json() as Promise<TokenResponse>;
-};
-
-/**
- * Extract expiration time from JWT's exp claim
- */
 export const getJwtExpiration = (token: string): number => {
   const payload = decodeJwt(token);
   if (typeof payload.exp === "number") {
-    return payload.exp * 1000; // Convert seconds to milliseconds
+    return payload.exp * 1000;
   }
-  // Fallback: 1 hour from now if no exp claim
   return Date.now() + 3600 * 1000;
 };
 
-export const getAccessToken = async (): Promise<string> => {
+export const getAccessToken = (): string => {
   const credentials = loadCredentials();
 
   if (!credentials) {
@@ -199,34 +147,9 @@ export const getAccessToken = async (): Promise<string> => {
     return credentials.access_token;
   }
 
-  const tokens = await refreshAccessToken(credentials.refresh_token);
-  // Use the JWT's actual exp claim, not expires_in from response
-  // Preserve existing GitHub tokens if still valid (WorkOS refresh doesn't return new GitHub tokens)
-  const newCredentials: Credentials = {
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    expires_at: getJwtExpiration(tokens.access_token),
-    // Keep GitHub access token if it hasn't expired yet
-    // If github_token_expires_at is undefined, token is non-expiring (GitHub classic OAuth)
-    ...(credentials.github_token &&
-      (credentials.github_token_expires_at === undefined ||
-        credentials.github_token_expires_at > Date.now()) && {
-        github_token: credentials.github_token,
-        github_token_expires_at: credentials.github_token_expires_at,
-      }),
-    // Keep GitHub refresh token if it hasn't expired yet (6-month lifetime)
-    // If github_refresh_token_expires_at is undefined, token is non-expiring
-    ...(credentials.github_refresh_token &&
-      (credentials.github_refresh_token_expires_at === undefined ||
-        credentials.github_refresh_token_expires_at > Date.now()) && {
-        github_refresh_token: credentials.github_refresh_token,
-        github_refresh_token_expires_at:
-          credentials.github_refresh_token_expires_at,
-      }),
-  };
-
-  saveCredentials(newCredentials);
-  return newCredentials.access_token;
+  throw new Error(
+    "Session expired. Run `dt auth login --force` to re-authenticate."
+  );
 };
 
 export const decodeUserInfo = (accessToken: string): UserInfo => {
@@ -248,15 +171,10 @@ export const getExpiresAt = (accessToken: string): Date | null => {
   return null;
 };
 
-/**
- * Check if GitHub access token is expired
- * Uses a 5-minute buffer for safety, same as WorkOS access token expiration check
- */
 export const isGitHubTokenExpired = (credentials: Credentials): boolean => {
   if (!credentials.github_token) {
-    return true; // No token = expired
+    return true;
   }
-  // If no expires_at, token is non-expiring (GitHub classic OAuth)
   if (!credentials.github_token_expires_at) {
     return false;
   }
@@ -264,10 +182,6 @@ export const isGitHubTokenExpired = (credentials: Credentials): boolean => {
   return credentials.github_token_expires_at < Date.now() + bufferMs;
 };
 
-/**
- * Check if GitHub refresh token is expired
- * Uses a 1-hour buffer since refresh tokens have a 6-month lifetime
- */
 export const isGitHubRefreshTokenExpired = (
   credentials: Credentials
 ): boolean => {
@@ -279,14 +193,10 @@ export const isGitHubRefreshTokenExpired = (
   ) {
     return true;
   }
-  const bufferMs = 60 * 60 * 1000; // 1 hour buffer
+  const bufferMs = 60 * 60 * 1000;
   return credentials.github_refresh_token_expires_at < Date.now() + bufferMs;
 };
 
-/**
- * Refresh the GitHub OAuth token using the refresh token
- * Calls the API endpoint which handles the GitHub token exchange server-side
- */
 const refreshGitHubTokenInternal = async (
   accessToken: string,
   credentials: Credentials
@@ -307,7 +217,6 @@ const refreshGitHubTokenInternal = async (
       credentials.github_refresh_token
     );
 
-    // Update credentials with new GitHub tokens
     const newCredentials: Credentials = {
       ...credentials,
       github_token: response.access_token,
@@ -319,84 +228,52 @@ const refreshGitHubTokenInternal = async (
     saveCredentials(newCredentials);
     return newCredentials;
   } catch {
-    // Return null silently - caller decides how to handle missing token
-    // This avoids displaying error messages when CLI gracefully falls back
     return null;
   }
 };
 
-/**
- * Get GitHub OAuth token from credentials if available
- * Automatically refreshes the token if expired but refresh token is still valid
- *
- * Returns null if:
- * - No credentials exist
- * - No GitHub token stored
- * - GitHub token is expired AND refresh failed or not available
- */
 export const getGitHubToken = async (): Promise<string | null> => {
   const credentials = loadCredentials();
   if (!credentials?.github_token) {
     return null;
   }
 
-  // Return token if not expired
   if (!isGitHubTokenExpired(credentials)) {
     return credentials.github_token;
   }
 
-  // Token is expired - try to refresh if we have a refresh token
   if (
     credentials.github_refresh_token &&
     !isGitHubRefreshTokenExpired(credentials)
   ) {
-    try {
-      // Get a valid WorkOS access token first (may need refresh itself)
-      const accessToken = await getAccessToken();
-      const newCredentials = await refreshGitHubTokenInternal(
-        accessToken,
-        credentials
-      );
-      if (newCredentials?.github_token) {
-        return newCredentials.github_token;
-      }
-    } catch {
-      // Failed to refresh - return null
+    const newCredentials = await refreshGitHubTokenInternal(
+      credentials.access_token,
+      credentials
+    );
+    if (newCredentials?.github_token) {
+      return newCredentials.github_token;
     }
   }
 
-  // Token expired and couldn't refresh
   return null;
 };
 
 export interface TokenHealthStatus {
-  workos: "valid" | "expired" | "refresh_needed" | "missing";
-  github:
-    | "valid"
-    | "expired"
-    | "refresh_needed"
-    | "refresh_available"
-    | "missing";
+  access: "valid" | "expired" | "missing";
+  github: "valid" | "expired" | "refresh_available" | "missing";
 }
 
-/**
- * Check health of stored tokens without throwing
- * Returns status object for caller to handle (e.g., show warnings on CLI startup)
- * Synchronous - only checks local token expiration, no API calls
- */
 export const checkTokenHealth = (): TokenHealthStatus => {
   const credentials = loadCredentials();
 
   if (!credentials) {
-    return { workos: "missing", github: "missing" };
+    return { access: "missing", github: "missing" };
   }
 
-  // Check WorkOS token
-  const workosStatus: TokenHealthStatus["workos"] = isTokenExpired(credentials)
-    ? "refresh_needed"
+  const accessStatus: TokenHealthStatus["access"] = isTokenExpired(credentials)
+    ? "expired"
     : "valid";
 
-  // Check GitHub token
   let githubStatus: TokenHealthStatus["github"] = "missing";
   if (credentials.github_token) {
     if (!isGitHubTokenExpired(credentials)) {
@@ -411,72 +288,21 @@ export const checkTokenHealth = (): TokenHealthStatus => {
     }
   }
 
-  return { workos: workosStatus, github: githubStatus };
+  return { access: accessStatus, github: githubStatus };
 };
 
-/**
- * Authenticate via Detent web app (browser-based flow)
- * Opens browser to the web app which handles WorkOS auth,
- * then receives callback on localhost with encrypted tokens.
- */
 export const authenticateViaWeb = async (): Promise<TokenResponse> => {
   const { openBrowser } = await import("./browser.js");
-  const { generateState, startCallbackServer } = await import(
-    "./localhost-server.js"
-  );
 
-  const authBaseUrl = getAuthUrl();
-  const state = generateState();
-  const server = await startCallbackServer(state);
-  const authUrl = `${authBaseUrl}/cli/auth?port=${server.port}&state=${state}`;
+  const device = await requestDeviceAuthorization();
 
   try {
-    await openBrowser(authUrl);
+    await openBrowser(device.verification_uri_complete);
   } catch {
-    console.log(`\nPlease open this URL in your browser:\n  ${authUrl}\n`);
-  }
-
-  const { code } = await server.waitForCallback();
-
-  const response = await fetch(`${authBaseUrl}/api/cli/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Token exchange failed: ${error}`);
-  }
-
-  const tokens = (await response.json()) as {
-    access_token: string;
-    refresh_token: string;
-    expires_at: number;
-    github_token?: string;
-    github_token_expires_at?: number;
-    github_refresh_token?: string;
-    github_refresh_token_expires_at?: number;
-  };
-
-  // Debug: log what browser auth returned
-  if (process.env.DEBUG) {
     console.log(
-      "[auth] Browser token exchange response:",
-      `access_token: ${tokens.access_token ? "present" : "missing"},`,
-      `github_token: ${tokens.github_token ? "present" : "missing"}`
+      `\nPlease open this URL in your browser:\n  ${device.verification_uri_complete}\n`
     );
   }
 
-  return {
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    token_type: "Bearer",
-    expires_in: Math.floor((tokens.expires_at - Date.now()) / 1000),
-    // Pass through GitHub OAuth tokens if available
-    github_token: tokens.github_token,
-    github_token_expires_at: tokens.github_token_expires_at,
-    github_refresh_token: tokens.github_refresh_token,
-    github_refresh_token_expires_at: tokens.github_refresh_token_expires_at,
-  };
+  return pollForTokens(device.device_code, device.interval);
 };

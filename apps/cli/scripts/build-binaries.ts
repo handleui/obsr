@@ -87,18 +87,10 @@ const compileBinary = async (
 
   log(`Compiling for ${target.os}/${target.arch}...`);
 
-  // Required environment variables for production builds
-  const workosClientId = process.env.WORKOS_CLIENT_ID;
-  if (!workosClientId) {
-    fatal(
-      "WORKOS_CLIENT_ID environment variable is required for production builds"
-    );
-  }
-
   // Optional environment variables with production defaults
   const detentApiUrl =
     process.env.DETENT_API_URL ?? "https://observer.detent.sh";
-  const detentAuthUrl = process.env.DETENT_AUTH_URL ?? "https://detent.sh";
+  const detentCliClientId = process.env.DETENT_CLI_CLIENT_ID ?? "detent-cli";
   const sentryDsn = process.env.SENTRY_DSN ?? "";
 
   const proc = Bun.spawn({
@@ -110,9 +102,8 @@ const compileBinary = async (
       `--define=DETENT_VERSION=${JSON.stringify(version)}`,
       "--define=DETENT_PRODUCTION=true",
       `--define=process.env.NODE_ENV="production"`,
-      `--define=process.env.WORKOS_CLIENT_ID=${JSON.stringify(workosClientId)}`,
       `--define=process.env.DETENT_API_URL=${JSON.stringify(detentApiUrl)}`,
-      `--define=process.env.DETENT_AUTH_URL=${JSON.stringify(detentAuthUrl)}`,
+      `--define=process.env.DETENT_CLI_CLIENT_ID=${JSON.stringify(detentCliClientId)}`,
       `--define=process.env.SENTRY_DSN=${JSON.stringify(sentryDsn)}`,
       "--minify",
       "--external=@aws-sdk/client-s3",

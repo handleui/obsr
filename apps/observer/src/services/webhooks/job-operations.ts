@@ -1,5 +1,5 @@
 import { type Db, runOps } from "@detent/db";
-import { fetchAllPages } from "../../lib/convex-pagination";
+import { fetchAllPages } from "../../lib/db-pagination";
 import type { DbClient } from "./types";
 
 export const lookupPrNumberFromRuns = async (

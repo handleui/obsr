@@ -3,99 +3,50 @@ title: Authentication
 description: Authenticate with the Observer API
 ---
 
-Detent uses WorkOS for authentication, providing secure JWT-based access to the API.
+Detent uses Better Auth with GitHub OAuth as the API identity provider.
 
-## Authentication Flow
+## Authentication flow
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Client    │────▶│   WorkOS    │────▶│ Observer API  │
-│   (CLI)     │     │   (Auth)    │     │             │
-└─────────────┘     └─────────────┘     └─────────────┘
-       │                   │                   │
-       │  1. Redirect to   │                   │
-       │     WorkOS login  │                   │
-       │──────────────────▶│                   │
-       │                   │                   │
-       │  2. User logs in  │                   │
-       │     (OAuth/SSO)   │                   │
-       │                   │                   │
-       │  3. Redirect with │                   │
-       │     auth code     │                   │
-       │◀──────────────────│                   │
-       │                   │                   │
-       │  4. Exchange code │                   │
-       │     for JWT       │                   │
-       │──────────────────▶│                   │
-       │                   │                   │
-       │  5. Use JWT for   │                   │
-       │     API requests  │                   │
-       │───────────────────────────────────────▶│
-```
+- Auth endpoints live under `https://observer.detent.sh/api/auth/*`.
+- The browser login flow uses Better Auth generic OAuth with `provider: "github"`.
+- On successful sign-in, the Better Auth session is established and can be used for API auth.
+- Protected API calls can use:
+  - `Authorization: Bearer <token>`
+  - `X-Detent-Token` / `X-API-Key` compatibility headers (when issued).
 
-## Obtaining a Token
+## Via CLI (Recommended)
 
-### Via CLI (Recommended)
-
-The CLI handles authentication automatically:
+The CLI handles the auth flow and token lifecycle:
 
 ```bash
 detent login
 ```
 
-This opens a browser for authentication and stores the token securely.
+## API login flow
 
-### Manual Flow
+You can start OAuth login using Better Auth’s social sign-in API with provider `github` and then return to the callback path below:
 
-For custom integrations:
-
-**Step 1: Initiate Login**
-
-Redirect users to the WorkOS authorization URL:
-
-```
-https://authkit.detent.sh/authorize?
-  client_id=YOUR_WORKOS_CLIENT_ID&
-  redirect_uri=YOUR_CALLBACK_URL&
-  response_type=code&
-  state=RANDOM_STATE
+```ts
+const response = await authClient.signIn.social({
+  provider: "github",
+  callbackURL: "https://your-app.com/callback",
+});
 ```
 
-**Step 2: Handle Callback**
-
-After login, WorkOS redirects to your callback URL with an authorization code:
-
-```
-https://your-app.com/callback?code=AUTH_CODE&state=RANDOM_STATE
-```
-
-**Step 3: Exchange Code**
-
-Exchange the authorization code for tokens:
+OAuth callback target:
 
 ```bash
-curl -X POST https://api.workos.com/user_management/authenticate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "client_id": "YOUR_WORKOS_CLIENT_ID",
-    "client_secret": "YOUR_WORKOS_API_KEY",
-    "code": "AUTH_CODE",
-    "grant_type": "authorization_code"
-  }'
+https://observer.detent.sh/api/auth/oauth2/callback/github
 ```
 
-## Using Tokens
+## Using tokens
 
-Include the JWT in the `Authorization` header:
+Include a session token in the `Authorization` header for requests:
 
 ```bash
 curl https://observer.detent.sh/v1/projects \
-  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIs..."
+  -H "Authorization: Bearer YOUR_TOKEN"
 ```
-
-## Token Structure
-
-The JWT contains:
 
 ```json
 {
@@ -106,55 +57,9 @@ The JWT contains:
 }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `sub` | WorkOS user ID |
-| `email` | User's email address |
-| `iat` | Issued at timestamp |
-| `exp` | Expiration timestamp |
+`sub` maps to the Better Auth user ID.
 
-## Token Expiration
-
-Tokens expire after 15 minutes. The CLI automatically refreshes tokens when needed.
-
-For custom integrations, implement token refresh:
-
-```typescript
-const isExpired = (token: string): boolean => {
-  const payload = JSON.parse(atob(token.split('.')[1]));
-  return Date.now() >= payload.exp * 1000;
-};
-
-const getValidToken = async (): Promise<string> => {
-  if (isExpired(currentToken)) {
-    currentToken = await refreshToken();
-  }
-  return currentToken;
-};
-```
-
-## Linking Provider Accounts
-
-Users can link their GitHub/GitLab accounts to enable provider-specific features:
-
-```bash
-# Check linked accounts
-curl https://observer.detent.sh/v1/auth/whoami \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
-```
-
-Response:
-
-```json
-{
-  "user_id": "user_01ABC123",
-  "email": "user@example.com",
-  "github_username": "octocat",
-  "gitlab_username": null
-}
-```
-
-## Error Responses
+## Error responses
 
 ### Invalid Token
 
@@ -176,13 +81,10 @@ Status: `401 Unauthorized`
 
 Status: `401 Unauthorized`
 
-## Security Best Practices
-
-<Callout type="warn">
-Never expose JWT tokens in client-side code, URLs, or logs.
-</Callout>
+## Security best practices
 
 - Store tokens securely (system keychain, encrypted storage)
 - Use HTTPS for all API requests
-- Implement token refresh before expiration
+- Prefer short-lived tokens and rotate when you need fresh auth context
 - Revoke tokens when users log out
+- See Better Auth token/session documentation for refresh behavior

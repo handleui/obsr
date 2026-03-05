@@ -728,10 +728,8 @@ describe("orchestrateResolves", () => {
   // ==========================================================================
 
   describe("graceful degradation", () => {
-    it("returns empty result when Convex query fails", async () => {
-      mockGetResolvesByPr.mockRejectedValueOnce(
-        new Error("Convex query failed")
-      );
+    it("returns empty result when DB query fails", async () => {
+      mockGetResolvesByPr.mockRejectedValueOnce(new Error("DB query failed"));
 
       const { orchestrateResolves } = await getOrchestrator();
 

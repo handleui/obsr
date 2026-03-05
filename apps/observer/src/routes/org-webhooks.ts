@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import { encryptToken } from "../lib/encryption";
 import {
   githubOrgAccessMiddleware,
@@ -272,10 +272,10 @@ app.post(
 
     const secretEncrypted = await encryptToken(secret, c.env.ENCRYPTION_KEY);
 
-    const convex = getConvexClient(c.env);
+    const dbClient = getDbClient(c.env);
     const now = Date.now();
 
-    const webhookId = (await convex.mutation("webhooks:create", {
+    const webhookId = (await dbClient.mutation("webhooks:create", {
       organizationId: organization._id,
       url,
       name: name.trim(),
@@ -311,8 +311,8 @@ app.get(
     const orgAccess = c.get("orgAccess") as OrgAccessContext;
     const { organization } = orgAccess;
 
-    const convex = getConvexClient(c.env);
-    const webhooks = (await convex.query("webhooks:listByOrg", {
+    const dbClient = getDbClient(c.env);
+    const webhooks = (await dbClient.query("webhooks:listByOrg", {
       organizationId: organization._id,
     })) as WebhookRecord[];
 
@@ -329,8 +329,8 @@ app.get(
     const { organization } = orgAccess;
     const webhookId = c.req.param("webhookId");
 
-    const convex = getConvexClient(c.env);
-    const webhook = (await convex.query("webhooks:getById", {
+    const dbClient = getDbClient(c.env);
+    const webhook = (await dbClient.query("webhooks:getById", {
       id: webhookId,
     })) as WebhookRecord | null;
 
@@ -368,9 +368,9 @@ app.patch(
       return c.json({ error: validationError }, 400);
     }
 
-    const convex = getConvexClient(c.env);
+    const dbClient = getDbClient(c.env);
 
-    const existing = (await convex.query("webhooks:getById", {
+    const existing = (await dbClient.query("webhooks:getById", {
       id: webhookId,
     })) as WebhookRecord | null;
 
@@ -394,7 +394,7 @@ app.patch(
       updateFields.active = body.active;
     }
 
-    await convex.mutation("webhooks:update", {
+    await dbClient.mutation("webhooks:update", {
       id: webhookId,
       ...updateFields,
     });
@@ -414,9 +414,9 @@ app.delete(
     const { organization } = orgAccess;
     const webhookId = c.req.param("webhookId");
 
-    const convex = getConvexClient(c.env);
+    const dbClient = getDbClient(c.env);
 
-    const existing = (await convex.query("webhooks:getById", {
+    const existing = (await dbClient.query("webhooks:getById", {
       id: webhookId,
     })) as WebhookRecord | null;
 
@@ -424,7 +424,7 @@ app.delete(
       return c.json({ error: "Webhook not found" }, 404);
     }
 
-    await convex.mutation("webhooks:remove", { id: webhookId });
+    await dbClient.mutation("webhooks:remove", { id: webhookId });
 
     return c.json({ success: true, deleted_id: webhookId });
   }

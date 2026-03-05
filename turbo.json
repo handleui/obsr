@@ -7,12 +7,14 @@
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"],
       "env": [
-        "WORKOS_CLIENT_ID",
         "JWT_SECRET_KEY",
-        "WORKOS_COOKIE_PASSWORD",
-        "WORKOS_API_KEY",
+        "BETTER_AUTH_SECRET",
+        "BETTER_AUTH_URL",
+        "BETTER_AUTH_GITHUB_CLIENT_ID",
+        "BETTER_AUTH_GITHUB_CLIENT_SECRET",
+        "BETTER_AUTH_DEVICE_CLIENT_IDS",
+        "BETTER_AUTH_DEVICE_VERIFICATION_URI",
         "POLAR_CHECKOUT_TOKEN",
-        "CONVEX_URL",
         "DATABASE_URL"
       ]
     },

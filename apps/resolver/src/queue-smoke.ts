@@ -1,33 +1,15 @@
-import { type Db, runErrorOps, runOps } from "@detent/db";
-import { ConvexHttpClient } from "convex/browser";
-import type { FunctionReference } from "convex/server";
 import {
-  type ConvexMethod,
-  wrapWithServiceToken,
-} from "./services/convex-client.js";
+  type Db,
+  projectOps,
+  resolveOps,
+  runErrorOps,
+  runOps,
+} from "@detent/db";
+import { ResolveTypes } from "@detent/types";
 import { createDbClient } from "./services/db-client.js";
 
 const MAX_RUN_FETCH_LIMIT = 200;
 const MAX_ERROR_FETCH_LIMIT = 1000;
-
-const createHttpConvexClient = (
-  url: string,
-  serviceToken: string
-): ConvexHttpClient => {
-  const client = new ConvexHttpClient(url);
-
-  client.query = wrapWithServiceToken(
-    client.query.bind(client) as unknown as ConvexMethod,
-    serviceToken
-  ) as unknown as ConvexHttpClient["query"];
-
-  client.mutation = wrapWithServiceToken(
-    client.mutation.bind(client) as unknown as ConvexMethod,
-    serviceToken
-  ) as unknown as ConvexHttpClient["mutation"];
-
-  return client;
-};
 
 interface RunRow {
   id: string;
@@ -40,13 +22,8 @@ interface RunRow {
 interface RunErrorRow {
   id: string;
   signatureId: string | null;
-  fixable: boolean;
+  source: string | null;
 }
-
-const asQuery = (name: string) => name as unknown as FunctionReference<"query">;
-
-const asMutation = (name: string) =>
-  name as unknown as FunctionReference<"mutation">;
 
 const parseNumber = (
   value: string | undefined,
@@ -81,17 +58,17 @@ const fetchRunById = async (db: Db, runId: string): Promise<RunRow | null> => {
   return run ? mapRun(run) : null;
 };
 
-const fetchRunErrors = async (
+const fetchRunErrors = (
   db: Db,
   runId: string
-): Promise<RunErrorRow[]> => {
-  const rows = await runErrorOps.listByRunId(db, runId, MAX_ERROR_FETCH_LIMIT);
-
-  return rows.map((row) => ({
-    id: row.id,
-    signatureId: row.signatureId ?? null,
-    fixable: row.fixable === true,
-  }));
+): Promise<
+  Awaited<ReturnType<typeof runErrorOps.listFixableSummariesByRunId>>
+> => {
+  return runErrorOps.listFixableSummariesByRunId(
+    db,
+    runId,
+    MAX_ERROR_FETCH_LIMIT
+  );
 };
 
 const fetchLatestFixableRun = async (
@@ -115,7 +92,7 @@ const fetchLatestFixableRun = async (
       continue;
     }
     const errors = await fetchRunErrors(db, run.id);
-    if (errors.some((error) => error.fixable)) {
+    if (errors.length > 0) {
       return run;
     }
   }
@@ -124,20 +101,16 @@ const fetchLatestFixableRun = async (
 };
 
 const ensureProjectExists = async (
-  convex: ConvexHttpClient,
+  db: Db,
   projectId: string
 ): Promise<void> => {
-  const result = (await convex.query(asQuery("projects:getById"), {
-    id: projectId,
-  })) as Record<string, unknown> | null;
+  const result = await projectOps.getById(db, projectId);
   if (!result) {
     throw new Error(`Project ${projectId} not found`);
   }
 };
 
 interface SmokeEnv {
-  convexUrl: string;
-  serviceToken: string;
   databaseUrl: string;
   runId: string | undefined;
   projectId: string | undefined;
@@ -145,14 +118,6 @@ interface SmokeEnv {
 }
 
 const loadSmokeEnv = (): SmokeEnv => {
-  const convexUrl = process.env.CONVEX_URL;
-  if (!convexUrl) {
-    throw new Error("CONVEX_URL is required");
-  }
-  const serviceToken = process.env.CONVEX_SERVICE_TOKEN;
-  if (!serviceToken) {
-    throw new Error("CONVEX_SERVICE_TOKEN is required");
-  }
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required");
@@ -166,7 +131,7 @@ const loadSmokeEnv = (): SmokeEnv => {
     throw new Error("RUN_ID, PROJECT_ID, or PR_NUMBER is required");
   }
 
-  return { convexUrl, serviceToken, databaseUrl, runId, projectId, prNumber };
+  return { databaseUrl, runId, projectId, prNumber };
 };
 
 interface ValidatedRun extends RunRow {
@@ -186,34 +151,29 @@ const resolveFixableRun = async (
   }
 
   const runErrors = await fetchRunErrors(db, run.id);
-  const fixableErrors = runErrors.filter((error) => error.fixable);
-  if (fixableErrors.length === 0) {
+  if (runErrors.length === 0) {
     throw new Error("Run has no fixable errors");
   }
 
-  return { run: run as ValidatedRun, fixableErrors };
+  return { run: run as ValidatedRun, fixableErrors: runErrors };
 };
 
 const main = async (): Promise<void> => {
   const smokeEnv = loadSmokeEnv();
-  const convex = createHttpConvexClient(
-    smokeEnv.convexUrl,
-    smokeEnv.serviceToken
-  );
   const { db, pool } = createDbClient(smokeEnv.databaseUrl);
 
   try {
     const { run, fixableErrors } = await resolveFixableRun(db, smokeEnv);
 
-    await ensureProjectExists(convex, run.projectId);
+    await ensureProjectExists(db, run.projectId);
 
     const errorIds = fixableErrors.map((err) => err.id);
     const signatureIds = fixableErrors
       .map((err) => err.signatureId)
       .filter((id): id is string => id !== null);
 
-    const resolveId = await convex.mutation(asMutation("resolves:create"), {
-      type: "resolve",
+    const resolveId = await resolveOps.create(db, {
+      type: ResolveTypes.Resolve,
       status: "pending",
       projectId: run.projectId,
       runId: run.id,
@@ -222,6 +182,10 @@ const main = async (): Promise<void> => {
       errorIds,
       signatureIds,
     });
+
+    if (!resolveId) {
+      throw new Error("Failed to queue resolve");
+    }
 
     console.log(`Queued resolve ${resolveId} for run ${run.id}`);
   } finally {

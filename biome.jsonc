@@ -31,16 +31,6 @@
       }
     },
     {
-      "includes": ["convex/**/*.ts"],
-      "linter": {
-        "rules": {
-          "style": {
-            "useFilenamingConvention": "off"
-          }
-        }
-      }
-    },
-    {
       "includes": ["apps/observer/src/services/comment-formatter.ts"],
       "linter": {
         "rules": {
@@ -49,6 +39,12 @@
             "noExcessiveCognitiveComplexity": "off"
           }
         }
+      }
+    },
+    {
+      "includes": [".vscode/settings.json"],
+      "formatter": {
+        "enabled": false
       }
     }
   ]

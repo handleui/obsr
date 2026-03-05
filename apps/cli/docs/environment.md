@@ -23,15 +23,16 @@ DETENT_HOME=/path/to/custom/dir detent <command>
 
 ## Development
 
+CLI auth uses Better Auth device authorization endpoints on Observer.
+
 Create a `.env` file in `apps/cli/`:
 
 ```bash
-# Required - get from WorkOS dashboard
-WORKOS_CLIENT_ID=client_xxx
-
 # Optional - point to local services
 DETENT_API_URL=http://localhost:8787
-DETENT_AUTH_URL=http://detent.localhost:1355
+
+# Optional - custom device client id (defaults to "detent-cli")
+DETENT_CLI_CLIENT_ID=detent-cli
 
 # Optional - use custom data directory (defaults to ~/.detent-dev in dev)
 # DETENT_HOME=~/.detent-custom
@@ -47,17 +48,16 @@ When building binaries (`bun run build:binaries`), the build script:
 
 | Variable | Required? | Default |
 |----------|-----------|---------|
-| `WORKOS_CLIENT_ID` | Yes | - |
 | `DETENT_API_URL` | No | `https://observer.detent.sh` |
-| `DETENT_AUTH_URL` | No | `https://detent.sh` |
+| `DETENT_CLI_CLIENT_ID` | No | `detent-cli` |
 
 Example build command:
 
 ```bash
-WORKOS_CLIENT_ID=client_xxx bun run build:binaries
+bun run build:binaries
 ```
 
-The magic happens in `scripts/build-binaries.ts` - it uses Bun's `--define` flag to replace `process.env.X` references with literal strings at compile time. No runtime env lookup needed.
+The magic happens in `scripts/build-binaries.ts` - it uses Bun's `--define` flag to replace `process.env.X` references with literal strings at compile time. No runtime env lookup is needed.
 
 ## How It Works
 
@@ -76,4 +76,4 @@ if (typeof DETENT_PRODUCTION === "undefined") {
 
 ## CI/CD
 
-Set `WORKOS_CLIENT_ID` as a GitHub Actions secret. The other URLs use sensible defaults.
+No auth provider secret is required for CLI binary builds. Optional overrides can be set with `DETENT_API_URL` and `DETENT_CLI_CLIENT_ID`.

@@ -1,7 +1,7 @@
 import { runOps, type UsageMetadata, usageEventOps } from "@detent/db";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK official pattern
 import * as Sentry from "@sentry/cloudflare";
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import { getDb } from "../lib/db.js";
 import type { Env } from "../types/env";
 import {
@@ -217,9 +217,9 @@ export const canRunResolve = async (
     return { allowed: true };
   }
 
-  const convex = getConvexClient(env);
+  const dbClient = getDbClient(env);
   try {
-    const org = (await convex.query("organizations:getById", {
+    const org = (await dbClient.query("organizations:getById", {
       id: orgId,
     })) as { _id: string } | null;
 
@@ -451,14 +451,14 @@ export const getUsageSummary = async (
   env: Env,
   orgId: string
 ): Promise<UsageSummary> => {
-  const convex = getConvexClient(env);
+  const dbClient = getDbClient(env);
   const { db, pool } = getDb(env);
   try {
     const periodStart = new Date();
     periodStart.setDate(periodStart.getDate() - DEFAULT_PERIOD_DAYS);
     const periodEnd = new Date();
 
-    const projects = (await convex.query("projects:listByOrg", {
+    const projects = (await dbClient.query("projects:listByOrg", {
       organizationId: orgId,
       includeRemoved: false,
       limit: 1000,

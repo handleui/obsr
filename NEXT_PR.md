@@ -6,7 +6,7 @@ Prepare a focused follow-up PR where another agent validates whether Better Auth
 ## Why This Exists
 We discussed three strategic ideas:
 1. Move authentication to Better Auth.
-2. Validate whether the current dual-database split (Neon + Convex) should stay or merge back.
+2. Validate whether the current single-database Neon model is sufficient long-term.
 3. Evolve `autofix` toward a broader `action` abstraction that can later include observe + resolve steps.
 
 This document turns those ideas into an executable validation PR scope.
@@ -16,9 +16,8 @@ This document turns those ideas into an executable validation PR scope.
   - CLI device/browser auth flows and WorkOS token exchange.
   - Observer JWT verification against WorkOS JWKS + issuer.
   - WorkOS env vars and docs surface are already baked in.
-- Dual DB is active in production paths:
-  - Neon/Drizzle used for non-realtime and reporting/ops paths.
-  - Convex heavily used for realtime/workflow entities and queue-facing flows.
+- Single DB is active in production paths:
+  - Neon/Drizzle owns operational, workflow, and reporting entities.
 - Resolve model still includes explicit `"autofix" | "resolve"` typing.
 
 ## Recommendation Summary
@@ -43,7 +42,7 @@ This PR should validate and de-risk, not hard-cut.
 - Identify unavoidable gaps and implementation cost (high/med/low).
 
 ### 2) Dual-DB Validation (Decision Input)
-- Map canonical ownership per entity (Convex vs Neon).
+- Map canonical ownership per entity inside Neon schemas.
 - List cross-DB write/read paths and failure modes.
 - Add a short scorecard using real signals:
   - latency impact

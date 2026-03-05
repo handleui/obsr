@@ -1,4 +1,4 @@
-import { getConvexClient } from "../../../db/convex";
+import { getDbClient } from "../../../db/client";
 import { cacheKey, deleteFromCache } from "../../../lib/cache";
 import { captureWebhookError } from "../../../lib/sentry";
 import { classifyError } from "../../../services/webhooks/error-classifier";
@@ -39,10 +39,10 @@ const tryDemoteToVisitor = async (
   orgLogin: string,
   deliveryId: string
 ): Promise<MemberSyncResult> => {
-  const convex = getConvexClient(env);
+  const dbClient = getDbClient(env);
   try {
     // Find the organization by GitHub org ID
-    const org = (await convex.query("organizations:getByProviderAccount", {
+    const org = (await dbClient.query("organizations:getByProviderAccount", {
       provider: "github",
       providerAccountId: String(githubOrgId),
     })) as OrganizationDoc | null;
@@ -57,7 +57,7 @@ const tryDemoteToVisitor = async (
     // Demote member to visitor role
     // Only demote auto-joined members, not manually invited
     // Security: Exclude owners (should not be auto-demoted) and visitors (no change needed)
-    const members = (await convex.query(
+    const members = (await dbClient.query(
       "organization_members:listByOrgProviderUser",
       {
         organizationId: org._id,
@@ -81,7 +81,7 @@ const tryDemoteToVisitor = async (
         continue;
       }
 
-      await convex.mutation("organization_members:update", {
+      await dbClient.mutation("organization_members:update", {
         id: member._id,
         role: "visitor",
         updatedAt: Date.now(),
@@ -128,10 +128,10 @@ const tryAutoAddMember = async (
   orgLogin: string,
   deliveryId: string
 ): Promise<MemberSyncResult> => {
-  const convex = getConvexClient(env);
+  const dbClient = getDbClient(env);
   try {
     // Find the organization by GitHub org ID
-    const org = (await convex.query("organizations:getByProviderAccount", {
+    const org = (await dbClient.query("organizations:getByProviderAccount", {
       provider: "github",
       providerAccountId: String(githubOrgId),
     })) as OrganizationDoc | null;
@@ -145,7 +145,7 @@ const tryAutoAddMember = async (
 
     // Single query to check all membership states for this user in this org
     // Replaces 3 separate queries with one
-    const existingMemberships = (await convex.query(
+    const existingMemberships = (await dbClient.query(
       "organization_members:listByOrgProviderUser",
       {
         organizationId: org._id,
@@ -188,7 +188,7 @@ const tryAutoAddMember = async (
       // SECURITY: Reset role to "member" on reactivation to prevent privilege escalation.
       // Previously elevated users (admin/owner) who left GitHub org and rejoin
       // should not automatically regain their elevated role.
-      await convex.mutation("organization_members:update", {
+      await dbClient.mutation("organization_members:update", {
         id: mirrorRemovedMember._id,
         removedAt: null,
         removalReason: null,
@@ -210,7 +210,7 @@ const tryAutoAddMember = async (
     }
 
     // Find user in Detent system by providerUserId (in any org)
-    const existingUsers = (await convex.query(
+    const existingUsers = (await dbClient.query(
       "organization_members:listByProviderUserId",
       {
         providerUserId: githubUserId,
@@ -230,7 +230,7 @@ const tryAutoAddMember = async (
     // Use onConflictDoNothing to handle race conditions gracefully:
     // - Concurrent webhook requests for same user
     // - User already has membership via different path (e.g., manual invite)
-    const created = (await convex.mutation(
+    const created = (await dbClient.mutation(
       "organization_members:createIfMissing",
       {
         organizationId: org._id,

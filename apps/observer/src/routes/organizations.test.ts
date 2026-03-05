@@ -41,10 +41,10 @@ const mockSet = vi.fn();
 
 const mockQuery = vi.fn();
 const mockMutation = vi.fn();
-const mockConvex = { query: mockQuery, mutation: mockMutation };
+const mockDB = { query: mockQuery, mutation: mockMutation };
 
-vi.mock("../db/convex", () => ({
-  getConvexClient: vi.fn(() => mockConvex),
+vi.mock("../db/client", () => ({
+  getDbClient: vi.fn(() => mockDB),
 }));
 
 // Test IDs
@@ -60,8 +60,6 @@ vi.spyOn(crypto, "randomUUID").mockImplementation(() => NEW_PROJECT_UUID);
 const MOCK_ENV = createMockEnv({
   GITHUB_APP_ID: "123456",
   GITHUB_APP_PRIVATE_KEY: "test-private-key",
-  WORKOS_CLIENT_ID: "test-workos-client",
-  WORKOS_API_KEY: "test-workos-key",
 });
 
 // Factory for organization data

@@ -9,9 +9,9 @@
  * - Individual org failures are isolated via Promise.allSettled
  */
 
-import { getConvexClient } from "../db/convex";
+import { getDbClient } from "../db/client";
 import { sleep } from "../lib/async";
-import { fetchAllPages } from "../lib/convex-pagination";
+import { fetchAllPages } from "../lib/db-pagination";
 import type { OrganizationSettings } from "../lib/org-settings";
 import { createGitHubService } from "../services/github";
 import {
@@ -42,13 +42,13 @@ export interface SyncJobResult {
   durationMs: number;
 }
 
-type DbClient = ReturnType<typeof getConvexClient>;
+type DbClient = ReturnType<typeof getDbClient>;
 
 /**
  * Sync a single organization's repos with GitHub
  */
 const syncOrganization = async (
-  convex: DbClient,
+  dbClient: DbClient,
   github: ReturnType<typeof createGitHubService>,
   org: {
     _id: string;
@@ -67,7 +67,7 @@ const syncOrganization = async (
   const installationInfo = await github.getInstallationInfo(installationId);
 
   if (!installationInfo) {
-    await convex.mutation("organizations:update", {
+    await dbClient.mutation("organizations:update", {
       id: org._id,
       deletedAt: now,
       lastSyncedAt: now,
@@ -85,7 +85,7 @@ const syncOrganization = async (
   const isSuspended = Boolean(installationInfo.suspended_at);
 
   if (wasSuspended !== isSuspended) {
-    await convex.mutation("organizations:update", {
+    await dbClient.mutation("organizations:update", {
       id: org._id,
       suspendedAt: isSuspended
         ? new Date(installationInfo.suspended_at as string).getTime()
@@ -96,7 +96,7 @@ const syncOrganization = async (
 
   // Get current repos from GitHub and reconcile with our projects
   const githubRepos = await github.getInstallationRepos(installationId);
-  await convex.mutation("projects:syncFromGitHub", {
+  await dbClient.mutation("projects:syncFromGitHub", {
     organizationId: org._id,
     repos: githubRepos.map((repo) => ({
       id: String(repo.id),
@@ -122,7 +122,7 @@ const syncOrganization = async (
       membershipSource?: string | null;
       role?: string | null;
       removedAt?: number | null;
-    }>(convex, "organization_members:paginateByOrg", {
+    }>(dbClient, "organization_members:paginateByOrg", {
       organizationId: org._id,
       includeRemoved: true,
     });
@@ -144,7 +144,7 @@ const syncOrganization = async (
 
     if (staleMembers.length > 0) {
       for (const member of staleMembers) {
-        await convex.mutation("organization_members:update", {
+        await dbClient.mutation("organization_members:update", {
           id: member._id,
           role: "visitor",
           updatedAt: now,
@@ -169,7 +169,7 @@ const syncOrganization = async (
 
     if (verifiableMembers.length > 0) {
       for (const member of verifiableMembers) {
-        await convex.mutation("organization_members:update", {
+        await dbClient.mutation("organization_members:update", {
           id: member._id,
           membershipSource: "github_sync",
           updatedAt: now,
@@ -181,7 +181,7 @@ const syncOrganization = async (
     }
   }
 
-  await convex.mutation("organizations:update", {
+  await dbClient.mutation("organizations:update", {
     id: org._id,
     lastSyncedAt: now,
     updatedAt: now,
@@ -249,12 +249,15 @@ export const syncAllOrganizations = async (
   env: Env
 ): Promise<SyncJobResult> => {
   const startTime = Date.now();
-  const convex = getConvexClient(env);
+  const dbClient = getDbClient(env);
 
   // Query all active GitHub orgs with app installed, ordered by lastSyncedAt (oldest first)
-  const allActiveOrgs = (await convex.query("organizations:listActiveGithub", {
-    limit: 5000,
-  })) as Array<{
+  const allActiveOrgs = (await dbClient.query(
+    "organizations:listActiveGithub",
+    {
+      limit: 5000,
+    }
+  )) as Array<{
     _id: string;
     slug: string;
     providerInstallationId: string;
@@ -299,7 +302,7 @@ export const syncAllOrganizations = async (
           `Rate limit low (${rateLimit?.remaining ?? "?"} remaining), skipping to preserve quota`
         );
       }
-      await syncOrganization(convex, github, org);
+      await syncOrganization(dbClient, github, org);
       console.log(`[sync-job] Completed sync for ${org.slug}`);
     }
   );

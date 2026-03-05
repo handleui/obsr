@@ -5,34 +5,40 @@ import type { Env } from "../types/env";
 
 const mockQuery = vi.fn();
 const mockMutation = vi.fn();
-const mockConvex = { query: mockQuery, mutation: mockMutation };
+const mockPoolQuery = vi.fn();
 
-vi.mock("../db/convex", () => ({
-  getConvexClient: vi.fn(() => mockConvex),
+const mockDB = {
+  query: mockQuery,
+  mutation: mockMutation,
+};
+
+const mockPool = {
+  query: mockPoolQuery,
+};
+
+vi.mock("../db/client", () => ({
+  getDbClient: vi.fn(() => mockDB),
 }));
 
-// Mock fetch for WorkOS and GitHub API calls
+vi.mock("../lib/better-auth", () => ({
+  getBetterAuthPool: vi.fn(() => mockPool),
+}));
+
 const mockFetch = vi.fn();
 
-// Mock environment
-const MOCK_ENV = createMockEnv({
-  WORKOS_API_KEY: "sk_test_workos_key",
-  WORKOS_CLIENT_ID: "client_123",
-});
+const DEFAULT_MOCK_ENV = createMockEnv({});
 
-// Helper to make request with a fresh app instance
 const makeRequest = async (
   method: "GET" | "POST",
   path: string,
   body?: unknown,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
+  env: Env = DEFAULT_MOCK_ENV
 ): Promise<Response> => {
-  // Import the routes fresh each time
   const authRoutes = (await import("./auth")).default;
 
   const app = new Hono<{ Bindings: Env }>();
 
-  // Middleware to set auth context (simulating what authMiddleware does)
   app.use("*", async (c, next) => {
     c.set("auth" as never, { userId: "user-123" } as never);
     await next();
@@ -53,35 +59,49 @@ const makeRequest = async (
     options.body = JSON.stringify(body);
   }
 
-  return app.request(path, options, MOCK_ENV);
+  return app.request(path, options, env);
 };
 
-// Factory for WorkOS user response
-const createWorkOSUser = (
+const createBetterAuthUser = (
   overrides: Partial<{
     id: string;
     email: string;
-    first_name: string;
-    last_name: string;
-    profile_picture_url: string;
+    name: string | null;
   }> = {}
 ) => ({
   id: overrides.id ?? "user-123",
   email: overrides.email ?? "test@example.com",
-  first_name: overrides.first_name ?? "Test",
-  last_name: overrides.last_name ?? "User",
-  profile_picture_url: overrides.profile_picture_url ?? null,
+  name: "name" in overrides ? overrides.name : "Test User",
 });
 
-// Factory for WorkOS identities response
-const createIdentitiesResponse = (
-  identities: Array<{
-    idp_id: string;
-    type: string;
-    provider: string;
-  }> = []
+const installDefaultPoolMocks = () => {
+  mockPoolQuery.mockImplementation((queryText: string) => {
+    if (queryText.includes('FROM "user"')) {
+      return Promise.resolve({ rows: [createBetterAuthUser()] });
+    }
+
+    if (queryText.includes("FROM account")) {
+      return Promise.resolve({
+        rows: [{ account_id: "12345", access_token: null }],
+      });
+    }
+
+    return Promise.resolve({ rows: [] });
+  });
+};
+
+const VALID_GITHUB_TOKEN = `gho_${"a".repeat(40)}`;
+const VALID_GITHUB_REFRESH_TOKEN = `ghr_${"b".repeat(30)}`;
+
+const createGitHubUserResponse = (
+  user: { id: number; login: string } = { id: 12_345, login: "testuser" }
 ) => ({
-  data: identities,
+  ok: true,
+  headers: {
+    get: (name: string) =>
+      name.toLowerCase() === "x-oauth-scopes" ? "read:org,user:email" : null,
+  },
+  json: () => Promise.resolve(user),
 });
 
 describe("auth routes", () => {
@@ -90,6 +110,9 @@ describe("auth routes", () => {
     mockFetch.mockReset();
     mockQuery.mockReset();
     mockMutation.mockReset();
+    mockPoolQuery.mockReset();
+
+    installDefaultPoolMocks();
 
     mockQuery.mockImplementation((name: string) => {
       if (name === "organization_members:listByUser") {
@@ -110,54 +133,27 @@ describe("auth routes", () => {
       return Promise.resolve([]);
     });
 
-    // Replace global fetch with mock
     global.fetch = mockFetch;
   });
 
   describe("POST /auth/sync-user", () => {
-    it("syncs identity with GitHub linked", async () => {
-      // Mock WorkOS user fetch
-      mockFetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(createWorkOSUser()),
-        })
-        // Mock WorkOS identities fetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () =>
-            Promise.resolve(
-              createIdentitiesResponse([
-                { idp_id: "12345", type: "OAuth", provider: "GitHubOAuth" },
-              ])
-            ),
-        })
-        // Mock WorkOS Pipes token fetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              active: true,
-              access_token: { token: "gho_test_token" },
-            }),
-        })
-        // Mock GitHub user fetch (authenticated)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({ login: "testuser" }),
-        });
+    it("syncs identity with Better Auth linked GitHub account", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ id: 12_345, login: "testuser" }),
+      });
 
       mockQuery.mockImplementation((name: string) => {
         if (name === "organization_members:listByUser") {
           return Promise.resolve([
             {
-              id: "member-1",
+              _id: "member-1",
               organizationId: "organization-1",
               userId: "user-123",
               role: "member",
             },
             {
-              id: "member-2",
+              _id: "member-2",
               organizationId: "organization-2",
               userId: "user-123",
               role: "member",
@@ -186,21 +182,21 @@ describe("auth routes", () => {
         installer_orgs_linked: 0,
         github_orgs_joined: 0,
       });
-
-      // Verify memberships were updated via Convex
       expect(mockMutation).toHaveBeenCalled();
     });
 
-    it("returns user info when no GitHub identity linked", async () => {
-      mockFetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(createWorkOSUser()),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(createIdentitiesResponse([])),
-        });
+    it("returns user info when no GitHub account is linked", async () => {
+      mockPoolQuery.mockImplementation((queryText: string) => {
+        if (queryText.includes('FROM "user"')) {
+          return Promise.resolve({ rows: [createBetterAuthUser()] });
+        }
+
+        if (queryText.includes("FROM account")) {
+          return Promise.resolve({ rows: [] });
+        }
+
+        return Promise.resolve({ rows: [] });
+      });
 
       const res = await makeRequest("POST", "/auth/sync-user");
       const json = await res.json();
@@ -214,70 +210,24 @@ describe("auth routes", () => {
         github_synced: false,
         github_username: null,
       });
-
-      // Memberships should not be updated
       expect(mockMutation).not.toHaveBeenCalled();
     });
 
-    it("returns user info when identities fetch fails", async () => {
+    it("syncs identity with null username when GitHub user lookup fails", async () => {
       mockFetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(createWorkOSUser()),
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          text: () => Promise.resolve("Unauthorized"),
-        });
-
-      const res = await makeRequest("POST", "/auth/sync-user");
-      const json = await res.json();
-
-      expect(res.status).toBe(200);
-      expect(json).toEqual({
-        user_id: "user-123",
-        email: "test@example.com",
-        first_name: "Test",
-        last_name: "User",
-        github_synced: false,
-        github_username: null,
-      });
-    });
-
-    it("syncs identity even when WorkOS Pipes token fetch fails", async () => {
-      mockFetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(createWorkOSUser()),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () =>
-            Promise.resolve(
-              createIdentitiesResponse([
-                { idp_id: "12345", type: "OAuth", provider: "GitHubOAuth" },
-              ])
-            ),
-        })
-        // WorkOS Pipes token fetch fails
-        .mockResolvedValueOnce({
-          ok: false,
-          json: () => Promise.reject(new Error("Unauthorized")),
-        });
+        .mockResolvedValueOnce({ ok: false })
+        .mockResolvedValueOnce({ ok: false });
 
       mockQuery.mockImplementation((name: string) => {
         if (name === "organization_members:listByUser") {
           return Promise.resolve([
             {
-              id: "member-1",
+              _id: "member-1",
               organizationId: "organization-1",
               userId: "user-123",
               role: "member",
             },
           ]);
-        }
-        if (name === "organizations:listByInstallerGithubId") {
-          return Promise.resolve([]);
         }
         return Promise.resolve([]);
       });
@@ -294,69 +244,17 @@ describe("auth routes", () => {
       });
     });
 
-    it("syncs identity even when GitHub API fetch fails", async () => {
-      mockFetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(createWorkOSUser()),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () =>
-            Promise.resolve(
-              createIdentitiesResponse([
-                { idp_id: "12345", type: "OAuth", provider: "GitHubOAuth" },
-              ])
-            ),
-        })
-        // WorkOS Pipes token fetch succeeds
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              active: true,
-              access_token: { token: "gho_test_token" },
-            }),
-        })
-        // GitHub API fetch fails
-        .mockResolvedValueOnce({
-          ok: false,
-          json: () => Promise.reject(new Error("Not found")),
-        });
-
-      mockQuery.mockImplementation((name: string) => {
-        if (name === "organization_members:listByUser") {
-          return Promise.resolve([
-            {
-              id: "member-1",
-              organizationId: "organization-1",
-              userId: "user-123",
-              role: "member",
-            },
-          ]);
+    it("returns 500 when Better Auth user fetch fails", async () => {
+      mockPoolQuery.mockImplementation((queryText: string) => {
+        if (queryText.includes('FROM "user"')) {
+          return Promise.resolve({ rows: [] });
         }
-        if (name === "organizations:listByInstallerGithubId") {
-          return Promise.resolve([]);
+
+        if (queryText.includes("FROM account")) {
+          return Promise.resolve({ rows: [{ account_id: "12345" }] });
         }
-        return Promise.resolve([]);
-      });
 
-      const res = await makeRequest("POST", "/auth/sync-user");
-      const json = await res.json();
-
-      expect(res.status).toBe(200);
-      expect(json).toMatchObject({
-        github_synced: true,
-        github_user_id: "12345",
-        github_username: null,
-        organizations_updated: 1,
-      });
-    });
-
-    it("returns 500 when WorkOS user fetch fails", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        text: () => Promise.resolve("Internal Server Error"),
+        return Promise.resolve({ rows: [] });
       });
 
       const res = await makeRequest("POST", "/auth/sync-user");
@@ -365,56 +263,15 @@ describe("auth routes", () => {
       expect(res.status).toBe(500);
       expect(json).toEqual({ error: "Failed to fetch user details" });
     });
-
-    it("filters out non-GitHub OAuth identities", async () => {
-      mockFetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(createWorkOSUser()),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () =>
-            Promise.resolve(
-              createIdentitiesResponse([
-                {
-                  idp_id: "google-123",
-                  type: "OAuth",
-                  provider: "GoogleOAuth",
-                },
-                {
-                  idp_id: "microsoft-456",
-                  type: "OAuth",
-                  provider: "MicrosoftOAuth",
-                },
-              ])
-            ),
-        });
-
-      const res = await makeRequest("POST", "/auth/sync-user");
-      const json = (await res.json()) as {
-        github_synced: boolean;
-        github_username: string | null;
-      };
-
-      expect(res.status).toBe(200);
-      expect(json.github_synced).toBe(false);
-      expect(json.github_username).toBeNull();
-    });
   });
 
   describe("GET /auth/me", () => {
-    it("returns user info with GitHub linked", async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(createWorkOSUser()),
-      });
-
+    it("returns user info with GitHub linked membership", async () => {
       mockQuery.mockImplementation((name: string) => {
         if (name === "organization_members:listByUser") {
           return Promise.resolve([
             {
-              id: "member-1",
+              _id: "member-1",
               organizationId: "organization-1",
               userId: "user-123",
               providerUserId: "12345",
@@ -441,24 +298,12 @@ describe("auth routes", () => {
       });
     });
 
-    it("returns user info without GitHub linked", async () => {
-      // First call: get user details from WorkOS
-      mockFetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(createWorkOSUser()),
-        })
-        // Second call: check WorkOS identities (since no GitHub linked in membership)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(createIdentitiesResponse([])),
-        });
-
+    it("falls back to linked account when membership is not linked", async () => {
       mockQuery.mockImplementation((name: string) => {
         if (name === "organization_members:listByUser") {
           return Promise.resolve([
             {
-              id: "member-1",
+              _id: "member-1",
               organizationId: "organization-1",
               userId: "user-123",
               providerUserId: null,
@@ -470,60 +315,65 @@ describe("auth routes", () => {
         return Promise.resolve([]);
       });
 
-      const res = await makeRequest("GET", "/auth/me");
-      const json = await res.json();
-
-      expect(res.status).toBe(200);
-      expect(json).toEqual({
-        user_id: "user-123",
-        email: "test@example.com",
-        first_name: "Test",
-        last_name: "User",
-        github_linked: false,
-        github_user_id: null,
-        github_username: null,
-      });
-    });
-
-    it("returns user info when not member of any organization", async () => {
-      // First call: get user details from WorkOS
-      mockFetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(createWorkOSUser()),
-        })
-        // Second call: check WorkOS identities (since no membership)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(createIdentitiesResponse([])),
-        });
-
-      mockQuery.mockImplementation((name: string) => {
-        if (name === "organization_members:listByUser") {
-          return Promise.resolve([]);
-        }
-        return Promise.resolve([]);
-      });
-
-      const res = await makeRequest("GET", "/auth/me");
-      const json = await res.json();
-
-      expect(res.status).toBe(200);
-      expect(json).toEqual({
-        user_id: "user-123",
-        email: "test@example.com",
-        first_name: "Test",
-        last_name: "User",
-        github_linked: false,
-        github_user_id: null,
-        github_username: null,
-      });
-    });
-
-    it("returns 500 when WorkOS user fetch fails", async () => {
       mockFetch.mockResolvedValueOnce({
-        ok: false,
-        text: () => Promise.resolve("Server Error"),
+        ok: true,
+        json: () => Promise.resolve({ id: 12_345, login: "testuser" }),
+      });
+
+      const res = await makeRequest("GET", "/auth/me");
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json).toEqual({
+        user_id: "user-123",
+        email: "test@example.com",
+        first_name: "Test",
+        last_name: "User",
+        github_linked: true,
+        github_user_id: "12345",
+        github_username: "testuser",
+      });
+    });
+
+    it("returns user info without GitHub linked", async () => {
+      mockPoolQuery.mockImplementation((queryText: string) => {
+        if (queryText.includes('FROM "user"')) {
+          return Promise.resolve({ rows: [createBetterAuthUser()] });
+        }
+
+        if (queryText.includes("FROM account")) {
+          return Promise.resolve({ rows: [] });
+        }
+
+        return Promise.resolve({ rows: [] });
+      });
+
+      const res = await makeRequest("GET", "/auth/me");
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json).toEqual({
+        user_id: "user-123",
+        email: "test@example.com",
+        first_name: "Test",
+        last_name: "User",
+        github_linked: false,
+        github_user_id: null,
+        github_username: null,
+      });
+    });
+
+    it("returns 500 when Better Auth user fetch fails", async () => {
+      mockPoolQuery.mockImplementation((queryText: string) => {
+        if (queryText.includes('FROM "user"')) {
+          return Promise.resolve({ rows: [] });
+        }
+
+        if (queryText.includes("FROM account")) {
+          return Promise.resolve({ rows: [{ account_id: "12345" }] });
+        }
+
+        return Promise.resolve({ rows: [] });
       });
 
       const res = await makeRequest("GET", "/auth/me");
@@ -534,27 +384,24 @@ describe("auth routes", () => {
     });
 
     it("handles user without first/last name", async () => {
-      // First call: get user details from WorkOS (no first/last name)
-      mockFetch
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              id: "user-123",
-              email: "test@example.com",
-            }),
-        })
-        // Second call: check WorkOS identities (since no membership)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(createIdentitiesResponse([])),
-        });
-
-      mockQuery.mockImplementation((name: string) => {
-        if (name === "organization_members:listByUser") {
-          return Promise.resolve([]);
+      mockPoolQuery.mockImplementation((queryText: string) => {
+        if (queryText.includes('FROM "user"')) {
+          return Promise.resolve({
+            rows: [
+              createBetterAuthUser({
+                id: "user-123",
+                email: "test@example.com",
+                name: null,
+              }),
+            ],
+          });
         }
-        return Promise.resolve([]);
+
+        if (queryText.includes("FROM account")) {
+          return Promise.resolve({ rows: [] });
+        }
+
+        return Promise.resolve({ rows: [] });
       });
 
       const res = await makeRequest("GET", "/auth/me");
@@ -566,6 +413,117 @@ describe("auth routes", () => {
       expect(res.status).toBe(200);
       expect(json.first_name).toBeUndefined();
       expect(json.last_name).toBeUndefined();
+    });
+  });
+
+  describe("GET /auth/github-orgs", () => {
+    it("returns github_account_not_linked when token is provided without linked account", async () => {
+      mockPoolQuery.mockImplementation((queryText: string) => {
+        if (queryText.includes('FROM "user"')) {
+          return Promise.resolve({ rows: [createBetterAuthUser()] });
+        }
+
+        if (queryText.includes("FROM account")) {
+          return Promise.resolve({ rows: [] });
+        }
+
+        return Promise.resolve({ rows: [] });
+      });
+
+      mockFetch.mockResolvedValueOnce(createGitHubUserResponse());
+
+      const res = await makeRequest("GET", "/auth/github-orgs", undefined, {
+        "X-GitHub-Token": VALID_GITHUB_TOKEN,
+      });
+      const json = (await res.json()) as { error: string; code?: string };
+
+      expect(res.status).toBe(401);
+      expect(json.code).toBe("github_account_not_linked");
+    });
+
+    it("falls back to linked Better Auth account token when header is missing", async () => {
+      mockPoolQuery.mockImplementation((queryText: string) => {
+        if (queryText.includes('FROM "user"')) {
+          return Promise.resolve({ rows: [createBetterAuthUser()] });
+        }
+
+        if (queryText.includes("FROM account")) {
+          return Promise.resolve({
+            rows: [{ account_id: "12345", access_token: VALID_GITHUB_TOKEN }],
+          });
+        }
+
+        return Promise.resolve({ rows: [] });
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: {
+          get: () => null,
+        },
+        json: () => Promise.resolve([]),
+      });
+
+      const res = await makeRequest("GET", "/auth/github-orgs");
+      const json = (await res.json()) as { orgs: unknown[] };
+
+      expect(res.status).toBe(200);
+      expect(json.orgs).toEqual([]);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("https://api.github.com/user/orgs"),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: `Bearer ${VALID_GITHUB_TOKEN}`,
+          }),
+        })
+      );
+    });
+  });
+
+  describe("POST /auth/github-token/refresh", () => {
+    it("returns github_account_not_linked when token refresh succeeds but account is not linked", async () => {
+      const env = createMockEnv({
+        GITHUB_CLIENT_SECRET: "github-client-secret",
+      });
+
+      mockPoolQuery.mockImplementation((queryText: string) => {
+        if (queryText.includes('FROM "user"')) {
+          return Promise.resolve({ rows: [createBetterAuthUser()] });
+        }
+
+        if (queryText.includes("FROM account")) {
+          return Promise.resolve({ rows: [] });
+        }
+
+        return Promise.resolve({ rows: [] });
+      });
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              access_token: VALID_GITHUB_TOKEN,
+              expires_in: 3600,
+              refresh_token: VALID_GITHUB_REFRESH_TOKEN,
+              refresh_token_expires_in: 86_400,
+              scope: "read:org,user:email",
+              token_type: "bearer",
+            }),
+        })
+        .mockResolvedValueOnce(createGitHubUserResponse());
+
+      const res = await makeRequest(
+        "POST",
+        "/auth/github-token/refresh",
+        { refresh_token: VALID_GITHUB_REFRESH_TOKEN },
+        undefined,
+        env
+      );
+      const json = (await res.json()) as { error: string; code?: string };
+
+      expect(res.status).toBe(401);
+      expect(json.code).toBe("github_account_not_linked");
     });
   });
 });

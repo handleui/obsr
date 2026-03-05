@@ -1,6 +1,6 @@
-import type { ConvexHttpClient } from "convex/browser";
+import type { ObserverClient } from "../../db/client";
 
-export type DbClient = ConvexHttpClient;
+export type DbClient = ObserverClient;
 
 export interface RunIdentifier {
   runId: number;

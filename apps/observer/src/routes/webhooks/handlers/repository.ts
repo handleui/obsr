@@ -1,4 +1,4 @@
-import { getConvexClient } from "../../../db/convex";
+import { getDbClient } from "../../../db/client";
 import { createProviderSlug } from "../../../lib/org-settings";
 import { captureWebhookError } from "../../../lib/sentry";
 import { classifyError } from "../../../services/webhooks/error-classifier";
@@ -26,10 +26,10 @@ export const handleRepositoryEvent = async (
     `[repository] ${action}: ${repository.full_name} (repo ID: ${repository.id}) [delivery: ${deliveryId}]`
   );
 
-  const convex = getConvexClient(c.env);
+  const dbClient = getDbClient(c.env);
 
   try {
-    const orgs = (await convex.query(
+    const orgs = (await dbClient.query(
       "organizations:listByProviderInstallationId",
       {
         providerInstallationId: String(installation.id),
@@ -52,7 +52,7 @@ export const handleRepositoryEvent = async (
     }
 
     // Resolve project in installation scope first to avoid cross-org ambiguity.
-    let project = (await convex.query("projects:getByOrgRepo", {
+    let project = (await dbClient.query("projects:getByOrgRepo", {
       organizationId: org._id,
       providerRepoId: String(repository.id),
     })) as {
@@ -66,7 +66,7 @@ export const handleRepositoryEvent = async (
 
     // Fallback for legacy rows created before scoped lookup.
     if (!project) {
-      project = (await convex.query("projects:getByRepoId", {
+      project = (await dbClient.query("projects:getByRepoId", {
         providerRepoId: String(repository.id),
       })) as {
         _id: string;
@@ -80,7 +80,7 @@ export const handleRepositoryEvent = async (
 
     if (!project) {
       // Ensure repository events can self-resolve missing project rows.
-      await convex.mutation("projects:syncFromGitHub", {
+      await dbClient.mutation("projects:syncFromGitHub", {
         organizationId: org._id,
         repos: [
           {
@@ -94,7 +94,7 @@ export const handleRepositoryEvent = async (
         syncRemoved: false,
       });
 
-      project = (await convex.query("projects:getByOrgRepo", {
+      project = (await dbClient.query("projects:getByOrgRepo", {
         organizationId: org._id,
         providerRepoId: String(repository.id),
       })) as {
@@ -120,7 +120,7 @@ export const handleRepositoryEvent = async (
     switch (action) {
       case "renamed": {
         // Update repo name and full_name, but preserve custom handle
-        await convex.mutation("projects:update", {
+        await dbClient.mutation("projects:update", {
           id: project._id,
           providerRepoName: repository.name,
           providerRepoFullName: repository.full_name,
@@ -142,7 +142,7 @@ export const handleRepositoryEvent = async (
       case "privatized":
       case "publicized": {
         const isPrivate = action === "privatized";
-        await convex.mutation("projects:update", {
+        await dbClient.mutation("projects:update", {
           id: project._id,
           isPrivate,
           updatedAt: Date.now(),
@@ -161,7 +161,7 @@ export const handleRepositoryEvent = async (
 
       case "transferred": {
         // Move repository to org tied to this installation and update name metadata.
-        await convex.mutation("projects:update", {
+        await dbClient.mutation("projects:update", {
           id: project._id,
           organizationId: org._id,
           providerRepoName: repository.name,
@@ -249,11 +249,11 @@ export const handleOrganizationEvent = async (
     return c.json({ message: "ignored", reason: "no login change" });
   }
 
-  const convex = getConvexClient(c.env);
+  const dbClient = getDbClient(c.env);
 
   try {
     // Find the organization by provider account ID (immutable)
-    const org = (await convex.query("organizations:getByProviderAccount", {
+    const org = (await dbClient.query("organizations:getByProviderAccount", {
       provider: "github",
       providerAccountId: String(organization.id),
     })) as {
@@ -293,7 +293,7 @@ export const handleOrganizationEvent = async (
       updates.name = organization.login;
     }
 
-    await convex.mutation("organizations:update", {
+    await dbClient.mutation("organizations:update", {
       id: org._id,
       ...updates,
     });
@@ -361,10 +361,10 @@ export const handleInstallationTargetEvent = async (
     return c.json({ message: "ignored", reason: "no login change" });
   }
 
-  const convex = getConvexClient(c.env);
+  const dbClient = getDbClient(c.env);
 
   try {
-    const org = (await convex.query("organizations:getByProviderAccount", {
+    const org = (await dbClient.query("organizations:getByProviderAccount", {
       provider: "github",
       providerAccountId: String(installation_target.id),
     })) as {
@@ -405,7 +405,7 @@ export const handleInstallationTargetEvent = async (
       updates.name = installation_target.login;
     }
 
-    await convex.mutation("organizations:update", {
+    await dbClient.mutation("organizations:update", {
       id: org._id,
       ...updates,
     });

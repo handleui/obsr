@@ -57,14 +57,12 @@ jobs:
 
       - name: Build workspace
         run: bun run build
-        env:
-          WORKOS_API_KEY: ${{ secrets.WORKOS_API_KEY }}
 
       - name: Build binaries
         run: bun run build:binaries
         working-directory: apps/cli
         env:
-          WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+          DETENT_CLI_CLIENT_ID: detent-cli
           SENTRY_DSN: ${{ secrets.SENTRY_CLI_DSN }}
 
       - name: Verify binary version

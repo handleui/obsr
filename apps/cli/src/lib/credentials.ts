@@ -1,5 +1,5 @@
 /**
- * Credentials management for WorkOS authentication
+ * Credentials management for CLI authentication
  *
  * Stores access and refresh tokens in global ~/.detent/credentials.json
  * Follows the same security patterns as config.ts (0o600 permissions)
@@ -18,9 +18,9 @@ import { getDetentHome } from "./env.js";
 
 export interface Credentials {
   access_token: string;
-  refresh_token: string;
+  refresh_token?: string;
   expires_at: number;
-  // GitHub OAuth tokens (from WorkOS "Return GitHub OAuth tokens" setting)
+  // GitHub OAuth tokens (when available from auth flow)
   // Access token expires in ~8 hours, refresh token expires in ~6 months
   github_token?: string;
   github_token_expires_at?: number;
@@ -52,11 +52,16 @@ const isValidCredentials = (data: unknown): data is Credentials => {
 
   // Validate required fields
   const hasRequiredFields =
-    typeof obj.access_token === "string" &&
-    typeof obj.refresh_token === "string" &&
-    typeof obj.expires_at === "number";
+    typeof obj.access_token === "string" && typeof obj.expires_at === "number";
 
   if (!hasRequiredFields) {
+    return false;
+  }
+
+  if (
+    obj.refresh_token !== undefined &&
+    typeof obj.refresh_token !== "string"
+  ) {
     return false;
   }
 

@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-05  
 Scope: Full auth cutover from WorkOS to Better Auth with clean migration assumptions (no prod users).  
-Out of scope now: CLI auth migration (`dt auth login`, device/browser flow).
+CLI auth migration is now in scope and implemented in this workspace.
 
 ## 1) Goals
 
@@ -225,12 +225,21 @@ Completion notes (2026-03-05):
 - Run full monorepo validation and auth test suite.
 - Update docs/env examples to Better Auth defaults.
 
-## 8) Explicitly deferred backlog (CLI)
+## 8) CLI Migration Status
 
-- `apps/cli/src/lib/auth.ts` device/browser flow replacement.
-- `/cli/auth` and `/api/cli/token` compatibility redesign.
-- Device Authorization plugin rollout for CLI parity.
-- CLI credential storage format migration.
+Status: completed (2026-03-05)
+
+- `apps/cli/src/lib/auth.ts` now uses Better Auth device authorization endpoints:
+  - `POST /api/auth/device/code`
+  - `POST /api/auth/device/token`
+- Browser and headless CLI login now both use Better Auth device flow.
+- Observer serves `/device` approval UX backed by Better Auth:
+  - `GET /device`
+  - `POST /device/sign-in`
+  - `POST /device/approve`
+  - `POST /device/deny`
+- CLI build/CI/env/docs no longer require `WORKOS_CLIENT_ID`.
+- Better Auth schema includes `device_code` table and generated Drizzle migration.
 
 ## 9) Risks and mitigations
 

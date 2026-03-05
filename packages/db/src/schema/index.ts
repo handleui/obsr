@@ -2,6 +2,7 @@ export {
   account,
   accountRelations,
   apikey,
+  deviceCode,
   invitation,
   invitationRelations,
   member,

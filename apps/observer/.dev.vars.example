@@ -26,6 +26,9 @@ BETTER_AUTH_GITHUB_SCOPES=read:user,user:email,read:org
 # BETTER_AUTH_OAUTH_PROXY_ENABLED=true
 # BETTER_AUTH_OAUTH_PROXY_CURRENT_URL=http://observer.localhost:1355
 # BETTER_AUTH_OAUTH_PROXY_PRODUCTION_URL=https://observer.detent.sh
+# Optional: CLI device auth settings
+# BETTER_AUTH_DEVICE_CLIENT_IDS=detent-cli
+# BETTER_AUTH_DEVICE_VERIFICATION_URI=http://observer.localhost:1355/device
 
 # Neon PostgreSQL (local dev, prod uses Hyperdrive)
 DATABASE_URL=postgresql://user:pass@host/neondb?sslmode=require

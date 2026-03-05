@@ -2,6 +2,11 @@ import type { DB } from "@better-auth/drizzle-adapter";
 import type { GenericOAuthConfig } from "better-auth/plugins/generic-oauth";
 import type { OAuthProxyOptions } from "better-auth/plugins/oauth-proxy";
 
+export interface DeviceAuthorizationConfig {
+  clientIds: string[];
+  verificationUri?: string;
+}
+
 export interface OAuthProviderConfig {
   providerId: string;
   clientId: string;
@@ -28,6 +33,7 @@ export interface CreateDetentAuthOptions {
   apiKeyHeaders?: string[];
   enableJwt?: boolean;
   oauthProxy?: OAuthProxyConfig;
+  deviceAuthorization?: DeviceAuthorizationConfig;
 }
 
 export interface DetentAuthEnv {
@@ -45,4 +51,6 @@ export interface DetentAuthEnv {
   BETTER_AUTH_OAUTH_PROXY_ENABLED?: string;
   BETTER_AUTH_OAUTH_PROXY_CURRENT_URL?: string;
   BETTER_AUTH_OAUTH_PROXY_PRODUCTION_URL?: string;
+  BETTER_AUTH_DEVICE_CLIENT_IDS?: string;
+  BETTER_AUTH_DEVICE_VERIFICATION_URI?: string;
 }

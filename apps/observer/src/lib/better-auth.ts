@@ -2,17 +2,23 @@ import { createDetentAuthFromEnv } from "@detent/auth";
 import type { Env } from "../types/env";
 import { getPersistentDb } from "./db";
 
-let cachedAuth: ReturnType<typeof createDetentAuthFromEnv> | null = null;
+const cachedAuthByConnectionString = new Map<
+  string,
+  ReturnType<typeof createDetentAuthFromEnv>
+>();
 
 export const getBetterAuth = (env: Env) => {
-  if (cachedAuth) {
-    return cachedAuth;
+  const connectionString = env.HYPERDRIVE?.connectionString ?? env.DATABASE_URL;
+  const existing = cachedAuthByConnectionString.get(connectionString);
+  if (existing) {
+    return existing;
   }
 
   const { db } = getPersistentDb(env);
+  const auth = createDetentAuthFromEnv(env, db);
 
-  cachedAuth = createDetentAuthFromEnv(env, db);
-  return cachedAuth;
+  cachedAuthByConnectionString.set(connectionString, auth);
+  return auth;
 };
 
 export const getBetterAuthPool = (env: Env) => getPersistentDb(env).pool;

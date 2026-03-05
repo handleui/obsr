@@ -197,7 +197,7 @@ detent/
 │   │   │       └── index.ts          # DB exports
 │   │   └── wrangler.jsonc            # Cloudflare Workers config
 │   │
-│   ├── cli/                          # Command-line interface (auth: WorkOS deferred)
+│   ├── cli/                          # Command-line interface (auth: Better Auth device flow)
 │   │   ├── src/
 │   │   │   ├── index.ts              # Entry point, auto-update, Sentry
 │   │   │   ├── commands/
@@ -208,7 +208,7 @@ detent/
 │   │   │   │   ├── errors.ts         # dt errors - view CI errors
 │   │   │   │   └── whoami.ts         # dt whoami - current user
 │   │   │   ├── lib/
-│   │   │   │   ├── auth.ts           # WorkOS Device Authorization (deferred)
+│   │   │   │   ├── auth.ts           # Better Auth device authorization flow
 │   │   │   │   ├── api.ts            # Authenticated API client
 │   │   │   │   ├── credentials.ts    # Token storage (~/.detent/)
 │   │   │   │   └── config.ts         # Config file handling (JSONC)
@@ -348,7 +348,7 @@ detent/
 │                    CLI AUTHENTICATION (Device Flow)                     │
 └────────────────────────────────────────────────────────────────────────┘
 
-   User Terminal                    WorkOS (CLI legacy)    Web App
+   User Terminal                  Better Auth (CLI)       Web App
         │                             │                        │
         │  dt auth                    │                        │
         │──────────────────────────►  │                        │
@@ -412,7 +412,7 @@ dt org                    # Organization management
 | Resolver     | Hono, Bun, Railway                    |
 | Database     | Neon Postgres (Drizzle)               |
 | Web Apps     | Next.js 16, React 19, Tailwind        |
-| Auth         | Better Auth, JWT (Jose), OAuth 2.0 (CLI deferred WorkOS) |
+| Auth         | Better Auth, JWT (Jose), OAuth 2.0 |
 | AI Extraction| Claude Haiku via Vercel AI SDK        |
 | AI Resolving   | Codex 5.2 via Vercel AI Gateway       |
 | Sandboxes    | E2B (fresh per resolve)                  |

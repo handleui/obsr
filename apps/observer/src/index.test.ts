@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockEnv } from "./test-helpers/mock-env";
 
-const { authHandlerMock, getBetterAuthMock } = vi.hoisted(() => ({
-  authHandlerMock: vi.fn(),
-  getBetterAuthMock: vi.fn(),
-}));
+const { authHandlerMock, getBetterAuthMock, getSessionMock } = vi.hoisted(
+  () => ({
+    authHandlerMock: vi.fn(),
+    getBetterAuthMock: vi.fn(),
+    getSessionMock: vi.fn(),
+  })
+);
 
 vi.mock("@detent/sentry", () => ({
   scrubEvent: vi.fn(),
@@ -26,8 +29,12 @@ import { app } from "./index";
 describe("observer auth route mounting", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getSessionMock.mockResolvedValue(null);
     getBetterAuthMock.mockReturnValue({
       handler: authHandlerMock,
+      api: {
+        getSession: getSessionMock,
+      },
     });
   });
 
@@ -74,5 +81,19 @@ describe("observer auth route mounting", () => {
     await expect(response.json()).resolves.toEqual({ ok: true });
     expect(getBetterAuthMock).toHaveBeenCalledTimes(1);
     expect(authHandlerMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders GET /device page", async () => {
+    const response = await app.request(
+      "http://localhost/device",
+      {
+        method: "GET",
+      },
+      createMockEnv()
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toContain("Detent CLI Device Login");
+    expect(getSessionMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -46,6 +46,7 @@ interface BetterAuthUser {
 
 interface BetterAuthGitHubAccount {
   accountId: string;
+  accessToken: string | null;
 }
 
 interface OrganizationDoc {
@@ -284,9 +285,12 @@ const loadLatestGitHubAccount = async (
   env: Env
 ): Promise<BetterAuthGitHubAccount | null> => {
   const pool = getBetterAuthPool(env);
-  const result = await pool.query<{ account_id: string }>(
+  const result = await pool.query<{
+    account_id: string;
+    access_token: string | null;
+  }>(
     `
-      SELECT account_id
+      SELECT account_id, access_token
       FROM account
       WHERE user_id = $1 AND provider_id = $2
       ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
@@ -302,6 +306,7 @@ const loadLatestGitHubAccount = async (
 
   return {
     accountId: row.account_id,
+    accessToken: row.access_token,
   };
 };
 
@@ -1320,30 +1325,49 @@ const handleGitHubApiError = (response: Response): TokenErrorResult => {
  * List GitHub organizations where the authenticated user can install the Detent GitHub App.
  * Returns org details with installation status and user's admin capability.
  *
- * Requires GitHub OAuth token via X-GitHub-Token header.
- * The token is validated for format and verified to belong to the authenticated user.
+ * Uses X-GitHub-Token when provided; otherwise falls back to the linked
+ * Better Auth GitHub account access token.
  */
 app.get("/github-orgs", async (c) => {
   const auth = c.get("auth");
   const linkedGitHubAccount = await loadLatestGitHubAccount(auth.userId, c.env);
+  const providedToken = c.req.header("X-GitHub-Token");
 
-  // Get verified GitHub token from header
-  const tokenResult = await getVerifiedGitHubToken(
-    c.req.header("X-GitHub-Token"),
-    linkedGitHubAccount?.accountId ?? null
-  );
-
-  if (!tokenResult.success) {
-    return c.json(
-      {
-        error: tokenResult.error,
-        ...(tokenResult.code && { code: tokenResult.code }),
-      },
-      tokenResult.status
+  let githubToken: string | null = null;
+  if (providedToken) {
+    const tokenResult = await getVerifiedGitHubToken(
+      providedToken,
+      linkedGitHubAccount?.accountId ?? null
     );
+
+    if (!tokenResult.success) {
+      return c.json(
+        {
+          error: tokenResult.error,
+          ...(tokenResult.code && { code: tokenResult.code }),
+        },
+        tokenResult.status
+      );
+    }
+
+    githubToken = tokenResult.token;
+  } else if (
+    linkedGitHubAccount?.accessToken &&
+    isValidGitHubTokenFormat(linkedGitHubAccount.accessToken)
+  ) {
+    githubToken = linkedGitHubAccount.accessToken;
   }
 
-  const githubToken = tokenResult.token;
+  if (!githubToken) {
+    return c.json(
+      {
+        error:
+          "GitHub token required. Re-authenticate with `dt auth login --force` after linking GitHub.",
+        code: "github_token_required",
+      },
+      401
+    );
+  }
 
   // Fetch all orgs with pagination (users can belong to >100 orgs)
   const githubOrgs: GitHubOrg[] = [];

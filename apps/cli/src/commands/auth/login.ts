@@ -14,9 +14,7 @@ import { ANSI_RESET, colors, hexToAnsi } from "../../tui/styles.js";
 const brand = hexToAnsi(colors.brand);
 
 const handleDeviceAuthError = (error: unknown): never => {
-  if (error instanceof Error && error.message.includes("WORKOS_CLIENT_ID")) {
-    console.error(`Error: ${error.message}`);
-  } else if (error instanceof Error && error.message.includes("fetch")) {
+  if (error instanceof Error && error.message.includes("fetch")) {
     console.error("Network error: Unable to connect to authentication server.");
     console.error("Please check your internet connection and try again.");
   } else {
@@ -121,8 +119,10 @@ export const loginCommand = defineCommand({
 
     const credentials: Credentials = {
       access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
       expires_at: getJwtExpiration(tokens.access_token),
+      ...(tokens.refresh_token && {
+        refresh_token: tokens.refresh_token,
+      }),
       // Store GitHub OAuth tokens if available (from browser flow)
       ...(tokens.github_token && {
         github_token: tokens.github_token,

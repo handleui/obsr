@@ -62,8 +62,7 @@ jobs:
         run: bun run build:binaries
         working-directory: apps/cli
         env:
-          # Required for deferred CLI auth path
-          WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+          DETENT_CLI_CLIENT_ID: detent-cli
           SENTRY_DSN: ${{ secrets.SENTRY_CLI_DSN }}
 
       - name: Verify binary version

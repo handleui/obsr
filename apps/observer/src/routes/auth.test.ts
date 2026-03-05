@@ -81,7 +81,9 @@ const installDefaultPoolMocks = () => {
     }
 
     if (queryText.includes("FROM account")) {
-      return Promise.resolve({ rows: [{ account_id: "12345" }] });
+      return Promise.resolve({
+        rows: [{ account_id: "12345", access_token: null }],
+      });
     }
 
     return Promise.resolve({ rows: [] });
@@ -437,6 +439,44 @@ describe("auth routes", () => {
 
       expect(res.status).toBe(401);
       expect(json.code).toBe("github_account_not_linked");
+    });
+
+    it("falls back to linked Better Auth account token when header is missing", async () => {
+      mockPoolQuery.mockImplementation((queryText: string) => {
+        if (queryText.includes('FROM "user"')) {
+          return Promise.resolve({ rows: [createBetterAuthUser()] });
+        }
+
+        if (queryText.includes("FROM account")) {
+          return Promise.resolve({
+            rows: [{ account_id: "12345", access_token: VALID_GITHUB_TOKEN }],
+          });
+        }
+
+        return Promise.resolve({ rows: [] });
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: {
+          get: () => null,
+        },
+        json: () => Promise.resolve([]),
+      });
+
+      const res = await makeRequest("GET", "/auth/github-orgs");
+      const json = (await res.json()) as { orgs: unknown[] };
+
+      expect(res.status).toBe(200);
+      expect(json.orgs).toEqual([]);
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining("https://api.github.com/user/orgs"),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: `Bearer ${VALID_GITHUB_TOKEN}`,
+          }),
+        })
+      );
     });
   });
 

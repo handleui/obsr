@@ -140,7 +140,7 @@ describe("credentials", () => {
       expect(result).toBeNull();
     });
 
-    it("returns null for missing refresh_token", () => {
+    it("returns credentials for missing refresh_token", () => {
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(readFileSync).mockReturnValue(
         JSON.stringify({
@@ -151,7 +151,10 @@ describe("credentials", () => {
 
       const result = loadCredentials();
 
-      expect(result).toBeNull();
+      expect(result).toEqual({
+        access_token: "token",
+        expires_at: expect.any(Number),
+      });
     });
 
     it("returns null for missing expires_at", () => {
@@ -190,6 +193,21 @@ describe("credentials", () => {
           access_token: "token",
           refresh_token: "token",
           expires_at: "not a number",
+        })
+      );
+
+      const result = loadCredentials();
+
+      expect(result).toBeNull();
+    });
+
+    it("returns null for non-string refresh_token", () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue(
+        JSON.stringify({
+          access_token: "token",
+          refresh_token: 123,
+          expires_at: Date.now(),
         })
       );
 

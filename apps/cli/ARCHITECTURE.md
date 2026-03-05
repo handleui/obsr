@@ -51,30 +51,20 @@ Two authentication methods supported:
 User runs `dt auth login`
          |
          v
-    Start localhost callback server (random port)
-    Generate cryptographic state token
+    Request device authorization from Better Auth
          |
          v
-    Open browser to detent.sh/cli/auth?port=PORT&state=STATE
+    Open browser to verification_uri_complete
          |
          v
-    User authenticates via WorkOS (legacy CLI auth; deferred)
+    User signs in and approves device request
          |
          v
-    Web app redirects to localhost:PORT/callback?code=CODE&state=STATE
-         |
-         v
-    Verify state, exchange code for tokens via web API
+    Poll Better Auth for token completion
          |
          v
     Save credentials to ~/.detent/credentials.json
 ```
-
-**Localhost Server** (`lib/localhost-server.ts`):
-- Uses port 0 for OS-assigned random available port
-- Tracks sockets for fast shutdown
-- 5-minute timeout
-- Returns HTML success page to browser
 
 ### 2. Device Code Flow (--headless)
 
@@ -84,13 +74,13 @@ For environments without browser access (CI, SSH, containers):
 User runs `dt auth login --headless`
          |
          v
-    Request device authorization from WorkOS (legacy CLI auth; deferred)
+    Request device authorization from Better Auth
          |
          v
     Display verification URL and user code
          |
          v
-    Poll WorkOS for token completion (legacy CLI auth; deferred)
+    Poll Better Auth for token completion
          |
          v
     Save credentials
@@ -116,8 +106,8 @@ Three distinct storage layers:
 
 ```typescript
 interface Credentials {
-  access_token: string;        // WorkOS JWT
-  refresh_token: string;
+  access_token: string;        // Better Auth session token
+  refresh_token?: string;      // Optional for backward compatibility
   expires_at: number;          // Unix timestamp (ms)
   github_token?: string;       // GitHub OAuth (from browser auth flow)
   github_token_expires_at?: number;
@@ -327,7 +317,7 @@ If update available:
 
 ## Build System
 
-CLI auth remains on the deferred WorkOS surface until the migration of CLI flows is completed.
+CLI auth uses Better Auth device authorization.
 
 Standalone binaries built with Bun's compile feature:
 
@@ -335,7 +325,7 @@ Standalone binaries built with Bun's compile feature:
 bun build --compile --target=bun-linux-x64 \
   --define=DETENT_VERSION='"x.y.z"' \
   --define=DETENT_PRODUCTION=true \
-  --define=process.env.WORKOS_CLIENT_ID='"..."' \
+  --define=process.env.DETENT_CLI_CLIENT_ID='"detent-cli"' \
   --minify src/index.ts --outfile=dist/dt-linux-amd64
 ```
 

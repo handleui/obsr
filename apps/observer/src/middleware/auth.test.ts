@@ -6,10 +6,11 @@ import type { Env } from "../types/env";
 import { authMiddleware } from "./auth";
 
 const verifyBearerToken = vi.fn<AuthProvider["verifyBearerToken"]>();
+const providerName = vi.hoisted(() => ({ value: "better-auth" }));
 
 vi.mock("../auth/auth-provider", () => ({
   resolveAuthProvider: vi.fn(() => ({
-    name: "better-auth",
+    name: providerName.value,
     verifyBearerToken,
   })),
 }));
@@ -24,6 +25,7 @@ const createApp = () => {
 describe("authMiddleware", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    providerName.value = "better-auth";
   });
 
   it("returns 401 when authorization header is missing", async () => {

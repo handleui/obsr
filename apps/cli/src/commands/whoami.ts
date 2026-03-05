@@ -15,10 +15,8 @@ const handleAuthError = (error: unknown, debug: boolean): never => {
 
   if (message.includes("Not logged in")) {
     console.error("Not logged in. Run `dt auth login` first.");
-  } else if (message.includes("refresh")) {
-    console.error(
-      "Session expired and refresh failed. Run `dt auth login` to re-authenticate."
-    );
+  } else if (message.includes("Session expired")) {
+    console.error("Session expired. Run `dt auth login --force`.");
     if (debug) {
       console.error("  Error:", message);
     }

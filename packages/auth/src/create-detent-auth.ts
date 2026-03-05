@@ -2,6 +2,7 @@ import { apiKey } from "@better-auth/api-key";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { betterAuth } from "better-auth";
 import { bearer } from "better-auth/plugins/bearer";
+import { deviceAuthorization } from "better-auth/plugins/device-authorization";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import { jwt } from "better-auth/plugins/jwt";
 import { oAuthProxy } from "better-auth/plugins/oauth-proxy";
@@ -16,6 +17,7 @@ const DEFAULT_GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const DEFAULT_GITHUB_USER_INFO_URL = "https://api.github.com/user";
 const DEFAULT_GITHUB_SCOPES = ["read:user", "user:email", "read:org"];
 const DEFAULT_API_KEY_HEADERS = ["x-api-key", "x-detent-token"];
+const DEFAULT_DEVICE_CLIENT_IDS = ["detent-cli"];
 
 const parseCsv = (input: string | undefined): string[] =>
   input
@@ -41,7 +43,32 @@ const normalizeApiKeyHeaders = (headers: string[] | undefined): string[] => {
   return [...new Set(normalized)];
 };
 
+const resolveDeviceVerificationUri = (
+  explicitVerificationUri: string | undefined,
+  baseURL: string | undefined
+): string | undefined => {
+  if (explicitVerificationUri) {
+    return explicitVerificationUri;
+  }
+
+  if (!baseURL) {
+    return undefined;
+  }
+
+  try {
+    return new URL("/device", baseURL).toString();
+  } catch {
+    return undefined;
+  }
+};
+
 export const createDetentAuth = (options: CreateDetentAuthOptions) => {
+  const allowedDeviceClientIds = new Set(
+    (options.deviceAuthorization?.clientIds ?? DEFAULT_DEVICE_CLIENT_IDS)
+      .map((clientId) => clientId.trim())
+      .filter(Boolean)
+  );
+
   const plugins: NonNullable<Parameters<typeof betterAuth>[0]["plugins"]> = [
     genericOAuth({
       config: options.oauthProviders,
@@ -51,6 +78,14 @@ export const createDetentAuth = (options: CreateDetentAuthOptions) => {
       apiKeyHeaders: normalizeApiKeyHeaders(options.apiKeyHeaders),
     }),
     bearer(),
+    deviceAuthorization({
+      validateClient: async (clientId: string) =>
+        allowedDeviceClientIds.has(clientId),
+      verificationUri: resolveDeviceVerificationUri(
+        options.deviceAuthorization?.verificationUri,
+        options.baseURL
+      ),
+    }),
   ];
 
   if (options.enableJwt) {
@@ -89,6 +124,7 @@ export const createDetentAuthFromEnv = (
   database: CreateDetentAuthOptions["database"]
 ) => {
   const scopes = parseCsv(env.BETTER_AUTH_GITHUB_SCOPES);
+  const deviceClientIds = parseCsv(env.BETTER_AUTH_DEVICE_CLIENT_IDS);
   const oauthProxyEnabled = isTrue(env.BETTER_AUTH_OAUTH_PROXY_ENABLED);
 
   if (oauthProxyEnabled && env.NODE_ENV === "production") {
@@ -137,5 +173,12 @@ export const createDetentAuthFromEnv = (
           ),
         }
       : undefined,
+    deviceAuthorization: {
+      clientIds:
+        deviceClientIds.length > 0
+          ? deviceClientIds
+          : DEFAULT_DEVICE_CLIENT_IDS,
+      verificationUri: env.BETTER_AUTH_DEVICE_VERIFICATION_URI,
+    },
   });
 };

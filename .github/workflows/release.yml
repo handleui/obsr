@@ -44,6 +44,7 @@ jobs:
           fi
 
           DISPATCHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          EXPECTED_TITLE="Build ($CLI_TAG_NAME)"
           echo "Dispatching build.yml for $CLI_TAG_NAME"
           gh workflow run build.yml --ref main -f ref="$CLI_TAG_NAME"
 
@@ -54,8 +55,8 @@ jobs:
               --event workflow_dispatch \
               --branch main \
               --limit 20 \
-              --json databaseId,createdAt \
-              --jq "map(select(.createdAt >= \"$DISPATCHED_AT\")) | sort_by(.createdAt) | reverse | .[0].databaseId")"
+              --json databaseId,createdAt,displayTitle \
+              --jq "map(select(.createdAt >= \"$DISPATCHED_AT\" and .displayTitle == \"$EXPECTED_TITLE\")) | sort_by(.createdAt) | reverse | .[0].databaseId")" || { sleep 5; continue; }
 
             if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
               break
@@ -64,7 +65,7 @@ jobs:
           done
 
           if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-            echo "Failed to locate dispatched build.yml run for $CLI_TAG_NAME"
+            echo "Failed to locate dispatched build.yml run for $CLI_TAG_NAME (expected title: $EXPECTED_TITLE)"
             exit 1
           fi
 

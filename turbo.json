@@ -19,6 +19,10 @@
       ]
     },
     "@detent/cli#build": {
+      "inputs": ["src/**/*.rs", "Cargo.toml", "Cargo.lock", "package.json"],
+      "outputs": ["target/**"]
+    },
+    "@detent/cli-legacy#build": {
       "dependsOn": ["@detent/resolving#build", "@detent/git#build"],
       "inputs": [
         "src/**/*.ts",

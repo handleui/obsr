@@ -1,10 +1,9 @@
-# API (Cloudflare Workers) environment variables
+# Observer (Cloudflare Workers) environment variables
 # Copy to .dev.vars and fill in your values
 
 # GitHub App
 GITHUB_APP_ID=
 GITHUB_CLIENT_ID=
-# Required for POST /v1/auth/github-token/refresh
 GITHUB_CLIENT_SECRET=
 # Private key must be single-line with literal \n
 # Convert: awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' your-key.pem
@@ -17,23 +16,9 @@ BETTER_AUTH_URL=http://observer.localhost:1355
 BETTER_AUTH_TRUSTED_ORIGINS=http://detent.localhost:1355
 BETTER_AUTH_GITHUB_CLIENT_ID=
 BETTER_AUTH_GITHUB_CLIENT_SECRET=
-BETTER_AUTH_GITHUB_SCOPES=read:user,user:email,read:org
-# Optional: override provider endpoints if needed
-# BETTER_AUTH_GITHUB_AUTHORIZATION_URL=https://github.com/login/oauth/authorize
-# BETTER_AUTH_GITHUB_TOKEN_URL=https://github.com/login/oauth/access_token
-# BETTER_AUTH_GITHUB_USER_INFO_URL=https://api.github.com/user
-# Optional: enable only in non-production preview/dev environments
-# BETTER_AUTH_OAUTH_PROXY_ENABLED=true
-# BETTER_AUTH_OAUTH_PROXY_CURRENT_URL=http://observer.localhost:1355
-# BETTER_AUTH_OAUTH_PROXY_PRODUCTION_URL=https://observer.detent.sh
-# Optional: CLI device auth settings
-# BETTER_AUTH_DEVICE_CLIENT_IDS=detent-cli
-# BETTER_AUTH_DEVICE_VERIFICATION_URI=http://observer.localhost:1355/device
 
-# Neon PostgreSQL (local dev, prod uses Hyperdrive)
+# Neon PostgreSQL (local dev)
 DATABASE_URL=postgresql://user:pass@host/neondb?sslmode=require
-# Hyperdrive local override (wrangler dev needs this to simulate the HYPERDRIVE binding)
-CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://user:pass@host/neondb?sslmode=require
 
 # Upstash Redis (rate limiting)
 UPSTASH_REDIS_REST_URL=
@@ -43,16 +28,12 @@ UPSTASH_REDIS_REST_TOKEN=
 RESEND_API_KEY=
 RESEND_EMAIL_FROM="Detent <noreply@detent.dev>"
 
-# URLs
+# App URLs and CORS
 APP_BASE_URL=http://detent.localhost:1355
-# Legacy alias (optional)
-# NAVIGATOR_BASE_URL=http://detent.localhost:1355
 ALLOWED_ORIGINS=http://detent.localhost:1355
 
-# Polar (billing)
-POLAR_ACCESS_TOKEN=
-POLAR_ORGANIZATION_ID=
-POLAR_WEBHOOK_SECRET=
+# Encryption for stored third-party secrets
+ENCRYPTION_KEY=
 
 # AI Gateway
 AI_GATEWAY_API_KEY=
@@ -60,9 +41,4 @@ AI_GATEWAY_API_KEY=
 # Upstash QStash (resolver queue)
 UPSTASH_QSTASH_URL=https://qstash.upstash.io
 UPSTASH_QSTASH_TOKEN=
-# Optional: override full publish URL for Upstash destination encoding
-UPSTASH_QSTASH_PUBLISH_URL=
 RESOLVER_WEBHOOK_URL=https://resolver.detent.sh/queue/resolves
-
-# Sentry
-SENTRY_DSN=

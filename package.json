@@ -4,6 +4,8 @@
   "scripts": {
     "build": "turbo run build",
     "build:observer": "turbo run build --filter=@detent/observer",
+    "deploy:observer": "wrangler deploy --config apps/observer/wrangler.jsonc --minify",
+    "deploy:observer:preview": "wrangler versions upload --config apps/observer/wrangler.jsonc --minify",
     "build:cli": "turbo run build --filter=@detent/cli",
     "dev": "turbo run dev",
     "dev:core": "turbo run dev --filter=@detent/observer --filter=@detent/web",

@@ -34,7 +34,7 @@ jobs:
           manifest-file: .release-please-manifest.json
 
       - name: Trigger CLI Build
-        if: ${{ steps.release.outputs['apps/cli--release_created'] }}
+        if: ${{ steps.release.outputs['apps/cli-legacy--release_created'] }}
         run: |
           set -euo pipefail
 
@@ -75,7 +75,7 @@ jobs:
           echo "CLI build succeeded: $RUN_URL"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CLI_TAG_NAME: ${{ steps.release.outputs['apps/cli--tag_name'] }}
+          CLI_TAG_NAME: ${{ steps.release.outputs['apps/cli-legacy--tag_name'] }}
 
       # npm package publishing setup
       - name: Setup Node for npm publish

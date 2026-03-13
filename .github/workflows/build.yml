@@ -53,6 +53,9 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -61,14 +64,14 @@ jobs:
 
       - name: Build binaries
         run: bun run build:binaries
-        working-directory: apps/cli
+        working-directory: apps/cli-legacy
         env:
           DETENT_CLI_CLIENT_ID: detent-cli
           SENTRY_DSN: ${{ secrets.SENTRY_CLI_DSN }}
 
       - name: Verify binary version
         run: |
-          cd apps/cli/dist
+          cd apps/cli-legacy/dist
           tar -xzf dt-linux-amd64.tar.gz
 
           # Get version from package.json
@@ -106,14 +109,14 @@ jobs:
       - name: Sign checksums
         run: |
           cosign sign-blob \
-            --output-certificate=apps/cli/dist/checksums.txt.pem \
-            --output-signature=apps/cli/dist/checksums.txt.sig \
+            --output-certificate=apps/cli-legacy/dist/checksums.txt.pem \
+            --output-signature=apps/cli-legacy/dist/checksums.txt.sig \
             --yes \
-            apps/cli/dist/checksums.txt
+            apps/cli-legacy/dist/checksums.txt
 
       - name: Upload to Blob
         run: bun run upload:binaries
-        working-directory: apps/cli
+        working-directory: apps/cli-legacy
         env:
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
 
@@ -124,11 +127,11 @@ jobs:
           name: ${{ steps.version.outputs.tag }}
           generate_release_notes: true
           files: |
-            apps/cli/dist/*.tar.gz
-            apps/cli/dist/*.zip
-            apps/cli/dist/checksums.txt
-            apps/cli/dist/checksums.txt.sig
-            apps/cli/dist/checksums.txt.pem
+            apps/cli-legacy/dist/*.tar.gz
+            apps/cli-legacy/dist/*.zip
+            apps/cli-legacy/dist/checksums.txt
+            apps/cli-legacy/dist/checksums.txt.sig
+            apps/cli-legacy/dist/checksums.txt.pem
 
       - name: Verify install from Blob
         run: |

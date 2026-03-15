@@ -7,7 +7,6 @@ use crate::config;
 use crate::credentials::{StoredCredentials, clear_credentials, load_credentials, save_credentials};
 use crate::error::{AppError, ErrorCode};
 
-const DEVICE_CLIENT_ID: &str = "detent-cli";
 const POLL_ATTEMPTS_LIMIT: usize = 120;
 const HTTP_TIMEOUT_SECONDS: u64 = 20;
 const USER_AGENT: &str = concat!("dt/", env!("CARGO_PKG_VERSION"));
@@ -149,11 +148,11 @@ impl AuthService {
     async fn request_device_code(&self) -> Result<DeviceAuthorizationResponse, AppError> {
         let response = self
             .client
-            .post(format!("{}/api/auth/device/code", self.base_url))
-            .json(&serde_json::json!({
-                "client_id": DEVICE_CLIENT_ID,
-                "scope": "openid profile email",
-            }))
+                .post(format!("{}/api/auth/device/code", self.base_url))
+                .json(&serde_json::json!({
+                    "client_id": config::device_client_id(),
+                    "scope": "openid profile email",
+                }))
             .send()
             .await
             .map_err(map_network_error)?;
@@ -177,7 +176,7 @@ impl AuthService {
                 .json(&serde_json::json!({
                     "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                     "device_code": device_code,
-                    "client_id": DEVICE_CLIENT_ID,
+                    "client_id": config::device_client_id(),
                 }))
                 .send()
                 .await

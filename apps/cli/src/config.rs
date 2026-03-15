@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::error::{AppError, ErrorCode};
 
 const DEFAULT_API_URL: &str = "https://observer.detent.sh";
+const DEFAULT_DEVICE_CLIENT_ID: &str = "detent-cli";
 const DETENT_DIR_NAME: &str = ".detent";
 const DETENT_DEV_DIR_NAME: &str = ".detent-dev";
 
@@ -11,6 +12,14 @@ pub fn api_url() -> String {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_API_URL.to_string())
+}
+
+pub fn device_client_id() -> String {
+    std::env::var("DETENT_DEVICE_CLIENT_ID")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_DEVICE_CLIENT_ID.to_string())
 }
 
 pub fn detent_home() -> Result<PathBuf, AppError> {
@@ -64,6 +73,18 @@ mod tests {
     fn defaults_api_url() {
         let _guard = EnvVarGuard::set("DETENT_API_URL", None);
         assert_eq!(api_url(), DEFAULT_API_URL);
+    }
+
+    #[test]
+    fn defaults_device_client_id() {
+        let _guard = EnvVarGuard::set("DETENT_DEVICE_CLIENT_ID", None);
+        assert_eq!(device_client_id(), DEFAULT_DEVICE_CLIENT_ID);
+    }
+
+    #[test]
+    fn respects_device_client_id_override() {
+        let _guard = EnvVarGuard::set("DETENT_DEVICE_CLIENT_ID", Some("custom-cli"));
+        assert_eq!(device_client_id(), "custom-cli");
     }
 
     #[test]

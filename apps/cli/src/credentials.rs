@@ -104,7 +104,9 @@ fn replace_existing_file(
 ) -> Result<bool, AppError> {
     #[cfg(windows)]
     {
-        if _path.exists() {
+        let is_conflict_error =
+            _error.kind() == std::io::ErrorKind::AlreadyExists || _error.raw_os_error() == Some(183);
+        if is_conflict_error && _path.exists() {
             fs::remove_file(_path).map_err(|remove_error| {
                 AppError::internal(format!(
                     "failed to replace credentials after rename error ({_error}): {remove_error}"

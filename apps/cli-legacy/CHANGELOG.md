@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.0](https://github.com/handleui/detent/compare/cli-v0.2.0...cli-v0.3.0) (2026-03-15)
+
+
+### Features
+
+* **cli:** add rust auth device flow ([#194](https://github.com/handleui/detent/issues/194)) ([42cf624](https://github.com/handleui/detent/commit/42cf624b7bcc9f805c687699932b88ec8dc0d67f))
+* **cli:** scaffold rust v1 and move ts cli to legacy ([836304c](https://github.com/handleui/detent/commit/836304c742222ace9f1c9838ef0ac68f02de1ca7))
+* **cli:** scaffold Rust v1 CLI and move TS CLI to legacy ([#192](https://github.com/handleui/detent/issues/192)) ([836304c](https://github.com/handleui/detent/commit/836304c742222ace9f1c9838ef0ac68f02de1ca7))
+
 ## [0.2.0](https://github.com/handleui/detent/compare/cli-v0.1.0...cli-v0.2.0) (2026-03-05)
 
 

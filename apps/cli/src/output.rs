@@ -69,8 +69,9 @@ pub fn print_auth_login(result: &LoginResult, mode: OutputMode) {
         }
         OutputMode::Json => {
             print_json(&serde_json::json!({
+                "event": "authenticated",
                 "status": "authenticated",
-                "api_url": crate::config::api_url(),
+                "api_url": result.api_url,
                 "verification_uri": result.device.verification_uri,
                 "verification_uri_complete": result.device.verification_uri_complete,
                 "user_code": result.device.user_code,
@@ -92,7 +93,14 @@ pub fn print_auth_login_prompt(device: &crate::auth::DeviceAuthorizationResponse
             println!("Waiting for approval...");
         }
         OutputMode::Json => {
-            let _ = device;
+            print_json(&serde_json::json!({
+                "event": "device_authorization",
+                "verification_uri": device.verification_uri,
+                "verification_uri_complete": device.verification_uri_complete,
+                "user_code": device.user_code,
+                "expires_in": device.expires_in,
+                "interval": device.interval,
+            }));
         }
     }
 }

@@ -93,7 +93,12 @@ impl AuthService {
 
         let me = self.fetch_me(&tokens.access_token).await?;
 
-        Ok(LoginResult { device, credentials, me })
+        Ok(LoginResult {
+            api_url: self.base_url.clone(),
+            device,
+            credentials,
+            me,
+        })
     }
 
     pub async fn status(&self) -> Result<AuthStatus, AppError> {
@@ -263,10 +268,12 @@ fn normalize_base_url(base_url: &str) -> Result<String, AppError> {
 
 fn is_loopback_host(host: Option<&str>) -> bool {
     matches!(host, Some("localhost" | "127.0.0.1" | "::1"))
+        || host.is_some_and(|value| value.ends_with(".localhost"))
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LoginResult {
+    pub api_url: String,
     pub device: DeviceAuthorizationResponse,
     #[serde(skip_serializing)]
     pub credentials: StoredCredentials,
@@ -403,6 +410,16 @@ mod tests {
     fn allows_http_localhost_api_urls() {
         AuthService::new_with_client(Client::new(), "http://localhost:1355".into(), no_sleep)
             .expect("localhost should be allowed");
+    }
+
+    #[test]
+    fn allows_http_portless_localhost_api_urls() {
+        AuthService::new_with_client(
+            Client::new(),
+            "http://observer.localhost:1355".into(),
+            no_sleep,
+        )
+        .expect("portless localhost domains should be allowed");
     }
 
     #[test]

@@ -4,7 +4,7 @@ use crate::cli::{
 use crate::auth::AuthService;
 use crate::config;
 use crate::credentials::clear_credentials;
-use crate::error::AppError;
+use crate::error::{AppError, ErrorCode};
 use crate::output::{
     OutputMode, print_auth_login, print_auth_login_prompt, print_auth_logout, print_auth_status,
     print_stub,
@@ -32,9 +32,15 @@ pub async fn execute(cli: AppCli) -> Result<(), AppError> {
                 } else {
                     OutputMode::Human
                 };
-                let result = crate::auth::LogoutResult {
-                    cleared: clear_credentials()?,
-                    api_url: config::api_url(),
+                let result = match AuthService::new() {
+                    Ok(service) => service.logout()?,
+                    Err(error) if error.code() == ErrorCode::InvalidConfiguration => {
+                        crate::auth::LogoutResult {
+                            cleared: clear_credentials()?,
+                            api_url: config::api_url(),
+                        }
+                    }
+                    Err(error) => return Err(error),
                 };
                 print_auth_logout(&result, mode);
                 Ok(())

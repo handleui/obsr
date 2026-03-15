@@ -71,9 +71,13 @@ pub fn save_credentials(credentials: &StoredCredentials) -> Result<(), AppError>
         })?;
     }
 
-    fs::rename(&temp_path, &path).map_err(|error| {
-        AppError::internal(format!("failed to finalize credentials save: {error}"))
-    })?;
+    if let Err(error) = fs::rename(&temp_path, &path) {
+        if !replace_existing_file(&temp_path, &path, &error)? {
+            return Err(AppError::internal(format!(
+                "failed to finalize credentials save: {error}"
+            )));
+        }
+    }
 
     Ok(())
 }
@@ -91,6 +95,31 @@ pub fn clear_credentials() -> Result<bool, AppError> {
 
 fn credentials_path() -> PathBuf {
     config::detent_home().join(CREDENTIALS_FILE)
+}
+
+fn replace_existing_file(
+    _temp_path: &PathBuf,
+    _path: &PathBuf,
+    _error: &std::io::Error,
+) -> Result<bool, AppError> {
+    #[cfg(windows)]
+    {
+        if _path.exists() {
+            fs::remove_file(_path).map_err(|remove_error| {
+                AppError::internal(format!(
+                    "failed to replace credentials after rename error ({_error}): {remove_error}"
+                ))
+            })?;
+            fs::rename(_temp_path, _path).map_err(|rename_error| {
+                AppError::internal(format!(
+                    "failed to replace credentials after rename error ({_error}): {rename_error}"
+                ))
+            })?;
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 fn validate_credentials(credentials: &StoredCredentials) -> Result<(), AppError> {
@@ -145,6 +174,29 @@ mod tests {
         let loaded = load_credentials().expect("should load");
 
         assert_eq!(loaded, Some(credentials));
+    }
+
+    #[test]
+    fn save_credentials_overwrites_existing_file() {
+        let temp_dir = tempfile_dir();
+        let _guard = EnvVarGuard::set("DETENT_HOME", Some(temp_dir.to_str().expect("utf8")));
+
+        let initial = StoredCredentials {
+            access_token: "first-token".into(),
+            refresh_token: Some("first-refresh".into()),
+            expires_at: 123,
+        };
+        let updated = StoredCredentials {
+            access_token: "second-token".into(),
+            refresh_token: Some("second-refresh".into()),
+            expires_at: 456,
+        };
+
+        save_credentials(&initial).expect("initial save should work");
+        save_credentials(&updated).expect("second save should overwrite");
+
+        let loaded = load_credentials().expect("should load after overwrite");
+        assert_eq!(loaded, Some(updated));
     }
 
     #[test]

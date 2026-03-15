@@ -15,11 +15,16 @@ pub fn api_url() -> String {
 }
 
 pub fn device_client_id() -> String {
-    std::env::var("DETENT_DEVICE_CLIENT_ID")
+    read_trimmed_env("DETENT_DEVICE_CLIENT_ID")
+        .or_else(|| read_trimmed_env("DETENT_CLI_CLIENT_ID"))
+        .unwrap_or_else(|| DEFAULT_DEVICE_CLIENT_ID.to_string())
+}
+
+fn read_trimmed_env(key: &str) -> Option<String> {
+    std::env::var(key)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_DEVICE_CLIENT_ID.to_string())
 }
 
 pub fn detent_home() -> Result<PathBuf, AppError> {
@@ -77,13 +82,37 @@ mod tests {
 
     #[test]
     fn defaults_device_client_id() {
-        let _guard = EnvVarGuard::set("DETENT_DEVICE_CLIENT_ID", None);
+        let _guard = EnvVarGuard::set_many(&[
+            ("DETENT_DEVICE_CLIENT_ID", None),
+            ("DETENT_CLI_CLIENT_ID", None),
+        ]);
         assert_eq!(device_client_id(), DEFAULT_DEVICE_CLIENT_ID);
     }
 
     #[test]
     fn respects_device_client_id_override() {
-        let _guard = EnvVarGuard::set("DETENT_DEVICE_CLIENT_ID", Some("custom-cli"));
+        let _guard = EnvVarGuard::set_many(&[
+            ("DETENT_CLI_CLIENT_ID", None),
+            ("DETENT_DEVICE_CLIENT_ID", Some("custom-cli")),
+        ]);
+        assert_eq!(device_client_id(), "custom-cli");
+    }
+
+    #[test]
+    fn falls_back_to_legacy_cli_client_id_override() {
+        let _guard = EnvVarGuard::set_many(&[
+            ("DETENT_DEVICE_CLIENT_ID", None),
+            ("DETENT_CLI_CLIENT_ID", Some("legacy-cli")),
+        ]);
+        assert_eq!(device_client_id(), "legacy-cli");
+    }
+
+    #[test]
+    fn prefers_device_client_id_over_legacy_override() {
+        let _guard = EnvVarGuard::set_many(&[
+            ("DETENT_CLI_CLIENT_ID", Some("legacy-cli")),
+            ("DETENT_DEVICE_CLIENT_ID", Some("custom-cli")),
+        ]);
         assert_eq!(device_client_id(), "custom-cli");
     }
 
@@ -119,32 +148,46 @@ mod tests {
 
     struct EnvVarGuard {
         _lock: std::sync::MutexGuard<'static, ()>,
-        key: &'static str,
-        original: Option<String>,
+        originals: Vec<(&'static str, Option<String>)>,
     }
 
     impl EnvVarGuard {
         fn set(key: &'static str, value: Option<&str>) -> Self {
             let lock = test_support::env_lock();
             let original = std::env::var(key).ok();
-            match value {
-                Some(value) => unsafe { std::env::set_var(key, value) },
-                None => unsafe { std::env::remove_var(key) },
+            apply_env_var(key, value);
+            Self {
+                _lock: lock,
+                originals: vec![(key, original)],
+            }
+        }
+
+        fn set_many(vars: &[(&'static str, Option<&str>)]) -> Self {
+            let lock = test_support::env_lock();
+            let mut originals = Vec::with_capacity(vars.len());
+            for (key, value) in vars {
+                originals.push((*key, std::env::var(key).ok()));
+                apply_env_var(key, *value);
             }
             Self {
                 _lock: lock,
-                key,
-                original,
+                originals,
             }
         }
     }
 
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
-            match &self.original {
-                Some(value) => unsafe { std::env::set_var(self.key, value) },
-                None => unsafe { std::env::remove_var(self.key) },
+            for (key, original) in self.originals.iter().rev() {
+                apply_env_var(key, original.as_deref());
             }
+        }
+    }
+
+    fn apply_env_var(key: &str, value: Option<&str>) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
         }
     }
 }

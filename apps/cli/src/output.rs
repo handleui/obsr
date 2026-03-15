@@ -57,6 +57,16 @@ where
     );
 }
 
+fn print_json_stderr<T>(value: &T)
+where
+    T: Serialize,
+{
+    eprintln!(
+        "{}",
+        serde_json::to_string(value).expect("output payload should serialize")
+    );
+}
+
 pub fn print_auth_login(result: &LoginResult, mode: OutputMode) {
     match mode {
         OutputMode::Human => {
@@ -93,7 +103,7 @@ pub fn print_auth_login_prompt(device: &crate::auth::DeviceAuthorizationResponse
             println!("Waiting for approval...");
         }
         OutputMode::Json => {
-            print_json(&serde_json::json!({
+            print_json_stderr(&serde_json::json!({
                 "event": "device_authorization",
                 "verification_uri": device.verification_uri,
                 "verification_uri_complete": device.verification_uri_complete,

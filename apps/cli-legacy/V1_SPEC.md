@@ -76,6 +76,19 @@ The same command should support:
 
 JSON is a first-class public interface, not a debugging afterthought.
 
+Agent-oriented contracts should treat JSON as both an output format and, where it materially improves ergonomics, a native input format.
+
+Guidance:
+
+- use flags for simple scalar inputs and toggles
+- support JSON input for commands with nested filters, arrays, maps, or evolving request payloads
+- prefer stdin or a dedicated input flag over shell-escaped ad hoc argument packing
+- do not force JSON input onto commands that are naturally simple
+
+`dt auth` should stay flag-first in v1.
+
+`dt observe` and future mutation commands may justify native JSON input once their request shapes become meaningfully structured.
+
 ## 5. Local-first fixing loop
 
 The CLI exposes diagnostics. Local tools or local agents decide how to fix them.
@@ -237,6 +250,25 @@ As Observer expands beyond CI, `source.kind` should support at least:
 - `pr_comment`
 
 ## Output Modes
+
+## Input Modes
+
+Flags remain the default input mode.
+
+For commands with richer request shapes, the CLI should support native structured input in addition to flags.
+
+Preferred patterns:
+
+- `--input <json>`
+- `--input-file <path>`
+- `stdin` when the command explicitly supports piped structured data
+
+Design rules:
+
+- structured input should map directly to the public request contract
+- flag inputs and JSON inputs must resolve to the same underlying shape
+- JSON input is for complex commands, not as a blanket requirement across the CLI
+- simple lifecycle commands like `auth` should avoid unnecessary structured-input ceremony
 
 ## Human Output
 

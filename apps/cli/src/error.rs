@@ -2,6 +2,10 @@
 pub enum ErrorCode {
     Display,
     InvalidArguments,
+    InvalidConfiguration,
+    InvalidData,
+    Network,
+    Auth,
     NotImplemented,
     Internal,
 }
@@ -11,6 +15,10 @@ impl ErrorCode {
         match self {
             Self::Display => "display",
             Self::InvalidArguments => "invalid_arguments",
+            Self::InvalidConfiguration => "invalid_configuration",
+            Self::InvalidData => "invalid_data",
+            Self::Network => "network_error",
+            Self::Auth => "auth_error",
             Self::NotImplemented => "not_implemented",
             Self::Internal => "internal_error",
         }
@@ -51,6 +59,10 @@ impl AppError {
             format!("operation '{operation}' is not implemented in v1 scaffold"),
             3,
         )
+    }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::Internal, message, 1)
     }
 
     pub fn code(&self) -> ErrorCode {

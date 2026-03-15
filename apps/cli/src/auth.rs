@@ -258,6 +258,14 @@ fn normalize_base_url(base_url: &str) -> Result<String, AppError> {
         )
     })?;
 
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(AppError::new(
+            ErrorCode::InvalidConfiguration,
+            "DETENT_API_URL must not include query parameters or fragments",
+            1,
+        ));
+    }
+
     let scheme = parsed.scheme();
     if scheme != "https" && !(scheme == "http" && is_loopback_host(parsed.host_str())) {
         return Err(AppError::new(
@@ -430,6 +438,25 @@ mod tests {
     fn allows_http_ipv6_loopback_api_urls() {
         AuthService::new_with_client(Client::new(), "http://[::1]:1355".into(), no_sleep)
             .expect("ipv6 loopback should be allowed");
+    }
+
+    #[test]
+    fn rejects_api_urls_with_query_or_fragment() {
+        let query_error = AuthService::new_with_client(
+            Client::new(),
+            "https://observer.detent.sh/?env=dev".into(),
+            no_sleep,
+        )
+        .expect_err("query strings should be rejected");
+        assert_eq!(query_error.code().as_str(), "invalid_configuration");
+
+        let fragment_error = AuthService::new_with_client(
+            Client::new(),
+            "https://observer.detent.sh/#preview".into(),
+            no_sleep,
+        )
+        .expect_err("fragments should be rejected");
+        assert_eq!(fragment_error.code().as_str(), "invalid_configuration");
     }
 
     #[test]

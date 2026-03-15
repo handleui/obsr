@@ -14,8 +14,8 @@ pub fn api_url() -> String {
 }
 
 pub fn detent_home() -> Result<PathBuf, AppError> {
-    if let Some(path) = detent_home_override() {
-        return Ok(path);
+    if let Some(value) = std::env::var_os("DETENT_HOME") {
+        return validate_detent_home_override(PathBuf::from(value));
     }
 
     let dir_name = if cfg!(debug_assertions) {
@@ -27,20 +27,6 @@ pub fn detent_home() -> Result<PathBuf, AppError> {
     resolve_detent_home(dirs::home_dir(), dir_name)
 }
 
-fn detent_home_override() -> Option<PathBuf> {
-    let value = std::env::var("DETENT_HOME").ok()?;
-    if value.trim().is_empty() || value.contains("..") {
-        return None;
-    }
-
-    let candidate = PathBuf::from(value);
-    if candidate.is_absolute() {
-        Some(candidate)
-    } else {
-        None
-    }
-}
-
 fn resolve_detent_home(home: Option<PathBuf>, dir_name: &str) -> Result<PathBuf, AppError> {
     let home = home.ok_or_else(|| {
         AppError::new(
@@ -50,6 +36,23 @@ fn resolve_detent_home(home: Option<PathBuf>, dir_name: &str) -> Result<PathBuf,
         )
     })?;
     Ok(home.join(dir_name))
+}
+
+fn validate_detent_home_override(candidate: PathBuf) -> Result<PathBuf, AppError> {
+    let invalid = candidate.as_os_str().is_empty()
+        || candidate
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        || !candidate.is_absolute();
+    if invalid {
+        return Err(AppError::new(
+            ErrorCode::InvalidConfiguration,
+            "DETENT_HOME must be an absolute path without '..'",
+            1,
+        ));
+    }
+
+    Ok(candidate)
 }
 
 #[cfg(test)]
@@ -75,8 +78,15 @@ mod tests {
     #[test]
     fn rejects_relative_detent_home_override() {
         let _guard = EnvVarGuard::set("DETENT_HOME", Some("tmp/detent-home"));
-        let path = detent_home().expect("relative override should fall back to home dir");
-        assert!(path.ends_with(DETENT_DEV_DIR_NAME) || path.ends_with(DETENT_DIR_NAME));
+        let error = detent_home().expect_err("relative override should fail");
+        assert_eq!(error.code().as_str(), "invalid_configuration");
+    }
+
+    #[test]
+    fn rejects_parent_directory_detent_home_override() {
+        let error = validate_detent_home_override(PathBuf::from("/tmp/../detent-home"))
+            .expect_err("parent-dir override should fail");
+        assert_eq!(error.code().as_str(), "invalid_configuration");
     }
 
     #[test]

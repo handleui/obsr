@@ -1,23 +1,50 @@
 use crate::cli::{
     AppCli, AuthSubcommand, Command, InstallSubcommand, ObserveCommand, SettingsSubcommand,
 };
+use crate::auth::AuthService;
 use crate::error::AppError;
-use crate::output::{OutputMode, print_stub};
+use crate::output::{
+    OutputMode, print_auth_login, print_auth_login_prompt, print_auth_logout, print_auth_status,
+    print_stub,
+};
 
 pub async fn execute(cli: AppCli) -> Result<(), AppError> {
     match cli.command {
         Command::Auth(auth) => match auth.command {
             AuthSubcommand::Login(args) => {
-                let _ = args;
-                Err(AppError::not_implemented("auth login"))
+                let mode = if args.json {
+                    OutputMode::Json
+                } else {
+                    OutputMode::Human
+                };
+                let service = AuthService::new()?;
+                let device = service.start_login(args.force).await?;
+                print_auth_login_prompt(&device, mode);
+                let result = service.complete_login(device).await?;
+                print_auth_login(&result, mode);
+                Ok(())
             }
             AuthSubcommand::Logout(args) => {
-                let _ = args;
-                Err(AppError::not_implemented("auth logout"))
+                let mode = if args.json {
+                    OutputMode::Json
+                } else {
+                    OutputMode::Human
+                };
+                let service = AuthService::new()?;
+                let result = service.logout()?;
+                print_auth_logout(&result, mode);
+                Ok(())
             }
             AuthSubcommand::Status(args) => {
-                let _ = args;
-                Err(AppError::not_implemented("auth status"))
+                let mode = if args.json {
+                    OutputMode::Json
+                } else {
+                    OutputMode::Human
+                };
+                let service = AuthService::new()?;
+                let result = service.status().await?;
+                print_auth_status(&result, mode);
+                Ok(())
             }
         },
         Command::Observe(args) => execute_observe(args),

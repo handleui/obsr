@@ -3,12 +3,28 @@ use std::ffi::OsString;
 use clap::Parser;
 
 pub mod cli;
+pub mod config;
 pub mod commands;
+pub mod credentials;
 pub mod error;
 pub mod output;
+pub mod auth;
 
 use cli::AppCli;
 use error::AppError;
+
+#[cfg(test)]
+pub mod test_support {
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    pub fn env_lock() -> MutexGuard<'static, ()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock should work")
+    }
+}
 
 pub async fn run_with_args<I, T>(args: I) -> Result<(), AppError>
 where
@@ -21,15 +37,26 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     #[tokio::test]
-    async fn dispatches_known_command_tree() {
-        let result = run_with_args(["dt", "auth", "status"])
-            .await
-            .expect_err("auth status is scaffold-only and should return not implemented");
+    async fn dispatches_auth_status_command() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "dt-lib-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time should work")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let _guard = EnvVarGuard::set("DETENT_HOME", Some(temp_dir.to_str().expect("utf8")));
 
-        assert_eq!(result.code().as_str(), "not_implemented");
+        run_with_args(["dt", "auth", "status"])
+            .await
+            .expect("auth status should execute");
     }
 
     #[tokio::test]
@@ -41,5 +68,36 @@ mod tests {
         assert_eq!(result.code().as_str(), "invalid_arguments");
         assert!(result.message().contains("unrecognized subcommand"));
         assert_eq!(result.exit_code(), 2);
+    }
+
+    struct EnvVarGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: Option<&str>) -> Self {
+            let lock = crate::test_support::env_lock();
+            let original = std::env::var(key).ok();
+            match value {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+            Self {
+                _lock: lock,
+                key,
+                original,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => unsafe { std::env::set_var(self.key, value) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
     }
 }

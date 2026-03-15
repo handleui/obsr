@@ -2,6 +2,8 @@ use crate::cli::{
     AppCli, AuthSubcommand, Command, InstallSubcommand, ObserveCommand, SettingsSubcommand,
 };
 use crate::auth::AuthService;
+use crate::config;
+use crate::credentials::clear_credentials;
 use crate::error::AppError;
 use crate::output::{
     OutputMode, print_auth_login, print_auth_login_prompt, print_auth_logout, print_auth_status,
@@ -30,8 +32,10 @@ pub async fn execute(cli: AppCli) -> Result<(), AppError> {
                 } else {
                     OutputMode::Human
                 };
-                let service = AuthService::new()?;
-                let result = service.logout()?;
+                let result = crate::auth::LogoutResult {
+                    cleared: clear_credentials()?,
+                    api_url: config::api_url(),
+                };
                 print_auth_logout(&result, mode);
                 Ok(())
             }

@@ -124,7 +124,12 @@ impl AuthService {
                 me,
             }),
             Err(error) if error.code() == ErrorCode::Auth => {
-                let _ = clear_credentials();
+                clear_credentials().map_err(|clear_error| {
+                    AppError::internal(format!(
+                        "stored session is invalid, but failed to clear credentials: {}",
+                        clear_error.message()
+                    ))
+                })?;
                 Ok(AuthStatus::Unauthenticated {
                     api_url: self.base_url.clone(),
                 })

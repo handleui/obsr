@@ -17,7 +17,7 @@ pub struct StoredCredentials {
 }
 
 pub fn load_credentials() -> Result<Option<StoredCredentials>, AppError> {
-    let path = credentials_path();
+    let path = credentials_path()?;
     if !path.exists() {
         return Ok(None);
     }
@@ -42,7 +42,7 @@ pub fn load_credentials() -> Result<Option<StoredCredentials>, AppError> {
 }
 
 pub fn save_credentials(credentials: &StoredCredentials) -> Result<(), AppError> {
-    let dir = config::detent_home();
+    let dir = config::detent_home()?;
     fs::create_dir_all(&dir)
         .map_err(|error| AppError::internal(format!("failed to create credentials directory: {error}")))?;
 
@@ -55,7 +55,7 @@ pub fn save_credentials(credentials: &StoredCredentials) -> Result<(), AppError>
         })?;
     }
 
-    let path = credentials_path();
+    let path = credentials_path()?;
     let temp_path = path.with_extension("json.tmp");
     let content = serde_json::to_string_pretty(credentials)
         .map_err(|error| AppError::internal(format!("failed to serialize credentials: {error}")))?;
@@ -83,7 +83,7 @@ pub fn save_credentials(credentials: &StoredCredentials) -> Result<(), AppError>
 }
 
 pub fn clear_credentials() -> Result<bool, AppError> {
-    let path = credentials_path();
+    let path = credentials_path()?;
     if !path.exists() {
         return Ok(false);
     }
@@ -93,8 +93,8 @@ pub fn clear_credentials() -> Result<bool, AppError> {
     Ok(true)
 }
 
-fn credentials_path() -> PathBuf {
-    config::detent_home().join(CREDENTIALS_FILE)
+fn credentials_path() -> Result<PathBuf, AppError> {
+    Ok(config::detent_home()?.join(CREDENTIALS_FILE))
 }
 
 fn replace_existing_file(
@@ -211,7 +211,9 @@ mod tests {
     fn invalid_empty_access_token_is_rejected() {
         let temp_dir = tempfile_dir();
         let _guard = EnvVarGuard::set("DETENT_HOME", Some(temp_dir.to_str().expect("utf8")));
-        let path = config::detent_home().join(CREDENTIALS_FILE);
+        let path = config::detent_home()
+            .expect("test detent home should resolve")
+            .join(CREDENTIALS_FILE);
         fs::write(
             path,
             "{\n  \"access_token\": \"\",\n  \"expires_at\": 123\n}\n",

@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::error::{AppError, ErrorCode};
+
 const DEFAULT_API_URL: &str = "https://observer.detent.sh";
 const DETENT_DIR_NAME: &str = ".detent";
 const DETENT_DEV_DIR_NAME: &str = ".detent-dev";
@@ -11,9 +13,9 @@ pub fn api_url() -> String {
         .unwrap_or_else(|| DEFAULT_API_URL.to_string())
 }
 
-pub fn detent_home() -> PathBuf {
+pub fn detent_home() -> Result<PathBuf, AppError> {
     if let Some(path) = detent_home_override() {
-        return path;
+        return Ok(path);
     }
 
     let dir_name = if cfg!(debug_assertions) {
@@ -22,8 +24,7 @@ pub fn detent_home() -> PathBuf {
         DETENT_DIR_NAME
     };
 
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(dir_name)
+    resolve_detent_home(dirs::home_dir(), dir_name)
 }
 
 fn detent_home_override() -> Option<PathBuf> {
@@ -40,6 +41,17 @@ fn detent_home_override() -> Option<PathBuf> {
     }
 }
 
+fn resolve_detent_home(home: Option<PathBuf>, dir_name: &str) -> Result<PathBuf, AppError> {
+    let home = home.ok_or_else(|| {
+        AppError::new(
+            ErrorCode::InvalidConfiguration,
+            "unable to determine home directory; set DETENT_HOME to an absolute path",
+            1,
+        )
+    })?;
+    Ok(home.join(dir_name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,13 +66,24 @@ mod tests {
     #[test]
     fn respects_absolute_detent_home_override() {
         let _guard = EnvVarGuard::set("DETENT_HOME", Some("/tmp/detent-home"));
-        assert_eq!(detent_home(), PathBuf::from("/tmp/detent-home"));
+        assert_eq!(
+            detent_home().expect("absolute override should be respected"),
+            PathBuf::from("/tmp/detent-home")
+        );
     }
 
     #[test]
     fn rejects_relative_detent_home_override() {
         let _guard = EnvVarGuard::set("DETENT_HOME", Some("tmp/detent-home"));
-        assert!(detent_home().ends_with(DETENT_DEV_DIR_NAME) || detent_home().ends_with(DETENT_DIR_NAME));
+        let path = detent_home().expect("relative override should fall back to home dir");
+        assert!(path.ends_with(DETENT_DEV_DIR_NAME) || path.ends_with(DETENT_DIR_NAME));
+    }
+
+    #[test]
+    fn errors_when_home_directory_is_unavailable() {
+        let error = resolve_detent_home(None, DETENT_DIR_NAME)
+            .expect_err("missing home directory should fail");
+        assert_eq!(error.code().as_str(), "invalid_configuration");
     }
 
     struct EnvVarGuard {

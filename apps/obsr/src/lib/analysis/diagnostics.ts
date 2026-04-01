@@ -1,16 +1,12 @@
 import { generateFingerprints } from "@obsr/lore";
 import {
-  type CIErrorSchema,
-  type ErrorSourceSchema,
+  type CIError,
+  type ErrorSource,
   scrubFilePath,
   scrubSecrets,
 } from "@obsr/types";
-import type { z } from "zod";
 import type { AnalysisDiagnostic } from "@/lib/contracts";
 import { categoryRank, MAX_EVIDENCE_CHARS } from "./constants";
-
-type CIError = z.infer<typeof CIErrorSchema>;
-type ErrorSource = z.infer<typeof ErrorSourceSchema>;
 
 const toNullableNumber = (value?: number | null) => {
   if (!value || value <= 0) {

@@ -4,9 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "portless obsr next dev",
-    "build": "next build --webpack",
+    "build": "next build",
     "start": "next start --port 3000",
-    "check-types": "next typegen && tsc --noEmit",
+    "check-types": "next typegen && tsc --noEmit --incremental false",
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",

@@ -1,11 +1,11 @@
-# @obsr/web
+# @obsr/docs
 
 ## 1.0.0
 
 ### Major Changes
 
 - 565831f: First stable web major after navigator removal.
-  Consolidates the product web surface so auth and docs entrypoints now live in apps/web instead of a separate navigator app.
+  Consolidates the product web surface so auth and docs entrypoints now live in apps/docs instead of a separate navigator app.
 
 ## 0.2.2
 

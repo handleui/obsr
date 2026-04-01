@@ -1,6 +1,6 @@
 # Legacy Resolver
 
-`apps/resolver` is a legacy sibling module.
+`legacy/resolver` is a legacy sibling module.
 
 Scope:
 - optional AI patch generation path

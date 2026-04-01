@@ -3,8 +3,8 @@
 ## Core Modules
 
 - `observer-cli` (`apps/cli`)
-- `observer-api` (`apps/api`)
-- `resolver` (`apps/resolver`, legacy)
+- `observer-api` (`legacy/api`, legacy)
+- `resolver` (`legacy/resolver`, legacy)
 
 ## observer-cli
 

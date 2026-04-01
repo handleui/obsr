@@ -12,10 +12,10 @@ Primary flow:
 
 ## Apps
 
-- `apps/api` — Observer API service (Cloudflare Workers)
+- `legacy/api` — Observer API service (legacy reference)
 - `apps/cli` — Observer CLI (`dt`)
-- `apps/web` — Product/docs web surface
-- `apps/resolver` — Legacy sibling module (optional)
+- `apps/docs` — Documentation web surface
+- `legacy/resolver` — Legacy sibling module (optional)
 
 ## Responsibility Split
 

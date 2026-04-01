@@ -22,21 +22,7 @@
       "inputs": ["src/**/*.rs", "Cargo.toml", "Cargo.lock", "package.json"],
       "outputs": ["target/**"]
     },
-    "@obsr/api#build": {
-      "dependsOn": ["@obsr/db#build", "^build"],
-      "inputs": ["src/**", "wrangler.jsonc", "tsconfig.json", "package.json"],
-      "outputs": ["dist/**"]
-    },
-    "@obsr/resolver#build": {
-      "dependsOn": [
-        "@obsr/db#build",
-        "@obsr/resolving#build",
-        "@obsr/sandbox#build"
-      ],
-      "inputs": ["src/**/*.ts", "tsconfig.json", "package.json"],
-      "outputs": ["dist/**"]
-    },
-    "@obsr/web#build": {
+    "@obsr/docs#build": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [".next/**", "!.next/cache/**"],

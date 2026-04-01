@@ -141,7 +141,7 @@ readonly filePath?: string;
 | `@obsr/extract` | Uses CIError, CIErrorSchema for error extraction and validation |
 | `@obsr/resolving` | Reads CIError for AI prompt generation, validation |
 | `@obsr/lore` | Uses ErrorFingerprints, ErrorSource for error signature tracking |
-| `apps/api` | Stores/retrieves errors, uses ErrorCategory, ErrorSource, CodeSnippet |
+| `legacy/api` | Stores/retrieves errors, uses ErrorCategory, ErrorSource, CodeSnippet |
 | `apps/cli` | Uses redactSensitiveData for config sanitization |
 
 ---

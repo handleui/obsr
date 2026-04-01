@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-panel: var(--panel);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-ink: var(--danger-ink);
+  --color-ok-soft: var(--ok-soft);
+  --color-ok-ink: var(--ok-ink);
+}
+
+@layer base {
+  :root {
+    --canvas: #f4efe7;
+    --surface: #fffaf3;
+    --panel: #f1e8dc;
+    --line: #d8ccb9;
+    --ink: #191510;
+    --muted: #6d6256;
+    --accent: #b8562a;
+    --accent-soft: #efd1c3;
+    --danger-soft: #f7d8cf;
+    --danger-ink: #8f3f21;
+    --ok-soft: #d8ebdf;
+    --ok-ink: #24543b;
+  }
+
+  * {
+    border-color: var(--line);
+  }
+
+  html {
+    background: var(--canvas);
+  }
+
+  body {
+    min-height: 100vh;
+    letter-spacing: -0.02em;
+  }
+
+  a,
+  button,
+  input,
+  textarea {
+    transition:
+      color 160ms ease,
+      background-color 160ms ease,
+      border-color 160ms ease,
+      box-shadow 160ms ease;
+  }
+}

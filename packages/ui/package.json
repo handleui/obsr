@@ -1,5 +1,5 @@
 {
-  "name": "@detent/ui",
+  "name": "@obsr/ui",
   "version": "0.0.0",
   "private": true,
   "exports": {
@@ -10,7 +10,7 @@
     "check-types": "tsc --noEmit"
   },
   "devDependencies": {
-    "@detent/typescript-config": "*",
+    "@obsr/typescript-config": "*",
     "@types/node": "^22.15.3",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",

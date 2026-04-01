@@ -1,4 +1,4 @@
-# @detent/resolving
+# @obsr/resolving
 
 ## 1.0.0
 
@@ -19,11 +19,11 @@
 
 ### Patch Changes
 
-- e1cb50b: Migrate from @detent/parser to @detent/types for shared type imports.
+- e1cb50b: Migrate from @obsr/parser to @obsr/types for shared type imports.
 - Updated dependencies [e1cb50b]
 - Updated dependencies [e1cb50b]
-  - @detent/lore@0.2.1
-  - @detent/types@0.5.0
+  - @obsr/lore@0.2.1
+  - @obsr/types@0.5.0
 
 ## 0.4.3
 
@@ -32,38 +32,38 @@
 - Updated dependencies [74eab1c]
 - Updated dependencies [74eab1c]
 - Updated dependencies [74eab1c]
-  - @detent/parser@0.7.0
-  - @detent/types@0.4.0
-  - @detent/lore@0.2.0
+  - @obsr/parser@0.7.0
+  - @obsr/types@0.4.0
+  - @obsr/lore@0.2.0
 
 ## 0.4.2
 
 ### Patch Changes
 
-- 6bfca1a: Update to use shared types from @detent/types.
+- 6bfca1a: Update to use shared types from @obsr/types.
 - Updated dependencies [6bfca1a]
 - Updated dependencies [6bfca1a]
 - Updated dependencies [6bfca1a]
-  - @detent/parser@0.6.0
-  - @detent/types@0.3.0
-  - @detent/lore@0.1.2
+  - @obsr/parser@0.6.0
+  - @obsr/types@0.3.0
+  - @obsr/lore@0.1.2
 
 ## 0.4.1
 
 ### Patch Changes
 
-- 5fa4de0: Update to use shared types from @detent/types.
+- 5fa4de0: Update to use shared types from @obsr/types.
 - Updated dependencies [5fa4de0]
 - Updated dependencies [5fa4de0]
-  - @detent/parser@0.5.3
-  - @detent/types@0.2.0
-  - @detent/lore@0.1.1
+  - @obsr/parser@0.5.3
+  - @obsr/types@0.2.0
+  - @obsr/lore@0.1.1
 
 ## 0.4.0
 
 ### Minor Changes
 
-- 2c9889d: Integrate error hints from @detent/lore into resolving prompts.
+- 2c9889d: Integrate error hints from @obsr/lore into resolving prompts.
   Adds `formatErrorsWithHints` function that enriches error output with contextual guidance for the AI.
 
 ### Patch Changes
@@ -71,7 +71,7 @@
 - 18b9db1: Add cache control to prompts for improved token efficiency and increase max retries.
   Expand eval dataset with 10 negative test cases for unfixable errors (missing files, network issues, env vars, memory limits, flaky tests, etc).
 - Updated dependencies [2c9889d]
-  - @detent/lore@0.1.0
+  - @obsr/lore@0.1.0
 
 ## 0.3.0
 

@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import type { CIError } from "@detent/types";
+import type { CIError } from "@obsr/types";
 import { Eval } from "braintrust";
 import { extractErrors } from "../extract.js";
 

@@ -1,4 +1,4 @@
-# @detent/git
+# @obsr/git
 
 ## 0.1.0
 

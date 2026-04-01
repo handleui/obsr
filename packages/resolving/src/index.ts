@@ -1,7 +1,7 @@
 // biome-ignore-all lint/performance/noBarrelFile: This is the package's public API
 
-// Pricing (re-exported from @detent/ai)
-export { calculateCost } from "@detent/ai";
+// Pricing (re-exported from @obsr/ai)
+export { calculateCost } from "@obsr/ai";
 // Resolving loop
 export { createConfig, ResolveLoop } from "./loop.js";
 // Preflight module

@@ -1,4 +1,4 @@
-import type { CIError, ErrorCategory } from "@detent/types";
+import type { CIError, ErrorCategory } from "@obsr/types";
 import { INTERNAL_FRAME_PATTERNS, MAX_STACK_TRACE_LINES } from "./system.js";
 
 const DEFAULT_CATEGORY = "unknown";
@@ -221,7 +221,7 @@ export const formatErrorsWithHints = async (
     return "(no errors)";
   }
 
-  const { matchHints } = await import("@detent/lore");
+  const { matchHints } = await import("@obsr/lore");
   const sorted = prioritizeErrors(errors);
   const matches = matchHints(sorted);
   const parts: string[] = [];

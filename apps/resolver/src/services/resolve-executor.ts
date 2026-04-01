@@ -1,11 +1,11 @@
-import { DEFAULT_FAST_MODEL, DEFAULT_SMART_MODEL } from "@detent/ai";
+import { DEFAULT_FAST_MODEL, DEFAULT_SMART_MODEL } from "@obsr/ai";
 import {
   createConfig,
   createToolRegistry,
   ResolveLoop,
   type ResolveResult,
   SYSTEM_PROMPT,
-} from "@detent/resolving";
+} from "@obsr/resolving";
 import { z } from "zod";
 import {
   createSandboxToolContext,

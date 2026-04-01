@@ -1,4 +1,4 @@
-# Detent
+# Observer
 
 Self-resolving CI/CD platform. Runs CI locally, uses AI to fix errors before pushing.
 
@@ -31,7 +31,7 @@ bun run dt <command>       # CLI local dev (never use ./dist/dt)
 
 ```
 apps/
-├── observer/       # Cloudflare Workers Observer service (Hono)
+├── api/            # Cloudflare Workers API service (Hono)
 ├── resolver/       # AI resolving service (Railway)
 ├── cli/            # Command-line interface
 └── web/            # Web app (Next.js)

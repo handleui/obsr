@@ -18,35 +18,25 @@
         "DATABASE_URL"
       ]
     },
-    "@detent/cli#build": {
+    "@obsr/cli#build": {
       "inputs": ["src/**/*.rs", "Cargo.toml", "Cargo.lock", "package.json"],
       "outputs": ["target/**"]
     },
-    "@detent/cli-legacy#build": {
-      "dependsOn": ["@detent/resolving#build", "@detent/git#build"],
-      "inputs": [
-        "src/**/*.ts",
-        "src/**/*.tsx",
-        "tsconfig.json",
-        "package.json"
-      ],
-      "outputs": ["dist/**"]
-    },
-    "@detent/observer#build": {
-      "dependsOn": ["@detent/db#build", "^build"],
+    "@obsr/api#build": {
+      "dependsOn": ["@obsr/db#build", "^build"],
       "inputs": ["src/**", "wrangler.jsonc", "tsconfig.json", "package.json"],
       "outputs": ["dist/**"]
     },
-    "@detent/resolver#build": {
+    "@obsr/resolver#build": {
       "dependsOn": [
-        "@detent/db#build",
-        "@detent/resolving#build",
-        "@detent/sandbox#build"
+        "@obsr/db#build",
+        "@obsr/resolving#build",
+        "@obsr/sandbox#build"
       ],
       "inputs": ["src/**/*.ts", "tsconfig.json", "package.json"],
       "outputs": ["dist/**"]
     },
-    "@detent/web#build": {
+    "@obsr/web#build": {
       "dependsOn": ["^build"],
       "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [".next/**", "!.next/cache/**"],

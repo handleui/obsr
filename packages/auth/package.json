@@ -1,5 +1,5 @@
 {
-  "name": "@detent/auth",
+  "name": "@obsr/auth",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -17,12 +17,12 @@
   "dependencies": {
     "@better-auth/api-key": "^1.5.3",
     "@better-auth/drizzle-adapter": "^1.5.3",
-    "@detent/db": "*",
+    "@obsr/db": "*",
     "better-auth": "^1.5.3",
     "drizzle-orm": "^0.44.0"
   },
   "devDependencies": {
-    "@detent/typescript-config": "*",
+    "@obsr/typescript-config": "*",
     "typescript": "^5.9.3"
   }
 }

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { CIError } from "@detent/types";
+import type { CIError } from "@obsr/types";
 
 import type { PreflightResult, StaleError, ValidationReason } from "./types.js";
 

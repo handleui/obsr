@@ -1,10 +1,11 @@
 use crate::auth::AuthService;
 use crate::cli::{
-    AppCli, AuthSubcommand, Command, InstallSubcommand, ObserveCommand, SettingsSubcommand,
+    AppCli, AuthSubcommand, Command, InstallSubcommand, SettingsSubcommand,
 };
 use crate::config;
 use crate::credentials::clear_credentials;
 use crate::error::{AppError, ErrorCode};
+use crate::observe::execute_observe;
 use crate::output::{
     OutputMode, print_auth_login, print_auth_login_prompt, print_auth_logout, print_auth_status,
     print_stub,
@@ -58,7 +59,7 @@ pub async fn execute(cli: AppCli) -> Result<(), AppError> {
                 Ok(())
             }
         },
-        Command::Observe(args) => execute_observe(args),
+        Command::Observe(args) => execute_observe(args).await,
         Command::Settings(settings) => match settings.command {
             SettingsSubcommand::Get(args) => {
                 let mode = if args.json {
@@ -125,9 +126,4 @@ pub async fn execute(cli: AppCli) -> Result<(), AppError> {
             }
         },
     }
-}
-
-fn execute_observe(args: ObserveCommand) -> Result<(), AppError> {
-    let _ = args;
-    Err(AppError::not_implemented("observe"))
 }

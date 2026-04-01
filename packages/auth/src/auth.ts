@@ -1,4 +1,4 @@
-import { createDb } from "@detent/db";
+import { createDb } from "@obsr/db";
 import { createDetentAuthFromEnv } from "./create-detent-auth.js";
 
 const databaseUrl = process.env.DATABASE_URL;

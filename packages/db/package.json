@@ -1,5 +1,5 @@
 {
-  "name": "@detent/db",
+  "name": "@obsr/db",
   "version": "1.0.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,7 +20,7 @@
     "pg": "^8.16.0"
   },
   "devDependencies": {
-    "@detent/typescript-config": "*",
+    "@obsr/typescript-config": "*",
     "@types/pg": "^8.11.0",
     "drizzle-kit": "^0.31.0",
     "typescript": "^5.9.3"

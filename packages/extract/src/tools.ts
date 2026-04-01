@@ -1,5 +1,5 @@
-import type { CIError, ErrorSource } from "@detent/types";
-import { CIErrorSchema, ErrorSourceSchema } from "@detent/types";
+import type { CIError, ErrorSource } from "@obsr/types";
+import { CIErrorSchema, ErrorSourceSchema } from "@obsr/types";
 import { tool } from "ai";
 import { z } from "zod";
 

@@ -1,5 +1,5 @@
 {
-  "name": "@detent/sdk",
+  "name": "@obsr/sdk",
   "version": "0.4.0",
   "type": "module",
   "description": "TypeScript SDK for the Observer API",
@@ -50,7 +50,7 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "@detent/typescript-config": "*",
+    "@obsr/typescript-config": "*",
     "@types/node": "^22.0.0",
     "typescript": "5.9.2",
     "vitest": "^4.0.16"

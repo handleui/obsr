@@ -10,7 +10,7 @@
  * - Braintrust tracing
  *
  * NOTE: This module depends on devDependencies (braintrust, autoevals).
- * Import from "@detent/resolving/eval" only in eval/test contexts.
+ * Import from "@obsr/resolving/eval" only in eval/test contexts.
  */
 
 export type { CostTracker, EvalCostSummary } from "./cost-tracker.js";

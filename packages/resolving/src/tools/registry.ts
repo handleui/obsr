@@ -1,4 +1,4 @@
-import { redactSensitiveData } from "@detent/types";
+import { redactSensitiveData } from "@obsr/types";
 import { type Tool as AiSdkTool, tool as aiTool } from "ai";
 import type { ToolContext } from "./context.js";
 import {

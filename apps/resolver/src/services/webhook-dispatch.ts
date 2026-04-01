@@ -1,10 +1,10 @@
-import { type Db, webhookOps } from "@detent/db";
+import { type Db, webhookOps } from "@obsr/db";
 import {
   importSigningKey,
   signPayload,
   type WebhookEventType,
   type WebhookPayload,
-} from "@detent/webhook-dispatch";
+} from "@obsr/webhook-dispatch";
 
 const base64ToBuffer = (base64: string): Uint8Array =>
   Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));

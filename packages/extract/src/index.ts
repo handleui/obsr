@@ -1,13 +1,13 @@
 // biome-ignore-all lint/performance/noBarrelFile: This is the package entry point
 
-export type { CIError } from "@detent/types";
+export type { CIError } from "@obsr/types";
 export {
   CIErrorSchema,
   CodeSnippetSchema,
   ErrorCategorySchema,
   ErrorSeveritySchema,
   ErrorSourceSchema,
-} from "@detent/types";
+} from "@obsr/types";
 export { type ExtractionOptions, extractErrors } from "./extract.js";
 export {
   type CompactResult,

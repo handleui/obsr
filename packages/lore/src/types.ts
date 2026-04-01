@@ -1,4 +1,4 @@
-import type { ErrorSource } from "@detent/types";
+import type { ErrorSource } from "@obsr/types";
 
 /**
  * Minimal interface for errors that can have hints matched.
@@ -33,4 +33,4 @@ export type {
   CIError,
   ErrorCategory,
   ErrorSource,
-} from "@detent/types";
+} from "@obsr/types";

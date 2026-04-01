@@ -1,5 +1,5 @@
 {
-  "name": "@detent/resolving",
+  "name": "@obsr/resolving",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -20,15 +20,15 @@
     "eval:live": "EVAL_MODE=live bun run src/eval/run.ts"
   },
   "dependencies": {
-    "@detent/ai": "workspace:*",
-    "@detent/lore": "workspace:*",
-    "@detent/types": "workspace:*",
+    "@obsr/ai": "workspace:*",
+    "@obsr/lore": "workspace:*",
+    "@obsr/types": "workspace:*",
     "ai": "^6.0.0",
     "fast-glob": "^3.3.3",
     "zod": "^3.25.34"
   },
   "devDependencies": {
-    "@detent/typescript-config": "*",
+    "@obsr/typescript-config": "*",
     "@types/node": "^22.15.3",
     "autoevals": "^0.0.131",
     "braintrust": "^2.0.0",

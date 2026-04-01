@@ -1,5 +1,5 @@
 {
-  "name": "@detent/git",
+  "name": "@obsr/git",
   "version": "0.0.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,7 +14,7 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "@detent/typescript-config": "*",
+    "@obsr/typescript-config": "*",
     "@types/node": "^25.0.3",
     "typescript": "^5.9.3",
     "vitest": "^4.0.16"

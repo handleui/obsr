@@ -1,5 +1,5 @@
 {
-  "name": "@detent/resolver",
+  "name": "@obsr/resolver",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -13,18 +13,18 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@detent/ai": "*",
-    "@detent/db": "*",
-    "@detent/resolving": "*",
-    "@detent/sandbox": "*",
-    "@detent/types": "*",
-    "@detent/webhook-dispatch": "*",
+    "@obsr/ai": "*",
+    "@obsr/db": "*",
+    "@obsr/resolving": "*",
+    "@obsr/sandbox": "*",
+    "@obsr/types": "*",
+    "@obsr/webhook-dispatch": "*",
     "hono": "^4.7.4",
     "jose": "^6.0.10",
     "zod": "^3.25.34"
   },
   "devDependencies": {
-    "@detent/typescript-config": "*",
+    "@obsr/typescript-config": "*",
     "@e2b/code-interpreter": "^2.3.3",
     "@types/node": "^25.0.3",
     "typescript": "^5.9.3",

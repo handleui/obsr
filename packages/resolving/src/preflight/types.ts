@@ -1,6 +1,6 @@
-import type { CIError } from "@detent/types";
+import type { CIError } from "@obsr/types";
 
-export type { CIError } from "@detent/types";
+export type { CIError } from "@obsr/types";
 
 export type ValidationReason =
   | "file_missing"

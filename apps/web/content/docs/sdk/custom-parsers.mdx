@@ -10,7 +10,7 @@ The SDK supports ESLint, TypeScript, Vitest, Cargo, and golangci-lint out of the
 Use `registerTool()` to add full support for a new tool in one call:
 
 ```ts
-import { registerTool, run } from "@detent/diagnostics"
+import { registerTool, run } from "@obsr/diagnostics"
 
 await registerTool({
   name: "pytest",
@@ -130,7 +130,7 @@ await registerTool({
 For more control, register the parser and tool config separately:
 
 ```ts
-import { registerParser, registerToolConfig } from "@detent/diagnostics"
+import { registerParser, registerToolConfig } from "@obsr/diagnostics"
 
 // Parser only (for use with extract())
 registerParser("custom", (content) => [...])
@@ -149,7 +149,7 @@ registerToolConfig({
 If you can't write a parser for a tool, use the Observer API as a fallback:
 
 ```ts
-import { createParser } from "@detent/diagnostics"
+import { createParser } from "@obsr/diagnostics"
 
 const parse = createParser({ apiKey: "your-api-key" })
 const result = await parse(unknownOutput)

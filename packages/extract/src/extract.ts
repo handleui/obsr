@@ -5,8 +5,8 @@ import {
   DEFAULT_TIMEOUT_MS,
   estimateCost,
   normalizeModelId,
-} from "@detent/ai";
-import type { CIError, ErrorSource } from "@detent/types";
+} from "@obsr/ai";
+import type { CIError, ErrorSource } from "@obsr/types";
 import { generateText, Output, stepCountIs } from "ai";
 import { type LogSegment, prepareForPrompt } from "./preprocess.js";
 import {

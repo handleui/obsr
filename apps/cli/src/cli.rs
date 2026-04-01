@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Clone, Parser)]
-#[command(name = "dt", about = "Detent CLI v1 Rust scaffold")]
+#[command(name = "dt", about = "Observer CLI")]
 pub struct AppCli {
     #[command(subcommand)]
     pub command: Command,

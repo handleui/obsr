@@ -1,5 +1,5 @@
-import type { CIError, ErrorSource } from "@detent/types";
-import { CIErrorSchemaWithValidation, ErrorSourceSchema } from "@detent/types";
+import type { CIError, ErrorSource } from "@obsr/types";
+import { CIErrorSchemaWithValidation, ErrorSourceSchema } from "@obsr/types";
 import { z } from "zod";
 import type { LogSegment } from "./preprocess.js";
 

@@ -3,8 +3,8 @@ import {
   createCacheableSystemMessage,
   createCachePrepareStep,
   normalizeModelId,
-} from "@detent/ai";
-import { redactSensitiveData } from "@detent/types";
+} from "@obsr/ai";
+import { redactSensitiveData } from "@obsr/types";
 import { generateText, stepCountIs } from "ai";
 import type { ToolRegistry } from "./tools/registry.js";
 import {

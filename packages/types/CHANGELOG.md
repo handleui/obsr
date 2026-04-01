@@ -1,4 +1,4 @@
-# @detent/types
+# @obsr/types
 
 ## 1.0.0
 

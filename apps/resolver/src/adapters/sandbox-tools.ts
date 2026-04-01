@@ -12,7 +12,7 @@ import {
   type Tool,
   type ToolContext,
   type ToolResult,
-} from "@detent/resolving/tools";
+} from "@obsr/resolving/tools";
 import type { SandboxHandle } from "../services/sandbox/index.js";
 
 const DEFAULT_READ_LIMIT = 2000;

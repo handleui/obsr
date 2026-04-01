@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import type { ErrorFingerprints } from "@detent/types";
+import type { ErrorFingerprints } from "@obsr/types";
 import type { CIError } from "../types.js";
 import { normalizeFilePath, normalizeForLore } from "./normalize.js";
 
-export type { ErrorFingerprints } from "@detent/types";
+export type { ErrorFingerprints } from "@obsr/types";
 export {
   normalizeFilePath,
   normalizeForLore,

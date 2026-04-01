@@ -1,4 +1,4 @@
-import type { Tool } from "@detent/resolving/tools";
+import type { Tool } from "@obsr/resolving/tools";
 import { describe, expect, test, vi } from "vitest";
 import {
   createSandboxToolContext,

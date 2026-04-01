@@ -1,4 +1,4 @@
-# @detent/sandbox
+# @obsr/sandbox
 
 ## 1.0.0
 

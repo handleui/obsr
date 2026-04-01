@@ -1,87 +1,43 @@
-# Detent Architecture
+# Observer Architecture
 
 ## Overview
 
-Detent is a self-resolving CI/CD platform with four main applications:
+Observer is a CLI-first diagnostics product.
 
-- `apps/observer` (Cloudflare Workers): API, auth, webhook ingestion, orchestration.
-- `apps/resolver` (Railway): queue worker that runs AI resolving jobs in sandboxes.
-- `apps/cli` (Bun/Node): local command-line interface (`dt`).
-- `apps/web` (Next.js): product web surface.
+Primary flow:
+1. GitHub App webhooks deliver CI/build events to API.
+2. API normalizes and stores diagnostics.
+3. CLI queries and streams diagnostics for humans and coding agents.
+4. Agents use output to fix code locally.
 
-Core runtime path is:
+## Apps
 
-1. CI failure/event arrives in Observer.
-2. Observer normalizes and stores run/error context.
-3. Resolver claims queued work and attempts fixes in E2B sandboxes.
-4. Results are reported back through Observer and surfaced to users.
+- `apps/api` — Observer API service (Cloudflare Workers)
+- `apps/cli` — Observer CLI (`dt`)
+- `apps/web` — Product/docs web surface
+- `apps/resolver` — Legacy sibling module (optional)
 
-## Service Responsibilities
+## Responsibility Split
 
-### Observer (`apps/observer`)
+### Observer CLI
+- Auth/session management
+- Scope selection (`repo`, `pr`, `commit`, `run`)
+- Human output and strict machine output (`json`, `ndjson`)
+- Agent-facing prompt context generation
 
-- Auth and identity APIs.
-- Organization/project APIs.
-- Webhook processing and idempotency.
-- Resolve request lifecycle and state transitions.
-- Data persistence through `packages/db` (Neon + Drizzle).
+### Observer API
+- GitHub App webhook ingestion
+- CI/build diagnostics extraction and normalization
+- Query APIs for commit/PR/run diagnostics
+- Idempotency and reliability controls
+- Self-host deployment target
 
-### Resolver (`apps/resolver`)
+### Resolver (Legacy)
+- AI patch generation and application workflows
+- Not required for Observer diagnostics workflows
 
-- Polls and processes resolve jobs.
-- Boots isolated sandboxes through `packages/sandbox`.
-- Executes resolving loop from `packages/resolving`.
-- Sends results/patches back to Observer APIs.
+## Data Boundary
 
-### CLI (`apps/cli`)
-
-- Local interface for auth, linking, org/project actions, config, and errors.
-- Uses Better Auth device authorization flow against Observer endpoints.
-- Stores local state under `~/.detent` (prod) and `~/.detent-dev` (dev).
-- Supports auto-update and signed binary distribution.
-
-### Web (`apps/web`)
-
-- Main product website and supporting web UX.
-- Shares backend contracts with Observer.
-
-## Shared Packages
-
-- `packages/db`: schema, queries, migrations.
-- `packages/sdk`: public API client used by CLI and external consumers.
-- `packages/resolving`: agentic resolving logic.
-- `packages/autofix`: deterministic non-agent fix paths.
-- `packages/extract`: CI log parsing/extraction.
-- `packages/git`, `packages/types`, `packages/sentry`, `packages/ai`, `packages/lore`, `packages/sandbox`, `packages/ui`.
-
-## Data and Auth
-
-- Primary database: Neon Postgres.
-- Auth stack: Better Auth.
-- API keys and bearer auth coexist for machine and user flows.
-
-## Release Flow
-
-### CLI
-
-1. `release.yml` runs `release-please` on `main`.
-2. If a CLI release is created, it emits a `cli-v*` tag.
-3. `release.yml` dispatches `build.yml` with that tag and waits for completion.
-4. `build.yml` builds binaries, signs checksums, uploads assets/blob artifacts, and publishes GitHub release artifacts.
-
-### SDK
-
-- When `release-please` creates an SDK release, `release.yml` builds and publishes `@detent/sdk` to npm.
-
-## Local Development
-
-Portless endpoints:
-
-- Web: `http://detent.localhost:1355`
-- Observer: `http://observer.localhost:1355`
-- Resolver: `http://resolver.localhost:1355`
-
-## Notes
-
-- This document is intentionally concise and operational.
-- Detailed implementation notes should live close to each app/package.
+- Privacy-first default behavior is required.
+- Local-only and self-hosted workflows are first-class.
+- Managed cloud is additive, not required.

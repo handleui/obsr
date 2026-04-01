@@ -1,5 +1,5 @@
 {
-  "name": "@detent/sandbox",
+  "name": "@obsr/sandbox",
   "version": "1.0.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -18,7 +18,7 @@
     "@vercel/sandbox": "^1.3.1"
   },
   "devDependencies": {
-    "@detent/typescript-config": "*",
+    "@obsr/typescript-config": "*",
     "@types/node": "^25.0.3",
     "typescript": "^5.9.3",
     "vitest": "^4.0.16"

@@ -2,12 +2,12 @@
 
 // System prompt and constants
 
-// Types re-exported from @detent/types
+// Types re-exported from @obsr/types
 export type {
   CIError,
   ErrorCategory,
   ErrorSeverity,
-} from "@detent/types";
+} from "@obsr/types";
 
 // Formatting functions
 export {

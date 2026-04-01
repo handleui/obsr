@@ -1,6 +1,6 @@
 # Resolving Package Architecture
 
-The AI core of Detent. Orchestrates agentic error fixing using Claude models. Receives pre-extracted errors from upstream (`@detent/extract`) and focuses purely on AI-powered fixing.
+The AI core of Detent. Orchestrates agentic error fixing using Claude models. Receives pre-extracted errors from upstream (`@obsr/extract`) and focuses purely on AI-powered fixing.
 
 ## Overview
 
@@ -179,7 +179,7 @@ Secrets are redacted before logging/storage to prevent leakage:
 | `Bearer *` | `Bearer [REDACTED_TOKEN]` |
 | Generic secrets | `$1: [REDACTED]` |
 
-**Note:** Shared utility at `@detent/types` has 50+ patterns. Local sanitization kept for specific replacement labels.
+**Note:** Shared utility at `@obsr/types` has 50+ patterns. Local sanitization kept for specific replacement labels.
 
 ## Token Tracking
 

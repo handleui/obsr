@@ -1,4 +1,4 @@
-import { createDb } from "@detent/db";
+import { createDb } from "@obsr/db";
 
 export const createDbClient = (
   databaseUrl: string

@@ -1,5 +1,5 @@
 {
-  "name": "@detent/lore",
+  "name": "@obsr/lore",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -15,10 +15,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@detent/types": "workspace:*"
+    "@obsr/types": "workspace:*"
   },
   "devDependencies": {
-    "@detent/typescript-config": "*",
+    "@obsr/typescript-config": "*",
     "@types/node": "^25.0.3",
     "typescript": "^5.9.3",
     "vitest": "^4.0.16"

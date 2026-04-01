@@ -1,4 +1,4 @@
-import { selectModelForErrors } from "@detent/ai";
+import { selectModelForErrors } from "@obsr/ai";
 import {
   type Db,
   organizationOps,
@@ -6,13 +6,13 @@ import {
   resolveOps,
   runErrorOps,
   runOps,
-} from "@detent/db";
+} from "@obsr/db";
 import {
   getResolverQueueResolveIds,
   type ResolverDiagnostic,
   type ResolverQueuePayload,
   ResolveTypes,
-} from "@detent/types";
+} from "@obsr/types";
 import type { Env } from "../../env.js";
 import { env } from "../../env.js";
 import { createDbClient } from "../db-client.js";

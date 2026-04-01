@@ -230,7 +230,7 @@ export const scrubEvent = <T>(event: T): T => {
  *
  * Usage:
  * ```ts
- * import { createBeforeSendHandler } from "@detent/sentry";
+ * import { createBeforeSendHandler } from "@obsr/sentry";
  *
  * Sentry.init({
  *   beforeSend: createBeforeSendHandler(),
@@ -262,7 +262,7 @@ const scrubSpan = (span: AnyObject): void => {
  *
  * Usage:
  * ```ts
- * import { createBeforeSendTransactionHandler } from "@detent/sentry";
+ * import { createBeforeSendTransactionHandler } from "@obsr/sentry";
  *
  * Sentry.init({
  *   beforeSendTransaction: createBeforeSendTransactionHandler(),
@@ -347,7 +347,7 @@ const scrubReplayResponse = (response: AnyObject): void => {
  *
  * Usage:
  * ```ts
- * import { scrubReplayEvent } from "@detent/sentry";
+ * import { scrubReplayEvent } from "@obsr/sentry";
  *
  * Sentry.replayIntegration({
  *   beforeAddRecordingEvent: scrubReplayEvent,

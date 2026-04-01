@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { parseResolverQueuePayload } from "@detent/types";
+import { parseResolverQueuePayload } from "@obsr/types";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { jwtVerify } from "jose";

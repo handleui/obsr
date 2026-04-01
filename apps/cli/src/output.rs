@@ -150,7 +150,7 @@ pub fn print_auth_login_prompt(
 ) {
     match mode {
         OutputMode::Human => {
-            println!("Open this URL to approve Detent CLI:");
+            println!("Open this URL to approve Observer CLI:");
             println!("  {}", device.verification_uri_complete);
             println!();
             println!("Or enter code: {}", device.user_code);

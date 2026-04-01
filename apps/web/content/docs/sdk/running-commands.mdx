@@ -8,7 +8,7 @@ Instead of manually capturing output and parsing it, use `run()` to execute comm
 ## Basic Usage
 
 ```ts
-import { run } from "@detent/diagnostics"
+import { run } from "@obsr/diagnostics"
 
 const result = await run("npm test")
 ```
@@ -54,7 +54,7 @@ const result = await run("npm test", {
 Use `formatDiagnostics()` to get human-readable output:
 
 ```ts
-import { run, formatDiagnostics } from "@detent/diagnostics"
+import { run, formatDiagnostics } from "@obsr/diagnostics"
 
 const result = await run("npm test")
 console.log(formatDiagnostics(result.diagnostics))
@@ -74,7 +74,7 @@ src/utils.ts:25:1 - warning: 'unused' is defined but never used
 If you have your own process runner, use `prepareCommand()` to get the modified command without executing:
 
 ```ts
-import { prepareCommand, extract } from "@detent/diagnostics"
+import { prepareCommand, extract } from "@obsr/diagnostics"
 
 const prepared = prepareCommand("eslint src/")
 // {

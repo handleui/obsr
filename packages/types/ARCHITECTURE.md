@@ -1,4 +1,4 @@
-# @detent/types Architecture
+# @obsr/types Architecture
 
 Shared type definitions for the Detent platform. Primarily TypeScript interfaces with some utility functions.
 
@@ -138,10 +138,10 @@ readonly filePath?: string;
 
 | Package | Usage |
 |---------|-------|
-| `@detent/extract` | Uses CIError, CIErrorSchema for error extraction and validation |
-| `@detent/resolving` | Reads CIError for AI prompt generation, validation |
-| `@detent/lore` | Uses ErrorFingerprints, ErrorSource for error signature tracking |
-| `apps/observer` | Stores/retrieves errors, uses ErrorCategory, ErrorSource, CodeSnippet |
+| `@obsr/extract` | Uses CIError, CIErrorSchema for error extraction and validation |
+| `@obsr/resolving` | Reads CIError for AI prompt generation, validation |
+| `@obsr/lore` | Uses ErrorFingerprints, ErrorSource for error signature tracking |
+| `apps/api` | Stores/retrieves errors, uses ErrorCategory, ErrorSource, CodeSnippet |
 | `apps/cli` | Uses redactSensitiveData for config sanitization |
 
 ---
@@ -172,7 +172,7 @@ const CIErrorSchema = ErrorLocationSchema.merge(ErrorClassificationSchema).exten
   "./context": "./dist/context.js"
 }
 
-// Usage: import { JobEvent } from "@detent/types/events"
+// Usage: import { JobEvent } from "@obsr/types/events"
 ```
 
 **If breaking changes needed:**

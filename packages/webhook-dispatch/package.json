@@ -1,5 +1,5 @@
 {
-  "name": "@detent/webhook-dispatch",
+  "name": "@obsr/webhook-dispatch",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -16,7 +16,7 @@
     "check-types": "tsc --noEmit"
   },
   "devDependencies": {
-    "@detent/typescript-config": "*",
+    "@obsr/typescript-config": "*",
     "typescript": "^5.9.3"
   }
 }

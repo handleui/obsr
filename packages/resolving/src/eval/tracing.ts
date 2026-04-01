@@ -12,7 +12,7 @@
  * (like API keys, tokens, passwords) from being sent to Braintrust.
  */
 
-import { redactSensitiveData } from "@detent/types";
+import { redactSensitiveData } from "@obsr/types";
 import { initLogger, traced } from "braintrust";
 import type { ResolveResult } from "../types.js";
 

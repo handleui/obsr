@@ -1,12 +1,12 @@
-# @detent/lore
+# @obsr/lore
 
 ## 0.2.1
 
 ### Patch Changes
 
-- e1cb50b: Migrate from @detent/parser to @detent/types for shared type imports.
+- e1cb50b: Migrate from @obsr/parser to @obsr/types for shared type imports.
 - Updated dependencies [e1cb50b]
-  - @detent/types@0.5.0
+  - @obsr/types@0.5.0
 
 ## 0.2.0
 
@@ -20,8 +20,8 @@
 
 - Updated dependencies [74eab1c]
 - Updated dependencies [74eab1c]
-  - @detent/parser@0.7.0
-  - @detent/types@0.4.0
+  - @obsr/parser@0.7.0
+  - @obsr/types@0.4.0
 
 ## 0.1.2
 
@@ -29,14 +29,14 @@
 
 - Updated dependencies [6bfca1a]
 - Updated dependencies [6bfca1a]
-  - @detent/parser@0.6.0
+  - @obsr/parser@0.6.0
 
 ## 0.1.1
 
 ### Patch Changes
 
 - Updated dependencies [5fa4de0]
-  - @detent/parser@0.5.3
+  - @obsr/parser@0.5.3
 
 ## 0.1.0
 

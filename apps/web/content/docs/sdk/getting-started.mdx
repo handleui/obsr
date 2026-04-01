@@ -3,24 +3,24 @@ title: Getting Started
 description: Install and start parsing CI output
 ---
 
-The `@detent/diagnostics` SDK parses output from CI tools into structured diagnostics. Zero dependencies, tree-shakeable, works offline.
+The `@obsr/diagnostics` SDK parses output from CI tools into structured diagnostics. Zero dependencies, tree-shakeable, works offline.
 
 ## Install
 
 <Tabs items={["npm", "pnpm", "bun"]}>
   <Tab value="npm">
     ```bash
-    npm install @detent/diagnostics
+    npm install @obsr/diagnostics
     ```
   </Tab>
   <Tab value="pnpm">
     ```bash
-    pnpm add @detent/diagnostics
+    pnpm add @obsr/diagnostics
     ```
   </Tab>
   <Tab value="bun">
     ```bash
-    bun add @detent/diagnostics
+    bun add @obsr/diagnostics
     ```
   </Tab>
 </Tabs>
@@ -28,7 +28,7 @@ The `@detent/diagnostics` SDK parses output from CI tools into structured diagno
 ## Quick Start
 
 ```ts
-import { extract } from "@detent/diagnostics"
+import { extract } from "@obsr/diagnostics"
 
 const output = `src/app.ts(10,5): error TS2304: Cannot find name 'foo'`
 const result = extract(output)

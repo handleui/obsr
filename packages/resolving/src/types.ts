@@ -1,4 +1,4 @@
-import type { TokenUsage } from "@detent/ai";
+import type { TokenUsage } from "@obsr/ai";
 import type { CommandLogEntry } from "./tools/registry.js";
 
 export type ResolveErrorType =
@@ -46,7 +46,7 @@ export interface ResolveResult {
   commandLog?: CommandLogEntry[];
 }
 
-export type { TokenUsage } from "@detent/ai";
+export type { TokenUsage } from "@obsr/ai";
 
 export const DEFAULT_CONFIG: ResolveConfig = {
   timeout: 600_000,

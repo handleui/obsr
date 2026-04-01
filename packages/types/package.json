@@ -1,5 +1,5 @@
 {
-  "name": "@detent/types",
+  "name": "@obsr/types",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -24,7 +24,7 @@
     }
   },
   "devDependencies": {
-    "@detent/typescript-config": "*",
+    "@obsr/typescript-config": "*",
     "typescript": "^5.9.3",
     "zod": "^3.25.34"
   }

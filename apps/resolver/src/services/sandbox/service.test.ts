@@ -5,11 +5,11 @@ import {
   type SandboxFileInfo,
   type SandboxHandle,
   TEMPLATES,
-} from "@detent/sandbox";
+} from "@obsr/sandbox";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { createSandboxService as createBaseSandboxService } from "./index.js";
 
-// Mock E2B SDK - must mock the module path that @detent/sandbox imports from
+// Mock E2B SDK - must mock the module path that @obsr/sandbox imports from
 vi.mock("@e2b/code-interpreter", () => {
   class MockRateLimitError extends Error {
     constructor(message = "Rate limit exceeded") {

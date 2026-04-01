@@ -1,5 +1,5 @@
 {
-  "name": "@detent/ai",
+  "name": "@obsr/ai",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -20,7 +20,7 @@
     "zod": "^3.25.34"
   },
   "devDependencies": {
-    "@detent/typescript-config": "*",
+    "@obsr/typescript-config": "*",
     "@types/node": "^22.15.3",
     "typescript": "^5.9.3",
     "vitest": "^4.0.16"

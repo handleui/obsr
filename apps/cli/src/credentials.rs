@@ -43,8 +43,9 @@ pub fn load_credentials() -> Result<Option<StoredCredentials>, AppError> {
 
 pub fn save_credentials(credentials: &StoredCredentials) -> Result<(), AppError> {
     let dir = config::detent_home()?;
-    fs::create_dir_all(&dir)
-        .map_err(|error| AppError::internal(format!("failed to create credentials directory: {error}")))?;
+    fs::create_dir_all(&dir).map_err(|error| {
+        AppError::internal(format!("failed to create credentials directory: {error}"))
+    })?;
 
     #[cfg(unix)]
     {
@@ -104,8 +105,8 @@ fn replace_existing_file(
 ) -> Result<bool, AppError> {
     #[cfg(windows)]
     {
-        let is_conflict_error =
-            _error.kind() == std::io::ErrorKind::AlreadyExists || _error.raw_os_error() == Some(183);
+        let is_conflict_error = _error.kind() == std::io::ErrorKind::AlreadyExists
+            || _error.raw_os_error() == Some(183);
         if is_conflict_error && _path.exists() {
             fs::remove_file(_path).map_err(|remove_error| {
                 AppError::internal(format!(

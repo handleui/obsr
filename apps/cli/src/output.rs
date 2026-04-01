@@ -67,6 +67,58 @@ where
     );
 }
 
+#[derive(Debug, Serialize)]
+struct SettingsEntry<'a> {
+    key: &'a str,
+    value: &'a str,
+}
+
+pub fn print_settings_get(key: &str, value: &str, mode: OutputMode) {
+    match mode {
+        OutputMode::Human => println!("{key}={value}"),
+        OutputMode::Json => print_json(&serde_json::json!({
+            "status": "ok",
+            "key": key,
+            "value": value,
+        })),
+    }
+}
+
+pub fn print_settings_set(key: &str, value: &str, mode: OutputMode) {
+    match mode {
+        OutputMode::Human => println!("Set {key}={value}"),
+        OutputMode::Json => print_json(&serde_json::json!({
+            "status": "ok",
+            "key": key,
+            "value": value,
+        })),
+    }
+}
+
+pub fn print_settings_list(entries: &[(&str, &str)], mode: OutputMode) {
+    match mode {
+        OutputMode::Human => {
+            if entries.is_empty() {
+                println!("No settings configured.");
+                return;
+            }
+            for (key, value) in entries {
+                println!("{key}={value}");
+            }
+        }
+        OutputMode::Json => {
+            let payload = entries
+                .iter()
+                .map(|(key, value)| SettingsEntry { key, value })
+                .collect::<Vec<_>>();
+            print_json(&serde_json::json!({
+                "status": "ok",
+                "settings": payload,
+            }));
+        }
+    }
+}
+
 pub fn print_auth_login(result: &LoginResult, mode: OutputMode) {
     match mode {
         OutputMode::Human => {
@@ -92,7 +144,10 @@ pub fn print_auth_login(result: &LoginResult, mode: OutputMode) {
     }
 }
 
-pub fn print_auth_login_prompt(device: &crate::auth::DeviceAuthorizationResponse, mode: OutputMode) {
+pub fn print_auth_login_prompt(
+    device: &crate::auth::DeviceAuthorizationResponse,
+    mode: OutputMode,
+) {
     match mode {
         OutputMode::Human => {
             println!("Open this URL to approve Detent CLI:");

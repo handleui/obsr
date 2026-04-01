@@ -2,13 +2,14 @@ use std::ffi::OsString;
 
 use clap::Parser;
 
+pub mod auth;
 pub mod cli;
-pub mod config;
 pub mod commands;
+pub mod config;
 pub mod credentials;
 pub mod error;
 pub mod output;
-pub mod auth;
+pub mod settings;
 
 use cli::AppCli;
 use error::AppError;
@@ -57,6 +58,30 @@ mod tests {
         run_with_args(["dt", "auth", "status"])
             .await
             .expect("auth status should execute");
+    }
+
+    #[tokio::test]
+    async fn settings_set_get_and_list_execute() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "dt-lib-test-settings-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time should work")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let _guard = EnvVarGuard::set("DETENT_HOME", Some(temp_dir.to_str().expect("utf8")));
+
+        run_with_args(["dt", "settings", "set", "theme", "dark"])
+            .await
+            .expect("settings set should execute");
+        run_with_args(["dt", "settings", "get", "theme"])
+            .await
+            .expect("settings get should execute");
+        run_with_args(["dt", "settings", "list"])
+            .await
+            .expect("settings list should execute");
     }
 
     #[tokio::test]

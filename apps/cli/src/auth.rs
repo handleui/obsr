@@ -4,7 +4,9 @@ use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::config;
-use crate::credentials::{StoredCredentials, clear_credentials, load_credentials, save_credentials};
+use crate::credentials::{
+    StoredCredentials, clear_credentials, load_credentials, save_credentials,
+};
 use crate::error::{AppError, ErrorCode};
 
 const POLL_ATTEMPTS_LIMIT: usize = 120;
@@ -40,7 +42,11 @@ impl AuthService {
         )
     }
 
-    fn new_with_client(client: Client, base_url: String, sleep_fn: SleepFn) -> Result<Self, AppError> {
+    fn new_with_client(
+        client: Client,
+        base_url: String,
+        sleep_fn: SleepFn,
+    ) -> Result<Self, AppError> {
         let base_url = normalize_base_url(&base_url)?;
 
         Ok(Self {
@@ -74,7 +80,9 @@ impl AuthService {
         &self,
         device: DeviceAuthorizationResponse,
     ) -> Result<LoginResult, AppError> {
-        let tokens = self.poll_for_token(&device.device_code, device.interval).await?;
+        let tokens = self
+            .poll_for_token(&device.device_code, device.interval)
+            .await?;
         if !tokens.token_type.eq_ignore_ascii_case("bearer") {
             return Err(AppError::new(
                 ErrorCode::Auth,
@@ -148,11 +156,11 @@ impl AuthService {
     async fn request_device_code(&self) -> Result<DeviceAuthorizationResponse, AppError> {
         let response = self
             .client
-                .post(format!("{}/api/auth/device/code", self.base_url))
-                .json(&serde_json::json!({
-                    "client_id": config::device_client_id(),
-                    "scope": "openid profile email",
-                }))
+            .post(format!("{}/api/auth/device/code", self.base_url))
+            .json(&serde_json::json!({
+                "client_id": config::device_client_id(),
+                "scope": "openid profile email",
+            }))
             .send()
             .await
             .map_err(map_network_error)?;
@@ -187,7 +195,11 @@ impl AuthService {
             }
 
             let status = response.status();
-            let error = parse_json_body::<TokenErrorResponse>(response, "failed to parse device token error").await?;
+            let error = parse_json_body::<TokenErrorResponse>(
+                response,
+                "failed to parse device token error",
+            )
+            .await?;
             match error.error.as_str() {
                 "authorization_pending" => continue,
                 "slow_down" => {
@@ -211,9 +223,9 @@ impl AuthService {
                 _ => {
                     return Err(AppError::new(
                         ErrorCode::Auth,
-                        error
-                            .error_description
-                            .unwrap_or_else(|| format!("authentication failed with status {status}")),
+                        error.error_description.unwrap_or_else(|| {
+                            format!("authentication failed with status {status}")
+                        }),
                         1,
                     ));
                 }
@@ -294,9 +306,18 @@ pub struct LoginResult {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum AuthStatus {
-    Unauthenticated { api_url: String },
-    Expired { api_url: String, expires_at: u64 },
-    Authenticated { api_url: String, expires_at: u64, me: MeResponse },
+    Unauthenticated {
+        api_url: String,
+    },
+    Expired {
+        api_url: String,
+        expires_at: u64,
+    },
+    Authenticated {
+        api_url: String,
+        expires_at: u64,
+        me: MeResponse,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -401,8 +422,12 @@ mod tests {
         let temp_dir = temp_dir();
         let _guard = EnvVarGuard::set("DETENT_HOME", Some(temp_dir.to_str().expect("utf8")));
 
-        let service = AuthService::new_with_client(Client::new(), "https://observer.detent.sh".into(), no_sleep)
-            .expect("service should initialize");
+        let service = AuthService::new_with_client(
+            Client::new(),
+            "https://observer.detent.sh".into(),
+            no_sleep,
+        )
+        .expect("service should initialize");
 
         let status = service.status().await.expect("status should resolve");
         assert!(matches!(status, AuthStatus::Unauthenticated { .. }));
@@ -410,9 +435,12 @@ mod tests {
 
     #[test]
     fn rejects_insecure_non_localhost_api_urls() {
-        let error =
-            AuthService::new_with_client(Client::new(), "http://observer.detent.sh".into(), no_sleep)
-                .expect_err("http production urls should be rejected");
+        let error = AuthService::new_with_client(
+            Client::new(),
+            "http://observer.detent.sh".into(),
+            no_sleep,
+        )
+        .expect_err("http production urls should be rejected");
 
         assert_eq!(error.code().as_str(), "invalid_configuration");
     }

@@ -1,10 +1,13 @@
-import type { CIError } from "@obsr/types";
+import type { CIErrorSchema } from "@obsr/types";
 import { describe, expect, it } from "vitest";
+import type { z } from "zod";
 import {
   dedupeDiagnostics,
   mapExtractedDiagnostics,
   rankDiagnostics,
 } from "./diagnostics";
+
+type CIError = z.infer<typeof CIErrorSchema>;
 
 const baseError: CIError = {
   message: "Type 'string' is not assignable to type 'number'",

@@ -1,5 +1,7 @@
 # @obsr/types
 
+Historical entries below predate the current trimmed package surface.
+
 ## 1.0.0
 
 ### Major Changes

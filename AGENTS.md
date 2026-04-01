@@ -38,13 +38,8 @@ legacy/
 
 packages/
 ├── ai/             # AI model routing & providers
-├── autofix/        # Deterministic autofix logic
 ├── extract/        # CI log parsing & error extraction
-├── git/            # Git operations
-├── resolving/      # AI error fixing orchestration
 ├── lore/           # Knowledge base
-├── sandbox/        # E2B sandbox management
-├── sentry/         # Sentry integration
 ├── types/          # Shared TypeScript types
 ├── ui/             # Shared React components
 └── typescript-config/
@@ -55,7 +50,6 @@ packages/
 Active Observer data lives in `apps/obsr`.
 
 - **Observer MVP**: schema in `apps/obsr/src/db/schema.ts` → `cd apps/obsr && bun run db:generate`
-- **Legacy API DB**: `packages/db` is reference-only unless you are intentionally touching legacy code
 
 ## Rules
 
@@ -104,7 +98,8 @@ Biome/Ultracite handles standard linting. Project-specific only:
 - **Docs**: `detent.sh`
 - **Legacy API**: `observer.detent.sh`
 
-## Resolving Architecture
+## Legacy Note
 
-- **Autofix** (deterministic): GitHub Action, no sandbox
-- **Legacy AI Resolving** (agentic): kept in `legacy/resolver` for reference only
+- `legacy/api` and `legacy/resolver` are guidance-only snapshots.
+- They may reference packages that have since been deleted.
+- Do not treat legacy code as runnable without restoration work.

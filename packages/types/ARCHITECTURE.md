@@ -1,6 +1,6 @@
 # @obsr/types Architecture
 
-Shared type definitions for the Detent platform. Primarily TypeScript interfaces with some utility functions.
+Shared type definitions for active Observer packages. Primarily TypeScript interfaces with a small set of sanitization helpers.
 
 ---
 
@@ -75,7 +75,7 @@ CIError
     └── workflowJob (flattened)
 ```
 
-**Data flow**: parsers populate location/classification → AI extraction adds context/hints → action enriches with workflow info.
+**Data flow**: parsers populate location/classification → AI extraction adds context/hints → analysis flow enriches with workflow info.
 
 ### Deprecated: ExtractedError
 
@@ -139,9 +139,9 @@ readonly filePath?: string;
 | Package | Usage |
 |---------|-------|
 | `@obsr/extract` | Uses CIError, CIErrorSchema for error extraction and validation |
-| `@obsr/resolving` | Reads CIError for AI prompt generation, validation |
 | `@obsr/lore` | Uses ErrorFingerprints, ErrorSource for error signature tracking |
-| `legacy/api` | Stores/retrieves errors, uses ErrorCategory, ErrorSource, CodeSnippet |
+| `apps/obsr` | Uses redact/scrub helpers and CIError-derived contracts for analysis flow |
+| `legacy/api` | Historical reference only |
 | `apps/cli` | Uses redactSensitiveData for config sanitization |
 
 ---
@@ -175,7 +175,7 @@ const CIErrorSchema = ErrorLocationSchema.merge(ErrorClassificationSchema).exten
 // Usage: import { JobEvent } from "@obsr/types/events"
 ```
 
-**If breaking changes needed:**
+**If breaking changes are needed:**
 - Bump major version
 - Document in CHANGELOG.md
 - Provide migration guide

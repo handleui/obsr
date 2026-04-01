@@ -1,13 +1,13 @@
 /**
  * Unified CI error schema.
  * Single source of truth for all error types across the monorepo.
- * Flows from extraction → resolving.
+ * Flows from extraction → analysis.
  *
  * Usage:
  * - parsers populate: message, filePath, line, column, severity, ruleId, source
  * - AI extraction adds: category, stackTrace, hints, codeSnippet, fixable
  * - post-processing adds: relatedFiles (parsed from stackTrace)
- * - action enriches: workflowContext, workflowJob
+ * - CI/job context enriches: workflowContext, workflowJob
  */
 import { z } from "zod";
 

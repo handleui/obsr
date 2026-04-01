@@ -40,27 +40,6 @@ export type {
   ErrorOccurrence,
   ErrorSignature,
 } from "./fingerprint.js";
-export type {
-  ResolveCreateStatus,
-  ResolveStatus,
-  ResolveSummary,
-  ResolveType,
-  ResolveUpdateStatus,
-} from "./resolve.js";
-export { ResolveStatuses, ResolveTypes } from "./resolve.js";
-export type {
-  ResolverDiagnostic,
-  ResolverDiagnosticsContext,
-} from "./resolver-diagnostics.js";
-export type {
-  ResolverQueuePayload,
-  ResolverQueueSource,
-} from "./resolver-queue.js";
-export {
-  getResolverQueueResolveIds,
-  parseResolverQueuePayload,
-  ResolverQueueSources,
-} from "./resolver-queue.js";
 export type { DiagnosticLike, RedactionPattern } from "./sanitize.js";
 export {
   redactionPatterns,

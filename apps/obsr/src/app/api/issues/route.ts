@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { MAX_ANALYSIS_REQUEST_BYTES } from "@/lib/analysis/constants";
-import { createAnalysis, listAnalyses } from "@/lib/analysis/service";
-import { AnalysisCreateInputSchema } from "@/lib/contracts";
 import { handleRouteError, parseJsonRequest } from "@/lib/http";
+import { MAX_INGEST_REQUEST_BYTES } from "@/lib/issues/constants";
+import { IssueIngestInputSchema } from "@/lib/issues/schema";
+import { ingestIssue, listIssues, toIssueCreated } from "@/lib/issues/service";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 
 export const GET = async () => {
   try {
-    return NextResponse.json(await listAnalyses());
+    return NextResponse.json(await listIssues());
   } catch (error) {
     return handleRouteError(error);
   }
@@ -20,10 +20,11 @@ export const POST = async (request: Request) => {
   try {
     const body = await parseJsonRequest(
       request,
-      AnalysisCreateInputSchema,
-      MAX_ANALYSIS_REQUEST_BYTES
+      IssueIngestInputSchema,
+      MAX_INGEST_REQUEST_BYTES
     );
-    return NextResponse.json(await createAnalysis(body), {
+    const issue = await ingestIssue(body);
+    return NextResponse.json(toIssueCreated(issue), {
       status: 201,
     });
   } catch (error) {

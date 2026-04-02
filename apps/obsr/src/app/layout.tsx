@@ -4,11 +4,11 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "Observer MVP",
-    template: "%s | Observer MVP",
+    default: "ObsR",
+    template: "%s | ObsR",
   },
   description:
-    "Paste CI logs, extract diagnostics, and build a compact fix prompt.",
+    "Ingest raw failures, cluster related evidence, and turn them into one issue with a concrete fix plan.",
 };
 
 const RootLayout = ({

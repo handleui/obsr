@@ -17,7 +17,7 @@ category  severity    source context events context-parser fingerprint sanitize 
                                                                                    ┌───────────┤
                                                                                    ▼           ▼
                                                                               CIError    CIErrorSchema
-                                                                           (core type)   (validation)
+                                                                        (shared CI type) (validation)
 ```
 
 ---
@@ -40,9 +40,9 @@ category  severity    source context events context-parser fingerprint sanitize 
 
 ---
 
-## Core Type: CIError
+## Shared Type: CIError
 
-The unified CI error schema used across all packages. Defined in `diagnostic.ts` with Zod validation.
+The shared CI/log diagnostic schema used by extraction and legacy resolver flows. Defined in `diagnostic.ts` with Zod validation.
 
 ```
 CIError
@@ -75,7 +75,7 @@ CIError
     └── workflowJob (flattened)
 ```
 
-**Data flow**: parsers populate location/classification → AI extraction adds context/hints → analysis flow enriches with workflow info.
+**Data flow**: parsers populate location/classification → AI extraction adds context/hints → downstream consumers enrich with workflow info.
 
 ### Deprecated: ExtractedError
 
@@ -140,7 +140,7 @@ readonly filePath?: string;
 |---------|-------|
 | `@obsr/extract` | Uses CIError, CIErrorSchema for error extraction and validation |
 | `@obsr/lore` | Uses ErrorFingerprints, ErrorSource for error signature tracking |
-| `apps/obsr` | Uses redact/scrub helpers and CIError-derived contracts for analysis flow |
+| `apps/obsr` | Uses redact/scrub helpers only; issue-domain types stay app-local |
 | `legacy/api` | Historical reference only |
 | `apps/cli` | Uses redactSensitiveData for config sanitization |
 

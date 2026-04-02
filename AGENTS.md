@@ -10,6 +10,9 @@ bun run lint               # Check issues
 bun run fix                # Auto-fix with Biome
 bun run check-types        # TypeScript validation
 bun run dt <command>       # CLI local dev (never use ./dist/dt)
+cd apps/obsr && npx auth generate --output ./src/db/auth-schema.ts --adapter drizzle --dialect postgresql --yes
+cd apps/obsr && bun run db:generate    # Generate Drizzle SQL migration files
+cd apps/obsr && bun run db:migrate     # Apply Drizzle migrations
 ```
 
 ## Tech Stack
@@ -49,7 +52,15 @@ packages/
 
 Active Observer data lives in `apps/obsr`.
 
-- **Observer MVP**: schema in `apps/obsr/src/db/schema.ts` → `cd apps/obsr && bun run db:generate`
+- **Observer MVP business tables**: `apps/obsr/src/db/schema.ts`
+- **Observer MVP auth tables**: `apps/obsr/src/db/auth-schema.ts`
+- **Migration system**: Drizzle only. Better Auth CLI generates auth schema; Drizzle Kit generates/applies SQL migrations.
+
+### Intended DB Flows
+
+- **Business schema only changed**: `cd apps/obsr && bun run db:generate`
+- **Better Auth config/plugins changed**: `cd apps/obsr && npx auth generate --output ./src/db/auth-schema.ts --adapter drizzle --dialect postgresql --yes && bun run db:generate`
+- **Apply generated migrations**: `cd apps/obsr && bun run db:migrate`
 
 ## Rules
 
@@ -58,6 +69,8 @@ Active Observer data lives in `apps/obsr`.
 - Run `bun run fix` before every commit
 - Use `bun run dt x` for local CLI testing
 - Never edit Drizzle generated SQL/files manually; only change schema files and regenerate
+- Never edit `apps/obsr/src/db/auth-schema.ts` manually; regenerate it with `cd apps/obsr && npx auth generate --output ./src/db/auth-schema.ts --adapter drizzle --dialect postgresql --yes`
+- Do not use `npx auth migrate` in `apps/obsr`; auth tables also flow through Drizzle migrations here
 - Always generate Drizzle migrations via command (`cd apps/obsr && bun run db:generate` for active work)
 - Never create markdown summary files when closing tasks
 

@@ -1,22 +1,19 @@
 import { NextResponse } from "next/server";
-import { getAnalysisDetail } from "@/lib/analysis/service";
 import { handleRouteError } from "@/lib/http";
+import { getIssueDetailView } from "@/lib/issues/service";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const runtime = "nodejs";
 
-interface AnalysisRouteProps {
+interface IssueRouteProps {
   params: Promise<{ id: string }>;
 }
 
-export const GET = async (
-  _request: Request,
-  { params }: AnalysisRouteProps
-) => {
+export const GET = async (_request: Request, { params }: IssueRouteProps) => {
   try {
     const { id } = await params;
-    return NextResponse.json(await getAnalysisDetail(id));
+    return NextResponse.json(await getIssueDetailView(id));
   } catch (error) {
     return handleRouteError(error);
   }

@@ -1,7 +1,7 @@
 /**
- * Unified CI error schema.
- * Single source of truth for all error types across the monorepo.
- * Flows from extraction → analysis.
+ * Shared CI/log diagnostic schema.
+ * Used by extraction, lore fingerprinting, and legacy resolving flows.
+ * Flows from extraction → enrichment.
  *
  * Usage:
  * - parsers populate: message, filePath, line, column, severity, ruleId, source

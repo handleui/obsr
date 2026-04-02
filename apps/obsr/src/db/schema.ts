@@ -2,44 +2,111 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import type { IssueObservationContext, IssuePlan } from "@/lib/issues/schema";
 
-export const analyses = pgTable(
-  "analyses",
+export const issues = pgTable(
+  "issues",
   {
     id: text("id")
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
+    title: text("title").notNull(),
+    severity: text("severity").notNull(),
+    status: text("status").notNull(),
+    primaryCategory: text("primary_category"),
+    primarySourceKind: text("primary_source_kind"),
+    sourceKinds: jsonb("source_kinds").$type<string[]>().notNull(),
+    summary: text("summary").notNull(),
+    rootCause: text("root_cause"),
+    plan: jsonb("plan").$type<IssuePlan>().notNull(),
+    clusterKey: text("cluster_key").notNull(),
+    repo: text("repo"),
+    app: text("app"),
+    service: text("service"),
+    environment: text("environment").notNull(),
+    firstSeenAt: timestamp("first_seen_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    observationCount: integer("observation_count").notNull().default(0),
+    diagnosticCount: integer("diagnostic_count").notNull().default(0),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "date",
     })
       .defaultNow()
       .notNull(),
-    inputKind: text("input_kind").notNull(),
-    rawLog: text("raw_log").notNull(),
-    rawLogWasTruncated: boolean("raw_log_was_truncated")
-      .notNull()
-      .default(false),
-    summary: text("summary").notNull(),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .defaultNow()
+      .notNull(),
   },
-  (table) => [index("analyses_created_at_idx").on(table.createdAt)]
+  (table) => [
+    index("issues_created_at_idx").on(table.createdAt),
+    index("issues_last_seen_at_idx").on(table.lastSeenAt),
+    index("issues_cluster_key_idx").on(table.clusterKey),
+  ]
 );
 
-export const analysisDiagnostics = pgTable(
-  "analysis_diagnostics",
+export const issueObservations = pgTable(
+  "issue_observations",
   {
     id: text("id")
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
-    analysisId: text("analysis_id")
+    issueId: text("issue_id")
       .notNull()
-      .references(() => analyses.id, { onDelete: "cascade" }),
+      .references(() => issues.id, { onDelete: "cascade" }),
+    sourceKind: text("source_kind").notNull(),
+    rawText: text("raw_text"),
+    rawPayload: jsonb("raw_payload").$type<unknown>(),
+    context: jsonb("context").$type<IssueObservationContext>().notNull(),
+    capturedAt: timestamp("captured_at", {
+      withTimezone: true,
+      mode: "date",
+    }).notNull(),
+    wasRedacted: boolean("was_redacted").notNull().default(false),
+    wasTruncated: boolean("was_truncated").notNull().default(false),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("issue_observations_issue_idx").on(table.issueId),
+    index("issue_observations_captured_at_idx").on(table.capturedAt),
+  ]
+);
+
+export const issueDiagnostics = pgTable(
+  "issue_diagnostics",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    issueId: text("issue_id")
+      .notNull()
+      .references(() => issues.id, { onDelete: "cascade" }),
+    observationId: text("observation_id")
+      .notNull()
+      .references(() => issueObservations.id, { onDelete: "cascade" }),
     fingerprint: text("fingerprint").notNull(),
+    repoFingerprint: text("repo_fingerprint").notNull(),
+    loreFingerprint: text("lore_fingerprint").notNull(),
     message: text("message").notNull(),
     severity: text("severity"),
     category: text("category"),
@@ -49,13 +116,20 @@ export const analysisDiagnostics = pgTable(
     column: integer("column"),
     ruleId: text("rule_id"),
     evidence: text("evidence").notNull(),
-    rank: integer("rank").notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .defaultNow()
+      .notNull(),
   },
   (table) => [
-    index("analysis_diagnostics_analysis_idx").on(table.analysisId),
-    index("analysis_diagnostics_rank_idx").on(table.analysisId, table.rank),
-    uniqueIndex("analysis_diagnostics_analysis_fingerprint_uidx").on(
-      table.analysisId,
+    index("issue_diagnostics_issue_idx").on(table.issueId),
+    index("issue_diagnostics_observation_idx").on(table.observationId),
+    index("issue_diagnostics_repo_fp_idx").on(table.repoFingerprint),
+    index("issue_diagnostics_lore_fp_idx").on(table.loreFingerprint),
+    uniqueIndex("issue_diagnostics_observation_fingerprint_uidx").on(
+      table.observationId,
       table.fingerprint
     ),
   ]

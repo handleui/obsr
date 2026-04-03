@@ -5,6 +5,12 @@ export interface TokenUsage {
   cacheReadInputTokens: number;
 }
 
+export interface ResponseUsageSummary {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
 export interface ModelConfig {
   model: string;
   maxOutputTokens?: number;

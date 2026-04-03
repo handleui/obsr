@@ -1,24 +1,35 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import type { IssueDiagnosticDraft } from "@/lib/issues/adapters/types";
-import type { IssueObservationContext, IssuePlan } from "@/lib/issues/schema";
+import type {
+  IssueCategory,
+  IssueEnvironment,
+  IssueObservationContext,
+  IssuePlan,
+  IssueSeverity,
+  IssueStatus,
+  ObservationSourceKind,
+} from "@/lib/issues/schema";
 import { getDb } from "./client";
 import { issueDiagnostics, issueObservations, issues } from "./schema";
 
 interface CreateIssueShellInput {
   id: string;
+  ownerUserId: string;
   clusterKey: string;
   repo: string | null;
   app: string | null;
   service: string | null;
-  environment: string;
+  environment: IssueEnvironment;
   firstSeenAt: Date;
 }
 
 interface CreateIssueObservationInput {
   issueId: string;
-  sourceKind: string;
+  ownerUserId: string;
+  sourceKind: ObservationSourceKind;
   rawText: string | null;
   rawPayload: unknown;
+  dedupeKey?: string | null;
   context: IssueObservationContext;
   capturedAt: Date;
   wasRedacted: boolean;
@@ -27,12 +38,13 @@ interface CreateIssueObservationInput {
 
 interface UpdateIssueSnapshotInput {
   id: string;
+  ownerUserId: string;
   title: string;
-  severity: string;
-  status: string;
-  primaryCategory: string | null;
-  primarySourceKind: string | null;
-  sourceKinds: string[];
+  severity: IssueSeverity;
+  status: IssueStatus;
+  primaryCategory: IssueCategory | null;
+  primarySourceKind: ObservationSourceKind | null;
+  sourceKinds: ObservationSourceKind[];
   summary: string;
   rootCause: string | null;
   plan: IssuePlan;
@@ -48,15 +60,18 @@ interface PersistIssueIngestInput {
   observation: CreateIssueObservationInput;
 }
 
-const buildIssueShellValues = (input: CreateIssueShellInput) => {
+const buildIssueShellValues = (
+  input: CreateIssueShellInput
+): typeof issues.$inferInsert => {
   return {
     id: input.id,
     title: "New issue",
+    ownerUserId: input.ownerUserId,
     severity: "medium",
     status: "open",
     primaryCategory: null,
     primarySourceKind: null,
-    sourceKinds: [],
+    sourceKinds: [] as ObservationSourceKind[],
     summary: "Issue pending synthesis.",
     rootCause: null,
     plan: {
@@ -78,12 +93,16 @@ const buildIssueShellValues = (input: CreateIssueShellInput) => {
   };
 };
 
-const buildObservationValues = (input: CreateIssueObservationInput) => {
+const buildObservationValues = (
+  input: CreateIssueObservationInput
+): typeof issueObservations.$inferInsert => {
   return {
     issueId: input.issueId,
+    ownerUserId: input.ownerUserId,
     sourceKind: input.sourceKind,
     rawText: input.rawText,
     rawPayload: input.rawPayload,
+    dedupeKey: input.dedupeKey ?? null,
     context: input.context,
     capturedAt: input.capturedAt,
     wasRedacted: input.wasRedacted,
@@ -95,7 +114,7 @@ const buildDiagnosticValues = (
   issueId: string,
   observationId: string,
   diagnostics: IssueDiagnosticDraft[]
-) => {
+): (typeof issueDiagnostics.$inferInsert)[] => {
   return diagnostics.map((diagnostic) => ({
     issueId,
     observationId,
@@ -152,7 +171,31 @@ export const persistIssueIngest = (input: PersistIssueIngestInput) => {
   });
 };
 
-export const listIssueClusterCandidates = (clusterKey: string) => {
+export const findIssueIdByObservationDedupeKey = async (
+  ownerUserId: string,
+  dedupeKey: string
+) => {
+  const { db } = getDb();
+  const [row] = await db
+    .select({
+      issueId: issueObservations.issueId,
+    })
+    .from(issueObservations)
+    .where(
+      and(
+        eq(issueObservations.dedupeKey, dedupeKey),
+        eq(issueObservations.ownerUserId, ownerUserId)
+      )
+    )
+    .limit(1);
+
+  return row?.issueId ?? null;
+};
+
+export const listIssueClusterCandidates = (
+  clusterKey: string,
+  ownerUserId: string
+) => {
   const { db } = getDb();
   return db
     .select({
@@ -161,12 +204,18 @@ export const listIssueClusterCandidates = (clusterKey: string) => {
       lastSeenAt: issues.lastSeenAt,
     })
     .from(issues)
-    .where(eq(issues.clusterKey, clusterKey))
+    .where(
+      and(
+        eq(issues.clusterKey, clusterKey),
+        eq(issues.ownerUserId, ownerUserId)
+      )
+    )
     .orderBy(desc(issues.lastSeenAt));
 };
 
 export const listIssueClusterCandidateFingerprintRows = (
-  clusterKey: string
+  clusterKey: string,
+  ownerUserId: string
 ) => {
   const { db } = getDb();
   return db
@@ -177,7 +226,62 @@ export const listIssueClusterCandidateFingerprintRows = (
     })
     .from(issueDiagnostics)
     .innerJoin(issues, eq(issueDiagnostics.issueId, issues.id))
-    .where(eq(issues.clusterKey, clusterKey));
+    .where(
+      and(
+        eq(issues.clusterKey, clusterKey),
+        eq(issues.ownerUserId, ownerUserId),
+        ne(issues.status, "ignored")
+      )
+    );
+};
+
+export const listRelatedIssueCandidates = (
+  clusterKey: string,
+  ownerUserId: string,
+  excludeIssueId: string
+) => {
+  const { db } = getDb();
+  return db
+    .select({
+      id: issues.id,
+      title: issues.title,
+      severity: issues.severity,
+      status: issues.status,
+      summary: issues.summary,
+      lastSeenAt: issues.lastSeenAt,
+    })
+    .from(issues)
+    .where(
+      and(
+        eq(issues.clusterKey, clusterKey),
+        eq(issues.ownerUserId, ownerUserId),
+        ne(issues.id, excludeIssueId),
+        ne(issues.status, "ignored")
+      )
+    )
+    .orderBy(desc(issues.lastSeenAt));
+};
+
+export const listIssueFingerprintRows = (issueIds: string[]) => {
+  if (issueIds.length === 0) {
+    return Promise.resolve(
+      [] as Array<{
+        issueId: string;
+        repoFingerprint: string;
+        loreFingerprint: string;
+      }>
+    );
+  }
+
+  const { db } = getDb();
+  return db
+    .select({
+      issueId: issueDiagnostics.issueId,
+      repoFingerprint: issueDiagnostics.repoFingerprint,
+      loreFingerprint: issueDiagnostics.loreFingerprint,
+    })
+    .from(issueDiagnostics)
+    .where(inArray(issueDiagnostics.issueId, issueIds));
 };
 
 export const updateIssueSnapshot = async (input: UpdateIssueSnapshotInput) => {
@@ -200,10 +304,12 @@ export const updateIssueSnapshot = async (input: UpdateIssueSnapshotInput) => {
       diagnosticCount: input.diagnosticCount,
       updatedAt: new Date(),
     })
-    .where(eq(issues.id, input.id));
+    .where(
+      and(eq(issues.id, input.id), eq(issues.ownerUserId, input.ownerUserId))
+    );
 };
 
-export const listRecentIssues = (limit = 20) => {
+export const listRecentIssues = (ownerUserId: string, limit = 20) => {
   const { db } = getDb();
   return db
     .select({
@@ -220,16 +326,21 @@ export const listRecentIssues = (limit = 20) => {
       diagnosticCount: issues.diagnosticCount,
     })
     .from(issues)
+    .where(eq(issues.ownerUserId, ownerUserId))
     .orderBy(desc(issues.lastSeenAt))
     .limit(limit);
 };
 
-export const getIssueAggregateById = async (id: string) => {
+export const getIssueAggregateById = async (
+  id: string,
+  ownerUserId: string
+) => {
   const { db } = getDb();
 
   const [issue] = await db
     .select({
       id: issues.id,
+      ownerUserId: issues.ownerUserId,
       title: issues.title,
       severity: issues.severity,
       status: issues.status,
@@ -250,51 +361,52 @@ export const getIssueAggregateById = async (id: string) => {
       diagnosticCount: issues.diagnosticCount,
     })
     .from(issues)
-    .where(eq(issues.id, id))
+    .where(and(eq(issues.id, id), eq(issues.ownerUserId, ownerUserId)))
     .limit(1);
 
   if (!issue) {
     return null;
   }
 
-  const observations = await db
-    .select({
-      id: issueObservations.id,
-      issueId: issueObservations.issueId,
-      sourceKind: issueObservations.sourceKind,
-      rawText: issueObservations.rawText,
-      rawPayload: issueObservations.rawPayload,
-      context: issueObservations.context,
-      capturedAt: issueObservations.capturedAt,
-      wasRedacted: issueObservations.wasRedacted,
-      wasTruncated: issueObservations.wasTruncated,
-    })
-    .from(issueObservations)
-    .where(eq(issueObservations.issueId, id))
-    .orderBy(desc(issueObservations.capturedAt));
-
-  const diagnostics = await db
-    .select({
-      id: issueDiagnostics.id,
-      issueId: issueDiagnostics.issueId,
-      observationId: issueDiagnostics.observationId,
-      fingerprint: issueDiagnostics.fingerprint,
-      repoFingerprint: issueDiagnostics.repoFingerprint,
-      loreFingerprint: issueDiagnostics.loreFingerprint,
-      message: issueDiagnostics.message,
-      severity: issueDiagnostics.severity,
-      category: issueDiagnostics.category,
-      source: issueDiagnostics.source,
-      ruleId: issueDiagnostics.ruleId,
-      filePath: issueDiagnostics.filePath,
-      line: issueDiagnostics.line,
-      column: issueDiagnostics.column,
-      evidence: issueDiagnostics.evidence,
-      createdAt: issueDiagnostics.createdAt,
-    })
-    .from(issueDiagnostics)
-    .where(eq(issueDiagnostics.issueId, id))
-    .orderBy(desc(issueDiagnostics.createdAt));
+  const [observations, diagnostics] = await Promise.all([
+    db
+      .select({
+        id: issueObservations.id,
+        issueId: issueObservations.issueId,
+        sourceKind: issueObservations.sourceKind,
+        rawText: issueObservations.rawText,
+        rawPayload: issueObservations.rawPayload,
+        context: issueObservations.context,
+        capturedAt: issueObservations.capturedAt,
+        wasRedacted: issueObservations.wasRedacted,
+        wasTruncated: issueObservations.wasTruncated,
+      })
+      .from(issueObservations)
+      .where(eq(issueObservations.issueId, id))
+      .orderBy(desc(issueObservations.capturedAt)),
+    db
+      .select({
+        id: issueDiagnostics.id,
+        issueId: issueDiagnostics.issueId,
+        observationId: issueDiagnostics.observationId,
+        fingerprint: issueDiagnostics.fingerprint,
+        repoFingerprint: issueDiagnostics.repoFingerprint,
+        loreFingerprint: issueDiagnostics.loreFingerprint,
+        message: issueDiagnostics.message,
+        severity: issueDiagnostics.severity,
+        category: issueDiagnostics.category,
+        source: issueDiagnostics.source,
+        ruleId: issueDiagnostics.ruleId,
+        filePath: issueDiagnostics.filePath,
+        line: issueDiagnostics.line,
+        column: issueDiagnostics.column,
+        evidence: issueDiagnostics.evidence,
+        createdAt: issueDiagnostics.createdAt,
+      })
+      .from(issueDiagnostics)
+      .where(eq(issueDiagnostics.issueId, id))
+      .orderBy(desc(issueDiagnostics.createdAt)),
+  ]);
 
   return {
     issue,

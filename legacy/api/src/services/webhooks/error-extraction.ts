@@ -4,10 +4,14 @@ import {
   type ExtractionUsage,
   extractErrors,
   type LogSegment,
-} from "@obsr/extract";
+} from "@obsr/legacy-extract";
+import type {
+  CIError,
+  ErrorSource,
+  ResolveCreateStatus,
+} from "@obsr/legacy-types";
+import { scrubSecrets } from "@obsr/legacy-types";
 import { type ErrorFingerprints, generateFingerprints } from "@obsr/lore";
-import type { CIError, ErrorSource, ResolveCreateStatus } from "@obsr/types";
-import { scrubSecrets } from "@obsr/types";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK is designed for namespace import
 import * as Sentry from "@sentry/cloudflare";
 import { getDbClient } from "../../db/client";

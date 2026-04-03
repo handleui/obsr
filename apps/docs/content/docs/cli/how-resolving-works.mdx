@@ -3,37 +3,49 @@ title: How Resolving Works
 description: What happens when Detent fixes your code
 ---
 
-When your CI fails, Detent doesn't just report the error. It reads your code, understands the problem, and writes a fix.
+When your CI fails, Detent does more than report the problem. It captures the evidence, builds a focused issue, and then tries the smallest safe fix.
 
 ## The Flow
 
 ```
-CI fails → Action parses errors → AI generates fix → You approve → Fix applied
+CI fails → Action uploads observations → Responses extraction builds issue diagnostics → AI generates fix → You approve
 ```
 
-### 1. Error Collection
+### 1. Observation Capture
 
-The Detent GitHub Action runs at the end of your CI job. It scans for output files from tools like ESLint, TypeScript, and Vitest:
+The Detent GitHub Action runs at the end of your CI job. It captures the useful evidence around a failure:
 
-```
-eslint-report.json
-vitest.json
-tsc-output.txt
-```
+- failed-step stdout and stderr
+- workflow and command context
+- optional artifacts when they already exist
 
-It extracts structured data: file path, line number, error message, and a code snippet around the error.
+Raw logs are valid input. Structured reports are optional extra evidence, not the contract.
 
-### 2. AI Resolving
+### 2. Issue Extraction
 
-Your error data goes to our resolving service. An AI agent (Claude) receives:
+Detent compacts those observations and sends them through the OpenAI Responses API with strict structured output. That step produces issue-native diagnostics such as:
 
-- The error message
-- 7 lines of code around the error
-- Your project context
+- message
+- severity
+- category
+- source
+- file path
+- line and column
+- evidence snippet
+
+Those diagnostics are ranked and deduped before any fix is proposed.
+
+### 3. AI Resolving
+
+Your issue data goes to our resolving service. An AI agent receives:
+
+- the ranked issue snapshot
+- the strongest evidence
+- related project context
 
 The AI runs in a sandbox. It can read files, run commands, and test fixes. It tries the fix, verifies it works, then submits a patch.
 
-### 3. You Review
+### 4. You Review
 
 Fixes appear as PR comments. You see:
 

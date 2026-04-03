@@ -1,12 +1,11 @@
-import { createGateway } from "@ai-sdk/gateway";
-import { DEFAULT_FAST_MODEL, DEFAULT_TIMEOUT_MS } from "@obsr/ai";
+import { isResponsesRequestError } from "@obsr/ai";
+import { normalizeSourceKinds, rankIssueDiagnostics } from "@obsr/issues";
 import { scrubFilePath, scrubSecrets } from "@obsr/types";
-import { generateText, Output } from "ai";
-import { z } from "zod";
-import { getAiGatewayApiKey } from "@/lib/env";
 import type { IssueDiagnosticDraft } from "./adapters/types";
-import { MAX_SYNTHESIS_DIAGNOSTICS } from "./constants";
-import { normalizeSourceKinds, rankIssueDiagnostics } from "./normalize";
+import {
+  type IssueSynthesisProvider,
+  responsesIssueSynthesisProvider,
+} from "./issue-agent";
 import type {
   Issue,
   IssueCategory,
@@ -14,6 +13,7 @@ import type {
   IssuePlan,
   IssueSeverity,
   ObservationSourceKind,
+  RelatedIssue,
 } from "./schema";
 
 export interface IssueSnapshot {
@@ -27,23 +27,6 @@ export interface IssueSnapshot {
   rootCause: string | null;
   plan: IssuePlan;
 }
-
-const SynthesisSchema = z.object({
-  title: z.string().min(1).max(120),
-  severity: z.enum(["important", "medium", "low"]),
-  summary: z.string().min(1).max(320),
-  rootCause: z.string().max(400).nullable(),
-  plan: z.object({
-    summary: z.string().min(1).max(220),
-    steps: z.array(z.string().min(1).max(180)).max(4),
-    validation: z.array(z.string().min(1).max(180)).max(4),
-    blockers: z.array(z.string().min(1).max(180)).max(4),
-  }),
-});
-
-const SYNTHESIS_OUTPUT = Output.object({
-  schema: SynthesisSchema,
-});
 
 const truncateTitle = (value: string, maxChars = 120) => {
   if (value.length <= maxChars) {
@@ -191,79 +174,20 @@ const buildFallbackTitle = ({
   return truncateTitle(`${primary.source ?? sourceKind}: ${primary.message}`);
 };
 
-const buildSynthesisPrompt = ({
-  diagnostics,
-  observations,
-}: {
-  diagnostics: IssueDiagnosticDraft[];
-  observations: IssueObservation[];
-}) => {
-  const topDiagnostics = rankIssueDiagnostics(diagnostics)
-    .slice(0, MAX_SYNTHESIS_DIAGNOSTICS)
-    .map((diagnostic) => ({
-      message: diagnostic.message,
-      severity: diagnostic.severity,
-      category: diagnostic.category,
-      source: diagnostic.source,
-      ruleId: diagnostic.ruleId,
-      filePath: diagnostic.filePath,
-      line: diagnostic.line,
-      evidence: diagnostic.evidence,
-    }));
-
-  const contexts = observations.map((observation) => ({
-    sourceKind: observation.sourceKind,
-    environment: observation.context.environment,
-    repo: observation.context.repo,
-    app: observation.context.app,
-    service: observation.context.service,
-    command: observation.context.command,
-    branch: observation.context.branch,
-  }));
-
-  return JSON.stringify(
-    {
-      contexts,
-      diagnostics: topDiagnostics,
-    },
-    null,
-    2
-  );
-};
-
-const generateIssueSnapshot = async ({
-  diagnostics,
-  observations,
-}: {
-  diagnostics: IssueDiagnosticDraft[];
-  observations: IssueObservation[];
-}) => {
-  const gateway = createGateway({
-    apiKey: getAiGatewayApiKey(),
-  });
-
-  const result = await generateText({
-    model: gateway(DEFAULT_FAST_MODEL),
-    abortSignal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
-    system:
-      "You turn engineering diagnostics into one plain-English issue cluster. Be concise, concrete, and action-first. Prefer the smallest safe fix plan.",
-    prompt: buildSynthesisPrompt({
-      diagnostics,
-      observations,
-    }),
-    output: SYNTHESIS_OUTPUT,
-    maxOutputTokens: 320,
-  });
-
-  return result.output ?? null;
-};
-
 export const synthesizeIssueSnapshot = async ({
   diagnostics,
   observations,
+  relatedIssues,
+  promptCacheKey,
+  safetyIdentifier,
+  provider = responsesIssueSynthesisProvider,
 }: {
   diagnostics: IssueDiagnosticDraft[];
   observations: IssueObservation[];
+  relatedIssues: RelatedIssue[];
+  promptCacheKey?: string;
+  safetyIdentifier?: string;
+  provider?: IssueSynthesisProvider;
 }): Promise<IssueSnapshot> => {
   const primaryCategory = pickPrimaryCategory(diagnostics);
   const primarySourceKind = pickPrimarySourceKind(observations);
@@ -295,9 +219,12 @@ export const synthesizeIssueSnapshot = async ({
   };
 
   try {
-    const synthesis = await generateIssueSnapshot({
+    const synthesis = await provider.synthesize({
       diagnostics,
       observations,
+      relatedIssues,
+      promptCacheKey,
+      safetyIdentifier,
     });
 
     if (!synthesis) {
@@ -327,6 +254,10 @@ export const synthesizeIssueSnapshot = async ({
       },
     };
   } catch (error) {
+    if (isResponsesRequestError(error) && error.retryable) {
+      throw error;
+    }
+
     console.error("[obsr-synthesis]", toSafeSynthesisErrorLog(error));
     return fallback;
   }

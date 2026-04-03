@@ -251,6 +251,8 @@ Linters: eslint, prettier, biome, tsc
 
 ### Queue Payload Contract (Observer -> Resolver)
 
+This contract is defined in `legacy/types` as `@obsr/legacy-types`.
+
 ```typescript
 type ResolverQueuePayload =
   | { resolveId: string; source: "create" | "trigger" }

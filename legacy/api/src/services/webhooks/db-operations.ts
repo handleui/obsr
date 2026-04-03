@@ -1,6 +1,6 @@
 import { type Db, runErrorOps, runOps } from "@obsr/db";
+import type { CIError, ResolverDiagnostic } from "@obsr/legacy-types";
 import { type generateFingerprints, sanitizeSensitiveData } from "@obsr/lore";
-import type { CIError, ResolverDiagnostic } from "@obsr/types";
 // biome-ignore lint/performance/noNamespaceImport: Sentry SDK official pattern
 import * as Sentry from "@sentry/cloudflare";
 import { getDbClient } from "../../db/client";

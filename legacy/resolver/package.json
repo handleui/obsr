@@ -17,7 +17,7 @@
     "@obsr/db": "*",
     "@obsr/resolving": "*",
     "@obsr/sandbox": "*",
-    "@obsr/types": "*",
+    "@obsr/legacy-types": "file:../types",
     "@obsr/webhook-dispatch": "*",
     "hono": "^4.7.4",
     "jose": "^6.0.10",

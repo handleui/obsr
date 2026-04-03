@@ -1,5 +1,5 @@
 import { type createDb, runErrorOps, runOps } from "@obsr/db";
-import { scrubSecrets } from "@obsr/types";
+import { scrubSecrets } from "@obsr/legacy-types";
 import { type Context, Hono } from "hono";
 import { getDbClient } from "../db/client";
 import { getDb } from "../lib/db.js";

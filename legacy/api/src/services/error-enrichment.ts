@@ -8,7 +8,7 @@
  */
 
 import { extname } from "node:path";
-import type { CIError, CodeSnippet } from "@obsr/types";
+import type { CIError, CodeSnippet } from "@obsr/legacy-types";
 import { fetchFileContents } from "./github/file-content";
 
 // ============================================================================

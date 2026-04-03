@@ -1,4 +1,4 @@
-import type { CIError } from "@obsr/types";
+import type { CIError } from "@obsr/legacy-types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { enrichErrorsWithFileContext } from "./error-enrichment";
 // biome-ignore lint/performance/noNamespaceImport: Required for vi.spyOn mocking

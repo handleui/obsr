@@ -1,18 +1,23 @@
+import { createHash } from "node:crypto";
+import { buildClusterKey, issueCategoryRank } from "@obsr/issues";
 import {
+  findIssueIdByObservationDedupeKey,
   getIssueAggregateById,
   listIssueClusterCandidateFingerprintRows,
   listIssueClusterCandidates,
+  listIssueFingerprintRows,
   listRecentIssues,
+  listRelatedIssueCandidates,
   persistIssueIngest,
   updateIssueSnapshot,
 } from "@/db/queries";
 import { RouteError } from "@/lib/http";
 import { sentryIssueAdapter } from "./adapters/sentry";
 import { textLogIssueAdapter } from "./adapters/text-log";
+import type { IssueAdapterAiContext } from "./adapters/types";
 import { buildIssueBrief } from "./brief";
 import { selectIssueClusterMatch } from "./cluster";
-import { issueCategoryRank } from "./constants";
-import { buildClusterKey } from "./normalize";
+import { buildRelatedIssues } from "./related";
 import type {
   IssueCreated,
   IssueDetail,
@@ -22,6 +27,7 @@ import type {
   IssueIngestOutput,
   IssueListItem,
   IssueObservation,
+  RelatedIssue,
 } from "./schema";
 import {
   IssueCreatedSchema,
@@ -33,9 +39,29 @@ import {
 import { synthesizeIssueSnapshot } from "./synthesize";
 
 const issueAdapters = [textLogIssueAdapter, sentryIssueAdapter];
+const ISSUE_EXTRACTION_PROMPT_CACHE_KEY = "obsr:issues:extract";
+const ISSUE_SNAPSHOT_PROMPT_CACHE_KEY = "obsr:issues:snapshot";
+
+type IssueAggregate = NonNullable<
+  Awaited<ReturnType<typeof getIssueAggregateById>>
+>;
 
 const serializeDate = (date: Date) => {
   return date.toISOString();
+};
+
+const createIssueSafetyIdentifier = (ownerUserId: string) => {
+  return createHash("sha256").update(ownerUserId).digest("hex").slice(0, 64);
+};
+
+const createIssueAdapterAiContext = (
+  ownerUserId: string,
+  sourceKind: IssueIngestInput["sourceKind"]
+): IssueAdapterAiContext => {
+  return {
+    promptCacheKey: `${ISSUE_EXTRACTION_PROMPT_CACHE_KEY}:${sourceKind}`,
+    safetyIdentifier: createIssueSafetyIdentifier(ownerUserId),
+  };
 };
 
 const getIssueAdapter = (sourceKind: IssueIngestInput["sourceKind"]) => {
@@ -135,7 +161,8 @@ const toIssueDiagnostic = (record: {
 };
 
 const toIssueDetail = (
-  aggregate: NonNullable<Awaited<ReturnType<typeof getIssueAggregateById>>>
+  aggregate: IssueAggregate,
+  relatedIssues: RelatedIssue[]
 ): IssueDetail => {
   const issue = IssueDetailSchema.omit({ brief: true }).parse({
     id: aggregate.issue.id,
@@ -156,6 +183,7 @@ const toIssueDetail = (
     diagnostics: rankIssueDiagnosticsForOutput(
       aggregate.diagnostics.map((diagnostic) => toIssueDiagnostic(diagnostic))
     ),
+    relatedIssues,
   });
 
   return IssueDetailSchema.parse({
@@ -216,15 +244,148 @@ const groupFingerprintRowsByIssue = (
   return grouped;
 };
 
+const getRelatedIssues = async ({
+  aggregate,
+  ownerUserId,
+}: {
+  aggregate: IssueAggregate;
+  ownerUserId: string;
+}) => {
+  const candidates = await listRelatedIssueCandidates(
+    aggregate.issue.clusterKey,
+    ownerUserId,
+    aggregate.issue.id
+  );
+
+  if (candidates.length === 0) {
+    return [];
+  }
+
+  const fingerprintRows = await listIssueFingerprintRows(
+    candidates.map((candidate) => candidate.id)
+  );
+
+  return buildRelatedIssues({
+    candidates: candidates.map((candidate) => ({
+      id: candidate.id,
+      title: candidate.title,
+      severity: candidate.severity as RelatedIssue["severity"],
+      status: candidate.status as RelatedIssue["status"],
+      summary: candidate.summary,
+      lastSeenAt: candidate.lastSeenAt,
+    })),
+    diagnostics: aggregate.diagnostics.map((diagnostic) => ({
+      repoFingerprint: diagnostic.repoFingerprint,
+      loreFingerprint: diagnostic.loreFingerprint,
+    })),
+    fingerprintRows,
+  });
+};
+
+const toSynthesisDiagnostics = (aggregate: IssueAggregate) => {
+  return aggregate.diagnostics.map((diagnostic) => ({
+    fingerprint: diagnostic.fingerprint,
+    repoFingerprint: diagnostic.repoFingerprint,
+    loreFingerprint: diagnostic.loreFingerprint,
+    message: diagnostic.message,
+    severity: diagnostic.severity as IssueDiagnostic["severity"],
+    category: diagnostic.category as IssueDiagnostic["category"],
+    source: diagnostic.source,
+    ruleId: diagnostic.ruleId,
+    filePath: diagnostic.filePath,
+    line: diagnostic.line,
+    column: diagnostic.column,
+    evidence: diagnostic.evidence,
+  }));
+};
+
+const updateSynthesizedIssue = async ({
+  aggregate,
+  issueId,
+  normalizedCapturedAt,
+  ownerUserId,
+  relatedIssues,
+  safetyIdentifier,
+}: {
+  aggregate: IssueAggregate;
+  issueId: string;
+  normalizedCapturedAt: Date;
+  ownerUserId: string;
+  relatedIssues: RelatedIssue[];
+  safetyIdentifier?: string;
+}) => {
+  let synthesized: Awaited<ReturnType<typeof synthesizeIssueSnapshot>> | null =
+    null;
+
+  try {
+    synthesized = await synthesizeIssueSnapshot({
+      diagnostics: toSynthesisDiagnostics(aggregate),
+      observations: aggregate.observations.map(toIssueObservation),
+      relatedIssues,
+      promptCacheKey: ISSUE_SNAPSHOT_PROMPT_CACHE_KEY,
+      safetyIdentifier,
+    });
+  } catch (error) {
+    console.error("[obsr-synthesis-persist]", {
+      name: error instanceof Error ? error.name : "UnknownThrownValue",
+      message:
+        error instanceof Error ? error.message.slice(0, 200) : "Unknown error.",
+    });
+  }
+
+  if (!synthesized) {
+    return;
+  }
+
+  await updateIssueSnapshot({
+    id: issueId,
+    ownerUserId,
+    title: synthesized.title,
+    severity: synthesized.severity,
+    status: synthesized.status,
+    primaryCategory: synthesized.primaryCategory,
+    primarySourceKind: synthesized.primarySourceKind,
+    sourceKinds: synthesized.sourceKinds,
+    summary: synthesized.summary,
+    rootCause: synthesized.rootCause,
+    plan: synthesized.plan,
+    firstSeenAt: aggregate.observations.reduce(
+      (earliest, observation) =>
+        observation.capturedAt < earliest ? observation.capturedAt : earliest,
+      aggregate.observations[0]?.capturedAt ?? normalizedCapturedAt
+    ),
+    lastSeenAt: aggregate.observations.reduce(
+      (latest, observation) =>
+        observation.capturedAt > latest ? observation.capturedAt : latest,
+      aggregate.observations[0]?.capturedAt ?? normalizedCapturedAt
+    ),
+    observationCount: aggregate.observations.length,
+    diagnosticCount: aggregate.diagnostics.length,
+  });
+};
+
 export const ingestIssue = async (
-  input: IssueIngestInput
+  input: IssueIngestInput,
+  ownerUserId: string
 ): Promise<IssueIngestOutput> => {
+  if (input.dedupeKey) {
+    const existingIssueId = await findIssueIdByObservationDedupeKey(
+      ownerUserId,
+      input.dedupeKey
+    );
+
+    if (existingIssueId) {
+      return getIssueDetail(existingIssueId, ownerUserId);
+    }
+  }
+
   const adapter = getIssueAdapter(input.sourceKind);
-  const normalized = await adapter.normalize(input);
+  const aiContext = createIssueAdapterAiContext(ownerUserId, input.sourceKind);
+  const normalized = await adapter.normalize(input, aiContext);
   const clusterKey = buildClusterKey(normalized.context);
   const [candidates, fingerprintRows] = await Promise.all([
-    listIssueClusterCandidates(clusterKey),
-    listIssueClusterCandidateFingerprintRows(clusterKey),
+    listIssueClusterCandidates(clusterKey, ownerUserId),
+    listIssueClusterCandidateFingerprintRows(clusterKey, ownerUserId),
   ]);
   const fingerprintsByIssue = groupFingerprintRowsByIssue(fingerprintRows);
   const issueId =
@@ -247,6 +408,7 @@ export const ingestIssue = async (
       ? null
       : {
           id: issueId,
+          ownerUserId,
           clusterKey,
           repo: normalized.context.repo ?? null,
           app: normalized.context.app ?? null,
@@ -256,9 +418,11 @@ export const ingestIssue = async (
         },
     observation: {
       issueId,
+      ownerUserId,
       sourceKind: normalized.sourceKind,
       rawText: normalized.rawText ?? null,
       rawPayload: normalized.rawPayload ?? null,
+      dedupeKey: normalized.dedupeKey ?? null,
       context: normalized.context,
       capturedAt: normalized.capturedAt,
       wasRedacted: normalized.wasRedacted,
@@ -266,79 +430,68 @@ export const ingestIssue = async (
     },
   });
 
-  const aggregate = await getIssueAggregateById(issueId);
+  const aggregate = await getIssueAggregateById(issueId, ownerUserId);
   if (!aggregate) {
     throw new RouteError(500, "INTERNAL_ERROR", "Issue aggregation failed.");
   }
 
-  const synthesized = await synthesizeIssueSnapshot({
-    diagnostics: aggregate.diagnostics.map((diagnostic) => ({
-      fingerprint: diagnostic.fingerprint,
-      repoFingerprint: diagnostic.repoFingerprint,
-      loreFingerprint: diagnostic.loreFingerprint,
-      message: diagnostic.message,
-      severity: diagnostic.severity as IssueDiagnostic["severity"],
-      category: diagnostic.category as IssueDiagnostic["category"],
-      source: diagnostic.source,
-      ruleId: diagnostic.ruleId,
-      filePath: diagnostic.filePath,
-      line: diagnostic.line,
-      column: diagnostic.column,
-      evidence: diagnostic.evidence,
-    })),
-    observations: aggregate.observations.map(toIssueObservation),
+  const relatedIssues = await getRelatedIssues({
+    aggregate,
+    ownerUserId,
+  });
+  await updateSynthesizedIssue({
+    aggregate,
+    issueId,
+    normalizedCapturedAt: normalized.capturedAt,
+    ownerUserId,
+    relatedIssues,
+    safetyIdentifier: aiContext.safetyIdentifier,
   });
 
-  await updateIssueSnapshot({
-    id: issueId,
-    title: synthesized.title,
-    severity: synthesized.severity,
-    status: synthesized.status,
-    primaryCategory: synthesized.primaryCategory,
-    primarySourceKind: synthesized.primarySourceKind,
-    sourceKinds: synthesized.sourceKinds,
-    summary: synthesized.summary,
-    rootCause: synthesized.rootCause,
-    plan: synthesized.plan,
-    firstSeenAt: aggregate.observations.reduce(
-      (earliest, observation) =>
-        observation.capturedAt < earliest ? observation.capturedAt : earliest,
-      aggregate.observations[0]?.capturedAt ?? normalized.capturedAt
-    ),
-    lastSeenAt: aggregate.observations.reduce(
-      (latest, observation) =>
-        observation.capturedAt > latest ? observation.capturedAt : latest,
-      aggregate.observations[0]?.capturedAt ?? normalized.capturedAt
-    ),
-    observationCount: aggregate.observations.length,
-    diagnosticCount: aggregate.diagnostics.length,
-  });
-
-  const refreshedAggregate = await getIssueAggregateById(issueId);
+  const refreshedAggregate = await getIssueAggregateById(issueId, ownerUserId);
   if (!refreshedAggregate) {
     throw new RouteError(500, "INTERNAL_ERROR", "Issue refresh failed.");
   }
 
-  return IssueIngestOutputSchema.parse(toIssueDetail(refreshedAggregate));
+  const refreshedRelatedIssues = await getRelatedIssues({
+    aggregate: refreshedAggregate,
+    ownerUserId,
+  });
+
+  return IssueIngestOutputSchema.parse(
+    toIssueDetail(refreshedAggregate, refreshedRelatedIssues)
+  );
 };
 
-export const getIssueDetail = async (id: string): Promise<IssueDetail> => {
-  const aggregate = await getIssueAggregateById(id);
+export const getIssueDetail = async (
+  id: string,
+  ownerUserId: string
+): Promise<IssueDetail> => {
+  const aggregate = await getIssueAggregateById(id, ownerUserId);
   if (!aggregate) {
     throw new RouteError(404, "NOT_FOUND", "Issue not found.");
   }
 
-  return toIssueDetail(aggregate);
+  return toIssueDetail(
+    aggregate,
+    await getRelatedIssues({
+      aggregate,
+      ownerUserId,
+    })
+  );
 };
 
 export const getIssueDetailView = async (
-  id: string
+  id: string,
+  ownerUserId: string
 ): Promise<IssueDetailView> => {
-  return toIssueDetailView(await getIssueDetail(id));
+  return toIssueDetailView(await getIssueDetail(id, ownerUserId));
 };
 
-export const listIssues = async (): Promise<IssueListItem[]> => {
-  const records = await listRecentIssues();
+export const listIssues = async (
+  ownerUserId: string
+): Promise<IssueListItem[]> => {
+  const records = await listRecentIssues(ownerUserId);
   return records.map((record) =>
     IssueListItemSchema.parse({
       id: record.id,

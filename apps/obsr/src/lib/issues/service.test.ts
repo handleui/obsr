@@ -1,19 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const findIssueIdByObservationDedupeKey = vi.fn();
 const getIssueAggregateById = vi.fn();
+const listIssueFingerprintRows = vi.fn();
 const listIssueClusterCandidateFingerprintRows = vi.fn();
 const listIssueClusterCandidates = vi.fn();
+const listRelatedIssueCandidates = vi.fn();
 const listRecentIssues = vi.fn();
 const persistIssueIngest = vi.fn();
 const updateIssueSnapshot = vi.fn();
 const textLogNormalize = vi.fn();
 const sentryNormalize = vi.fn();
 const synthesizeIssueSnapshot = vi.fn();
+const SERVICE_MODULE = new URL("./service.ts", import.meta.url).href;
 
 vi.mock("@/db/queries", () => ({
+  findIssueIdByObservationDedupeKey,
   getIssueAggregateById,
+  listIssueFingerprintRows,
   listIssueClusterCandidateFingerprintRows,
   listIssueClusterCandidates,
+  listRelatedIssueCandidates,
   listRecentIssues,
   persistIssueIngest,
   updateIssueSnapshot,
@@ -107,13 +114,17 @@ describe("issue service", () => {
         },
       ],
     });
+    findIssueIdByObservationDedupeKey.mockResolvedValue(null);
     listIssueClusterCandidates.mockResolvedValue([]);
     listIssueClusterCandidateFingerprintRows.mockResolvedValue([]);
+    listRelatedIssueCandidates.mockResolvedValue([]);
+    listIssueFingerprintRows.mockResolvedValue([]);
     persistIssueIngest.mockResolvedValue(observation);
     getIssueAggregateById
       .mockResolvedValueOnce({
         issue: {
           id: "issue_new",
+          ownerUserId: "user_1",
           title: "New issue",
           severity: "medium",
           status: "open",
@@ -144,6 +155,7 @@ describe("issue service", () => {
       .mockResolvedValueOnce({
         issue: {
           id: "issue_new",
+          ownerUserId: "user_1",
           title: "TypeScript issue",
           severity: "medium",
           status: "open",
@@ -188,17 +200,27 @@ describe("issue service", () => {
       },
     });
 
-    vi.resetModules();
-    const { ingestIssue } = await import("./service");
-    const result = await ingestIssue({
-      sourceKind: "manual-log",
-      rawText: "error TS2322",
-      context: {
-        environment: "local",
-        repo: "obsr",
+    const { ingestIssue } = await import(SERVICE_MODULE);
+    const result = await ingestIssue(
+      {
+        sourceKind: "manual-log",
+        rawText: "error TS2322",
+        context: {
+          environment: "local",
+          repo: "obsr",
+        },
       },
-    });
+      "user_1"
+    );
 
+    expect(listIssueClusterCandidates).toHaveBeenCalledWith(
+      "obsr::_::_::local",
+      "user_1"
+    );
+    expect(listIssueClusterCandidateFingerprintRows).toHaveBeenCalledWith(
+      "obsr::_::_::local",
+      "user_1"
+    );
     expect(persistIssueIngest).toHaveBeenCalledWith({
       diagnostics: [
         {
@@ -218,6 +240,7 @@ describe("issue service", () => {
       ],
       issueShell: {
         id: "issue_new",
+        ownerUserId: "user_1",
         clusterKey: "obsr::_::_::local",
         repo: "obsr",
         app: null,
@@ -227,9 +250,11 @@ describe("issue service", () => {
       },
       observation: {
         issueId: "issue_new",
+        ownerUserId: "user_1",
         sourceKind: "manual-log",
         rawText: "error TS2322",
         rawPayload: null,
+        dedupeKey: null,
         context: {
           environment: "local",
           repo: "obsr",
@@ -242,6 +267,7 @@ describe("issue service", () => {
     expect(updateIssueSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "issue_new",
+        ownerUserId: "user_1",
         observationCount: 1,
         diagnosticCount: 1,
       })
@@ -253,9 +279,12 @@ describe("issue service", () => {
   it("returns a UI-safe issue detail view", async () => {
     const capturedAt = new Date("2026-04-01T12:00:00.000Z");
 
+    listRelatedIssueCandidates.mockResolvedValue([]);
+    listIssueFingerprintRows.mockResolvedValue([]);
     getIssueAggregateById.mockResolvedValue({
       issue: {
         id: "issue_view",
+        ownerUserId: "user_1",
         title: "Runtime issue",
         severity: "important",
         status: "open",
@@ -318,12 +347,49 @@ describe("issue service", () => {
       ],
     });
 
-    vi.resetModules();
-    const { getIssueDetailView } = await import("./service");
-    const result = await getIssueDetailView("issue_view");
+    const { getIssueDetailView } = await import(SERVICE_MODULE);
+    const result = await getIssueDetailView("issue_view", "user_1");
 
     expect(result.observations[0]).not.toHaveProperty("rawText");
     expect(result.observations[0]).not.toHaveProperty("rawPayload");
     expect(result.id).toBe("issue_view");
+    expect(result.relatedIssues).toEqual([]);
+    expect(getIssueAggregateById).toHaveBeenCalledWith("issue_view", "user_1");
+  });
+
+  it("returns 404 when the issue does not belong to the owner", async () => {
+    getIssueAggregateById.mockResolvedValue(null);
+
+    const { getIssueDetailView } = await import(SERVICE_MODULE);
+    await expect(
+      getIssueDetailView("issue_view", "user_2")
+    ).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      status: 404,
+    });
+  });
+
+  it("lists issues for one owner", async () => {
+    listRecentIssues.mockResolvedValue([
+      {
+        id: "issue_1",
+        title: "TypeScript issue",
+        severity: "medium",
+        status: "open",
+        primaryCategory: "type-check",
+        primarySourceKind: "manual-log",
+        sourceKinds: ["manual-log"],
+        summary: "TypeScript failed first.",
+        lastSeenAt: new Date("2026-04-01T12:00:00.000Z"),
+        observationCount: 1,
+        diagnosticCount: 1,
+      },
+    ]);
+
+    const { listIssues } = await import(SERVICE_MODULE);
+    const result = await listIssues("user_1");
+
+    expect(result).toHaveLength(1);
+    expect(listRecentIssues).toHaveBeenCalledWith("user_1");
   });
 });

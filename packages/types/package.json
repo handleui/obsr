@@ -15,17 +15,8 @@
     "build": "tsc",
     "check-types": "tsc --noEmit"
   },
-  "peerDependencies": {
-    "zod": "^3.25.0"
-  },
-  "peerDependenciesMeta": {
-    "zod": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@obsr/typescript-config": "*",
-    "typescript": "^5.9.3",
-    "zod": "^3.25.34"
+    "typescript": "^5.9.3"
   }
 }

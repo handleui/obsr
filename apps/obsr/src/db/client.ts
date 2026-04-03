@@ -10,7 +10,13 @@ import {
   userRelations,
   verification,
 } from "./auth-schema";
-import { issueDiagnostics, issueObservations, issues } from "./schema";
+import {
+  issueDiagnostics,
+  issueObservations,
+  issues,
+  vercelConnections,
+  vercelSyncTargets,
+} from "./schema";
 
 const persistentDbByUrl = new Map<string, ReturnType<typeof createDb>>();
 const authSchema = {
@@ -27,6 +33,8 @@ const schema = {
   issues,
   issueObservations,
   issueDiagnostics,
+  vercelConnections,
+  vercelSyncTargets,
 };
 
 export const createPool = (connectionString: string) => {

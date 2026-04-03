@@ -10,8 +10,6 @@
     "...cli",
     "---CI Integration---",
     "...action",
-    "---SDK---",
-    "...sdk",
     "---API---",
     "...api"
   ]

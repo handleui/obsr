@@ -1,9 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RouteError } from "@/lib/http";
 
+const requireAuthenticatedUser = vi.fn();
 const ingestIssue = vi.fn();
 const listIssues = vi.fn();
 const toIssueCreated = vi.fn();
+const authUser = {
+  id: "user_1",
+  createdAt: new Date("2026-04-01T12:00:00.000Z"),
+  updatedAt: new Date("2026-04-01T12:00:00.000Z"),
+  email: "user_1@example.com",
+  emailVerified: true,
+  name: "User One",
+  image: null,
+};
+
+vi.mock("@/lib/auth-session", () => ({
+  requireAuthenticatedUser,
+}));
 
 vi.mock("@/lib/issues/service", () => ({
   ingestIssue,
@@ -14,6 +28,7 @@ vi.mock("@/lib/issues/service", () => ({
 describe("issues collection routes", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    requireAuthenticatedUser.mockResolvedValue(authUser);
   });
 
   it("returns recent issues on GET", async () => {
@@ -34,11 +49,13 @@ describe("issues collection routes", () => {
     ]);
 
     const { GET } = await import("./route");
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/issues"));
     const payload = await response.json();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(payload[0]?.id).toBe("issue_1");
+    expect(listIssues).toHaveBeenCalledWith("user_1");
   });
 
   it("creates an issue on POST happy path", async () => {
@@ -64,6 +81,7 @@ describe("issues collection routes", () => {
       diagnosticCount: 1,
       observations: [],
       diagnostics: [],
+      relatedIssues: [],
       brief: "Issue: TypeScript issue",
     });
     toIssueCreated.mockReturnValue({
@@ -89,11 +107,31 @@ describe("issues collection routes", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(201);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(payload.id).toBe("issue_2");
-    expect(ingestIssue).toHaveBeenCalledOnce();
+    expect(ingestIssue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceKind: "manual-log",
+      }),
+      "user_1"
+    );
     expect(toIssueCreated).toHaveBeenCalledWith(
       expect.objectContaining({ id: "issue_2" })
     );
+  });
+
+  it("returns 401 on GET when the request is unauthenticated", async () => {
+    requireAuthenticatedUser.mockRejectedValue(
+      new RouteError(401, "UNAUTHORIZED", "Authentication required.")
+    );
+
+    const { GET } = await import("./route");
+    const response = await GET(new Request("http://localhost/api/issues"));
+    const payload = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(payload.error.code).toBe("UNAUTHORIZED");
+    expect(listIssues).not.toHaveBeenCalled();
   });
 
   it("returns 400 for invalid input", async () => {
@@ -112,6 +150,34 @@ describe("issues collection routes", () => {
     );
 
     expect(response.status).toBe(400);
+  });
+
+  it("returns 401 on POST when the request is unauthenticated", async () => {
+    requireAuthenticatedUser.mockRejectedValue(
+      new RouteError(401, "UNAUTHORIZED", "Authentication required.")
+    );
+
+    const { POST } = await import("./route");
+    const response = await POST(
+      new Request("http://localhost/api/issues", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          sourceKind: "manual-log",
+          rawText: "error TS2322",
+          context: {
+            environment: "local",
+          },
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(payload.error.code).toBe("UNAUTHORIZED");
+    expect(ingestIssue).not.toHaveBeenCalled();
   });
 
   it("rejects non-json requests", async () => {

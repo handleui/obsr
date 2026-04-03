@@ -4,7 +4,7 @@ import type {
   ResolveSummary,
   ResolveType,
   ResolveUpdateStatus,
-} from "@obsr/types";
+} from "@obsr/legacy-types";
 import { enqueueResolveForResolver } from "../../services/resolve-queue";
 import type { Env } from "../../types/env";
 import { getDbClient } from "../client";

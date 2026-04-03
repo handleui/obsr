@@ -261,7 +261,7 @@ workflow_job.completed (failure)
            |
            v
    AI extracts errors
-   (@obsr/extract)
+   (@obsr/legacy-extract)
            |
            v
    Store errors in DB
@@ -271,7 +271,9 @@ workflow_job.completed (failure)
    (if auto-trigger enabled)
 ```
 
-Error extraction happens automatically when a workflow job fails. The `@obsr/extract` package uses AI to extract structured errors from raw CI logs, handling diverse log formats without requiring format-specific parsers.
+Error extraction happens automatically when a workflow job fails. The `@obsr/legacy-extract` package is the legacy compatibility layer for the old CIError-based flow and is kept under `/legacy`.
+
+Legacy CI/error contracts used by this flow now live in `legacy/types` as `@obsr/legacy-types`.
 
 ### Resolver Service (Railway)
 

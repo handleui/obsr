@@ -1,7 +1,7 @@
 // Comment formatter for GitHub PR comments
 // Formats error summaries in a clean, scannable format
 
-import type { CIError } from "@obsr/types";
+import type { CIError } from "@obsr/legacy-types";
 import type { JobEvaluation, JobSummary } from "./github/workflow-jobs";
 import type {
   WorkflowRunEvaluation,

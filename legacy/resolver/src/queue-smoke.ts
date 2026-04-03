@@ -1,5 +1,5 @@
 import { type Db, projectOps, resolveOps, runErrorOps, runOps } from "@obsr/db";
-import { ResolveTypes } from "@obsr/types";
+import { ResolveTypes } from "@obsr/legacy-types";
 import { createDbClient } from "./services/db-client.js";
 
 const MAX_RUN_FETCH_LIMIT = 200;

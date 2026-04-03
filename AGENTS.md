@@ -23,7 +23,7 @@ cd apps/obsr && bun run db:migrate     # Apply Drizzle migrations
 - **Docs**: Next.js 16 docs site (`apps/docs`)
 - **Database**: Neon Postgres (Drizzle)
 - **CLI**: TypeScript, Citty, Ink
-- **AI**: Claude Haiku (fast) + GPT-5.2-Codex (smart) via Vercel AI Gateway — routing logic in `packages/ai`
+- **AI**: Claude Haiku (fast) + GPT-5.2-Codex (smart) via Vercel AI Gateway — model routing in `packages/ai`, issue extraction/synthesis via OpenAI Responses API in `packages/issues`
 - **Linting**: Biome via Ultracite
 - **Icons**: `iconoir-react` — browse at [iconoir.com](https://iconoir.com). Do NOT grep `node_modules`.
 
@@ -41,7 +41,7 @@ legacy/
 
 packages/
 ├── ai/             # AI model routing & providers
-├── extract/        # CI log parsing & error extraction
+├── issues/         # Issue-domain contracts + Responses-based extraction/synthesis
 ├── lore/           # Knowledge base
 ├── types/          # Shared TypeScript types
 ├── ui/             # Shared React components

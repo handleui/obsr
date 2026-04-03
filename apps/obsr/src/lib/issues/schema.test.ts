@@ -8,6 +8,8 @@ import {
 describe("issue ingest schema", () => {
   it("accepts log-based input", () => {
     const result = IssueIngestInputSchema.parse({
+      capturedAt: "2026-04-01T12:00:00.000Z",
+      dedupeKey: "vercel:build:dep_1",
       sourceKind: "manual-log",
       rawText: "error TS2322",
       context: {
@@ -16,6 +18,7 @@ describe("issue ingest schema", () => {
     });
 
     expect(result.sourceKind).toBe("manual-log");
+    expect(result.dedupeKey).toBe("vercel:build:dep_1");
   });
 
   it("accepts sentry payloads", () => {
@@ -90,6 +93,7 @@ describe("issue ingest schema", () => {
         },
       ],
       diagnostics: [],
+      relatedIssues: [],
       brief: "Issue: TypeScript issue",
     });
 

@@ -15,12 +15,10 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "@ai-sdk/gateway": "^3.0.0",
-    "@obsr/ai": "*",
-    "@obsr/extract": "*",
-    "@obsr/lore": "*",
-    "@obsr/types": "*",
-    "ai": "^6.0.0",
+    "@obsr/ai": "workspace:*",
+    "@obsr/issues": "workspace:*",
+    "@obsr/lore": "workspace:*",
+    "@obsr/types": "workspace:*",
     "better-auth": "^1.5.6",
     "drizzle-orm": "^0.44.0",
     "geist": "^1.7.0",

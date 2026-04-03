@@ -88,7 +88,6 @@ const createAuth = () => {
       schema: authSchema,
     }),
     plugins: [
-      nextCookies(),
       genericOAuth({
         config: [
           {
@@ -104,6 +103,7 @@ const createAuth = () => {
           },
         ],
       }),
+      nextCookies(),
     ],
   });
 };

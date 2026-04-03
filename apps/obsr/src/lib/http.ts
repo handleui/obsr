@@ -25,6 +25,16 @@ const jsonError = (status: number, code: string, message: string) => {
   );
 };
 
+const withPrivateNoStore = (init?: ResponseInit): ResponseInit => {
+  const headers = new Headers(init?.headers);
+  headers.set("cache-control", "private, no-store");
+
+  return {
+    ...init,
+    headers,
+  };
+};
+
 const getJsonContentLength = (request: Request) => {
   const contentLength = request.headers.get("content-length");
   if (!contentLength) {
@@ -120,6 +130,10 @@ export const parseJsonRequest = async <TSchema extends ZodType>(
 
 export const isRouteNotFoundError = (error: unknown) => {
   return error instanceof RouteError && error.status === 404;
+};
+
+export const jsonPrivateNoStore = (body: unknown, init?: ResponseInit) => {
+  return NextResponse.json(body, withPrivateNoStore(init));
 };
 
 const toSafeErrorLog = (error: unknown) => {

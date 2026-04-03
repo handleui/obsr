@@ -4,6 +4,11 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@obsr/legacy-types": ["../types/src/index.ts"],
+      "zod": ["../../packages/types/node_modules/zod/index.d.ts"]
+    },
     "strict": true,
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,

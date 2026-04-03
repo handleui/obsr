@@ -1,66 +1,61 @@
+import {
+  IssueCategorySchema as SharedIssueCategorySchema,
+  IssueObservationContextSchema as SharedIssueObservationContextSchema,
+  IssuePlanSchema as SharedIssuePlanSchema,
+  IssueSeveritySchema as SharedIssueSeveritySchema,
+  IssueStatusSchema as SharedIssueStatusSchema,
+  ObservationSourceKindSchema as SharedObservationSourceKindSchema,
+  issueDiagnosticSeverityValues as sharedIssueDiagnosticSeverityValues,
+} from "@obsr/issues";
 import { z } from "zod";
 import { MAX_RAW_TEXT_CHARS } from "./constants";
 
-export const IssueSeveritySchema = z.enum(["important", "medium", "low"]);
-export const IssueStatusSchema = z.enum(["open", "resolved", "ignored"]);
-export const ObservationSourceKindSchema = z.enum([
-  "manual-log",
-  "ci",
-  "runtime-log",
-  "dev-server",
-  "sentry",
-]);
-export const IssueCategorySchema = z.enum([
-  "type-check",
-  "lint",
-  "test",
-  "compile",
-  "runtime",
-  "dependency",
-  "config",
-  "infrastructure",
-  "security",
-  "unknown",
-]);
-export const IssueEnvironmentSchema = z.enum([
-  "local",
-  "ci",
-  "preview",
-  "production",
-  "unknown",
-]);
-
-export const IssueObservationContextSchema = z.object({
-  repo: z.string().trim().min(1).optional(),
-  app: z.string().trim().min(1).optional(),
-  service: z.string().trim().min(1).optional(),
-  environment: IssueEnvironmentSchema.default("unknown"),
-  branch: z.string().trim().min(1).optional(),
-  commitSha: z.string().trim().min(1).optional(),
-  command: z.string().trim().min(1).optional(),
-  route: z.string().trim().min(1).optional(),
-  provider: z.string().trim().min(1).optional(),
-  externalId: z.string().trim().min(1).optional(),
-  externalUrl: z.string().trim().url().optional(),
-});
-
-export const IssuePlanSchema = z.object({
-  summary: z.string().min(1),
-  steps: z.array(z.string().min(1)),
-  validation: z.array(z.string().min(1)),
-  blockers: z.array(z.string().min(1)),
-});
+export type {
+  IssueCategory,
+  IssueEnvironment,
+  IssueObservationContext,
+  IssuePlan,
+  IssueSeverity,
+  IssueStatus,
+  ObservationSourceKind,
+} from "@obsr/issues";
+// biome-ignore lint/performance/noBarrelFile: ObsR keeps shared issue contracts behind this local schema surface.
+export {
+  IssueCategorySchema,
+  IssueEnvironmentSchema,
+  IssueObservationContextSchema,
+  IssuePlanSchema,
+  IssueSeveritySchema,
+  IssueStatusSchema,
+  issueCategoryValues,
+  issueDiagnosticSeverityValues,
+  issueEnvironmentValues,
+  issueSeverityValues,
+  issueStatusValues,
+  ObservationSourceKindSchema,
+  observationSourceKindValues,
+} from "@obsr/issues";
 
 export const IssueObservationSchema = z.object({
   id: z.string(),
   issueId: z.string(),
-  sourceKind: ObservationSourceKindSchema,
+  sourceKind: SharedObservationSourceKindSchema,
   rawText: z.string().optional(),
   rawPayload: z.unknown().optional(),
-  context: IssueObservationContextSchema,
+  context: SharedIssueObservationContextSchema,
   capturedAt: z.string().datetime(),
   wasRedacted: z.boolean(),
   wasTruncated: z.boolean(),
+});
+
+export const RelatedIssueSchema = z.object({
+  id: z.string(),
+  title: z.string().min(1),
+  status: SharedIssueStatusSchema,
+  severity: SharedIssueSeveritySchema,
+  summary: z.string().min(1),
+  lastSeenAt: z.string().datetime(),
+  matchReason: z.string().min(1),
 });
 
 export const IssueObservationViewSchema = IssueObservationSchema.omit({
@@ -74,8 +69,8 @@ export const IssueDiagnosticSchema = z.object({
   observationId: z.string(),
   fingerprint: z.string().min(1),
   message: z.string().min(1),
-  severity: z.enum(["error", "warning"]).nullable(),
-  category: IssueCategorySchema.nullable(),
+  severity: z.enum(sharedIssueDiagnosticSeverityValues).nullable(),
+  category: SharedIssueCategorySchema.nullable(),
   source: z.string().nullable(),
   ruleId: z.string().nullable(),
   filePath: z.string().nullable(),
@@ -87,14 +82,14 @@ export const IssueDiagnosticSchema = z.object({
 export const IssueSchema = z.object({
   id: z.string(),
   title: z.string().min(1),
-  severity: IssueSeveritySchema,
-  status: IssueStatusSchema,
-  primaryCategory: IssueCategorySchema.nullable(),
-  primarySourceKind: ObservationSourceKindSchema.nullable(),
-  sourceKinds: z.array(ObservationSourceKindSchema),
+  severity: SharedIssueSeveritySchema,
+  status: SharedIssueStatusSchema,
+  primaryCategory: SharedIssueCategorySchema.nullable(),
+  primarySourceKind: SharedObservationSourceKindSchema.nullable(),
+  sourceKinds: z.array(SharedObservationSourceKindSchema),
   summary: z.string().min(1),
   rootCause: z.string().nullable(),
-  plan: IssuePlanSchema,
+  plan: SharedIssuePlanSchema,
   firstSeenAt: z.string().datetime(),
   lastSeenAt: z.string().datetime(),
   observationCount: z.number().int().min(0),
@@ -118,12 +113,14 @@ export const IssueListItemSchema = IssueSchema.pick({
 export const IssueDetailSchema = IssueSchema.extend({
   observations: z.array(IssueObservationSchema),
   diagnostics: z.array(IssueDiagnosticSchema),
+  relatedIssues: z.array(RelatedIssueSchema),
   brief: z.string().min(1),
 });
 
 export const IssueDetailViewSchema = IssueSchema.extend({
   observations: z.array(IssueObservationViewSchema),
   diagnostics: z.array(IssueDiagnosticSchema),
+  relatedIssues: z.array(RelatedIssueSchema),
   brief: z.string().min(1),
 });
 
@@ -133,10 +130,12 @@ export const IssueCreatedSchema = z.object({
 
 export const IssueIngestInputSchema = z
   .object({
-    sourceKind: ObservationSourceKindSchema.default("manual-log"),
+    sourceKind: SharedObservationSourceKindSchema.default("manual-log"),
     rawText: z.string().max(MAX_RAW_TEXT_CHARS).optional(),
     rawPayload: z.unknown().optional(),
-    context: IssueObservationContextSchema.default({
+    dedupeKey: z.string().trim().min(1).max(255).optional(),
+    capturedAt: z.string().datetime().optional(),
+    context: SharedIssueObservationContextSchema.default({
       environment: "unknown",
     }),
   })
@@ -161,19 +160,10 @@ export const IssueIngestInputSchema = z
   });
 
 export const IssueIngestOutputSchema = IssueDetailSchema;
-
-export type IssueSeverity = z.infer<typeof IssueSeveritySchema>;
-export type IssueStatus = z.infer<typeof IssueStatusSchema>;
-export type ObservationSourceKind = z.infer<typeof ObservationSourceKindSchema>;
-export type IssueCategory = z.infer<typeof IssueCategorySchema>;
-export type IssueEnvironment = z.infer<typeof IssueEnvironmentSchema>;
-export type IssueObservationContext = z.infer<
-  typeof IssueObservationContextSchema
->;
-export type IssuePlan = z.infer<typeof IssuePlanSchema>;
 export type IssueObservation = z.infer<typeof IssueObservationSchema>;
 export type IssueObservationView = z.infer<typeof IssueObservationViewSchema>;
 export type IssueDiagnostic = z.infer<typeof IssueDiagnosticSchema>;
+export type RelatedIssue = z.infer<typeof RelatedIssueSchema>;
 export type Issue = z.infer<typeof IssueSchema>;
 export type IssueListItem = z.infer<typeof IssueListItemSchema>;
 export type IssueDetail = z.infer<typeof IssueDetailSchema>;

@@ -5,17 +5,15 @@ description: AI fixes your CI before you have to
 
 Your CI breaks. You dig through logs. You fix a typo. You push again. You wait.
 
-**Detent stops the cycle.** When your build fails, Detent reads the errors, writes a fix, and opens a PR. You review, merge, done.
+**Detent stops the cycle.** When your build fails, Detent captures the evidence, builds a focused issue, writes a fix, and opens a PR. You review, merge, done.
 
 ## How It Works
 
 1. **CI fails** — Your GitHub Action runs. ESLint, TypeScript, tests — something breaks.
-
-2. **Detent parses the errors** — Our action extracts structured error data from your tools — not raw logs.
-
-3. **AI writes the fix** — Claude reads your code, understands the error, and writes a patch.
-
-4. **You approve** — Review the fix in a PR comment or the Detent dashboard. One click to apply.
+2. **Detent captures observations** — The action uploads the failed-step evidence, including raw logs and workflow context.
+3. **Detent builds issue diagnostics** — The backend turns that evidence into ranked issue diagnostics with the OpenAI Responses API.
+4. **AI writes the fix** — Claude reads your code, understands the issue, and writes a patch.
+5. **You approve** — Review the fix in a PR comment or the Detent dashboard. One click to apply.
 
 ## Get Started
 

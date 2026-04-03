@@ -8,6 +8,20 @@
       "when": 1775087380924,
       "tag": "0000_tearful_steel_serpent",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1775091834261,
+      "tag": "0001_clever_silver_fox",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1775226898346,
+      "tag": "0002_dashing_sunfire",
+      "breakpoints": true
     }
   ]
 }

@@ -12,7 +12,7 @@ import {
   type ResolverDiagnostic,
   type ResolverQueuePayload,
   ResolveTypes,
-} from "@obsr/types";
+} from "@obsr/legacy-types";
 import type { Env } from "../../env.js";
 import { env } from "../../env.js";
 import { createDbClient } from "../db-client.js";

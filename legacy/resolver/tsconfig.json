@@ -2,7 +2,12 @@
   "extends": "@obsr/typescript-config/base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "..",
+    "baseUrl": ".",
+    "paths": {
+      "@obsr/legacy-types": ["../types/src/index.ts"],
+      "zod": ["../../packages/types/node_modules/zod/index.d.ts"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

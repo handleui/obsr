@@ -5,7 +5,7 @@ import type { ErrorSource } from "@obsr/types";
  * Uses string types for maximum compatibility with different error representations.
  *
  * Note: `source` is intentionally typed as `string` rather than `ErrorSource` to allow
- * errors from external systems or custom parsers that may not use our canonical source
+ * errors from external systems or legacy compatibility flows that may not use our canonical source
  * names. Non-matching sources simply won't find any hint rules (safe fallback).
  */
 export interface HintableError {
@@ -29,8 +29,16 @@ export interface HintMatch<T extends HintableError = HintableError> {
   hints: string[];
 }
 
+export interface FingerprintableDiagnostic {
+  message: string;
+  source?: string;
+  ruleId?: string;
+  filePath?: string;
+  line?: number | null;
+  column?: number | null;
+}
+
 export type {
-  CIError,
   ErrorCategory,
   ErrorSource,
 } from "@obsr/types";

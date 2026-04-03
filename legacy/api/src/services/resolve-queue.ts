@@ -2,7 +2,7 @@ import {
   getResolverQueueResolveIds,
   type ResolverQueuePayload,
   type ResolverQueueSource,
-} from "@obsr/types";
+} from "@obsr/legacy-types";
 import type { Env } from "../types/env";
 
 const sleep = (ms: number): Promise<void> =>

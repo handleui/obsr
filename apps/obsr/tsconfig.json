@@ -21,8 +21,8 @@
     ],
     "paths": {
       "@/*": ["./src/*"],
-      "@obsr/ai": ["../../packages/ai/dist/index.js"],
-      "@obsr/extract": ["../../packages/extract/dist/index.js"],
+      "@obsr/ai": ["../../packages/ai/src/index.ts"],
+      "@obsr/issues": ["../../packages/issues/src/index.ts"],
       "@obsr/lore": ["../../packages/lore/dist/index.js"]
     }
   },

@@ -7,9 +7,9 @@ export {
 } from "./hints/index.js";
 export * from "./signatures/index.js";
 export type {
-  CIError,
   ErrorCategory,
   ErrorSource,
+  FingerprintableDiagnostic,
   HintableError,
   HintMatch,
   HintRule,

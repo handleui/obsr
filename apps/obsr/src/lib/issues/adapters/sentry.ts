@@ -1,5 +1,9 @@
+import {
+  createIssueDiagnosticDraft,
+  sanitizeIssueObservationContext,
+  scrubUnknown,
+} from "@obsr/issues";
 import { RouteError } from "@/lib/http";
-import { createIssueDiagnosticDraft, scrubUnknown } from "../normalize";
 import type { IssueAdapter } from "./types";
 
 interface SentryExceptionValue {
@@ -88,13 +92,14 @@ export const sentryIssueAdapter: IssueAdapter = {
     return Promise.resolve({
       sourceKind: "sentry",
       rawPayload: payload,
-      context: {
+      dedupeKey: input.dedupeKey,
+      context: sanitizeIssueObservationContext({
         ...input.context,
         provider: input.context.provider ?? "sentry",
         externalId: input.context.externalId ?? payload.event_id,
         externalUrl: input.context.externalUrl ?? payload.url,
-      },
-      capturedAt: new Date(),
+      }),
+      capturedAt: input.capturedAt ? new Date(input.capturedAt) : new Date(),
       wasRedacted: JSON.stringify(payload) !== JSON.stringify(input.rawPayload),
       wasTruncated: false,
       diagnostics: [

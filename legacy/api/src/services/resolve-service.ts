@@ -1,4 +1,4 @@
-import type { ResolveCreateStatus } from "@obsr/types";
+import type { ResolveCreateStatus } from "@obsr/legacy-types";
 import { createResolve } from "../db/operations/resolves";
 import type { OrganizationSettings } from "../lib/org-settings";
 import type { Env } from "../types/env";

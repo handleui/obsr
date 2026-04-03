@@ -6,9 +6,20 @@ Observer is a CLI-first diagnostics product.
 
 Primary flow:
 1. GitHub App webhooks deliver CI/build events to API.
-2. API normalizes and stores diagnostics.
-3. CLI queries and streams diagnostics for humans and coding agents.
-4. Agents use output to fix code locally.
+2. `@obsr/ai` provides the reusable OpenAI-first Responses runtime used by active AI workflows.
+3. `apps/obsr` uses `@obsr/issues` to extract issue-native diagnostics and synthesize issue snapshots on top of that runtime.
+4. API normalizes and stores diagnostics.
+5. CLI queries and streams diagnostics for humans and coding agents.
+6. Future solve workflows will consume stored issues downstream, not raw logs.
+
+## Active Issue Pipeline
+
+- `@obsr/ai` owns reusable Responses transport, routing, and error/runtime policy.
+- `@obsr/issues` is the source of truth for extraction, normalization, and synthesis contracts.
+- The active issue pipeline uses the official OpenAI SDK with the Responses API and structured `text.format` schemas.
+- Vercel AI Gateway is optional routing infrastructure, not the domain abstraction.
+- The old `@obsr/extract` plus `CIError` extraction model is legacy-only.
+- Future solving should live in a separate downstream domain package, not in `@obsr/issues`.
 
 ## Apps
 

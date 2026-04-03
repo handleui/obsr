@@ -1,16 +1,16 @@
 ---
 title: GitHub Action
-description: Collect errors and enable AI resolving in your workflows
+description: Capture CI observations and enable AI resolving in your workflows
 ---
 
-The Detent action runs at the end of your CI job to collect structured error data and send it for AI-powered resolving.
+The Detent action runs at the end of your CI job to capture the evidence around a failure and send it for AI-powered resolving.
 
 ## What It Does
 
-- **Detects Errors** — Finds JSON outputs from ESLint, Vitest, golangci-lint, Cargo
-- **Extracts Context** — Reads source code around each error for AI context
-- **Reports to API** — Sends structured data (not logs) to Detent backend
-- **Enables Resolving** — Powers automatic fix suggestions and PR comments
+- **Captures observations** — Collects failed-step output, workflow metadata, and optional artifacts
+- **Scrubs and compacts** — Removes obvious secrets and keeps the useful evidence
+- **Builds issue diagnostics** — The backend turns raw observations into issue-native diagnostics with the OpenAI Responses API
+- **Enables resolving** — Powers snapshots, fix suggestions, and PR comments
 
 ## Installation
 
@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: npm ci
-      - run: npm run lint -- --format json --output-file eslint-report.json
+      - run: npm run lint
       - run: npm test
 
       - uses: detent/action@v1
@@ -33,12 +33,12 @@ jobs:
 ```
 
 <Callout type="warn">
-The action must run with `if: always()` to capture errors from failed steps.
+The action must run with `if: always()` to capture evidence from failed steps.
 </Callout>
 
 ## Performance Impact
 
-The action adds **0.5-3 seconds** to your job runtime:
+The action usually adds **well under 3 seconds** to your job runtime:
 
 | Project Size | Errors | Overhead |
 |--------------|--------|----------|
@@ -50,106 +50,47 @@ For typical projects, this is **less than 1% of job duration**.
 
 ### What Happens
 
-1. **File detection** (10-50ms) - Scans for tool output files
-2. **JSON parsing** (20-500ms) - Parses error data from each tool
-3. **Snippet extraction** (30-1500ms) - Reads source code context
-4. **API report** (100-500ms) - Sends structured data to Detent
+1. **Observation capture** (10-50ms) — Collects failed-step stdout, stderr, and workflow context
+2. **Compaction** (20-500ms) — Keeps the useful evidence and trims noise
+3. **Upload** (100-500ms) — Sends the observation bundle to Detent
+4. **Issue extraction** — The backend builds structured issue diagnostics from that evidence
 
-## Supported Tools
+## Best Results
 
-The action auto-detects JSON outputs from these tools:
+- Keep the action as the final `if: always()` step.
+- Let failing commands print their normal output. Raw logs are valid input.
+- If your tools also emit artifacts or reports, Detent can use those as extra evidence, but they are optional.
+- Clear file paths, line numbers, stack traces, and command names lead to better fixes.
 
-<Tabs items={["ESLint", "Vitest", "golangci-lint", "Cargo"]}>
-  <Tab value="ESLint">
-    Enable JSON output in your lint command:
+## What Gets Sent
 
-    ```bash
-    eslint . --format json --output-file eslint-report.json
-    ```
-
-    Or in your workflow:
-
-    ```yaml
-    - run: npm run lint -- --format json --output-file eslint-report.json
-    ```
-  </Tab>
-  <Tab value="Vitest">
-    Enable the JSON reporter in your config:
-
-    ```typescript title="vitest.config.ts"
-    import { defineConfig } from 'vitest/config'
-
-    export default defineConfig({
-      test: {
-        reporters: ['default', 'json'],
-        outputFile: 'vitest.json'
-      }
-    })
-    ```
-  </Tab>
-  <Tab value="golangci-lint">
-    Output to JSON format:
-
-    ```bash
-    golangci-lint run --out-format json > golangci-lint.json
-    ```
-  </Tab>
-  <Tab value="Cargo">
-    Use JSON message format:
-
-    ```bash
-    cargo build --message-format=json 2>&1 | tee cargo-output.json
-    ```
-
-    Or set the `CARGO_STDOUT` environment variable with the JSON output.
-  </Tab>
-</Tabs>
-
-### Detection Locations
-
-The action searches these directories for output files:
-
-- `.` (repository root)
-- `./reports`
-- `./test-results`
-- `./coverage`
-- `./.nyc_output`
-
-## Data Collected
-
-The action sends **only structured error data**, never raw logs:
+The action sends the observation bundle needed to explain the failure:
 
 | Field | Example | Purpose |
 |-------|---------|---------|
 | `repository` | `acme/app` | Identify project |
 | `commitSha` | `a1b2c3d4...` | Link to code version |
 | `workflowName` | `CI` | Workflow identification |
-| `errors[]` | See below | Parsed error details |
-| `codeSnippet` | 7 lines | Context for AI resolving |
+| `observations[]` | Failed step output | Raw evidence for extraction |
+| `command` | `bun run check-types` | Reproduction context |
+| `environment` | `ci` | Runtime context |
+| `diagnostics[]` | Derived server-side | Ranked issue evidence |
 
-### Full Error Structure
+Detent can work from raw logs. Structured artifacts are helpful, but they are not required.
+
+### Derived Diagnostic Example
 
 ```json
 {
-  "message": "Type 'string' is not assignable to type 'number'",
+  "message": "Type 'string' is not assignable to type 'number'.",
+  "severity": "error",
+  "category": "type-check",
+  "source": "typescript",
+  "ruleId": "TS2322",
   "filePath": "src/utils.ts",
   "line": 42,
   "column": 5,
-  "severity": "error",
-  "ruleId": "TS2322",
-  "codeSnippet": {
-    "lines": [
-      "  return value",
-      "}",
-      "",
-      "const x: number = 'hello'",
-      "",
-      "export const helper = () => {"
-    ],
-    "startLine": 39,
-    "errorLine": 3,
-    "language": "typescript"
-  }
+  "evidence": "src/utils.ts:42:5 - error TS2322: Type 'string' is not assignable to type 'number'."
 }
 ```
 
@@ -183,7 +124,7 @@ jobs:
           node-version: 20
 
       - run: npm ci
-      - run: npm run lint -- --format json --output-file eslint-report.json
+      - run: npm run lint
         continue-on-error: true
       - run: npm test
         continue-on-error: true
@@ -195,5 +136,5 @@ jobs:
 ```
 
 <Callout type="info">
-Using `continue-on-error: true` on lint/test steps ensures the Detent action runs even when checks fail, which is when you need error collection most.
+Using `continue-on-error: true` on lint/test steps ensures the Detent action runs even when checks fail, which is when you need observation capture most.
 </Callout>

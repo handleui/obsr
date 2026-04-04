@@ -62,6 +62,7 @@ Active Observer data lives in `apps/obsr`.
 ## Rules
 
 - IMPORTANT: Never use background agents (`run_in_background: true`). Always use foreground subagents.
+- IMPORTANT: **Respect other agents’ work and uncommitted state.** Another session may have deleted, moved, or partially replaced directories on purpose (e.g. CLI migration, package splits). Do **not** undo that by running `git restore`, `git checkout --`, or re-adding paths from `HEAD` to “fix the build” unless the **user explicitly** asked you to restore or reset. If the tree is dirty or half-migrated: report what you see, run checks only on packages you touched, or ask the user which direction to finish—**do not clobber parallel work** to get a green monorepo build.
 - IMPORTANT: Use **Context7 MCP** (`resolve-library-id` → `query-docs`) for any external library/docs research. Always use it without asking — just call it directly when you need documentation or code examples for any dependency.
 - Run `bun run fix` before every commit
 - Use `bun run dt x` for local CLI testing

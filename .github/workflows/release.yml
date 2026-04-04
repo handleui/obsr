@@ -34,7 +34,7 @@ jobs:
           manifest-file: .release-please-manifest.json
 
       - name: Trigger CLI Build
-        if: ${{ steps.release.outputs['apps/cli-legacy--release_created'] }}
+        if: ${{ steps.release.outputs['apps--cli--release_created'] }}
         run: |
           set -euo pipefail
 
@@ -75,37 +75,4 @@ jobs:
           echo "CLI build succeeded: $RUN_URL"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CLI_TAG_NAME: ${{ steps.release.outputs['apps/cli-legacy--tag_name'] }}
-
-      # npm package publishing setup
-      - name: Setup Node for npm publish
-        if: ${{ steps.release.outputs['packages/sdk--release_created'] }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Setup Bun
-        if: ${{ steps.release.outputs['packages/sdk--release_created'] }}
-        uses: oven-sh/setup-bun@v2
-
-      - name: Update npm for trusted publishing
-        if: ${{ steps.release.outputs['packages/sdk--release_created'] }}
-        run: npm install -g npm@latest
-
-      - name: Install dependencies
-        if: ${{ steps.release.outputs['packages/sdk--release_created'] }}
-        run: bun install
-
-      # sdk package
-      - name: Build SDK
-        if: ${{ steps.release.outputs['packages/sdk--release_created'] }}
-        run: bun run build
-        working-directory: packages/sdk
-
-      - name: Publish @detent/sdk
-        if: ${{ steps.release.outputs['packages/sdk--release_created'] }}
-        run: npm publish
-        working-directory: packages/sdk
-        env:
-          NPM_CONFIG_PROVENANCE: false
+          CLI_TAG_NAME: ${{ steps.release.outputs['apps--cli--tag_name'] }}

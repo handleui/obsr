@@ -17,7 +17,6 @@
   "dependencies": {
     "@obsr/ai": "workspace:*",
     "@obsr/issues": "workspace:*",
-    "@obsr/lore": "workspace:*",
     "@obsr/types": "workspace:*",
     "better-auth": "^1.5.6",
     "drizzle-orm": "^0.44.0",

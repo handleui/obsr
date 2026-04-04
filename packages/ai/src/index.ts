@@ -14,7 +14,15 @@ export {
 } from "./cache.js";
 
 export { normalizeModelId } from "./client.js";
-
+export {
+  DEFAULT_FAST_MODEL,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+  DEFAULT_SMART_MODEL,
+  DEFAULT_TIMEOUT_MS,
+  type ModelConfig,
+  type ResponseUsageSummary,
+  type TokenUsage,
+} from "./model-defaults.js";
 export {
   calculateCost,
   estimateCost,
@@ -43,12 +51,3 @@ export {
   type StructuredTextFormat,
 } from "./responses.js";
 export { selectModelForErrors } from "./routing.js";
-export {
-  DEFAULT_FAST_MODEL,
-  DEFAULT_MAX_OUTPUT_TOKENS,
-  DEFAULT_SMART_MODEL,
-  DEFAULT_TIMEOUT_MS,
-  type ModelConfig,
-  type ResponseUsageSummary,
-  type TokenUsage,
-} from "./types.js";

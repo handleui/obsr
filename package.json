@@ -32,11 +32,8 @@
   "packageManager": "bun@1.3.5",
   "workspaces": [
     "apps/*",
-    "legacy/extract",
-    "legacy/types",
     "packages/ai",
     "packages/issues",
-    "packages/lore",
     "packages/types",
     "packages/typescript-config",
     "packages/ui"

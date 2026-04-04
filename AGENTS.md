@@ -1,15 +1,17 @@
 # Observer
 
-Self-resolving CI/CD platform. Runs CI locally, uses AI to fix errors before pushing.
+Diagnostics hub for coding agents and humans: ingest failures, normalize diagnostics, and produce agent-ready context. Downstream “solve” workflows are out of scope for the core product; see root [`README.md`](README.md).
 
 ## Commands
 
 ```bash
-bun run build              # Build all (Turborepo)
-bun run lint               # Check issues
-bun run fix                # Auto-fix with Biome
-bun run check-types        # TypeScript validation
-bun run dt <command>       # CLI local dev (never use ./dist/dt)
+bun run build                 # Build all (Turborepo)
+bun run lint                  # Check issues
+bun run fix                   # Auto-fix with Biome
+bun run check-types           # TypeScript validation
+bun run test                  # All package tests (Turborepo)
+bun run check:legacy-imports  # Fails if forbidden legacy-type imports appear
+bun run dt <command>          # CLI local dev (never use ./dist/dt)
 cd apps/obsr && npx auth generate --output ./src/db/auth-schema.ts --adapter drizzle --dialect postgresql --yes
 cd apps/obsr && bun run db:generate    # Generate Drizzle SQL migration files
 cd apps/obsr && bun run db:migrate     # Apply Drizzle migrations
@@ -22,8 +24,8 @@ cd apps/obsr && bun run db:migrate     # Apply Drizzle migrations
 - **Active App**: Next.js 16, React 19, Tailwind CSS (`apps/obsr`)
 - **Docs**: Next.js 16 docs site (`apps/docs`)
 - **Database**: Neon Postgres (Drizzle)
-- **CLI**: TypeScript, Citty, Ink
-- **AI**: Claude Haiku (fast) + GPT-5.2-Codex (smart) via Vercel AI Gateway — model routing in `packages/ai`, issue extraction/synthesis via OpenAI Responses API in `packages/issues`
+- **CLI**: Rust (`apps/cli`, `dt`)
+- **AI**: Claude Haiku 4.5 (`anthropic/claude-haiku-4-5`, fast) + GPT-5.2 Codex (`openai/gpt-5.2-codex`, smart) via Vercel AI Gateway — model routing in `packages/ai`, issue extraction/synthesis via OpenAI Responses API in `packages/issues`
 - **Linting**: Biome via Ultracite
 - **Icons**: `iconoir-react` — browse at [iconoir.com](https://iconoir.com). Do NOT grep `node_modules`.
 
@@ -31,19 +33,14 @@ cd apps/obsr && bun run db:migrate     # Apply Drizzle migrations
 
 ```
 apps/
-├── cli/            # Command-line interface
+├── cli/            # Rust CLI (dt)
 ├── docs/           # Documentation app (Next.js)
 └── obsr/           # Observer MVP app (Next.js)
 
-legacy/
-├── api/            # Legacy Cloudflare Workers API (reference only)
-└── resolver/       # Legacy resolver service (reference only)
-
 packages/
-├── ai/             # AI model routing & providers
+├── ai/             # OpenAI Responses transport (thin; no issue domain logic)
 ├── issues/         # Issue-domain contracts + Responses-based extraction/synthesis
-├── lore/           # Knowledge base
-├── types/          # Shared TypeScript types
+├── types/          # Cross-cutting primitives (sanitize, etc.)
 ├── ui/             # Shared React components
 └── typescript-config/
 ```
@@ -73,6 +70,7 @@ Active Observer data lives in `apps/obsr`.
 - Do not use `npx auth migrate` in `apps/obsr`; auth tables also flow through Drizzle migrations here
 - Always generate Drizzle migrations via command (`cd apps/obsr && bun run db:generate` for active work)
 - Never create markdown summary files when closing tasks
+- There is **no legacy code path** in this repo; do not reintroduce `legacy/` or old extraction packages.
 
 ### Ask First
 
@@ -93,6 +91,7 @@ Biome/Ultracite handles standard linting. Project-specific only:
 ## Git
 
 - Conventional commits, brief descriptions
+- **Default workflow**: commit directly to `main` in this repo. Do not create a branch or open a PR unless the user explicitly asks for one.
 
 ## Plan Mode
 
@@ -103,16 +102,7 @@ Biome/Ultracite handles standard linting. Project-specific only:
 
 - **Docs**: `http://detent.localhost:1355`
 - **Observer**: `http://obsr.localhost:1355`
-- **Legacy API**: `http://observer.localhost:1355`
-- **Legacy Resolver**: `http://resolver.localhost:1355`
 
 ## Production
 
 - **Docs**: `detent.sh`
-- **Legacy API**: `observer.detent.sh`
-
-## Legacy Note
-
-- `legacy/api` and `legacy/resolver` are guidance-only snapshots.
-- They may reference packages that have since been deleted.
-- Do not treat legacy code as runnable without restoration work.

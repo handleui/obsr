@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Clone, Parser)]
-#[command(name = "dt", about = "Observer CLI")]
+#[command(name = "dt", about = "Observer CLI", version)]
 pub struct AppCli {
     #[command(subcommand)]
     pub command: Command,

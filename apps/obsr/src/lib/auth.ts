@@ -112,11 +112,28 @@ type AuthInstance = ReturnType<typeof createAuth>;
 
 let authInstance: AuthInstance | null = null;
 
+const assertProductionGitHubOAuth = () => {
+  if (process.env.NODE_ENV !== "production") {
+    return;
+  }
+
+  const clientId = process.env.BETTER_AUTH_GITHUB_CLIENT_ID?.trim();
+  const clientSecret = process.env.BETTER_AUTH_GITHUB_CLIENT_SECRET?.trim();
+
+  if (!(clientId && clientSecret)) {
+    throw new Error(
+      "BETTER_AUTH_GITHUB_CLIENT_ID and BETTER_AUTH_GITHUB_CLIENT_SECRET are required in production."
+    );
+  }
+};
+
 export const getAuth = (): AuthInstance => {
   const existingAuth = authInstance;
   if (existingAuth) {
     return existingAuth;
   }
+
+  assertProductionGitHubOAuth();
 
   const nextAuth = createAuth();
   authInstance = nextAuth;

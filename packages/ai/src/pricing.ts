@@ -1,5 +1,5 @@
 import type { LanguageModel } from "ai";
-import type { TokenUsage } from "./types.js";
+import type { TokenUsage } from "./model-defaults.js";
 
 export type ModelParam = string | LanguageModel;
 

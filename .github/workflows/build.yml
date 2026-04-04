@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Tag or ref to build (e.g., cli-v1.3.0)."
+        description: "Tag or ref to build (e.g., cli-v0.2.0)."
         required: true
         type: string
 
@@ -42,7 +42,6 @@ jobs:
         id: version
         run: |
           REF="${{ steps.ref.outputs.ref }}"
-          # Extract version from tag (e.g., cli-v0.13.0 -> 0.13.0)
           VERSION=$(echo "$REF" | sed 's|refs/tags/||' | sed 's|^cli-v||' | sed 's|^v||')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=cli-v$VERSION" >> $GITHUB_OUTPUT
@@ -62,46 +61,37 @@ jobs:
       - name: Build workspace
         run: bun run build
 
-      - name: Build binaries
-        run: bun run build:binaries
-        working-directory: apps/cli-legacy
-        env:
-          DETENT_CLI_CLIENT_ID: detent-cli
-          SENTRY_DSN: ${{ secrets.SENTRY_CLI_DSN }}
+      - name: Build Rust CLI
+        run: cargo build --release --manifest-path apps/cli/Cargo.toml
+
+      - name: Package Linux binary
+        run: |
+          set -euo pipefail
+          mkdir -p apps/cli/dist
+          cp apps/cli/target/release/dt apps/cli/dist/dt-linux-amd64
+          chmod +x apps/cli/dist/dt-linux-amd64
+          cd apps/cli/dist
+          tar czf dt-linux-amd64.tar.gz dt-linux-amd64
+          sha256sum dt-linux-amd64.tar.gz > checksums.txt
 
       - name: Verify binary version
         run: |
-          cd apps/cli-legacy/dist
+          set -euo pipefail
+          cd apps/cli/dist
           tar -xzf dt-linux-amd64.tar.gz
-
-          # Get version from package.json
-          PKG_VERSION=$(jq -r .version ../package.json)
-
-          # Get version from binary - filter for clean semver line (ignore debug output from dotenv etc)
-          # The version command outputs just the version number on its own line
-          BINARY_OUTPUT=$(./dt-linux-amd64 version 2>/dev/null || true)
-          echo "Full binary output:"
-          echo "$BINARY_OUTPUT"
-          echo "---"
-
-          # Extract the line that is ONLY a semver (no other text)
-          BINARY_VERSION=$(echo "$BINARY_OUTPUT" | grep -xE '[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?' | head -1 || echo "")
-
-          echo "Binary version: $BINARY_VERSION"
+          PKG_VERSION=$(jq -r .version ../../package.json)
+          BINARY_VERSION=$(./dt-linux-amd64 --version 2>/dev/null | head -1 | tr -d '\r')
           echo "Package version: $PKG_VERSION"
-
+          echo "Binary --version: $BINARY_VERSION"
           if [ -z "$BINARY_VERSION" ]; then
-            echo "ERROR: Could not extract version from binary output"
+            echo "ERROR: Could not read version from binary"
             exit 1
           fi
-
           if [ "$BINARY_VERSION" != "$PKG_VERSION" ]; then
-            echo "ERROR: Version mismatch!"
+            echo "ERROR: Version mismatch (expected $PKG_VERSION, got $BINARY_VERSION)"
             exit 1
           fi
-
-          echo "Version verified: $BINARY_VERSION"
-          rm dt-linux-amd64
+          rm -f dt-linux-amd64
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3
@@ -109,16 +99,10 @@ jobs:
       - name: Sign checksums
         run: |
           cosign sign-blob \
-            --output-certificate=apps/cli-legacy/dist/checksums.txt.pem \
-            --output-signature=apps/cli-legacy/dist/checksums.txt.sig \
+            --output-certificate=apps/cli/dist/checksums.txt.pem \
+            --output-signature=apps/cli/dist/checksums.txt.sig \
             --yes \
-            apps/cli-legacy/dist/checksums.txt
-
-      - name: Upload to Blob
-        run: bun run upload:binaries
-        working-directory: apps/cli-legacy
-        env:
-          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+            apps/cli/dist/checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -127,43 +111,7 @@ jobs:
           name: ${{ steps.version.outputs.tag }}
           generate_release_notes: true
           files: |
-            apps/cli-legacy/dist/*.tar.gz
-            apps/cli-legacy/dist/*.zip
-            apps/cli-legacy/dist/checksums.txt
-            apps/cli-legacy/dist/checksums.txt.sig
-            apps/cli-legacy/dist/checksums.txt.pem
-
-      - name: Verify install from Blob
-        run: |
-          VERSION="cli-v${{ steps.version.outputs.version }}"
-          echo "Testing install of $VERSION from Blob..."
-
-          # Test direct download and checksum
-          curl -fsSL "https://detent.sh/api/cli/${VERSION}/checksums.txt" -o /tmp/checksums.txt
-          curl -fsSL "https://detent.sh/api/cli/${VERSION}/dt-linux-amd64.tar.gz" -o /tmp/dt.tar.gz
-
-          # Verify checksum
-          EXPECTED=$(grep "dt-linux-amd64.tar.gz" /tmp/checksums.txt | cut -d' ' -f1)
-          ACTUAL=$(sha256sum /tmp/dt.tar.gz | cut -d' ' -f1)
-
-          if [ "$EXPECTED" != "$ACTUAL" ]; then
-            echo "ERROR: Checksum mismatch after upload!"
-            echo "Expected: $EXPECTED"
-            echo "Actual: $ACTUAL"
-            exit 1
-          fi
-
-          # Extract and verify version
-          tar -xzf /tmp/dt.tar.gz -C /tmp
-          INSTALLED_VERSION=$(/tmp/dt-linux-amd64 version | head -1)
-          echo "Installed version: $INSTALLED_VERSION"
-
-          # Verify manifest updated
-          MANIFEST_LATEST=$(curl -fsSL "https://detent.sh/api/cli/manifest.json" | grep -o '"latest":"[^"]*"' | cut -d'"' -f4)
-          echo "Manifest latest: $MANIFEST_LATEST"
-
-          if [ "$MANIFEST_LATEST" != "$VERSION" ]; then
-            echo "WARNING: Manifest not yet updated (may be caching)"
-          fi
-
-          echo "Install verification passed!"
+            apps/cli/dist/*.tar.gz
+            apps/cli/dist/checksums.txt
+            apps/cli/dist/checksums.txt.sig
+            apps/cli/dist/checksums.txt.pem

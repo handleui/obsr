@@ -88,7 +88,7 @@ const createApiClient = async (ownerUserId: string) => {
     throw new RouteError(
       500,
       "VERCEL_CONNECTION_INVALID",
-      "The saved Vercel connection could not be decrypted."
+      "The saved Vercel connection is invalid or could not be loaded."
     );
   }
 };

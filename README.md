@@ -18,4 +18,4 @@ Product stance:
 - self-host API first
 - managed cloud is optional later
 
-Resolver stays in this repo as a legacy sibling module, not the core product.
+Downstream “solve” workflows are out of scope for the core diagnostics hub.

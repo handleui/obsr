@@ -1,13 +1,13 @@
 import OpenAI from "openai";
 import type { AutoParseableTextFormat } from "openai/lib/parser";
 import { normalizeModelId } from "./client.js";
-import { estimateCost } from "./pricing.js";
 import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   DEFAULT_SMART_MODEL,
   DEFAULT_TIMEOUT_MS,
   type ResponseUsageSummary,
-} from "./types.js";
+} from "./model-defaults.js";
+import { estimateCost } from "./pricing.js";
 
 export const AI_GATEWAY_RESPONSES_BASE_URL = "https://ai-gateway.vercel.sh/v1";
 export const responsesRoutingModes = ["openai", "gateway"] as const;

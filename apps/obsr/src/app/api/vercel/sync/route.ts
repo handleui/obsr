@@ -4,6 +4,7 @@ import {
   jsonPrivateNoStore,
   parseJsonRequest,
 } from "@/lib/http";
+import { MAX_VERCEL_SYNC_REQUEST_BYTES } from "@/lib/vercel/constants";
 import { VercelSyncRequestSchema } from "@/lib/vercel/schema";
 import { syncVercelTargets } from "@/lib/vercel/service";
 
@@ -14,7 +15,11 @@ export const runtime = "nodejs";
 export const POST = async (request: Request) => {
   try {
     const user = await requireAuthenticatedUser(request);
-    const body = await parseJsonRequest(request, VercelSyncRequestSchema);
+    const body = await parseJsonRequest(
+      request,
+      VercelSyncRequestSchema,
+      MAX_VERCEL_SYNC_REQUEST_BYTES
+    );
     return jsonPrivateNoStore(await syncVercelTargets(user.id, body));
   } catch (error) {
     return handleRouteError(error);

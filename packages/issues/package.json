@@ -19,7 +19,6 @@
   },
   "dependencies": {
     "@obsr/ai": "workspace:*",
-    "@obsr/lore": "workspace:*",
     "@obsr/types": "workspace:*",
     "zod": "^3.25.34"
   },

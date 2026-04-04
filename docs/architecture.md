@@ -1,26 +1,17 @@
 # Architecture
 
-## Core Modules
+## Core modules
 
-- `observer-cli` (`apps/cli`)
-- `observer-api` (`legacy/api`, legacy)
-- `resolver` (`legacy/resolver`, legacy)
+- `observer-cli` (`apps/cli`, Rust `dt`)
+- `observer-app` (`apps/obsr`, Next.js issue workflow)
 
 ## observer-cli
 
-- user auth/session management
-- observe snapshot/watch workflows
-- strict `json` / `ndjson` output envelopes
-- prompt context generation for agents
+- Auth/session management where implemented
+- Strict machine output where applicable
+- Prompt context for agents
 
-## observer-api
+## observer-app
 
-- GitHub App webhook ingestion
-- CI/build diagnostics normalization
-- query by repo, PR, commit, run
-- idempotent processing for duplicate deliveries
-
-## resolver (legacy boundary)
-
-- kept as optional sibling module
-- not part of Observer core promise
+- Issue intake, extraction, and synthesis via `@obsr/issues` and `@obsr/ai`
+- Drizzle + Neon persistence

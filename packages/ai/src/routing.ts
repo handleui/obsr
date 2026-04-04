@@ -1,7 +1,7 @@
-import { DEFAULT_FAST_MODEL, DEFAULT_SMART_MODEL } from "./types.js";
+import { DEFAULT_FAST_MODEL, DEFAULT_SMART_MODEL } from "./model-defaults.js";
 
 // Minimal shape for routing — decoupled from resolver's RunErrorRow
-// (packages/ai can't import from legacy/resolver)
+// Domain routing for model selection stays out of @obsr/issues; keep this file transport-only.
 interface RoutableError {
   category: string | null;
   stackTrace: string | null;

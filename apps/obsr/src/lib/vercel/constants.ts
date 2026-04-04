@@ -1,0 +1,1 @@
+export const MAX_VERCEL_SYNC_REQUEST_BYTES = 64_000;

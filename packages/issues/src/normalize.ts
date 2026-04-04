@@ -1,5 +1,5 @@
-import { generateFingerprints } from "@obsr/lore";
 import { scrubFilePath, scrubSecrets } from "@obsr/types";
+import { generateFingerprints } from "./fingerprint.js";
 import type {
   IssueCategory,
   IssueDiagnosticDraft,

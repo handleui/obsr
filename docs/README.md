@@ -5,5 +5,4 @@
 - [Contracts](./contracts.md)
 - [Privacy and Ops](./privacy-ops.md)
 - [Positioning](./positioning.md)
-- [Legacy Resolver](./legacy-resolver.md)
 - [Open Questions](./open-questions.md)

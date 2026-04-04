@@ -7,8 +7,24 @@ const currentDir = path.dirname(filePath);
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
+  transpilePackages: ["@obsr/ai", "@obsr/issues", "@obsr/types"],
   turbopack: {
     root: path.resolve(currentDir, "../.."),
+  },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=()",
+          },
+        ],
+      },
+    ];
   },
 };
 

@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: obsr
+      POSTGRES_PASSWORD: obsr
+      POSTGRES_DB: obsr
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U obsr -d obsr"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  obsr:
+    build:
+      context: .
+      dockerfile: apps/obsr/Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.selfhost
+    environment:
+      DATABASE_URL: postgresql://obsr:obsr@db:5432/obsr
+      DIRECT_URL: postgresql://obsr:obsr@db:5432/obsr
+      OBSR_DATABASE_URL: postgresql://obsr:obsr@db:5432/obsr
+      BETTER_AUTH_URL: http://localhost:3000
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata: {}

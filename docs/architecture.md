@@ -2,14 +2,13 @@
 
 ## Core modules
 
-- `observer-cli` (`apps/cli`, Rust `dt`)
+- `observer-cli` (`apps/cli`, TypeScript `dt`)
 - `observer-app` (`apps/obsr`, Next.js issue workflow)
 
 ## observer-cli
 
-- Auth/session management where implemented
-- Strict machine output where applicable
-- Prompt context for agents
+- Self-host scaffolding: `dt create` (compose + env example), `dt start` (wraps `docker compose up`)
+- Future: auth/session, machine-readable output, agent-facing workflows as the product grows
 
 ## observer-app
 

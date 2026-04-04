@@ -2,6 +2,9 @@
 # Detent CLI Installer
 # Usage: curl -fsSL https://detent.sh/install.sh | bash
 #
+# Releases publish a Bun-compiled Linux amd64 `dt` binary. From the Observer
+# monorepo, use: `bun run dt -- --help` (see AGENTS.md).
+#
 # Environment variables:
 #   DETENT_VERSION - Install a specific version (e.g., "v0.10.0")
 #   DETENT_INSTALL_DIR - Custom installation directory (default: ~/.local/bin)

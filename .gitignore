@@ -10,6 +10,7 @@ package-lock.json
 .env*
 !.env
 !.env.example
+!.env.selfhost.example
 .dev.vars
 
 # Testing

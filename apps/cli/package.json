@@ -2,10 +2,24 @@
   "name": "@obsr/cli",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
+  "bin": {
+    "dt": "./dist/index.js"
+  },
   "scripts": {
-    "build": "cargo build --manifest-path Cargo.toml",
-    "check-types": "cargo check --manifest-path Cargo.toml",
-    "test": "cargo test --manifest-path Cargo.toml",
-    "dev": "cargo run --manifest-path Cargo.toml --"
+    "dev": "bun run src/index.ts",
+    "build": "tsc && cp -R src/templates dist/templates",
+    "check-types": "tsc --noEmit",
+    "test": "bun test src/lib/path-safety.test.ts"
+  },
+  "dependencies": {
+    "citty": "^0.1.6",
+    "consola": "^3.4.2",
+    "execa": "^9.6.1",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5.9.3"
   }
 }

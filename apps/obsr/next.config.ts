@@ -6,6 +6,8 @@ const filePath = fileURLToPath(import.meta.url);
 const currentDir = path.dirname(filePath);
 
 const nextConfig: NextConfig = {
+  output: "standalone",
+  outputFileTracingRoot: path.resolve(currentDir, "../.."),
   reactCompiler: true,
   transpilePackages: ["@obsr/ai", "@obsr/issues", "@obsr/types"],
   turbopack: {

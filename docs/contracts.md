@@ -9,16 +9,11 @@ Canonical model fields:
 
 ## CLI Contract
 
-Stable command surfaces:
-- `dt auth`
-- `dt observe`
-- `dt install`
-- `dt settings`
+Stable command surfaces (MVP):
+- `dt create [dir]` — writes `compose.yaml` and `.env.selfhost.example` under the current working directory (paths cannot escape CWD)
+- `dt start` — runs `docker compose up` (see `--file`, `--detach`, `--allow-outside` only if the compose path is outside CWD)
 
-Stable output modes:
-- human-readable text
-- `--json` envelope
-- `--ndjson` event stream envelope
+Additional output modes (e.g. `--json`, `--ndjson`) are reserved for future diagnostics workflows.
 
 ## API Contract
 

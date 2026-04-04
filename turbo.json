@@ -19,8 +19,13 @@
       ]
     },
     "@obsr/cli#build": {
-      "inputs": ["src/**/*.rs", "Cargo.toml", "Cargo.lock", "package.json"],
-      "outputs": ["target/**"]
+      "inputs": [
+        "src/**/*.ts",
+        "src/templates/**",
+        "tsconfig.json",
+        "package.json"
+      ],
+      "outputs": ["dist/**"]
     },
     "@obsr/docs#build": {
       "dependsOn": ["^build"],
